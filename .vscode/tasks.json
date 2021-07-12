@@ -1,0 +1,157 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+		{
+			"type": "shell",
+			"label": "build_debug_arm",
+			
+			"linux":{
+				"command": "/usr/bin/bash",
+				"args": [
+					"-c",
+					"make clean && make CONFIG=debug.arm -j64"
+				],
+			},
+
+			"osx":{
+				"command": "/bin/bash",
+				"args": [
+					"-c",
+					"make CONFIG=debug.arm -j8"
+				],
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"detail": "Build Debug ARM64"
+		},
+
+		{
+			"type": "shell",
+			"label": "build_arm_debug_test",
+			
+			"linux":{
+				"command": "/usr/bin/bash",
+				"args": [
+					"-c",
+					"make clean && make CONFIG=debug.arm.test -j64"
+				],
+			},
+
+			"osx":{
+				"command": "/bin/bash",
+				"args": [
+					"-c",
+					"make CONFIG=debug.arm.test -j8"
+				],
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"detail": "Build DebugTest ARM64"
+		},
+
+		
+		{
+			"type": "shell",
+			"label": "build_debug",
+			"command": "/usr/bin/bash",
+			"args": [
+				"-c",
+				"make clean && make CONFIG=debug -j24"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			},
+			"detail": "Build Debug"
+		}
+
+		,{
+			"type": "shell",
+			"label": "build_debug_test",
+			"command": "/usr/bin/bash",
+			"args": [
+				"-c",
+				"make clean && make CONFIG=debug.test -j24"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			},
+			"detail": "Build Debug Test"
+		}
+		
+		// Debug priv
+		,{
+			"label": "build_debug_priv",
+			"type": "shell",
+			"command": "/usr/bin/bash",
+			"args": [
+				"-c",
+				"make clean && make CONFIG=debug.priv -j24"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			},
+			"detail": "Build Debug Priv"
+		}
+
+		// Licgen
+		,{
+			"label": "build_debug_licgen",
+			"type": "shell",
+			"command": "/usr/bin/bash",
+			"args": [
+				"-c",
+				"make clean && make CONFIG=licgen.debug -j24"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			},
+			"detail": "Build Debug Licgen"
+		}
+	]
+}

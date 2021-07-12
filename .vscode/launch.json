@@ -1,0 +1,131 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Arm64",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.bin/debug.arm/bladebit",
+            "args": [
+                "-f" , "ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef"
+                ,"-p", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8"
+                // ,"-w"
+                ,"-n", "2"
+                ,"-v"
+                // ,".sandbox"
+                ,"/home/harito/data"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+
+            "linux": {
+                "MIMode": "gdb",
+                "miDebuggerPath": "/usr/bin/gdb"
+            },
+
+            "osx": {
+                "MIMode": "lldb"
+            },
+            
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build_debug_arm"
+        },
+
+        {
+            "name": "Test Arm64",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.bin/debug.arm.test/bladebit",
+            "args": [
+                "-s"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+
+            "linux": {
+                "MIMode": "gdb",
+                "miDebuggerPath": "/usr/bin/gdb"
+            },
+
+            "osx": {
+                "MIMode": "lldb"
+            },
+            
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build_arm_debug_test"
+        },
+        
+        // x86 Debug
+        {
+            "name": "Debug x86",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.bin/debug/bladebit",
+            "args": [
+                "-f" , "ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef"
+                ,"-p", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8"
+                , ".sandbox"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build_debug",
+            "miDebuggerPath": "/usr/bin/gdb"
+        },
+
+        {
+            "name": "Debug x86 - Test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.bin/debug.test/bladebit",
+            "args": [
+                "-f" , "ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef"
+                ,"-p", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8"
+                , ".sandbox"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build_debug_test",
+            "miDebuggerPath": "/usr/bin/gdb"
+        }
+
+    ]
+}
