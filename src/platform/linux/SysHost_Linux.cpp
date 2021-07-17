@@ -324,10 +324,22 @@ bool SysHost::NumaSetThreadInterleavedMode()
     if( !numa )
         return false;
     
-    unsigned long mask[128];
+    const size_t MASK_SIZE = 128;
+    unsigned long mask[MASK_SIZE];
     memset( mask, 0xFF, sizeof( mask ) );
+    
+    const int maxPossibleNodes = numa_num_possible_nodes();
+    ASSERT( (MASK_SIZE * 64) >= (size_t)maxPossibleNodes );
 
-    long r = set_mempolicy( MPOL_INTERLEAVE, mask, numa->cpuCount );
+    long r = set_mempolicy( MPOL_INTERLEAVE, mask, maxPossibleNodes );
+
+    #if _DEBUG
+    if( r )
+    {
+        int err = errno;
+        Log::Error( "Warning: set_mempolicy() failed with error %d (0x%x).", err, err );
+    }
+    #endif
 
     return r == 0;
 }
@@ -339,10 +351,22 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
     if( !numa )
         return false;
 
-    unsigned long mask[128];
+    const size_t MASK_SIZE = 128;
+    unsigned long mask[MASK_SIZE];
     memset( mask, 0xFF, sizeof( mask ) );
 
-    long r = mbind( ptr, size, MPOL_INTERLEAVE, mask, numa->cpuCount, 0 ); 
+    const int maxPossibleNodes = numa_num_possible_nodes();
+    ASSERT( (MASK_SIZE * 64) >= (size_t)maxPossibleNodes );
+
+    long r = mbind( ptr, size, MPOL_INTERLEAVE, mask, maxPossibleNodes, 0 ); 
     
+    #if _DEBUG
+    if( r )
+    {
+        int err = errno;
+        Log::Error( "Warning: set_mempolicy() failed with error %d (0x%x).", err, err );
+    }
+    #endif
+
     return r == 0;
 }

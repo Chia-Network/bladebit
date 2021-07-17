@@ -56,13 +56,10 @@ Writes to disk only occur to the final plot file, and it is done sequentially, u
 
 
 ## Pool Plots
-Pool plots are implemented, but I have not had the time to test them. The code follows the chia-blockchain reference to create taproot memos. So it should work, but again, since they are untested, I can't guarantee anything. 
-
+Pool plots have been implemented and plot id and plot memo generation tested against the chia-blockchain implementation, where it generates the exact data. More testing from the community is required to verify that the plots are properly operating with pools.
 
 ## NUMA systems
-There are certain instances in plotting where memory touched is unpredictable (for example, sorting). These parts can become slow already since they will likely have tons of cache misses because of the random nature of memory access patterns. If you have NUMA system, this part will become even more inefficient because, even if memory affinity is set, at some point memory from another core will have to be touched.
-
-Memory policies can be set, which will certainly help with sequential access portions. However, since I don't have a NUMA system to test in, this has not been implemented at all.
+Memory is bound on interleaved mode for NUMA systems which currently gives the best performance on systems with several nodes. This can be disabled with with the `-m or --no-numa` switch.
 
 
 ## Huge TLBs
