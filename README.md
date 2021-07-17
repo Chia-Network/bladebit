@@ -13,21 +13,30 @@ This repository depends on Chia's [bls-signatures](https://github.com/Chia-Netwo
 64-bit is supported only, for obvious reasons.
 Only Linux is currently completed. There are several platform abstractions misisng for macOS and Windows.
 
-### Build
+### Build & Install
+<details>
+  <summary>Ubuntu 20.04</summary>
+  
+  ```bash
+  # install build toolkit and NUMA library
+  sudo apt update && sudo apt install cmake build-essential libnuma-dev -y
 
-```bash
-# Clone the repo & its submodules
-git clone --recursive https://github.com/harold-b/bladebit.git
+  # Clone the repo & its submodules and switch to repo folder
+  git clone --recursive https://github.com/harold-b/bladebit.git && cd bladebit
+  
+  # Build bls library. Only needs to be done once.
+  ./build-bls
 
-# Build bls library. Only needs to be done once.
-./build-bls
+  # Build for x86
+  make clean && make -j$(nproc --all)
 
-# For x86
-make clean && make -j$(nproc --all)
+  # Build for AMR
+  make clean && make -j$(nproc --all) CONFIG=release.arm
 
-# For ARM
-make clean && make -j$(nproc --all) CONFIG=release.arm
-```
+  ```
+  
+  The result binaries will be in `.bin/release` folder.
+</details>
 
 ## Usage
 Run `bladebit -h` for usage and command line options.
