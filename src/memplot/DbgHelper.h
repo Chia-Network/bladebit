@@ -285,7 +285,7 @@ inline void DbgWriteTableToFile( ThreadPool& pool, const char* path, uint64 entr
     file.Close();
 
     ///
-    /// Multi-threader writing
+    /// Multi-threaded writing
     ///
     struct WriteJob
     {
@@ -295,8 +295,11 @@ inline void DbgWriteTableToFile( ThreadPool& pool, const char* path, uint64 entr
         size_t     blockSize;
     };
     
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wclass-memaccess"
     WriteJob jobs[MAX_THREADS];
     memset( jobs, 0, sizeof( jobs ) );
+    #pragma GCC diagnostic pop
 
     const uint threadCount = pool.ThreadCount();
     ASSERT( threadCount <= MAX_THREADS );
