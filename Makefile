@@ -13,7 +13,7 @@ VERBOSE		:= 0
 
 OBJ_DIR		:= .obj
 OBJ_EXT		:= o
-OUT_DIR		:= .bin
+OUT_DIR		:= ./bin
 OUT_NAME	:= bladebit
 Q			:= @
 
