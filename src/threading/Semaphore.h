@@ -7,7 +7,7 @@ class Semaphore
 {
 public:
 
-    Semaphore( int initialCount = 1);
+    Semaphore( int initialCount = 0 );
     ~Semaphore();
 
     void Wait();

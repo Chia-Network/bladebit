@@ -1,10 +1,13 @@
 #include "ThreadPool.h"
 #include "Util.h"
 #include "util/Log.h"
+#include "SysHost.h"
+
 
 //-----------------------------------------------------------
-ThreadPool::ThreadPool( uint threadCount )
+ThreadPool::ThreadPool( uint threadCount, Mode mode )
     : _threadCount( threadCount )
+    , _mode       ( mode )
     , _jobSignal  ( 0 )
     , _poolSignal ( 0 )
 {
@@ -14,15 +17,17 @@ ThreadPool::ThreadPool( uint threadCount )
     _threads    = new Thread    [threadCount];
     _threadData = new ThreadData[threadCount];
 
+    auto threadRunner = mode == Mode::Fixed ? FixedThreadRunner : GreedyThreadRunner;
+
     for( uint i = 0; i < threadCount; i++ )
     {
         _threadData[i].index = (int)i;
+        _threadData[i].cpuId = i;
         _threadData[i].pool  = this;
-
+        
         Thread& t = _threads[i];
 
-        t.SetAffinity( i );
-        t.Run( ThreadRunner, &_threadData[i] );
+        t.Run( threadRunner, &_threadData[i] );
     }
 }
 
@@ -31,8 +36,17 @@ ThreadPool::~ThreadPool()
 {
     // Signal
     _exitSignal.store( true, std::memory_order_release );
-    for( int i = 0; i < _threadCount; i++ )
-        _jobSignal.Release();
+
+    if( _mode == Mode::Fixed )
+    {
+        for( uint i = 0; i < _threadCount; i++ )
+            _threadData[i].jobSignal.Release();
+    }
+    else
+    {
+        for( uint i = 0; i < _threadCount; i++ )
+            _jobSignal.Release();
+    }
 
     // #TODO: Wait for all threads to finish
     
@@ -49,9 +63,45 @@ ThreadPool::~ThreadPool()
 //-----------------------------------------------------------
 void ThreadPool::RunJob( JobFunc func, void* data, uint count, size_t dataSize )
 {
+    ASSERT( func     );
+    ASSERT( data     );
+    ASSERT( dataSize );
+
     // #TODO: Should lock here to prevent re-entrancy and wait
     //        until current jobs are finished, but that is not the intended usage.
+    if( _mode == Mode::Fixed )
+        DispatchFixed( func, (byte*)data, count, dataSize );
+    else
+        DispatchGreedy( func, (byte*)data, count, dataSize );
+}
 
+//-----------------------------------------------------------
+void ThreadPool::DispatchFixed( JobFunc func, byte* data, uint count, size_t dataSize )
+{
+    _jobFunc     = func;
+    _jobData     = (byte*)data;
+    _jobDataSize = dataSize;
+
+    ASSERT( count <= _threadCount );
+
+    if( count > _threadCount )
+        count = _threadCount;
+
+    for( uint i = 0; i < count; i++ )
+        _threadData[i].jobSignal.Release();
+
+    // Wait until all running jobs finish
+    uint releaseCount = 0;
+    while( releaseCount < count )
+    {
+        _poolSignal.Wait();
+        releaseCount++;
+    }
+}
+
+//-----------------------------------------------------------
+void ThreadPool::DispatchGreedy( JobFunc func, byte* data, uint count, size_t dataSize )
+{
     // No jobs should currently be running
     ASSERT( _jobSignal.GetCount() == 0 );
     ASSERT( count );
@@ -65,8 +115,7 @@ void ThreadPool::RunJob( JobFunc func, void* data, uint count, size_t dataSize )
     ASSERT( _poolSignal.GetCount() == 0 );
 
     // Signal release the job semaphore <coun> amount of times.
-    // The job threads will grab jobs from the pool
-    // as long as there is one.
+    // The job threads will grab jobs from the pool as long as there is one.
     for( uint i = 0; i < count; i++ )
         _jobSignal.Release();
 
@@ -88,12 +137,49 @@ void ThreadPool::RunJob( JobFunc func, void* data, uint count, size_t dataSize )
 }
 
 //-----------------------------------------------------------
-void ThreadPool::ThreadRunner( void* tParam )
+void ThreadPool::FixedThreadRunner( void* tParam )
+{
+    ASSERT( tParam );
+    ThreadData& d    = *(ThreadData*)tParam;
+    ThreadPool& pool = *d.pool;
+
+    SysHost::SetCurrentThreadAffinityCpuId( d.cpuId );
+
+    const uint index = (uint)d.index;
+
+    std::atomic<bool>& exitSignal = pool._exitSignal;
+    Semaphore&         poolSignal = pool._poolSignal;
+    Semaphore&         jobSignal  = d.jobSignal;
+
+    for( ;; )
+    {
+        if( exitSignal.load( std::memory_order::memory_order_acquire ) )
+            return;
+
+        // Wait until we are signalled to go
+        jobSignal.Wait();
+
+        // We may have been signalled to exit
+        if( exitSignal.load( std::memory_order_acquire ) )
+            return;
+        
+        // Run job
+        pool._jobFunc( pool._jobData + pool._jobDataSize * index );
+
+        // Finished job
+        poolSignal.Release();
+    }
+}
+
+//-----------------------------------------------------------
+void ThreadPool::GreedyThreadRunner( void* tParam )
 {
     ASSERT( tParam );
 
     ThreadData& d    = *(ThreadData*)tParam;
     ThreadPool& pool = *d.pool;
+
+    SysHost::SetCurrentThreadAffinityCpuId( d.cpuId );
 
     for( ;; )
     {
@@ -121,7 +207,6 @@ void ThreadPool::ThreadRunner( void* tParam )
                 ASSERT( pool._jobFunc );
 
                 // We acquired the job, run it
-                // Log::Line( "Thread %d running job.", d.index );
                 pool._jobFunc( pool._jobData + pool._jobDataSize * jobIndex );
             }
         }

@@ -28,6 +28,7 @@ struct Config
     uint            threads            = 0;
     uint            plotCount          = 1;
     bool            warmStart          = false;
+    bool            disableNuma        = false;
 
     bls::G1Element  farmerPublicKey;
     bls::G1Element* poolPublicKey      = nullptr;
@@ -38,23 +39,31 @@ struct Config
     int             maxFailCount       = 100;
 
     const char*     plotId             = nullptr;
+
 };
 
 /// Internal Functions
 void           ParseCommandLine( int argc, const char* argv[], Config& cfg );
 bool           HexPKeyToG1Element( const char* hexKey, bls::G1Element& pkey );
 
-ByteSpan       DecodePuzzleHash( const char* poolContractAddress );
-void           GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32], uint16& outMemoSize );
-bls::G1Element MasterSkToLocalSK( bls::PrivateKey& sk );
-bls::G1Element GeneratePlotPublicKey( const bls::G1Element& localPk, bls::G1Element& farmerPk, const bool includeTaproot );
+ByteSpan        DecodePuzzleHash( const char* poolContractAddress );
+void            GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32], uint16& outMemoSize );
+bls::PrivateKey MasterSkToLocalSK( bls::PrivateKey& sk );
+bls::G1Element  GeneratePlotPublicKey( const bls::G1Element& localPk, bls::G1Element& farmerPk, const bool includeTaproot );
 
-std::vector<uint8_t> BytesConcat( std::vector<uint8_t> l, std::vector<uint8_t> r );
 std::vector<uint8_t> BytesConcat( std::vector<uint8_t> a, std::vector<uint8_t> b, std::vector<uint8_t> c );
 
 void PrintSysInfo();
 void GetPlotIdBytes( const std::string& plotId, byte outBytes[32] );
 void PrintUsage();
+
+#if _DEBUG
+    std::string          HexToString( const byte* bytes, size_t length );
+    std::vector<uint8_t> HexStringToBytes( const char* hexStr );
+    std::vector<uint8_t> HexStringToBytes( const std::string& hexStr );
+    void PrintPK( const bls::G1Element&  key );
+    void PrintSK( const bls::PrivateKey& key );
+#endif
 
 //-----------------------------------------------------------
 const char* USAGE = "bladebit [<OPTIONS>] [<out_dir>]\n"
@@ -87,6 +96,11 @@ OPTIONS:
  -i, --plot-id        : Specify a plot id for debugging.
 
  -v, --verbose        : Enable verbose output.
+
+ -m, --no-numa        : Disable automatic NUMA aware memory binding.
+                        If you set this parameter in a NUMA system you
+                        will likely get degraded performance.
+
 )";
 
 
@@ -102,7 +116,7 @@ int main( int argc, const char* argv[] )
 
     // Create the plot output path
     size_t outputFolderLen = strlen( cfg.outputFolder );
-    char* plotOutPath = new char[outputFolderLen + 64+6+1];
+    char*  plotOutPath     = new char[outputFolderLen + 64+6+1];
 
     if( outputFolderLen )
     {
@@ -120,7 +134,7 @@ int main( int argc, const char* argv[] )
     PlotRequest req;
     ZeroMem( &req );
 
-    MemPlotter plotter( cfg.threads, cfg.warmStart );
+    MemPlotter plotter( cfg.threads, cfg.warmStart, cfg.disableNuma );
 
     byte   plotId[32];
     byte   memo  [48+48+32];
@@ -132,7 +146,7 @@ int main( int argc, const char* argv[] )
     {
         // Generate a new plot id
         GeneratePlotIdAndMemo( cfg, plotId, memo, memoSize );
-        
+
         if( cfg.plotId )
             HexStrToBytes( cfg.plotId, 64, plotId, 32 );
         
@@ -273,7 +287,11 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
                     Fatal( "Invalid plot id." );
             }
         }
-        else if( check( "-v" ) || check( "--verbose " ) )
+        else if( check( "-m" ) || check( "--no-numa" ) )
+        {
+            cfg.disableNuma = true;
+        }
+        else if( check( "-v" ) || check( "--verbose" ) )
         {
             Log::SetVerbose( true );
         }
@@ -322,9 +340,6 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
     else if( poolContractAddress )
     {
         cfg.contractPuzzleHash = new ByteSpan( std::move( DecodePuzzleHash( poolContractAddress ) ) );
-
-        if( poolContractAddress[0] == '0' && poolContractAddress[1] == 'x' )
-            poolContractAddress += 2;
     }
     else
         Fatal( "Error: Either a pool public key or a pool contract address must be specified." );
@@ -383,7 +398,7 @@ void GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32
     SysHost::Random( seed, sizeof( seed ) );
 
     bls::PrivateKey sk      = bls::AugSchemeMPL().KeyGen( bls::Bytes( seed, sizeof( seed ) ) );
-    bls::G1Element  localPk = std::move( MasterSkToLocalSK( sk ) );
+    bls::G1Element  localPk = std::move( MasterSkToLocalSK( sk ) ).GetG1Element();
 
     // #See: chia-blockchain create_plots.py
     //       The plot public key is the combination of the harvester and farmer keys
@@ -391,7 +406,7 @@ void GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32
     const bool includeTaproot = cfg.contractPuzzleHash != nullptr;
     
     bls::G1Element plotPublicKey = std::move( GeneratePlotPublicKey( localPk, farmerPK, includeTaproot ) );
-
+    
     std::vector<uint8_t> farmerPkBytes = farmerPK.Serialize();
     std::vector<uint8_t> localSkBytes  = sk.Serialize();
 
@@ -400,6 +415,7 @@ void GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32
     {
         std::vector<uint8_t> bytes = poolPK->Serialize();
         
+        // Gen plot id
         auto plotPkBytes = plotPublicKey.Serialize();
         bytes.insert( bytes.end(), plotPkBytes.begin(), plotPkBytes.end() );
 
@@ -421,12 +437,13 @@ void GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32
 
         const auto& ph = *cfg.contractPuzzleHash;
         std::vector<uint8_t> phBytes( (uint8_t*)ph.values, (uint8_t*)ph.values + ph.length );
-        std::vector<uint8_t> bytes = phBytes;
         
+        // Gen plot id
+        std::vector<uint8_t> plotIdBytes = phBytes;
         auto plotPkBytes = plotPublicKey.Serialize();
-        bytes.insert( bytes.end(), plotPkBytes.begin(), plotPkBytes.end() );
 
-        bls::Util::Hash256( plotId, bytes.data(), bytes.size() );
+        plotIdBytes.insert( plotIdBytes.end(), plotPkBytes.begin(), plotPkBytes.end() );
+        bls::Util::Hash256( plotId, plotIdBytes.data(), plotIdBytes.size() );
 
         // Gen memo
         auto memoBytes = BytesConcat( phBytes, farmerPkBytes, localSkBytes );
@@ -440,7 +457,7 @@ void GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32
 }
 
 //-----------------------------------------------------------
-bls::G1Element MasterSkToLocalSK( bls::PrivateKey& sk )
+bls::PrivateKey MasterSkToLocalSK( bls::PrivateKey& sk )
 {
     // #SEE: chia-blockchain: derive-keys.py
     // EIP 2334 bls key derivation
@@ -456,8 +473,9 @@ bls::G1Element MasterSkToLocalSK( bls::PrivateKey& sk )
     bls::PrivateKey ssk = bls::AugSchemeMPL().DeriveChildSk( sk, blsSpecNum );
     ssk = bls::AugSchemeMPL().DeriveChildSk( ssk, chiaBlockchainPort );
     ssk = bls::AugSchemeMPL().DeriveChildSk( ssk, localIdx );
+    ssk = bls::AugSchemeMPL().DeriveChildSk( ssk, 0        );
 
-    return ssk.GetG1Element();
+    return ssk;
 }
 
 //-----------------------------------------------------------
@@ -491,12 +509,6 @@ ByteSpan DecodePuzzleHash( const char* poolContractAddress )
     ASSERT( poolContractAddress );
 
     size_t length = strlen( poolContractAddress );
-    
-    if( length > 1 && poolContractAddress[0] == '0' && poolContractAddress[1] == 'x' )
-    {
-        poolContractAddress +=2 ;
-        length -= 2;
-    }
 
     if( length < 9 )
         Fatal( "Error: Invalid pool contract address '%s'.", poolContractAddress );
@@ -505,7 +517,7 @@ ByteSpan DecodePuzzleHash( const char* poolContractAddress )
     byte* data = (byte*)malloc( length - 8 );
 
     size_t dataLength = 0;
-    bech32_encoding  encoding = bech32_decode( hrp, data, &dataLength, poolContractAddress );
+    bech32_encoding encoding = bech32_decode( hrp, data, &dataLength, poolContractAddress );
     if( encoding == BECH32_ENCODING_NONE )
         Fatal( "Error: Failed to decode contract address '%s'.", poolContractAddress );
 
@@ -595,13 +607,6 @@ void GetPlotIdBytes( const std::string& plotId, byte outBytes[32] )
 
 
 //-----------------------------------------------------------
-inline std::vector<uint8_t> BytesConcat( std::vector<uint8_t> l, std::vector<uint8_t> r )
-{
-    l.insert( l.begin(), r.begin(), r.end() );
-    return l;
-}
-
-//-----------------------------------------------------------
 inline std::vector<uint8_t> BytesConcat( std::vector<uint8_t> a, std::vector<uint8_t> b, std::vector<uint8_t> c )
 {
     a.insert( a.end(), b.begin(), b.end() );
@@ -616,3 +621,56 @@ void PrintUsage()
     fflush( stderr );
 }
 
+#if _DEBUG
+    //-----------------------------------------------------------
+    std::string HexToString( const byte* bytes, size_t length )
+    {
+        ASSERT( length );
+
+        const size_t slen = length * 2 + 1;
+        char* buffer      = (char*)malloc( slen );
+        memset( buffer, 0, slen );
+        
+        size_t numEncoded;
+        BytesToHexStr( bytes, length, buffer, slen, numEncoded );
+
+        std::string str( buffer );
+        free( buffer );
+
+        return str;
+    }
+
+    //-----------------------------------------------------------
+    std::vector<uint8_t> HexStringToBytes( const char* hexStr )
+    {
+        const size_t len  = strlen( hexStr );
+
+        byte* buffer = (byte*)malloc( len / 2 );
+
+        HexStrToBytes( hexStr, len, buffer, len / 2 );
+        std::vector<uint8_t> ret( buffer, buffer + len / 2 );
+        
+        free( buffer );
+        return ret;
+    }
+
+    //-----------------------------------------------------------
+    std::vector<uint8_t> HexStringToBytes( const std::string& hexStr )
+    {
+        return HexStringToBytes( hexStr.c_str() );
+    }
+
+    //-----------------------------------------------------------
+    void PrintPK( const bls::G1Element& key )
+    {
+        std::vector<uint8_t> bytes = key.Serialize();
+        Log::Line( "%s", HexToString( (byte*)bytes.data(), bytes.size() ).c_str() );
+    }
+
+    //-----------------------------------------------------------
+    void PrintSK( const bls::PrivateKey& key )
+    {
+        std::vector<uint8_t> bytes = key.Serialize();
+        Log::Line( "%s", HexToString( (byte*)bytes.data(), bytes.size() ).c_str() );
+    }
+#endif

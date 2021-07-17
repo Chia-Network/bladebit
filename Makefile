@@ -39,7 +39,8 @@ endif
 
 LDFLAGS := -pthread \
 	-Llib \
-	-lbls
+	-lbls \
+	-lnuma
 
 
 # Is it release or debug?

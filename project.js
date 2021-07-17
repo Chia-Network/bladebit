@@ -6,8 +6,8 @@ const CONFIG_NAMES = [
     'release.arm',
 
     // Test/sandbox mode
-    // 'debug.test',
-    // 'release.test',
+    'debug.test',
+    'release.test',
     // 'debug.arm.test',
     // 'release.arm.test'
 ];
@@ -157,7 +157,8 @@ bladebit.configs.test = () => config({
 
     ,src: [
 
-        // 'src/test/Test.cpp'
+        'src/test/test_main.cpp'
+        // ,'src/test/TestNuma.cpp'
     ]
 
     ,ignore: [

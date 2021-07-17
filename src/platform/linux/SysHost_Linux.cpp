@@ -6,6 +6,8 @@
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
+#include <numa.h>
+#include <numaif.h>
 
 #if _DEBUG
     #include "util/Log.h"
@@ -134,17 +136,46 @@ uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
 
     cpu_set_t cpuSet;
     CPU_ZERO( &cpuSet );
-    CPU_SET( mask, &cpuSet );
+
+    if( mask == 0 )
+        CPU_SET( 1, &cpuSet );
+    else
+    {
+        for( uint i = 0; i < 64; i++ )
+        {
+            if( mask & (1ull << i ) )
+                CPU_SET( i+1, &cpuSet );
+        }
+    }
 
     int r = pthread_setaffinity_np( thread, sizeof(cpu_set_t), &cpuSet );
     if( r != 0 )
+    {
+        ASSERT( 0 );
         return 0;
+    }
 
     r = pthread_getaffinity_np( thread, sizeof(cpu_set_t), &cpuSet );
     if( r != 0 )
+    {
+        ASSERT( 0 );
         return 0;
+    }
 
     return mask;
+}
+
+//-----------------------------------------------------------
+bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
+{
+    pthread_t thread = pthread_self();
+    
+    cpu_set_t cpuSet;
+    CPU_ZERO( &cpuSet );
+    CPU_SET( cpuId, &cpuSet );
+
+    int r = pthread_setaffinity_np( thread, sizeof(cpu_set_t), &cpuSet );
+    return r == 0;
 }
 
 //-----------------------------------------------------------
@@ -204,3 +235,114 @@ void SysHost::Random( byte* buffer, size_t size )
     }
 }
 
+// #NOTE: This is not thread-safe
+//-----------------------------------------------------------
+const NumaInfo* SysHost::GetNUMAInfo()
+{
+    if( numa_available() == -1 )
+        return nullptr;
+
+    static NumaInfo _info;
+    static NumaInfo* info = nullptr;
+
+    // Initialize if not initialized
+    if( !info )
+    {
+        memset( &_info, 0, sizeof( NumaInfo ) );
+        
+        const uint nodeCount = (uint)numa_num_configured_nodes();
+   
+        uint totalCpuCount = 0;
+        Span<uint>* cpuIds = (Span<uint>*)malloc( sizeof( uint* ) * nodeCount );
+
+
+        for( uint i = 0; i < nodeCount; i++ )
+        {
+            bitmask* cpuMask = numa_allocate_cpumask();
+            if( !cpuMask )
+                Fatal( "Failed to allocate NUMA CPU mask." );
+
+            int r = numa_node_to_cpus( i, cpuMask );
+
+            if( r )
+            {
+                int err = errno;
+                Fatal( "Failed to get cpus from NUMA node %u with error: %d (0x%x)", i, err, err );
+            }
+
+            // Count how many CPUs in this node
+            uint cpuCount = 0;
+            for( uint64 j = 0; j < cpuMask->size; j++ )
+                if( numa_bitmask_isbitset( cpuMask, (uint)j ) )
+                    cpuCount ++;
+
+            // Allocate a buffer for this cpu
+            cpuIds[i].values = (uint*)malloc( sizeof( uint ) * cpuCount );
+            cpuIds[i].length = cpuCount;
+
+            // Assign CPUs
+            uint cpuI = 0;
+            for( uint64 j = 0; j < cpuMask->size; j++ )
+            {
+                int s = numa_bitmask_isbitset( cpuMask, (uint)j );
+                if( s )
+                    cpuIds[i].values[cpuI++] = (uint)j;
+
+                ASSERT( cpuI <= cpuCount );
+            }
+
+            totalCpuCount += cpuCount;
+
+            // #TODO BUG: This is a memory leak,
+            //        but we're getting crashes releasing it or
+            //        using it multiple times with numa_node_to_cpus on
+            //        a signle allocations.
+            //        Fix it. (Not fatal as it is a small allocation, and this has re-entry protection)
+            // numa_free_cpumask( cpuMask );
+        }
+
+        // Save instance
+        _info.nodeCount = nodeCount;
+        _info.cpuCount  = totalCpuCount;
+        _info.cpuIds    = cpuIds;
+        info = &_info;
+    }
+
+    return info;
+}
+
+//-----------------------------------------------------------
+void SysHost::NumaAssignPages( void* ptr, size_t size, uint node )
+{
+    numa_tonode_memory( ptr, size, (int)node );
+}
+
+//-----------------------------------------------------------
+bool SysHost::NumaSetThreadInterleavedMode()
+{
+    const NumaInfo* numa = GetNUMAInfo();
+    if( !numa )
+        return false;
+    
+    unsigned long mask[128];
+    memset( mask, 0xFF, sizeof( mask ) );
+
+    long r = set_mempolicy( MPOL_INTERLEAVE, mask, numa->cpuCount );
+
+    return r == 0;
+}
+
+//-----------------------------------------------------------
+bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
+{
+    const NumaInfo* numa = GetNUMAInfo();
+    if( !numa )
+        return false;
+
+    unsigned long mask[128];
+    memset( mask, 0xFF, sizeof( mask ) );
+
+    long r = mbind( ptr, size, MPOL_INTERLEAVE, mask, numa->cpuCount, 0 ); 
+    
+    return r == 0;
+}

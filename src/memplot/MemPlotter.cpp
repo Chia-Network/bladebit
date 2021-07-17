@@ -11,14 +11,27 @@
 
 
 //----------------------------------------------------------
-MemPlotter::MemPlotter( uint threadCount, bool warmStart )
+MemPlotter::MemPlotter( uint threadCount, bool warmStart, bool noNUMA )
 {
     ZeroMem( &_context );
+
+    const NumaInfo* numa = nullptr;
+    if( !noNUMA )
+        numa = SysHost::GetNUMAInfo();
+    
+    if( numa && numa->nodeCount < 2 )
+        numa = nullptr;
+    
+    if( numa )
+    {
+        if( !SysHost::NumaSetThreadInterleavedMode() )
+            Log::Error( "Warning: Failed to set NUMA interleaved mode." );
+    }
 
     _context.threadCount = threadCount;
     
     // Create a thread pool
-    _context.threadPool  = new ThreadPool( threadCount );
+    _context.threadPool = new ThreadPool( threadCount, ThreadPool::Mode::Greedy );
 
     // Allocate buffers
     {
@@ -63,21 +76,21 @@ MemPlotter::MemPlotter( uint threadCount, bool warmStart )
             Log::Line( "Warning: Not enough memory available. Buffer allocation may fail." );
 
         Log::Line( "Allocating buffers." );
-        _context.t1XBuffer   = SafeAlloc<uint32>( t1XBuffer , warmStart  );
+        _context.t1XBuffer   = SafeAlloc<uint32>( t1XBuffer  , warmStart, numa );
 
-        _context.t2LRBuffer  = SafeAlloc<Pair>  ( t2LRBuffer , warmStart );
-        _context.t3LRBuffer  = SafeAlloc<Pair>  ( t3LRBuffer , warmStart );
-        _context.t4LRBuffer  = SafeAlloc<Pair>  ( t4LRBuffer , warmStart );
-        _context.t5LRBuffer  = SafeAlloc<Pair>  ( t5LRBuffer , warmStart );
-        _context.t6LRBuffer  = SafeAlloc<Pair>  ( t6LRBuffer , warmStart );
+        _context.t2LRBuffer  = SafeAlloc<Pair>  ( t2LRBuffer , warmStart, numa );
+        _context.t3LRBuffer  = SafeAlloc<Pair>  ( t3LRBuffer , warmStart, numa );
+        _context.t4LRBuffer  = SafeAlloc<Pair>  ( t4LRBuffer , warmStart, numa );
+        _context.t5LRBuffer  = SafeAlloc<Pair>  ( t5LRBuffer , warmStart, numa );
+        _context.t6LRBuffer  = SafeAlloc<Pair>  ( t6LRBuffer , warmStart, numa );
 
-        _context.t7YBuffer   = SafeAlloc<uint32>( t7YBuffer  , warmStart );
-        _context.t7LRBuffer  = SafeAlloc<Pair>  ( t7LRBuffer , warmStart );
+        _context.t7YBuffer   = SafeAlloc<uint32>( t7YBuffer  , warmStart, numa );
+        _context.t7LRBuffer  = SafeAlloc<Pair>  ( t7LRBuffer , warmStart, numa );
 
-        _context.yBuffer0    = SafeAlloc<uint64>( yBuffer0   , warmStart );
-        _context.yBuffer1    = SafeAlloc<uint64>( yBuffer1   , warmStart );
-        _context.metaBuffer0 = SafeAlloc<uint64>( metaBuffer0, warmStart );
-        _context.metaBuffer1 = SafeAlloc<uint64>( metaBuffer1, warmStart );
+        _context.yBuffer0    = SafeAlloc<uint64>( yBuffer0   , warmStart, numa );
+        _context.yBuffer1    = SafeAlloc<uint64>( yBuffer1   , warmStart, numa );
+        _context.metaBuffer0 = SafeAlloc<uint64>( metaBuffer0, warmStart, numa );
+        _context.metaBuffer1 = SafeAlloc<uint64>( metaBuffer1, warmStart, numa );
 
 
         // Some table's kBC group pairings yield more values than 2^k. 
@@ -245,12 +258,12 @@ void MemPlotter::WaitPlotWriter()
 ///
 //-----------------------------------------------------------
 template<typename T>
-T* MemPlotter::SafeAlloc( size_t size, bool warmStart )
+T* MemPlotter::SafeAlloc( size_t size, bool warmStart, const NumaInfo* numa )
 {
     #if DEBUG || BOUNDS_PROTECTION
     
         const size_t originalSize = size;
-        const size_t pageSize = SysHost::GetPageSize();
+        const size_t pageSize     = SysHost::GetPageSize();
         size = pageSize * 2 + RoundUpToNextBoundary( size, (int)pageSize );
 
     #endif
@@ -260,6 +273,12 @@ T* MemPlotter::SafeAlloc( size_t size, bool warmStart )
     if( !ptr )
     {
         Fatal( "Error: Failed to allocate required buffers." );
+    }
+
+    if( numa )
+    {
+        if( !SysHost::NumaSetMemoryInterleavedMode( ptr, size ) )
+            Log::Error( "Warning: Failed to bind NUMA memory." );
     }
 
     // Protect memory boundaries
@@ -333,5 +352,4 @@ T* MemPlotter::SafeAlloc( size_t size, bool warmStart )
 
     return ptr;
 }
-
 

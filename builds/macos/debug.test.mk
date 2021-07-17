@@ -28,7 +28,7 @@ SOURCES += \
 	src/PlotWriter.cpp \
 	src/pos/chacha8.cpp \
 	src/SysHost.cpp \
-	src/test/Test.cpp \
+	src/test/test_main.cpp \
 	src/threading/Semaphore.cpp \
 	src/threading/Thread.cpp \
 	src/threading/ThreadPool.cpp \

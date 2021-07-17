@@ -12,6 +12,12 @@ enum class VProtect : uint
 };
 ImplementFlagOps( VProtect );
 
+struct NumaInfo
+{
+    uint        nodeCount;  // How many NUMA nodes in the system
+    uint        cpuCount;   // Total cpu count used by nodes
+    Span<uint>* cpuIds;     // CPU ids of each node
+};
 
 class SysHost
 {
@@ -41,10 +47,26 @@ public:
     /// Set the processor affinity mask for the current thread
     static uint64 SetCurrentThreadAffinityMask( uint64 mask );
 
+    /// Set the processor affinity mask to a specific cpu id for the current thread
+    static bool   SetCurrentThreadAffinityCpuId( uint32 cpuId );
+
     /// Install a crash handler to dump stack traces upon crash
     static void InstallCrashHandler();
 
     /// Generate random data
     /// (We basically do what libsodium does here)
     static void Random( byte* buffer, size_t size );
+
+    /// Get system's NUMA info, if it has any
+    static const NumaInfo* GetNUMAInfo();
+
+    /// Assign memory pages to a NUMA node
+    static void NumaAssignPages( void* ptr, size_t size, uint node );
+
+    /// Set interleave NUMA mode for allocations in the calling thread
+    static bool NumaSetThreadInterleavedMode();
+
+    /// Set interleave NUMA mode for the specified memory regions.
+    /// NOTE: Pages must not yet be faulted.
+    static bool NumaSetMemoryInterleavedMode( void* ptr, size_t size );
 };

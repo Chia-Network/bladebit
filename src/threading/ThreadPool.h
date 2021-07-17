@@ -12,7 +12,15 @@ typedef void (*JobFunc)( void* data );
 class ThreadPool
 {
 public:
-    ThreadPool( uint threadCount );
+    enum class Mode
+    {
+        Fixed  = 0, // Only can run as many jobs as we have threads.
+        Greedy = 1  // Can run more jobs that we have threads.
+                    // Threads will continue to process jobs as long 
+                    // as there are jobs available.
+    };
+
+    ThreadPool( uint threadCount, Mode mode = Mode::Fixed );
     ~ThreadPool();
 
     void RunJob( JobFunc func, void* data, uint count, size_t dataSize );
@@ -20,24 +28,32 @@ public:
     template<typename T>
     inline void RunJob( void (*TJobFunc)( T* ), T* data, uint count );
 
-    inline uint ThreadCount() { return (uint)_threadCount; }
+    inline uint ThreadCount() { return _threadCount; }
 private:
 
-    static void ThreadRunner( void* tParam );
+    void DispatchFixed( JobFunc func, byte* data, uint count, size_t dataSize );
+    void DispatchGreedy( JobFunc func, byte* data, uint count, size_t dataSize );
+
+    static void FixedThreadRunner( void* tParam );
+    static void GreedyThreadRunner( void* tParam );
 
     struct ThreadData
     {
         ThreadPool* pool;
         int         index;
+        uint        cpuId;     // CPU Id affinity
+        Semaphore   jobSignal; // Used for fixed mode
     };
 
 private:
-    int               _threadCount;         // Reserved number of thread running jobs
+    uint              _threadCount;         // Reserved number of thread running jobs
+    Mode              _mode        = Mode::Greedy;
     Thread*           _threads;
     ThreadData*       _threadData;
     Semaphore         _jobSignal;           // Used to signal threads that there's a new job
     Semaphore         _poolSignal;          // Used to signal the pool that a thread has finished its job
     std::atomic<bool> _exitSignal = false;  // Used to signal threads to exit
+
 
     // Current job group
     std::atomic<uint> _jobIndex    = 0;            // Next jobi index
