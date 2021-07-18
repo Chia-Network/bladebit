@@ -11,7 +11,7 @@ A fast **RAM-only**, **k32-only**, Chia plotter.
 This repository depends on Chia's [bls-signatures](https://github.com/Chia-Network/bls-signatures) repository to generate keys and plot ids, which requires [Cmake](https://cmake.org/). At the time of this writing **Cmake 3.14+** is required by bls-signatures. See the repository for any updated build instructions.
 
 64-bit is supported only, for obvious reasons.
-Only Linux is currently completed. There are several platform abstractions misisng for macOS and Windows.
+Only Linux is currently completed. There are several platform abstractions missing for macOS and Windows.
 
 ### Build & Install
 <details>
@@ -30,7 +30,7 @@ Only Linux is currently completed. There are several platform abstractions misis
   # Build for x86
   make clean && make -j$(nproc --all)
 
-  # Build for AMR
+  # Build for ARM
   make clean && make -j$(nproc --all) CONFIG=release.arm
 
   ```
