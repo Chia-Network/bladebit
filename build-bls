@@ -35,6 +35,12 @@ esac
 # Build
 pushd modules/bls-signatures
 
+# BLS needs GCC and G++ version < 10
+CC=$(which gcc-10)
+CXX=$(which g++-10)
+export CC
+export CXX
+
 mkdir -p build
 cd build
 cmake ../
