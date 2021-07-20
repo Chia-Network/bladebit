@@ -116,7 +116,6 @@ int main( int argc, const char* argv[] )
 
     // Create the plot output path
     size_t outputFolderLen = strlen( cfg.outputFolder );
-    //char* plotOutPath = new char[outputFolderLen + 64+6+1];
     // initial dir sep == 1
     // plot-k32 == 8
     // +1 sep
