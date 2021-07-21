@@ -13,8 +13,23 @@ This repository depends on Chia's [bls-signatures](https://github.com/Chia-Netwo
 64-bit is supported only, for obvious reasons.
 Only Linux is currently completed. There are several platform abstractions misisng for macOS and Windows.
 
+**Linux**
+> *NOTE: Some repositories may have cmake versions not compatible with BLS, in which case you would have to build & install Cmake yourself.*
+
+```
+# CentOS or Amazon Linux
+sudo yum install -y cmake numactl-devel
+```
+
+
 ### Build
 
+> *NOTE: BLS/Relic is currently not compatible with GCC 11*
+
+
+Install pre-requisites then run:
+
+**Linux**
 ```bash
 # Clone the repo & its submodules
 git clone --recursive https://github.com/harold-b/bladebit.git
