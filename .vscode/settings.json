@@ -77,7 +77,11 @@
         "mutex": "cpp",
         "shared_mutex": "cpp",
         "variant": "cpp",
-        "segwit_addr.h": "c"
+        "segwit_addr.h": "c",
+        "complex": "cpp",
+        "forward_list": "cpp",
+        "typeindex": "cpp",
+        "valarray": "cpp"
     },
     "cSpell.words": [
         "Ryzen"

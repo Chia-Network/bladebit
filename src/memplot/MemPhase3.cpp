@@ -86,13 +86,14 @@ uint64 MemPhase3::ProcessTable( uint32* lEntries, uint64* lpBuffer, Pair* rTable
     uint32* map = (uint32*)cx.metaBuffer1;
 
     std::atomic<uint> threadSignal = 0;
+    std::atomic<uint> releaseLock  = 0;
     
     LPJob jobs[MAX_THREADS];
 
     for( uint i = 0; i < threadCount; i++ )
     {
         auto& job = jobs[i];
-        job.Init( (uint)i, threadCount, threadSignal );
+        job.Init( (uint)i, threadCount, threadSignal, releaseLock );
 
         job.lTable        = lEntries;
         job.length        = entriesPerThread;

@@ -1,5 +1,6 @@
 #pragma once
 #include "threading/ThreadPool.h"
+#include <cstring>
 
 class RadixSort256
 {
@@ -12,6 +13,7 @@ class RadixSort256
         // When All threads have finished, we can
         // thread 0 (the control thread) can calculate jobs and signal them to continue
         std::atomic<uint>* finishedCount;
+        std::atomic<uint>* releaseLock;
 
         uint64* counts;             // Counts array for each thread
         uint64* pfxSums;            // Prefix sums for each thread. We use a different buffers to avoid copying to tmp buffers.
@@ -83,6 +85,7 @@ void inline RadixSort256::DoSort( ThreadPool& pool, T1* input, T1* tmp, TK* keyI
     uint64 prefixSums[ThreadCount*256]; 
 
     std::atomic<uint> finishedCount = 0;
+    std::atomic<uint> releaseLock   = 0;
     SortJob<T1, TK> jobs[ThreadCount];
     
     for( uint i = 0; i < threadCount; i++ )
@@ -92,6 +95,7 @@ void inline RadixSort256::DoSort( ThreadPool& pool, T1* input, T1* tmp, TK* keyI
         job.id            = i;
         job.threadCount   = threadCount;
         job.finishedCount = &finishedCount;
+        job.releaseLock   = &releaseLock;
         job.counts        = counts;
         job.pfxSums       = prefixSums;
         job.startIndex    = i * entriesPerThread;
@@ -128,6 +132,7 @@ void RadixSort256::RadixSortThread( SortJob<T1, T2>* job )
     const uint         id            = job->id;
     const uint         threadCount   = job->threadCount;
     std::atomic<uint>& finishedCount = *job->finishedCount;
+    std::atomic<uint>& releaseLock   = *job->releaseLock;
 
     uint64*      counts    = job->counts  + id * Radix;
     uint64*      prefixSum = job->pfxSums + id * Radix;
@@ -212,21 +217,25 @@ void RadixSort256::RadixSortThread( SortJob<T1, T2>* job )
                 nextThreadCountBuffer -= Radix;
             }
 
-            // Finished, signal other threads
+            // Finished, init release lock & signal other threads
+            releaseLock  .store( 0, std::memory_order_release );
             finishedCount.store( 0, std::memory_order_release );
         }
         else
         {
             // Signal we've finished so we can calculate the shared prefix sum
-            uint count = finishedCount.load( std::memory_order_relaxed );
+            uint count = finishedCount.load( std::memory_order_acquire );
 
-            while( !finishedCount.compare_exchange_weak( count, count+1,
-                    std::memory_order_release,
-                    std::memory_order_relaxed ) );
+            while( !finishedCount.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
             
             // Wait for the control thread (id == 0 ) to signal us so
             // that we can continue working.
             while( finishedCount.load( std::memory_order_relaxed ) != 0 );
+
+            // Ensure all threads have been released
+            count = releaseLock.load( std::memory_order_acquire );
+            while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+            while( releaseLock.load( std::memory_order_relaxed ) != threadCount-1 );
         }
         
         // Populate output array (access input in reverse now)
@@ -270,20 +279,24 @@ void RadixSort256::RadixSortThread( SortJob<T1, T2>* job )
                 // Wait for all threads
                 while( finishedCount.load( std::memory_order_relaxed ) != (threadCount-1) );
                 
-                // Signal all threads
+                // Finished, init release lock & signal other threads
+                releaseLock  .store( 0, std::memory_order_release );
                 finishedCount.store( 0, std::memory_order_release );
             }
             else
             {
                 // Signal control thread
-                uint count = finishedCount.load( std::memory_order_relaxed );
+                uint count = finishedCount.load( std::memory_order_acquire );
 
-                while( !finishedCount.compare_exchange_weak( count, count+1,
-                        std::memory_order_release,
-                        std::memory_order_relaxed ) );
+                while( !finishedCount.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
 
                 // Wait for control thread to signal us
                 while( finishedCount.load( std::memory_order_relaxed ) != 0 );
+
+                // Ensure all threads have been released
+                count = releaseLock.load( std::memory_order_acquire );
+                while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+                while( releaseLock.load( std::memory_order_relaxed ) != threadCount-1 );
             }
         }
     }
