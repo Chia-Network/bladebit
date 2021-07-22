@@ -11,8 +11,9 @@ struct SyncedJob
     uint               _threadId;
     uint               _threadCount;
     std::atomic<uint>* _readyCount;
+    std::atomic<uint>* _releaseLock;
     
-    inline void Init( const uint threadId, const uint threadCount, std::atomic<uint>& signal );
+    inline void Init( const uint threadId, const uint threadCount, std::atomic<uint>& signal, std::atomic<uint>& releaseLock );
     inline void WaitForThreads();
 };
 
@@ -87,39 +88,45 @@ FORCE_INLINE uint64 SquareToLinePoint( uint64 x, uint64 y )
 
 
 //-----------------------------------------------------------
-inline void SyncedJob::Init( const uint threadId, const uint threadCount, std::atomic<uint>& signal )
+inline void SyncedJob::Init( const uint threadId, const uint threadCount, std::atomic<uint>& signal, std::atomic<uint>& releaseLock )
 {
     _threadId    = threadId;
     _threadCount = threadCount;
     _readyCount  = &signal;
+    _releaseLock = &releaseLock;
 }
 
 //-----------------------------------------------------------
 inline void SyncedJob::WaitForThreads()
 {
-    auto& readyCount = *_readyCount;
+    std::atomic<uint>& readyCount  = *_readyCount;
+    std::atomic<uint>& releaseLock = *_releaseLock;
+
+    const uint targetCount = _threadCount - 1;
 
     if( _threadId == 0 )
     {
-        const uint targetCount = _threadCount - 1;
-
         // Wait for all threads
         while( readyCount.load( std::memory_order_relaxed ) != targetCount );
         
         // Signal all threads
-        readyCount.store( 0, std::memory_order_release );
+        releaseLock .store( 0, std::memory_order_release );
+        readyCount  .store( 0, std::memory_order_release );
     }
     else
     {
         // Signal control thread
-        uint count = readyCount.load( std::memory_order_relaxed );
+        uint count = readyCount.load( std::memory_order_acquire );
 
-        while( !readyCount.compare_exchange_weak( count, count+1,
-                std::memory_order_release,
-                std::memory_order_relaxed ) );
+        while( !readyCount.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
 
         // Wait for control thread to signal us
         while( readyCount.load( std::memory_order_relaxed ) != 0 );
+
+        // Ensure all threads have been released
+        count = releaseLock.load( std::memory_order_acquire );
+        while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+        while( releaseLock.load( std::memory_order_relaxed ) != targetCount );
     }
 }
 
