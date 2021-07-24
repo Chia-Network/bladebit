@@ -116,7 +116,14 @@ int main( int argc, const char* argv[] )
 
     // Create the plot output path
     size_t outputFolderLen = strlen( cfg.outputFolder );
-    char*  plotOutPath     = new char[outputFolderLen + 64+6+1];
+    // initial dir sep == 1
+    // plot-k32 == 8
+    // +1 sep
+    // ymdhm is 4+2+2+2+2 + 4 separators == 16
+    // +1 sep
+    // plotid
+    // .plot.tmp == 9
+    char* plotOutPath = new char[outputFolderLen + 1+8+1+16+1+64+9+1];
 
     if( outputFolderLen )
     {
@@ -126,9 +133,6 @@ int main( int argc, const char* argv[] )
         if( plotOutPath[outputFolderLen-1] != '/' )
             plotOutPath[outputFolderLen++] = '/';
     }
-
-    memcpy( plotOutPath+outputFolderLen+64, ".plot", sizeof( ".plot" ) );
-    
 
     // Begin plotting
     PlotRequest req;
@@ -144,6 +148,12 @@ int main( int argc, const char* argv[] )
     int failCount = 0;
     for( uint i = 0; i < cfg.plotCount; i++ )
     {
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+        strftime(plotOutPath+outputFolderLen, outputFolderLen + 99 + 1, "plot-k32-%Y-%m-%d-%H-%M-", t);
+
+        memcpy( plotOutPath+outputFolderLen+26+64, ".plot.tmp", sizeof( ".plot.tmp" ) );
+
         // Generate a new plot id
         GeneratePlotIdAndMemo( cfg, plotId, memo, memoSize );
 
@@ -160,7 +170,7 @@ int main( int argc, const char* argv[] )
         }
 
         // Set the output path
-        memcpy( plotOutPath+outputFolderLen, plotIdStr, 64 );
+        memcpy( plotOutPath+outputFolderLen+26, plotIdStr, 64 );
 
         Log::Line( "Generating plot %d / %d: %s", i+1, cfg.plotCount, plotIdStr );
         Log::Line( "" );

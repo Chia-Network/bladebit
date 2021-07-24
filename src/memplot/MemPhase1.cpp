@@ -101,6 +101,12 @@ void MemPhase1::WaitForPreviousPlotWriter()
             _context.plotWriter->FilePath().c_str(),
             _context.plotWriter->GetError() );
 
+    const char* curname = _context.plotWriter->FilePath().c_str();
+    char* newname = new char[strlen(curname) - 3]();
+    memcpy(newname, curname, strlen(curname) - 4);
+
+    rename(curname, newname);
+
     // Print final pointer offsets
     Log::Line( "" );
     Log::Line( "Previous plot %s finished writing to disk:", _context.plotWriter->FilePath().c_str() );
