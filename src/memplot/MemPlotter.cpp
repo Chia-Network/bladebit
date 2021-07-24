@@ -235,7 +235,7 @@ void MemPlotter::WaitPlotWriter()
                 _context.plotWriter->GetError() );
 
         const char* curname = _context.plotWriter->FilePath().c_str();
-        char* newname = new char[strlen(curname) - 3];
+        char* newname = new char[strlen(curname) - 3]();
         memcpy(newname, curname, strlen(curname) - 4);
 
         rename(curname, newname);
