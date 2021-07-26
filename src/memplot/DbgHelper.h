@@ -295,11 +295,17 @@ inline void DbgWriteTableToFile( ThreadPool& pool, const char* path, uint64 entr
         size_t     blockSize;
     };
     
+    #if __GNUC__ > 7
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wclass-memaccess"
+    #endif
+
     WriteJob jobs[MAX_THREADS];
     memset( jobs, 0, sizeof( jobs ) );
+
+    #if __GNUC__ > 7
     #pragma GCC diagnostic pop
+    #endif
 
     const uint threadCount = pool.ThreadCount();
     ASSERT( threadCount <= MAX_THREADS );
