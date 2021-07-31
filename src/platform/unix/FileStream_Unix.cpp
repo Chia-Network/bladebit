@@ -41,7 +41,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     #endif
 
     if( mode == FileMode::Create )
-        fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
+        fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
 
     int fd = open( path, fdFlags, fmode );
     if( fd < 0 )
