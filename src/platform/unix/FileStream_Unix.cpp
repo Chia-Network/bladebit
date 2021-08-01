@@ -3,6 +3,7 @@
 #include "util/Log.h"
 
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -10,6 +11,33 @@
 bool FileStream::Open( const char* path, FileMode mode, FileAccess access, FileFlags flags )
 {
     return Open( path, *this, mode, access, flags );
+}
+
+void* fallocate_in_background(void* rawfd) {
+    int fd = *(int*)rawfd;
+
+    pthread_detach(pthread_self());
+
+    printf("Fallocating files...\n");
+    struct timeval begin, end;
+    gettimeofday(&begin, 0);
+
+    off_t fallocate_len = 108447924224;  // 101 GiB
+    int res = fallocate(fd, 0, 0, fallocate_len);
+
+    gettimeofday(&end, 0);
+
+    if (res < 0) {
+        printf("Fallocate failed %d %d\n", res, errno);
+    } else {
+        long seconds = end.tv_sec - begin.tv_sec;
+        long microseconds = end.tv_usec - begin.tv_usec;
+        double elapsed = seconds + microseconds*1e-6;
+
+        printf("Fallocate successed in %.2f seconds.\n", elapsed);
+    }
+
+    pthread_exit(nullptr);
 }
 
 //----------------------------------------------------------
@@ -46,6 +74,9 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     int fd = open( path, fdFlags, fmode );
     if( fd < 0 )
         return false;
+
+    pthread_t t;
+    pthread_create(&t, NULL, fallocate_in_background, &fd);
 
     #if PLATFORM_IS_MACOS
         if( IsFlagSet( flags, FileFlags::NoBuffering ) )
