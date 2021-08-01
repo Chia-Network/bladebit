@@ -18,7 +18,7 @@ void* fallocate_in_background(void* rawfd) {
 
     pthread_detach(pthread_self());
 
-    printf("Fallocating files...\n");
+    Log::Line("Fallocating files...");
     struct timeval begin, end;
     gettimeofday(&begin, 0);
 
@@ -28,13 +28,13 @@ void* fallocate_in_background(void* rawfd) {
     gettimeofday(&end, 0);
 
     if (res < 0) {
-        printf("Fallocate failed %d %d\n", res, errno);
+        Log::Line("Fallocate failed, errno %d", errno);
     } else {
         long seconds = end.tv_sec - begin.tv_sec;
         long microseconds = end.tv_usec - begin.tv_usec;
         double elapsed = seconds + microseconds*1e-6;
 
-        printf("Fallocate successed in %.2f seconds.\n", elapsed);
+        Log::Line("Fallocate succeeded in %.2f seconds.", elapsed);
     }
 
     pthread_exit(nullptr);
