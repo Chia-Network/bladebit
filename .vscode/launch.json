@@ -84,8 +84,8 @@
             "args": [
                 "-f" , "ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef"
                 ,"-p", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8"
-                ,"-i", "d1476057a46d887f6770ee1c435049853a60ca6352206799b0a27a49670bb192"
-                ,"-w"
+                // ,"-i", "d1476057a46d887f6770ee1c435049853a60ca6352206799b0a27a49670bb192"
+                // ,"-w"
                 // ,"-t", "48"
                 , "/home/harito/data"
             ],
