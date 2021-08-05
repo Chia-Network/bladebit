@@ -234,9 +234,29 @@ void MemPlotter::WaitPlotWriter()
                 _context.plotWriter->FilePath().c_str(),
                 _context.plotWriter->GetError() );
 
-        // Print final pointer offsets
+        // Rename plot file to final plot file name (remove .tmp suffix)
+        const char*  tmpName       = _context.plotWriter->FilePath().c_str();
+        const size_t tmpNameLength = strlen( tmpName );
+
+        char* plotName = new char[tmpNameLength - 3];  ASSERT( plotName );
+
+        memcpy( plotName, tmpName, tmpNameLength - 4 );
+        plotName[tmpNameLength-4] = 0;
+
+        int r = rename( tmpName, plotName );
+        
+        if( r )
+        {
+            Log::Error( "Error: Failed to rename plot file %s.", tmpName );
+            Log::Error( " Please rename it manually." );
+        }
+
         Log::Line( "" );
-        Log::Line( "Plot %s finished writing to disk:", _context.plotWriter->FilePath().c_str() );
+        Log::Line( "Plot %s finished writing to disk:", r ? tmpName : plotName );
+
+        delete[] plotName;
+
+        // Print final pointer offsets
         const uint64* tablePointers = _context.plotWriter->GetTablePointers();
         for( uint i = 0; i < 7; i++ )
         {
