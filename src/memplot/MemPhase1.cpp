@@ -38,6 +38,11 @@ struct F1GenJob
     uint32* xBuffer;
 };
 
+struct F1NumaGenJob : F1GenJob
+{
+    uint32 nodeCount;
+};
+
 struct kBCJob
 {
     const uint64* yBuffer;
@@ -486,6 +491,73 @@ void F1JobThread( F1GenJob* job )
     uint32* xBuffer = job->xBuffer;
     for( uint64 i = 0; i < entryCount; i++ )
         xBuffer[i] = x + i;
+}
+
+
+//-----------------------------------------------------------
+void F1NumaJobThread( F1NumaGenJob* job )
+{
+    const uint32 CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
+    const uint32 entriesPerBlock    = CHACHA_BLOCK_SIZE / sizeof( uint32 );
+
+    const uint32 blockCount    = job->blockCount;
+    const uint32 entryCount    = job->entryCount;
+    const uint64 x             = job->x;
+
+    const uint32 pageSize       = (uint32)SysHost::GetPageSize();
+    const uint32 pageCount      = (uint32)( (blockCount * (uint64)CHACHA_BLOCK_SIZE) / pageSize );
+    const uint32 blocksPerPage  = pageSize / CHACHA_BLOCK_SIZE;
+    const uint32 pageStride     = job->nodeCount;
+    const uint32 byteStride     = pageSize * pageStride;
+    const uint32 entriesPerPage = entriesPerBlock * blocksPerPage;
+    const uint32 entryStride    = entriesPerPage * pageStride;
+
+    byte*   blockBytes = job->blocks;
+    uint32* blocks     = (uint32*)blockBytes;
+    uint64* yBuffer    = job->yBuffer;
+
+    chacha8_ctx chacha;
+    ZeroMem( &chacha );
+
+    chacha8_keysetup( &chacha, job->key, 256, NULL );
+
+    for( uint64 p = 0; p < pageCount; p++ )
+    {
+        // Which block are we generating?
+        const uint64 blockIdx = ( x + p * entryStride ) * _K / kF1BlockSizeBits;
+        
+        chacha8_get_keystream( &chacha, blockIdx, blocksPerPage, blockBytes );
+        blockBytes += byteStride;
+    }
+
+    // chacha output is treated as big endian, therefore swap, as required by chiapos
+    for( uint64 p = 0; p < pageCount; p++ )
+    {
+        const uint64 curX = x + p * entryStride;
+
+        for( uint64 i = 0; i < entriesPerPage; i++ )
+        {
+            const uint64 y = Swap32( blocks[i] );
+            yBuffer[i] = ( y << kExtraBits ) | ( (x+i) >> (_K - kExtraBits) );
+        }
+
+        yBuffer += entryStride;
+    }
+
+    // Gen the x that generated the y
+    uint32* xBuffer = job->xBuffer;
+
+    for( uint64 p = 0; p < pageCount; p++ )
+    {
+        const uint32 curX = (uint32)(x + p * entryStride);
+
+        for( uint32 i = 0; i < entriesPerPage; i++ )
+            xBuffer[i] = curX + i;
+
+        xBuffer += entryStride;
+    }
+
+    // #TODO: Process last part
 }
 
 
