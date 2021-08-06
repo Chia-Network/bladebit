@@ -3,6 +3,7 @@
 #include <string>
 #include <thread>
 
+#include "Version.h"
 #include "Util.h"
 #include "util/Log.h"
 #include "SysHost.h"
@@ -104,6 +105,7 @@ OPTIONS:
                         If you set this parameter in a NUMA system you
                         will likely get degraded performance.
 
+ --version            : Display current version.
 )";
 
 
@@ -305,6 +307,11 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
         else if( check( "-v" ) || check( "--verbose" ) )
         {
             Log::SetVerbose( true );
+        }
+        else if( check( "--version" ) )
+        {
+            Log::Line( BLADEBIT_VERSION_STR );
+            exit( 0 );
         }
         else
         {
