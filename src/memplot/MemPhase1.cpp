@@ -28,6 +28,9 @@
 ///
 struct F1GenJob
 {
+    uint index;
+    uint threadCount;
+    
     const byte* key;
 
     uint32  blockCount;
@@ -36,11 +39,6 @@ struct F1GenJob
     byte*   blocks;
     uint64* yBuffer;
     uint32* xBuffer;
-};
-
-struct F1NumaGenJob : F1GenJob
-{
-    uint32 nodeCount;
 };
 
 struct kBCJob
@@ -78,6 +76,7 @@ struct FpFxJob
 
 /// Internal Funcs forwards-declares
 void F1JobThread( F1GenJob* job );
+void F1NumaJobThread( F1GenJob* job );
 
 void FpScanThread( kBCJob* job );
 void FpPairThread( kBCJob* job );
@@ -200,6 +199,8 @@ uint64 MemPhase1::GenerateF1()
 
     ASSERT( numThreads < MAX_THREADS );
 
+    const NumaInfo* numa = SysHost::GetNUMAInfo();
+
     // Gen all raw f1 values
     {
         // Prepare jobs
@@ -210,13 +211,16 @@ uint64 MemPhase1::GenerateF1()
             uint64 blockOffset = i * blocksPerThread * CHACHA_BLOCK_SIZE;
 
             F1GenJob& job = jobs[i];
+            job.index       = i;
+            job.threadCount = numThreads;
+
             job.key        = key;
             job.blockCount = blocksPerThread;
             job.entryCount = (uint32)entriesPerThread;
             job.x          = (uint32)offset;
-            job.blocks     = blocks  + blockOffset;
-            job.yBuffer    = yBuffer + offset;
-            job.xBuffer    = xBuffer + offset;
+            job.blocks     = numa ? blocks  : blocks  + blockOffset;
+            job.yBuffer    = numa ? yBuffer : yBuffer + offset;
+            job.xBuffer    = numa ? xBuffer : xBuffer + offset;
         }
 
         jobs[numThreads-1].entryCount += trailingEntries;
@@ -225,7 +229,7 @@ uint64 MemPhase1::GenerateF1()
         Log::Line( "Generating F1..." );
         auto timeStart = TimerBegin();
 
-        cx.threadPool->RunJob( F1JobThread, jobs, numThreads );
+        cx.threadPool->RunJob( numa ? F1NumaJobThread : F1JobThread, jobs, numThreads );
 
         double elapsed = TimerEnd( timeStart );
         Log::Line( "Finished F1 generation in %.2lf seconds.", elapsed );
@@ -495,22 +499,40 @@ void F1JobThread( F1GenJob* job )
 
 
 //-----------------------------------------------------------
-void F1NumaJobThread( F1NumaGenJob* job )
+void F1NumaJobThread( F1GenJob* job )
 {
-    const uint32 CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
+    const NumaInfo* numa = SysHost::GetNUMAInfo();
+
+    const uint32 pageSize           = (uint32)SysHost::GetPageSize();
+
+    const uint   k                  = _K;
+    const size_t CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
+    const uint64 totalEntries       = 1ull << k;
+    const uint64 entriesPerBlock    = CHACHA_BLOCK_SIZE / sizeof( uint32 );
+
+    const uint64 totalBlocks        = totalEntries / entriesPerBlock;
+    const uint32 totalPages         = (uint32)( CHACHA_BLOCK_SIZE * totalBlocks / pageSize );
+    const uint32 pagesPerNode       = totalPages / numa->nodeCount;
+
+    const uint32 threadCount        = job->threadCount;
+    const uint32 threadsPerNode     = threadCount  / numa->nodeCount;
+    const uint32 pageCount          = pagesPerNode / threadCount;
+
     const uint32 entriesPerBlock    = CHACHA_BLOCK_SIZE / sizeof( uint32 );
 
-    const uint32 blockCount    = job->blockCount;
-    const uint32 entryCount    = job->entryCount;
-    const uint64 x             = job->x;
+    // const uint32 blockCount     = job->blockCount;
+    // const uint32 entryCount     = job->entryCount;
+    const uint64 x                  = job->x;
 
-    const uint32 pageSize       = (uint32)SysHost::GetPageSize();
-    const uint32 pageCount      = (uint32)( (blockCount * (uint64)CHACHA_BLOCK_SIZE) / pageSize );
+    // const uint32 pageCount      = (uint32)( (blockCount * (uint64)CHACHA_BLOCK_SIZE) / pageSize );
     const uint32 blocksPerPage  = pageSize / CHACHA_BLOCK_SIZE;
-    const uint32 pageStride     = job->nodeCount;
-    const uint32 byteStride     = pageSize * pageStride;
     const uint32 entriesPerPage = entriesPerBlock * blocksPerPage;
+
+    const uint32 pageStride     = numa->nodeCount + threadsPerNode;
+    const uint32 byteStride     = pageSize       * pageStride;
     const uint32 entryStride    = entriesPerPage * pageStride;
+
+    const uint32 threadIndex = job->index;
 
     byte*   blockBytes = job->blocks;
     uint32* blocks     = (uint32*)blockBytes;
