@@ -1,7 +1,8 @@
 #pragma once
 
-#define STR( x ) #x
 #define DEFER( m, ...)  m( __VA_ARGS__ )
+#define XSTR( x ) #x
+#define STR( x ) XSTR( x )
 
 
 
