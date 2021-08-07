@@ -607,7 +607,23 @@ void F1NumaJobThread( F1GenJob* job )
             const uint64 y = Swap32( blocks[i] );
             yBuffer[i] = ( y << kExtraBits ) | ( (curX+i) >> (_K - kExtraBits) );
         }
+        
+        // for( uint64 i = 0; i < 64; i++ )
+        // {
+        //     yBuffer[0] = ( Swap32( blocks[0] ) << kExtraBits ) | ( (curX+0) >> (_K - kExtraBits) );
+        //     yBuffer[1] = ( Swap32( blocks[1] ) << kExtraBits ) | ( (curX+1) >> (_K - kExtraBits) );
+        //     yBuffer[2] = ( Swap32( blocks[2] ) << kExtraBits ) | ( (curX+2) >> (_K - kExtraBits) );
+        //     yBuffer[3] = ( Swap32( blocks[3] ) << kExtraBits ) | ( (curX+3) >> (_K - kExtraBits) );
+        //     yBuffer[4] = ( Swap32( blocks[4] ) << kExtraBits ) | ( (curX+4) >> (_K - kExtraBits) );
+        //     yBuffer[5] = ( Swap32( blocks[5] ) << kExtraBits ) | ( (curX+5) >> (_K - kExtraBits) );
+        //     yBuffer[6] = ( Swap32( blocks[6] ) << kExtraBits ) | ( (curX+6) >> (_K - kExtraBits) );
+        //     yBuffer[7] = ( Swap32( blocks[7] ) << kExtraBits ) | ( (curX+7) >> (_K - kExtraBits) );
 
+        //     yBuffer += 8;
+        //     blocks  += 8;
+        // }
+
+        // #TODO: This is wrong. We need to fill more y's before w go to the next block page.
         yBuffer += entryStride64;
         blocks  += entryStride32;
     }
