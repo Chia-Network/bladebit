@@ -28,7 +28,9 @@
 ///
 struct F1GenJob
 {
-    uint index;
+    uint node;
+    uint startPage;
+    uint pageCount;
     uint threadCount;
     
     const byte* key;
@@ -211,20 +213,50 @@ uint64 MemPhase1::GenerateF1()
             uint64 blockOffset = i * blocksPerThread * CHACHA_BLOCK_SIZE;
 
             F1GenJob& job = jobs[i];
-            job.index       = i;
+            // job.index       = i;
             job.threadCount = numThreads;
 
             job.key        = key;
             job.blockCount = blocksPerThread;
             job.entryCount = (uint32)entriesPerThread;
             job.x          = (uint32)offset;
-            job.blocks     = numa ? blocks  : blocks  + blockOffset;
-            job.yBuffer    = numa ? yBuffer : yBuffer + offset;
-            job.xBuffer    = numa ? xBuffer : xBuffer + offset;
+            job.blocks     = blocks  + blockOffset;
+            job.yBuffer    = yBuffer + offset;
+            job.xBuffer    = xBuffer + offset;
         }
 
         jobs[numThreads-1].entryCount += trailingEntries;
         jobs[numThreads-1].blockCount += trailingBlocks;
+
+        // Initialize NUMA pages
+        if( numa )
+        {
+            const uint pageSize       = (uint)SysHost::GetPageSize();
+            const uint blocksPerPage  = (uint)((totalBlocks * CHACHA_BLOCK_SIZE) / pageSize);
+            const uint pageCount      = (uint)(totalBlocks / blocksPerPage);
+            const uint pagesPerThread = pageCount / numThreads;
+            const uint nodeStride     = numa->nodeCount;
+
+            for( uint i = 0; i < numa->nodeCount; i++ )
+            {
+                const auto& nodeCpus = numa->cpuIds[i];
+                const uint  cpuCount = nodeCpus.length;
+
+                for( uint j = 0; j < cpuCount; j++ )
+                { 
+                    const uint cpuId = nodeCpus[j];
+
+                    auto& job = jobs[cpuId];
+
+                    job.node      = i;
+                    job.startPage = i + nodeStride * j;
+                    job.pageCount = pagesPerThread;
+                    job.blocks    = blocks;
+                    job.yBuffer   = yBuffer;
+                    job.xBuffer   = xBuffer;
+                }
+            }
+        }
 
         Log::Line( "Generating F1..." );
         auto timeStart = TimerBegin();
@@ -508,35 +540,27 @@ void F1NumaJobThread( F1GenJob* job )
     const uint   k                  = _K;
     const size_t CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
     const uint64 totalEntries       = 1ull << k;
-    const uint64 entriesPerBlock    = CHACHA_BLOCK_SIZE / sizeof( uint32 );
+    const uint32 entriesPerBlock    = (uint32)( CHACHA_BLOCK_SIZE / sizeof( uint32 ) );
+    const uint32 blocksPerPage      = pageSize / CHACHA_BLOCK_SIZE;
+    const uint32 entriesPerPage     = entriesPerBlock * blocksPerPage;
+    
+    const uint   startPage          = job->startPage;
+    const uint   pageCount          = job->pageCount;
 
-    const uint64 totalBlocks        = totalEntries / entriesPerBlock;
-    const uint32 totalPages         = (uint32)( CHACHA_BLOCK_SIZE * totalBlocks / pageSize );
-    const uint32 pagesPerNode       = totalPages / numa->nodeCount;
+    const uint32 pageStride         = job->threadCount;
+    const uint32 blockStride        = pageSize       * pageStride;
+    const uint32 entryStride        = entriesPerPage * pageStride;
 
-    const uint32 threadCount        = job->threadCount;
-    const uint32 threadsPerNode     = threadCount  / numa->nodeCount;
-    const uint32 pageCount          = pagesPerNode / threadCount;
+    // const uint64 x                  = job->x;
+    const uint64 x                  = startPage  * entriesPerPage;
+    const uint32 xStride            = pageStride * entriesPerPage;
 
-    const uint32 entriesPerBlock    = CHACHA_BLOCK_SIZE / sizeof( uint32 );
 
-    // const uint32 blockCount     = job->blockCount;
-    // const uint32 entryCount     = job->entryCount;
-    const uint64 x                  = job->x;
-
-    // const uint32 pageCount      = (uint32)( (blockCount * (uint64)CHACHA_BLOCK_SIZE) / pageSize );
-    const uint32 blocksPerPage  = pageSize / CHACHA_BLOCK_SIZE;
-    const uint32 entriesPerPage = entriesPerBlock * blocksPerPage;
-
-    const uint32 pageStride     = numa->nodeCount + threadsPerNode;
-    const uint32 byteStride     = pageSize       * pageStride;
-    const uint32 entryStride    = entriesPerPage * pageStride;
-
-    const uint32 threadIndex = job->index;
-
-    byte*   blockBytes = job->blocks;
+    byte*   blockBytes = job->blocks + startPage * pageSize;
     uint32* blocks     = (uint32*)blockBytes;
-    uint64* yBuffer    = job->yBuffer;
+    
+    uint64* yBuffer    = job->yBuffer + startPage * entriesPerPage;
+    uint32* xBuffer    = job->xBuffer + startPage * entriesPerPage;
 
     chacha8_ctx chacha;
     ZeroMem( &chacha );
@@ -549,16 +573,16 @@ void F1NumaJobThread( F1GenJob* job )
         const uint64 blockIdx = ( x + p * entryStride ) * _K / kF1BlockSizeBits;
         
         chacha8_get_keystream( &chacha, blockIdx, blocksPerPage, blockBytes );
-        blockBytes += byteStride;
+        blockBytes += blockStride;
     }
 
-    // chacha output is treated as big endian, therefore swap, as required by chiapos
     for( uint64 p = 0; p < pageCount; p++ )
     {
         const uint64 curX = x + p * entryStride;
 
         for( uint64 i = 0; i < entriesPerPage; i++ )
         {
+            // chacha output is treated as big endian, therefore swap, as required by chiapos
             const uint64 y = Swap32( blocks[i] );
             yBuffer[i] = ( y << kExtraBits ) | ( (x+i) >> (_K - kExtraBits) );
         }
@@ -567,8 +591,6 @@ void F1NumaJobThread( F1GenJob* job )
     }
 
     // Gen the x that generated the y
-    uint32* xBuffer = job->xBuffer;
-
     for( uint64 p = 0; p < pageCount; p++ )
     {
         const uint32 curX = (uint32)(x + p * entryStride);
