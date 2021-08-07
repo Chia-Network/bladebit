@@ -24,8 +24,8 @@ MemPlotter::MemPlotter( uint threadCount, bool warmStart, bool noNUMA )
     
     if( numa )
     {
-        if( !SysHost::NumaSetThreadInterleavedMode() )
-            Log::Error( "Warning: Failed to set NUMA interleaved mode." );
+        // if( !SysHost::NumaSetThreadInterleavedMode() )
+        //     Log::Error( "Warning: Failed to set NUMA interleaved mode." );
     }
 
     _context.threadCount = threadCount;

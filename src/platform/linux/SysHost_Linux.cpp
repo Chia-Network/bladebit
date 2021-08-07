@@ -9,9 +9,9 @@
 #include <numa.h>
 #include <numaif.h>
 
-#if _DEBUG
+// #if _DEBUG
     #include "util/Log.h"
-#endif
+// #endif
 
 std::atomic<bool> _crashed = false;
 

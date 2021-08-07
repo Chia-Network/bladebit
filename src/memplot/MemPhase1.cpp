@@ -234,7 +234,7 @@ uint64 MemPhase1::GenerateF1()
         {
             const uint pageSize       = (uint)SysHost::GetPageSize();
             const uint blocksPerPage  = (uint)( pageSize / CHACHA_BLOCK_SIZE );
-            const uint pageCount      = (uint)(totalBlocks / blocksPerPage);
+            const uint pageCount      = (uint)( totalBlocks / blocksPerPage );
             const uint pagesPerThread = pageCount / numThreads;
             const uint nodeStride     = numa->nodeCount;
 
@@ -243,6 +243,10 @@ uint64 MemPhase1::GenerateF1()
                 const auto& nodeCpus = numa->cpuIds[i];
                 const uint  cpuCount = nodeCpus.length;
 
+                // #TODO: Remove this. For now we hard-code it to
+                //        the node of the first page.
+                // const int pageOffset = (i + 1) & 1;
+
                 for( uint j = 0; j < cpuCount; j++ )
                 { 
                     const uint cpuId = nodeCpus[j];
@@ -250,7 +254,7 @@ uint64 MemPhase1::GenerateF1()
                     auto& job = jobs[cpuId];
 
                     job.node      = i;
-                    job.startPage = i + nodeStride * j;
+                    job.startPage = nodeStride * j;
                     job.pageCount = pagesPerThread;
                     job.blocks    = blocks;
                     job.yBuffer   = yBuffer;
@@ -538,30 +542,37 @@ void F1NumaJobThread( F1GenJob* job )
 
     const uint32 pageSize           = (uint32)SysHost::GetPageSize();
 
-    const uint   k                  = _K;
+    // const uint   k                  = _K;
     const size_t CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
     // const uint64 totalEntries       = 1ull << k;
     const uint32 entriesPerBlock    = (uint32)( CHACHA_BLOCK_SIZE / sizeof( uint32 ) );
     const uint32 blocksPerPage      = pageSize / CHACHA_BLOCK_SIZE;
-    const uint32 entriesPerPage     = entriesPerBlock * blocksPerPage;
+    const uint32 entriesPerPage32   = entriesPerBlock * blocksPerPage;
+    const uint32 entriesPerPage64   = entriesPerPage32 / 2;
     
-    const uint   startPage          = job->startPage;
+    const uint   pageOffset         = job->startPage;
     const uint   pageCount          = job->pageCount;
 
     const uint32 pageStride         = job->threadCount;
-    const uint32 blockStride        = pageSize       * pageStride;
-    const uint32 entryStride        = entriesPerPage * pageStride;
+    const uint32 blockStride        = pageSize         * pageStride;
+    const uint32 entryStride32      = entriesPerPage32 * pageStride;
+    const uint32 entryStride64      = entriesPerPage64 * pageStride;
+
+    // #TODO: Get proper offset depending on node count. Or, figure out if we can always have
+    //        the pages of the buffers simply start at the same location
+    const uint32 blockStartPage    = SysHost::NumaGetNodeFromPage( job->blocks  ) == job->node ? 0 : 1;
+    const uint32 yStartPage        = SysHost::NumaGetNodeFromPage( job->yBuffer ) == job->node ? 0 : 1;
+    const uint32 xStartPage        = SysHost::NumaGetNodeFromPage( job->xBuffer ) == job->node ? 0 : 1;
 
     // const uint64 x                  = job->x;
-    const uint64 x                  = startPage  * entriesPerPage;
-    const uint32 xStride            = pageStride * entriesPerPage;
+    const uint64 x                  = (blockStartPage + pageOffset) * entriesPerPage32;
+    // const uint32 xStride            = pageStride * entriesPerPage;
 
-
-    byte*   blockBytes = job->blocks + startPage * pageSize;
+    byte*   blockBytes = job->blocks + (blockStartPage + pageOffset) * pageSize;
     uint32* blocks     = (uint32*)blockBytes;
     
-    uint64* yBuffer    = job->yBuffer + startPage * entriesPerPage;
-    uint32* xBuffer    = job->xBuffer + startPage * entriesPerPage;
+    uint64* yBuffer    = job->yBuffer + ( yStartPage + pageOffset ) * entriesPerPage64;
+    uint32* xBuffer    = job->xBuffer + ( xStartPage + pageOffset ) * entriesPerPage32;
 
     chacha8_ctx chacha;
     ZeroMem( &chacha );
@@ -570,25 +581,11 @@ void F1NumaJobThread( F1GenJob* job )
 
     for( uint64 p = 0; p < pageCount; p++ )
     {
-        int node  = -1;
-        // int node2 = -1;
-        // int node3 = -1;
-        int r = numa_move_pages( 0, 1, (void**)&blockBytes, nullptr, &node, 0 );
-        ASSERT( !r );
-
-        // byte* nextPage = blockBytes + pageSize;
-        // r = numa_move_pages( 0, 1, (void**)&nextPage, nullptr, &node2, 0 );
-        // ASSERT( !r );
-
-        // nextPage += pageSize;
-        // r = numa_move_pages( 0, 1, (void**)&nextPage, nullptr, &node3, 0 );
-        // ASSERT( !r );
-        ASSERT( node == (int)job->node );
-
+        ASSERT( SysHost::NumaGetNodeFromPage( blockBytes ) == job->node );
 
         // blockBytes
         // Which block are we generating?
-        const uint64 blockIdx = ( x + p * entryStride ) * _K / kF1BlockSizeBits;
+        const uint64 blockIdx = ( x + p * entryStride32 ) * _K / kF1BlockSizeBits;
 
         chacha8_get_keystream( &chacha, blockIdx, blocksPerPage, blockBytes );
         blockBytes += blockStride;
@@ -596,27 +593,33 @@ void F1NumaJobThread( F1GenJob* job )
 
     for( uint64 p = 0; p < pageCount; p++ )
     {
-        const uint64 curX = x + p * entryStride;
+        ASSERT( SysHost::NumaGetNodeFromPage( yBuffer ) == job->node );
+        ASSERT( SysHost::NumaGetNodeFromPage( blocks  ) == job->node );
 
-        for( uint64 i = 0; i < entriesPerPage; i++ )
+        const uint64 curX = x + p * entryStride32;
+
+        for( uint64 i = 0; i < entriesPerPage32; i++ )
         {
             // chacha output is treated as big endian, therefore swap, as required by chiapos
             const uint64 y = Swap32( blocks[i] );
-            yBuffer[i] = ( y << kExtraBits ) | ( (x+i) >> (_K - kExtraBits) );
+            yBuffer[i] = ( y << kExtraBits ) | ( (curX+i) >> (_K - kExtraBits) );
         }
 
-        yBuffer += entryStride;
+        yBuffer += entryStride64;
+        blocks  += entryStride32;
     }
 
     // Gen the x that generated the y
     for( uint64 p = 0; p < pageCount; p++ )
     {
-        const uint32 curX = (uint32)(x + p * entryStride);
+        ASSERT( SysHost::NumaGetNodeFromPage( xBuffer ) == job->node );
 
-        for( uint32 i = 0; i < entriesPerPage; i++ )
+        const uint32 curX = (uint32)(x + p * entryStride32);
+
+        for( uint32 i = 0; i < entriesPerPage32; i++ )
             xBuffer[i] = curX + i;
 
-        xBuffer += entryStride;
+        xBuffer += entryStride32;
     }
 
     // #TODO: Process last part
