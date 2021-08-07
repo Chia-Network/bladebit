@@ -232,7 +232,7 @@ uint64 MemPhase1::GenerateF1()
         if( numa )
         {
             const uint pageSize       = (uint)SysHost::GetPageSize();
-            const uint blocksPerPage  = (uint)((totalBlocks * CHACHA_BLOCK_SIZE) / pageSize);
+            const uint blocksPerPage  = (uint)( pageSize / CHACHA_BLOCK_SIZE );
             const uint pageCount      = (uint)(totalBlocks / blocksPerPage);
             const uint pagesPerThread = pageCount / numThreads;
             const uint nodeStride     = numa->nodeCount;
@@ -533,13 +533,13 @@ void F1JobThread( F1GenJob* job )
 //-----------------------------------------------------------
 void F1NumaJobThread( F1GenJob* job )
 {
-    const NumaInfo* numa = SysHost::GetNUMAInfo();
+    // const NumaInfo* numa = SysHost::GetNUMAInfo();
 
     const uint32 pageSize           = (uint32)SysHost::GetPageSize();
 
     const uint   k                  = _K;
     const size_t CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
-    const uint64 totalEntries       = 1ull << k;
+    // const uint64 totalEntries       = 1ull << k;
     const uint32 entriesPerBlock    = (uint32)( CHACHA_BLOCK_SIZE / sizeof( uint32 ) );
     const uint32 blocksPerPage      = pageSize / CHACHA_BLOCK_SIZE;
     const uint32 entriesPerPage     = entriesPerBlock * blocksPerPage;
