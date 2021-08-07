@@ -579,7 +579,7 @@ void F1NumaJobThread( F1GenJob* job )
 
     chacha8_keysetup( &chacha, job->key, 256, NULL );
 
-    for( uint64 p = 0; p < pageCount; p++ )
+    for( uint64 p = 0; p < pageCount/4; p+=4 )
     {
         ASSERT( SysHost::NumaGetNodeFromPage( blockBytes ) == job->node );
 
@@ -587,8 +587,11 @@ void F1NumaJobThread( F1GenJob* job )
         // Which block are we generating?
         const uint64 blockIdx = ( x + p * entryStride32 ) * _K / kF1BlockSizeBits;
 
-        chacha8_get_keystream( &chacha, blockIdx, blocksPerPage, blockBytes );
-        blockBytes += blockStride;
+        chacha8_get_keystream( &chacha, blockIdx,  blocksPerPage,   blockBytes );
+        chacha8_get_keystream( &chacha, blockIdx + blocksPerPage,   blocksPerPage, blockBytes + blockStride     );
+        chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*2, blocksPerPage, blockBytes + blockStride * 2 );
+        chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*3, blocksPerPage, blockBytes + blockStride * 3 );
+        blockBytes += blockStride * 4;
     }
 
     for( uint64 p = 0; p < pageCount; p++ )
