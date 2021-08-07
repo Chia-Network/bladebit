@@ -8,7 +8,7 @@
 #include <cmath>
 
 #include "DbgHelper.h"
-
+#include <numa.h>
     
     bool DbgVerifySortedY( const uint64 entryCount, const uint64* yBuffer );
     
@@ -29,9 +29,10 @@
 struct F1GenJob
 {
     uint node;
+    uint threadCount;
+    uint cpuId;
     uint startPage;
     uint pageCount;
-    uint threadCount;
     
     const byte* key;
 
@@ -213,7 +214,7 @@ uint64 MemPhase1::GenerateF1()
             uint64 blockOffset = i * blocksPerThread * CHACHA_BLOCK_SIZE;
 
             F1GenJob& job = jobs[i];
-            // job.index       = i;
+            job.cpuId       = i;
             job.threadCount = numThreads;
 
             job.key        = key;
@@ -569,9 +570,26 @@ void F1NumaJobThread( F1GenJob* job )
 
     for( uint64 p = 0; p < pageCount; p++ )
     {
+        int node  = -1;
+        // int node2 = -1;
+        // int node3 = -1;
+        int r = numa_move_pages( 0, 1, (void**)&blockBytes, nullptr, &node, 0 );
+        ASSERT( !r );
+
+        // byte* nextPage = blockBytes + pageSize;
+        // r = numa_move_pages( 0, 1, (void**)&nextPage, nullptr, &node2, 0 );
+        // ASSERT( !r );
+
+        // nextPage += pageSize;
+        // r = numa_move_pages( 0, 1, (void**)&nextPage, nullptr, &node3, 0 );
+        // ASSERT( !r );
+        ASSERT( node == (int)job->node );
+
+
+        // blockBytes
         // Which block are we generating?
         const uint64 blockIdx = ( x + p * entryStride ) * _K / kF1BlockSizeBits;
-        
+
         chacha8_get_keystream( &chacha, blockIdx, blocksPerPage, blockBytes );
         blockBytes += blockStride;
     }
