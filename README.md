@@ -16,15 +16,20 @@ Only Linux is currently completed. There are several platform abstractions misis
 **Linux**
 > *NOTE: Some repositories may have cmake versions not compatible with BLS, in which case you would have to build & install Cmake yourself.*
 
-```
+```bash
 # CentOS or Amazon Linux
+sudo yum group install -y "Development Tools"
 sudo yum install -y cmake numactl-devel
+
+# Ubuntu
+sudo apt install -y build-essential
+sudo apt install -y cmake libnuma-dev
 ```
 
 
 ### Build
 
-> *NOTE: BLS/Relic is currently not compatible with GCC 11*
+> *NOTE: BLS/Relic seems to be incompatible with some versiong of GCC*
 
 
 Install pre-requisites then run:
@@ -32,7 +37,7 @@ Install pre-requisites then run:
 **Linux**
 ```bash
 # Clone the repo & its submodules
-git clone --recursive https://github.com/harold-b/bladebit.git
+git clone --recursive https://github.com/harold-b/bladebit.git && cd bladebit
 
 # Build bls library. Only needs to be done once.
 ./build-bls
@@ -44,8 +49,18 @@ make clean && make -j$(nproc --all)
 make clean && make -j$(nproc --all) CONFIG=release.arm
 ```
 
+The resulting binary will be found at `.bin/release/bladebit` for **x86** or `.bin/release.arm/bladebit` for **ARM**.
+
 ## Usage
-Run `bladebit -h` for usage and command line options.
+Run **bladebit** with the `-h` for usage and command line options.
+
+```bash
+# x86
+.bin/release/bladebit -h
+
+# ARM
+.bin/release.arm/bladebit -h
+```
 
 
 ## Support
