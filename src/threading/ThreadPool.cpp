@@ -40,9 +40,10 @@ ThreadPool::ThreadPool( uint threadCount, Mode mode )
             if( !stack )
                 Fatal( "Failed to allocate stack for thread." );
 
-            SysHost::NumaAssignPages( stack, stackSize, )
-            t = new ( (void*) (_threads+i) ) Thread( stack, stackSize );
+            const uint node = numa->cpuToNodeMap[i]; ASSERT( node < numa->nodeCount );
+            SysHost::NumaAssignPages( stack, stackSize, node );
 
+            t = new ( (void*) (_threads+i) ) Thread( stack, stackSize );
         }
         else
         {

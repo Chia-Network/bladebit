@@ -14,9 +14,10 @@ ImplementFlagOps( VProtect );
 
 struct NumaInfo
 {
-    uint        nodeCount;  // How many NUMA nodes in the system
-    uint        cpuCount;   // Total cpu count used by nodes
-    Span<uint>* cpuIds;     // CPU ids of each node
+    uint        nodeCount;      // How many NUMA nodes in the system
+    uint        cpuCount;       // Total cpu count used by nodes
+    Span<uint>* cpuIds;         // CPU ids of each node
+    byte*       cpuToNodeMap;   // Gets the node a CPU belongs to for a given cpu id.
 };
 
 class SysHost

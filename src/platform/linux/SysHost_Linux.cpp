@@ -295,16 +295,30 @@ const NumaInfo* SysHost::GetNUMAInfo()
 
             // #TODO BUG: This is a memory leak,
             //        but we're getting crashes releasing it or
-            //        using it multiple times with numa_node_to_cpus on
-            //        a signle allocations.
+            //        using it multiple times with numa_node_to_cpus on a single allocation.
             //        Fix it. (Not fatal as it is a small allocation, and this has re-entry protection)
             // numa_free_cpumask( cpuMask );
         }
 
+        // Map cpus to nodes
+        if( nodeCount > 255 )
+            Fatal( "Too many NUMA nodes." );
+        
+        byte* cpuMap = (byte*)malloc( totalCpuCount );
+        
+        for( uint i = 0; i < nodeCount; i++ )
+        {
+            const auto& cpuId = cpuIds[i];
+
+            for( uint j = 0; j < cpuId.length; j++ )
+                cpuMap[cpuId[j]] = (byte)i;
+        }
+
         // Save instance
-        _info.nodeCount = nodeCount;
-        _info.cpuCount  = totalCpuCount;
-        _info.cpuIds    = cpuIds;
+        _info.nodeCount    = nodeCount;
+        _info.cpuCount     = totalCpuCount;
+        _info.cpuIds       = cpuIds;
+        _info.cpuToNodeMap = cpuMap;
         info = &_info;
     }
 
