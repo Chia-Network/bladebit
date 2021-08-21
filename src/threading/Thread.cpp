@@ -25,7 +25,7 @@ Thread::Thread( void* stack, size_t stackSize )
 //-----------------------------------------------------------
 void Thread::Init( void* stack, size_t stackSize )
 {
-    if( stackSize < 1024 * 4 )
+    if( !stack && stackSize < 1024 * 4 )
         Fatal( "Thread stack size is too small." );
 
 #if PLATFORM_IS_UNIX
