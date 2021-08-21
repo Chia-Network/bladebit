@@ -260,6 +260,7 @@
   <ClInclude Include="src\Types.h"/>
   <ClInclude Include="src\Util.h"/>
   <ClInclude Include="src\util\Log.h"/>
+  <ClInclude Include="src\Version.h"/>
   <ClInclude Include="src\View.h"/>
 </ItemGroup>
 <ItemGroup>
@@ -339,6 +340,12 @@
   <ClCompile Include="src\pos\chacha8.cpp"/>
   <ClCompile Include="src\SysHost.cpp"/>
   <ClCompile Include="src\test\test_main.cpp">
+    <ExcludedFromBuild Condition="'$(Configuration)'=='release'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='debug'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='debug.arm'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='release.arm'">true</ExcludedFromBuild>
+  </ClCompile>
+  <ClCompile Include="src\test\test_numa_sort.cpp">
     <ExcludedFromBuild Condition="'$(Configuration)'=='release'">true</ExcludedFromBuild>
     <ExcludedFromBuild Condition="'$(Configuration)'=='debug'">true</ExcludedFromBuild>
     <ExcludedFromBuild Condition="'$(Configuration)'=='debug.arm'">true</ExcludedFromBuild>
@@ -455,6 +462,7 @@
   <ClInclude Include="src/Types.h"/>
   <ClInclude Include="src/Util.h"/>
   <ClInclude Include="src/util/Log.h"/>
+  <ClInclude Include="src/Version.h"/>
   <ClInclude Include="src/View.h"/>
 </ItemGroup>
 
