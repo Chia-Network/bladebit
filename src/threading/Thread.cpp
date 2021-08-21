@@ -261,8 +261,3 @@ void* Thread::ThreadStarter( Thread* t )
     return nullptr;
 }
 
-//-----------------------------------------------------------
-void* Thread::AllocStack( size_t& stackSize )
-{
-
-}

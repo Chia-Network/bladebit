@@ -175,19 +175,8 @@ void ThreadPool::FixedThreadRunner( void* tParam )
 
     #if _DEBUG
         const NumaInfo* numa = SysHost::GetNUMAInfo();
-        int node = -1;
-        for( uint i = 0; i < numa->nodeCount; i++ )
-        {
-            for( uint j = 0; j < numa->cpuIds[i].length; j++ )
-            {
-                if( numa->cpuIds[i][j] == d.cpuId )
-                {
-                    node = (int)i;
-                    break;
-                }
-            }
-        }
-        ASSERT( node >= 0 );
+        uint node = numa->cpuToNodeMap[d.cpuId];
+        ASSERT( node >= 0 && node < numa->nodeCount );
         ASSERT( SysHost::NumaGetNodeFromPage( (void*)&index ) == node );
     #endif
 
