@@ -92,7 +92,7 @@ void SysHost::VirtualFree( void* ptr )
 
     const size_t pageSize = GetPageSize();
 
-    byte* realPtr    = ((byte*)ptr) - pageSize;
+    byte* realPtr     = ((byte*)ptr) - pageSize;
     const size_t size = *((size_t*)realPtr);
 
     munmap( realPtr, size );
