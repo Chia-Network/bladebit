@@ -121,7 +121,7 @@ void Log::Verbose( const char* msg, ...  )
     va_list args;
     va_start( args, msg );
     
-    FILE* stream = GetOutStream();
+    FILE* stream = GetErrStream();
     vfprintf( stream, msg, args );
     fputc( '\n', stream );
 
