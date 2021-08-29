@@ -9,9 +9,9 @@
 #include <numa.h>
 #include <numaif.h>
 
-#if _DEBUG
+// #if _DEBUG
     #include "util/Log.h"
-#endif
+// #endif
 
 std::atomic<bool> _crashed = false;
 
@@ -92,7 +92,7 @@ void SysHost::VirtualFree( void* ptr )
 
     const size_t pageSize = GetPageSize();
 
-    byte* realPtr    = ((byte*)ptr) - pageSize;
+    byte* realPtr     = ((byte*)ptr) - pageSize;
     const size_t size = *((size_t*)realPtr);
 
     munmap( realPtr, size );
@@ -295,16 +295,30 @@ const NumaInfo* SysHost::GetNUMAInfo()
 
             // #TODO BUG: This is a memory leak,
             //        but we're getting crashes releasing it or
-            //        using it multiple times with numa_node_to_cpus on
-            //        a signle allocations.
+            //        using it multiple times with numa_node_to_cpus on a single allocation.
             //        Fix it. (Not fatal as it is a small allocation, and this has re-entry protection)
             // numa_free_cpumask( cpuMask );
         }
 
+        // Map cpus to nodes
+        if( nodeCount > 255 )
+            Fatal( "Too many NUMA nodes." );
+        
+        byte* cpuMap = (byte*)malloc( totalCpuCount );
+        
+        for( uint i = 0; i < nodeCount; i++ )
+        {
+            const auto& cpuId = cpuIds[i];
+
+            for( uint j = 0; j < cpuId.length; j++ )
+                cpuMap[cpuId[j]] = (byte)i;
+        }
+
         // Save instance
-        _info.nodeCount = nodeCount;
-        _info.cpuCount  = totalCpuCount;
-        _info.cpuIds    = cpuIds;
+        _info.nodeCount    = nodeCount;
+        _info.cpuCount     = totalCpuCount;
+        _info.cpuIds       = cpuIds;
+        _info.cpuToNodeMap = cpuMap;
         info = &_info;
     }
 
@@ -364,9 +378,33 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
     if( r )
     {
         int err = errno;
-        Log::Error( "Warning: set_mempolicy() failed with error %d (0x%x).", err, err );
+        Log::Error( "Warning: mbind() failed with error %d (0x%x).", err, err );
     }
     #endif
 
     return r == 0;
+}
+
+//-----------------------------------------------------------
+int SysHost::NumaGetNodeFromPage( void* ptr )
+{
+    const NumaInfo* numa = GetNUMAInfo();
+    if( !numa )
+        return -1;
+
+    int node = -1;
+    int r = numa_move_pages( 0, 1, &ptr, nullptr, &node, 0 );
+
+    if( r )
+    {
+        int err = errno;
+        Log::Error( "Warning: numa_move_pages() failed with error %d (0x%x).", err, err );
+    }
+    else if( node < 0 )
+    {
+        int err = std::abs( node );
+        Log::Error( "Warning: numa_move_pages() node retrieval failed with error %d (0x%x).", err, err );
+    }
+
+    return node;
 }

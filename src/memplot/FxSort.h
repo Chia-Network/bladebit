@@ -42,7 +42,7 @@ inline void SortFx(
     GenSortKey<MAX_JOBS>( pool, length, sortKey );
 
     // Sort on y along with the sort key
-    RadixSort256::SortWithKey<MAX_JOBS>( pool,
+    RadixSort256::SortYWithKey<MAX_JOBS>( pool,
         yBuffer, yTmp,
         sortKey, sortKeyTmp, 
         length

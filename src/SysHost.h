@@ -14,9 +14,10 @@ ImplementFlagOps( VProtect );
 
 struct NumaInfo
 {
-    uint        nodeCount;  // How many NUMA nodes in the system
-    uint        cpuCount;   // Total cpu count used by nodes
-    Span<uint>* cpuIds;     // CPU ids of each node
+    uint        nodeCount;      // How many NUMA nodes in the system
+    uint        cpuCount;       // Total cpu count used by nodes
+    Span<uint>* cpuIds;         // CPU ids of each node
+    byte*       cpuToNodeMap;   // Gets the node a CPU belongs to for a given cpu id.
 };
 
 class SysHost
@@ -69,4 +70,10 @@ public:
     /// Set interleave NUMA mode for the specified memory regions.
     /// NOTE: Pages must not yet be faulted.
     static bool NumaSetMemoryInterleavedMode( void* ptr, size_t size );
+
+    /// Get the node a memory page belongs to.
+    /// Returns a negative value upon failure.
+    /// NOTE: Pages must first be faulted on linuz.
+    static int NumaGetNodeFromPage( void* ptr );
+
 };

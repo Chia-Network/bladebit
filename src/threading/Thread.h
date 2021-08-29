@@ -8,6 +8,7 @@ class Thread
 {
 public:
 
+    Thread( void* stack, size_t stackSize );
     Thread( size_t stackSize );
     Thread();
     ~Thread();
@@ -25,6 +26,8 @@ public:
     bool HasExited() const;
 
 private:
+    void Init( void* stack, size_t stackSize );
+
     static void* ThreadStarter( Thread* thread );
 
 private:

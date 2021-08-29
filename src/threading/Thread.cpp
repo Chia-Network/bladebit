@@ -10,24 +10,47 @@ typedef void* (*PthreadFunc)( void* param );
 //-----------------------------------------------------------
 Thread::Thread( size_t stackSize )
 {
-     // Configure stack size
-    if( stackSize < 1024 * 4 )
+    Init( nullptr, stackSize );
+}
+
+//-----------------------------------------------------------
+Thread::Thread( void* stack, size_t stackSize )
+{
+    if( !stack )
+        Fatal( "Null stack." );
+
+    Init( stack, stackSize );
+}
+
+//-----------------------------------------------------------
+void Thread::Init( void* stack, size_t stackSize )
+{
+    if( !stack && stackSize < 1024 * 4 )
         Fatal( "Thread stack size is too small." );
-    
-    // Align to 8 bytes
-    stackSize = RoundUpToNextBoundary( stackSize, 8 );
 
 #if PLATFORM_IS_UNIX
 
     _state.store( ThreadState::ReadyToRun, std::memory_order_release );
 
-    pthread_attr_t  attr;
+    pthread_attr_t attr;
     
     int r = pthread_attr_init( &attr );
     if( r ) Fatal( "pthread_attr_init() failed." );
+
+    if( stack )
+    {
+        r = pthread_attr_setstack( &attr, stack, stackSize );
+        if( r ) Fatal( "pthread_attr_setstack() failed." );
+    }
+    else
+    {
+        const size_t pageSize = SysHost::GetPageSize();
+        stackSize = RoundUpToNextBoundary( stackSize, (int)pageSize );
+
+        r = pthread_attr_setstacksize( &attr, stackSize );
+        if( r ) Fatal( "pthread_attr_setstacksize() failed." );
+    }
     
-    r = pthread_attr_setstacksize( &attr, stackSize );
-    if( r ) Fatal( "pthread_attr_setstacksize() failed." );
 
     // Initialize suspended mode signal
     r = pthread_cond_init(  &_launchCond,  NULL );
@@ -237,3 +260,4 @@ void* Thread::ThreadStarter( Thread* t )
 
     return nullptr;
 }
+

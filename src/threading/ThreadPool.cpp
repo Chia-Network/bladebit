@@ -14,8 +14,14 @@ ThreadPool::ThreadPool( uint threadCount, Mode mode )
     if( threadCount < 1 )
         Fatal( "threadCount must be greater than 0." );
     
-    _threads    = new Thread    [threadCount];
+    _threads    = (Thread*)malloc( sizeof(Thread) * threadCount );
     _threadData = new ThreadData[threadCount];
+
+    // #TODO: Allocate a stack for NUMA systems on greedy mode?
+    const NumaInfo* numa       = SysHost::GetNUMAInfo();
+    const size_t    pageSize   = SysHost::GetPageSize();
+    const bool      allocStack = numa && numa->nodeCount > 1 && mode == Mode::Fixed;
+    const size_t    stackSize  = 8 MB;
 
     auto threadRunner = mode == Mode::Fixed ? FixedThreadRunner : GreedyThreadRunner;
 
@@ -24,10 +30,27 @@ ThreadPool::ThreadPool( uint threadCount, Mode mode )
         _threadData[i].index = (int)i;
         _threadData[i].cpuId = i;
         _threadData[i].pool  = this;
-        
-        Thread& t = _threads[i];
 
-        t.Run( threadRunner, &_threadData[i] );
+        Thread* t;
+
+        if( allocStack )
+        {
+            // Allocate a stack on the thread's NUMA node
+            void* stack = SysHost::VirtualAlloc( stackSize, false );
+            if( !stack )
+                Fatal( "Failed to allocate stack for thread." );
+
+            const uint node = numa->cpuToNodeMap[i]; ASSERT( node < numa->nodeCount );
+            SysHost::NumaAssignPages( stack, stackSize, node );
+
+            t = new ( (void*) (_threads+i) ) Thread( stack, stackSize );
+        }
+        else
+        {
+            t = new ( (void*) (_threads+i) ) Thread( stackSize );
+        }
+
+        t->Run( threadRunner, &_threadData[i] );
     }
 }
 
@@ -53,7 +76,10 @@ ThreadPool::~ThreadPool()
     // #TODO: Signal thread for exit.
     // #TODO: Wait for all threads to exit
 
-    delete[] _threads;
+    for( uint i = 0; i < _threadCount; i++ )
+        _threads[i].~Thread();
+    
+    free( _threads );
     delete[] _threadData;
     
     _threads    = nullptr;
@@ -146,6 +172,13 @@ void ThreadPool::FixedThreadRunner( void* tParam )
     SysHost::SetCurrentThreadAffinityCpuId( d.cpuId );
 
     const uint index = (uint)d.index;
+
+    #if _DEBUG
+        const NumaInfo* numa = SysHost::GetNUMAInfo();
+        uint node = numa->cpuToNodeMap[d.cpuId];
+        ASSERT( node >= 0 && node < numa->nodeCount );
+        ASSERT( SysHost::NumaGetNodeFromPage( (void*)&index ) == node );
+    #endif
 
     std::atomic<bool>& exitSignal = pool._exitSignal;
     Semaphore&         poolSignal = pool._poolSignal;
