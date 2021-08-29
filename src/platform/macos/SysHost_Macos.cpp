@@ -53,8 +53,10 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
     // #TODO: Use vm_allocate
     // #TODO: Consider initialize
     
+    const size_t pageSize = (size_t)getpagesize();
+
     // Align size to page boundary
-    size = RoundUpToNextBoundary( size, (int)GetPageSize() );
+    size = RoundUpToNextBoundary( size, (int)pageSize );
 
     void* ptr = mmap( NULL, size, 
         PROT_READ | PROT_WRITE, 
@@ -71,6 +73,22 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
         #endif
     
         return nullptr;
+    }
+    else if( initialize )
+    {
+        // Initialize memory 
+        // (since physical pages are not allocated until the actual pages are accessed)
+
+        byte* page = (byte*)ptr;
+
+        const size_t pageCount = size / pageSize;
+        const byte*  endPage   = page + pageCount * pageSize;
+
+        do
+        {
+            *page = 0;
+            page += pageSize;
+        } while( page < endPage );
     }
 
     return ptr;

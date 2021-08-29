@@ -99,6 +99,9 @@
     <ClInclude Include="src\algorithm\RadixSort.h">
       <Filter>src\algorithm</Filter>
     </ClInclude>
+    <ClInclude Include="src\algorithm\YSort.h">
+      <Filter>src\algorithm</Filter>
+    </ClInclude>
     <ClInclude Include="src\b3\blake3_impl.h">
       <Filter>src\b3</Filter>
     </ClInclude>
@@ -212,6 +215,9 @@
     </ClInclude>
     <ClInclude Include="src\util\Log.h">
       <Filter>src\util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Version.h">
+      <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\View.h">
       <Filter>src</Filter>
@@ -348,6 +354,9 @@
     <ClInclude Include="src/algorithm/RadixSort.h">
       <Filter>src/algorithm</Filter>
     </ClInclude>
+    <ClInclude Include="src/algorithm/YSort.h">
+      <Filter>src/algorithm</Filter>
+    </ClInclude>
     <ClInclude Include="src/b3/blake3_impl.h">
       <Filter>src/b3</Filter>
     </ClInclude>
@@ -462,11 +471,17 @@
     <ClInclude Include="src/util/Log.h">
       <Filter>src/util</Filter>
     </ClInclude>
+    <ClInclude Include="src/Version.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="src/View.h">
       <Filter>src</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\algorithm\YSort.cpp">
+      <Filter>src\algorithm</Filter>
+    </ClCompile>
     <ClCompile Include="src\b3\blake3_avx2.c">
       <Filter>src\b3</Filter>
     </ClCompile>
@@ -555,6 +570,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="src\test\test_main.cpp">
+      <Filter>src\test</Filter>
+    </ClCompile>
+    <ClCompile Include="src\test\test_numa_sort.cpp">
       <Filter>src\test</Filter>
     </ClCompile>
     <ClCompile Include="src\threading\Semaphore.cpp">

@@ -68,7 +68,7 @@ ifeq ($(PLATFORM),linux)
 	endif
 endif
 
-CFLAGS := \
+CFLAGS += \
 	-Wall \
 	-Wno-comment
 

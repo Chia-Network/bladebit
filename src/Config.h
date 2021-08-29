@@ -34,4 +34,5 @@
 // #define DBG_WRITE_LINE_POINTS 1
 // #define DBG_WRITE_SORTED_F7_TABLE 1
 
+// #define BB_BENCHMARK_MODE 1
 
