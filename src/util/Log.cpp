@@ -2,6 +2,7 @@
 
 
 FILE* Log::_outStream = nullptr;
+FILE* Log::_errStream = nullptr;
 
 bool Log::_verbose = false;
 
@@ -11,9 +12,22 @@ inline FILE* Log::GetOutStream()
     if( _outStream == nullptr )
     {
         _outStream = stdout;
+        setvbuf( stdout, NULL, _IONBF, 0 );
     }
 
     return _outStream;
+}
+
+//-----------------------------------------------------------
+inline FILE* Log::GetErrStream()
+{
+    if( _errStream == nullptr )
+    {
+        _errStream = stderr;
+        setvbuf( stderr, NULL, _IONBF, 0 );
+    }
+
+    return _errStream;
 }
 
 //-----------------------------------------------------------
@@ -89,13 +103,13 @@ void Log::WriteError( const char* msg, ... )
 void Log::Error( const char* msg, va_list args )
 {
     WriteError( msg, args );
-    fputc( '\n', stderr );
+    fputc( '\n', GetErrStream() );
 }
 
 //-----------------------------------------------------------
 void Log::WriteError( const char* msg, va_list args )
 {
-    vfprintf( stderr, msg, args );
+    vfprintf( GetErrStream(), msg, args );
 }
 
 //-----------------------------------------------------------
@@ -107,8 +121,9 @@ void Log::Verbose( const char* msg, ...  )
     va_list args;
     va_start( args, msg );
     
-    vfprintf( stderr, msg, args );
-    fputc( '\n', stderr );
+    FILE* stream = GetErrStream();
+    vfprintf( stream, msg, args );
+    fputc( '\n', stream );
 
     va_end( args );
 }
@@ -122,7 +137,7 @@ void Log::VerboseWrite( const char* msg, ...  )
     va_list args;
     va_start( args, msg );
     
-    vfprintf( stderr, msg, args );
+    vfprintf( GetErrStream(), msg, args );
 
     va_end( args );
 }
@@ -138,5 +153,5 @@ void Log::Flush()
 //-----------------------------------------------------------
 void Log::FlushError()
 {
-    fflush( stderr );
+    fflush( GetErrStream() );
 }
