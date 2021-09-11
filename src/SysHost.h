@@ -69,4 +69,10 @@ public:
     /// Set interleave NUMA mode for the specified memory regions.
     /// NOTE: Pages must not yet be faulted.
     static bool NumaSetMemoryInterleavedMode( void* ptr, size_t size );
+
+    /// Get the node a memory page belongs to.
+    /// Returns a negative value upon failure.
+    /// NOTE: Pages must first be faulted on linuz.
+    static int NumaGetNodeFromPage( void* ptr );
+
 };

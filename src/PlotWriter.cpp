@@ -1,19 +1,27 @@
 #include "PlotWriter.h"
 #include "ChiaConsts.h"
 #include "SysHost.h"
+#include "Config.h"
 
 //-----------------------------------------------------------
 DiskPlotWriter::DiskPlotWriter()
     : _writeSignal       ( 0 )
     , _plotFinishedSignal( 0 )
 {
+    #if BB_BENCHMARK_MODE
+        return;
+    #endif
     // Start writer thread
     _writerThread.Run( WriterMain, this );
 }
 
 //-----------------------------------------------------------
 DiskPlotWriter::~DiskPlotWriter()
-{   
+{
+    #if BB_BENCHMARK_MODE
+        return;
+    #endif
+
     // Signal writer thread to exit, if it hasn't already
     _terminateSignal.store( true, std::memory_order_release );
     _writeSignal.Release();
@@ -31,6 +39,11 @@ DiskPlotWriter::~DiskPlotWriter()
 //-----------------------------------------------------------
 bool DiskPlotWriter::BeginPlot( const char* plotFilePath, FileStream& file, const byte plotId[32], const byte* plotMemo, const uint16 plotMemoSize )
 {
+    #if BB_BENCHMARK_MODE
+        _filePath = plotFilePath;
+        return true;
+    #endif
+
     ASSERT( plotMemo     );
     ASSERT( plotMemoSize );
 
@@ -136,6 +149,10 @@ bool DiskPlotWriter::BeginPlot( const char* plotFilePath, FileStream& file, cons
 //-----------------------------------------------------------
 bool DiskPlotWriter::WriteTable( const void* buffer, size_t size )
 {
+    #if BB_BENCHMARK_MODE
+        return true;
+    #endif
+
     if( !SubmitTable( buffer, size ) )
         return false;
 
@@ -148,6 +165,10 @@ bool DiskPlotWriter::WriteTable( const void* buffer, size_t size )
 //-----------------------------------------------------------
 bool DiskPlotWriter::SubmitTable( const void* buffer, size_t size )
 {
+    #if BB_BENCHMARK_MODE
+        return true;
+    #endif
+
     // Make sure the thread has already started.
     // We must have no errors
     if( !_file || _error )
@@ -195,6 +216,10 @@ bool DiskPlotWriter::SubmitTable( const void* buffer, size_t size )
 //-----------------------------------------------------------
 bool DiskPlotWriter::WaitUntilFinishedWriting()
 {
+#if BB_BENCHMARK_MODE
+    return true;
+#else
+
     // For re-entry checks
     if( !_file && _plotFinishedSignal.GetCount() == 0 )
         return true;
@@ -206,6 +231,7 @@ bool DiskPlotWriter::WaitUntilFinishedWriting()
     ASSERT( _file == nullptr );
 
     return _error == 0;
+#endif
 }
 
 
@@ -408,6 +434,10 @@ void DiskPlotWriter::WriterThread()
 //-----------------------------------------------------------
 size_t DiskPlotWriter::AlignToBlockSize( size_t size )
 {
+    #if BB_BENCHMARK_MODE
+        return RoundUpToNextBoundary( size, 4096 );
+    #endif
+
     ASSERT( _file );
 
     // Shoud never be called without a file

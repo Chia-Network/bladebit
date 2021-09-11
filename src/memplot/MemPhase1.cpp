@@ -4,11 +4,11 @@
 #include "Util.h"
 #include "util/Log.h"
 #include "FxSort.h"
+#include "algorithm/YSort.h"
 #include "SysHost.h"
 #include <cmath>
 
 #include "DbgHelper.h"
-
     
     bool DbgVerifySortedY( const uint64 entryCount, const uint64* yBuffer );
     
@@ -28,6 +28,12 @@
 ///
 struct F1GenJob
 {
+    // uint node;
+    // uint threadCount;
+    // uint cpuId;
+    // uint startPage;
+    // uint pageCount;
+    
     const byte* key;
 
     uint32  blockCount;
@@ -73,6 +79,7 @@ struct FpFxJob
 
 /// Internal Funcs forwards-declares
 void F1JobThread( F1GenJob* job );
+void F1NumaJobThread( F1GenJob* job );
 
 void FpScanThread( kBCJob* job );
 void FpPairThread( kBCJob* job );
@@ -189,11 +196,15 @@ uint64 MemPhase1::GenerateF1()
     ASSERT( entriesPerBlock * sizeof( uint32 ) == CHACHA_BLOCK_SIZE );  // Must fit exactly within a block
 
     // Generate all of the y values to a metabuffer first
-    byte*   blocks  = (byte*)cx.metaBuffer1;
+    byte*   blocks  = (byte*)cx.yBuffer0;
     uint64* yBuffer = cx.yBuffer0;
     uint32* xBuffer = cx.t1XBuffer;
+    uint64* yTmp    = cx.metaBuffer1;
+    uint32* xTmp    = (uint32*)(yTmp + totalEntries);
 
-    ASSERT( numThreads < MAX_THREADS );
+    ASSERT( numThreads <= MAX_THREADS );
+
+    // const NumaInfo* numa = SysHost::GetNUMAInfo();
 
     // Gen all raw f1 values
     {
@@ -205,21 +216,59 @@ uint64 MemPhase1::GenerateF1()
             uint64 blockOffset = i * blocksPerThread * CHACHA_BLOCK_SIZE;
 
             F1GenJob& job = jobs[i];
+            // job.cpuId       = i;
+            // job.threadCount = numThreads;
+
             job.key        = key;
             job.blockCount = blocksPerThread;
             job.entryCount = (uint32)entriesPerThread;
             job.x          = (uint32)offset;
             job.blocks     = blocks  + blockOffset;
-            job.yBuffer    = yBuffer + offset;
-            job.xBuffer    = xBuffer + offset;
+            job.yBuffer    = yTmp    + offset;
+            job.xBuffer    = xTmp    + offset;
         }
 
         jobs[numThreads-1].entryCount += trailingEntries;
         jobs[numThreads-1].blockCount += trailingBlocks;
 
+        // Initialize NUMA pages
+        // if( numa )
+        // {
+        //     const uint pageSize       = (uint)SysHost::GetPageSize();
+        //     const uint blocksPerPage  = (uint)( pageSize / CHACHA_BLOCK_SIZE );
+        //     const uint pageCount      = (uint)( totalBlocks / blocksPerPage );
+        //     const uint pagesPerThread = pageCount / numThreads;
+        //     const uint nodeStride     = numa->nodeCount;
+
+        //     for( uint i = 0; i < numa->nodeCount; i++ )
+        //     {
+        //         const auto& nodeCpus = numa->cpuIds[i];
+        //         const uint  cpuCount = nodeCpus.length;
+
+        //         // #TODO: Remove this. For now we hard-code it to
+        //         //        the node of the first page.
+        //         // const int pageOffset = (i + 1) & 1;
+
+        //         for( uint j = 0; j < cpuCount; j++ )
+        //         { 
+        //             const uint cpuId = nodeCpus[j];
+
+        //             auto& job = jobs[cpuId];
+
+        //             job.node      = i;
+        //             job.startPage = nodeStride * j;
+        //             job.pageCount = pagesPerThread;
+        //             job.blocks    = blocks;
+        //             job.yBuffer   = yBuffer;
+        //             job.xBuffer   = xBuffer;
+        //         }
+        //     }
+        // }
+
         Log::Line( "Generating F1..." );
         auto timeStart = TimerBegin();
 
+        // cx.threadPool->RunJob( numa ? F1NumaJobThread : F1JobThread, jobs, numThreads );
         cx.threadPool->RunJob( F1JobThread, jobs, numThreads );
 
         double elapsed = TimerEnd( timeStart );
@@ -229,13 +278,8 @@ uint64 MemPhase1::GenerateF1()
     Log::Line( "Sorting F1..." );
     auto timeStart = TimerBegin();
 
-    uint64* yTmp = cx.metaBuffer1;
-    uint32* xTmp = (uint32*)(yTmp + totalEntries);
-
-    RadixSort256::SortWithKey<MAX_THREADS>( *cx.threadPool,
-        yBuffer, yTmp,
-        xBuffer, xTmp,
-        totalEntries );
+    YSorter sorter( *cx.threadPool );
+    sorter.Sort( totalEntries, yTmp, yBuffer, xTmp, xBuffer );
 
     double elapsed = TimerEnd( timeStart );
     Log::Line( "Finished F1 sort in %.2lf seconds.", elapsed );
@@ -395,14 +439,14 @@ uint64 MemPhase1::FpComputeSingleTable(
 
         // Use table 7's buffers as a temporary buffer
         uint32* sortKey    = cx.t7YBuffer;
-        uint64* yTmp       = metaBuffer.write;
         uint32* sortKeyTmp = (uint32*)( metaBuffer.write + ENTRIES_PER_TABLE ); // Use the output metabuffer for now as 
                                                                                 // the temporary sortkey buffer.
         SortFx<MAX_THREADS>(
             *cx.threadPool,        pairCount,
-            (uint64*)yBuffer.read, yTmp,
-            sortKey,               sortKeyTmp
+            (uint64*)yBuffer.read, yBuffer.write,
+            sortKeyTmp,            sortKey
         );
+        yBuffer.Swap();
 
         // DbgVerifyPairsKBCGroups( pairCount, yBuffer.write, unsortedPairBuffer );
 
@@ -413,10 +457,6 @@ uint64 MemPhase1::FpComputeSingleTable(
         );
 
         // DbgVerifyPairsKBCGroups( pairCount, yBuffer.write, pairBuffer );
-
-        // #NOTE: We don't swap the y buffer because
-        //   sorting leaves yBuffer.read sorted in its places. 
-        //   So it is already swapped for the next table to read it.
 
         // Use the sorted metabuffer as the read buffer for the next table
         metaBuffer.Swap();
@@ -487,6 +527,116 @@ void F1JobThread( F1GenJob* job )
     for( uint64 i = 0; i < entryCount; i++ )
         xBuffer[i] = x + i;
 }
+
+
+//-----------------------------------------------------------
+// void F1NumaJobThread( F1GenJob* job )
+// {
+//     // const NumaInfo* numa = SysHost::GetNUMAInfo();
+
+//     const uint32 pageSize           = (uint32)SysHost::GetPageSize();
+
+//     // const uint   k                  = _K;
+//     const size_t CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
+//     // const uint64 totalEntries       = 1ull << k;
+//     const uint32 entriesPerBlock    = (uint32)( CHACHA_BLOCK_SIZE / sizeof( uint32 ) );
+//     const uint32 blocksPerPage      = pageSize / CHACHA_BLOCK_SIZE;
+//     const uint32 entriesPerPage32   = entriesPerBlock * blocksPerPage;
+//     const uint32 entriesPerPage64   = entriesPerPage32 / 2;
+    
+//     const uint   pageOffset         = job->startPage;
+//     const uint   pageCount          = job->pageCount;
+
+//     const uint32 pageStride         = job->threadCount;
+//     const uint32 blockStride        = pageSize         * pageStride;
+//     const uint32 entryStride32      = entriesPerPage32 * pageStride;
+//     const uint32 entryStride64      = entriesPerPage64 * pageStride;
+
+//     // #TODO: Get proper offset depending on node count. Or, figure out if we can always have
+//     //        the pages of the buffers simply start at the same location
+//     const uint32 blockStartPage    = SysHost::NumaGetNodeFromPage( job->blocks  ) == job->node ? 0 : 1;
+//     const uint32 yStartPage        = SysHost::NumaGetNodeFromPage( job->yBuffer ) == job->node ? 0 : 1;
+//     const uint32 xStartPage        = SysHost::NumaGetNodeFromPage( job->xBuffer ) == job->node ? 0 : 1;
+
+//     // const uint64 x                  = job->x;
+//     const uint64 x                  = (blockStartPage + pageOffset) * entriesPerPage32;
+//     // const uint32 xStride            = pageStride * entriesPerPage;
+
+//     byte*   blockBytes = job->blocks + (blockStartPage + pageOffset) * pageSize;
+//     uint32* blocks     = (uint32*)blockBytes;
+    
+//     uint64* yBuffer    = job->yBuffer + ( yStartPage + pageOffset ) * entriesPerPage64;
+//     uint32* xBuffer    = job->xBuffer + ( xStartPage + pageOffset ) * entriesPerPage32;
+
+//     chacha8_ctx chacha;
+//     ZeroMem( &chacha );
+
+//     chacha8_keysetup( &chacha, job->key, 256, NULL );
+
+//     for( uint64 p = 0; p < pageCount/4; p+=4 )
+//     {
+//         ASSERT( SysHost::NumaGetNodeFromPage( blockBytes ) == job->node );
+
+//         // blockBytes
+//         // Which block are we generating?
+//         const uint64 blockIdx = ( x + p * entryStride32 ) * _K / kF1BlockSizeBits;
+
+//         chacha8_get_keystream( &chacha, blockIdx,  blocksPerPage,   blockBytes );
+//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage,   blocksPerPage, blockBytes + blockStride     );
+//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*2, blocksPerPage, blockBytes + blockStride * 2 );
+//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*3, blocksPerPage, blockBytes + blockStride * 3 );
+//         blockBytes += blockStride * 4;
+//     }
+
+//     for( uint64 p = 0; p < pageCount; p++ )
+//     {
+//         ASSERT( SysHost::NumaGetNodeFromPage( yBuffer ) == job->node );
+//         ASSERT( SysHost::NumaGetNodeFromPage( blocks  ) == job->node );
+
+//         const uint64 curX = x + p * entryStride32;
+
+//         for( uint64 i = 0; i < entriesPerPage32; i++ )
+//         {
+//             // chacha output is treated as big endian, therefore swap, as required by chiapos
+//             const uint64 y = Swap32( blocks[i] );
+//             yBuffer[i] = ( y << kExtraBits ) | ( (curX+i) >> (_K - kExtraBits) );
+//         }
+        
+//         // for( uint64 i = 0; i < 64; i++ )
+//         // {
+//         //     yBuffer[0] = ( Swap32( blocks[0] ) << kExtraBits ) | ( (curX+0) >> (_K - kExtraBits) );
+//         //     yBuffer[1] = ( Swap32( blocks[1] ) << kExtraBits ) | ( (curX+1) >> (_K - kExtraBits) );
+//         //     yBuffer[2] = ( Swap32( blocks[2] ) << kExtraBits ) | ( (curX+2) >> (_K - kExtraBits) );
+//         //     yBuffer[3] = ( Swap32( blocks[3] ) << kExtraBits ) | ( (curX+3) >> (_K - kExtraBits) );
+//         //     yBuffer[4] = ( Swap32( blocks[4] ) << kExtraBits ) | ( (curX+4) >> (_K - kExtraBits) );
+//         //     yBuffer[5] = ( Swap32( blocks[5] ) << kExtraBits ) | ( (curX+5) >> (_K - kExtraBits) );
+//         //     yBuffer[6] = ( Swap32( blocks[6] ) << kExtraBits ) | ( (curX+6) >> (_K - kExtraBits) );
+//         //     yBuffer[7] = ( Swap32( blocks[7] ) << kExtraBits ) | ( (curX+7) >> (_K - kExtraBits) );
+
+//         //     yBuffer += 8;
+//         //     blocks  += 8;
+//         // }
+
+//         // #TODO: This is wrong. We need to fill more y's before w go to the next block page.
+//         yBuffer += entryStride64;
+//         blocks  += entryStride32;
+//     }
+
+//     // Gen the x that generated the y
+//     for( uint64 p = 0; p < pageCount; p++ )
+//     {
+//         ASSERT( SysHost::NumaGetNodeFromPage( xBuffer ) == job->node );
+
+//         const uint32 curX = (uint32)(x + p * entryStride32);
+
+//         for( uint32 i = 0; i < entriesPerPage32; i++ )
+//             xBuffer[i] = curX + i;
+
+//         xBuffer += entryStride32;
+//     }
+
+//     // #TODO: Process last part
+// }
 
 
 ///

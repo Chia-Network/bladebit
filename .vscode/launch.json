@@ -120,12 +120,18 @@
                 // ,"-t", "32"
                 
             ],
+            
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
             "setupCommands": [
+                // {
+                //     "description": "Set scheduler locking to step",
+                //     "ignoreFailures": false,
+                //     "text": "set scheduler-locking step"
+                // },
                 {
                     "description": "Enable pretty-printing for gdb",
                     "text": "-enable-pretty-printing",

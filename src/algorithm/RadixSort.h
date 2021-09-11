@@ -43,14 +43,19 @@ public:
     template<uint32 ThreadCount, typename T1, typename TK>
     static void SortWithKey( ThreadPool& pool, T1* input, T1* tmp, TK* keyInput, TK* keyTmp, uint64 length );
 
+    template<uint32 ThreadCount>
+    static void SortY( ThreadPool& pool, uint64* input, uint64* tmp, uint64 length );
+
+    template<uint32 ThreadCount>
+    static void SortYWithKey( ThreadPool& pool, uint64* input, uint64* tmp, uint32* keyInput, uint32* keyTmp, uint64 length );
+
 private:
 
-    template<uint32 ThreadCount, SortMode Mode, typename T1, typename TK>
+    template<uint32 ThreadCount, SortMode Mode, typename T1, typename TK, int MaxIter = sizeof( T1 )>
     static void DoSort( ThreadPool& pool, T1* input, T1* tmp, TK* keyInput, TK* keyTmp, uint64 length );
 
-    template<typename T1, typename T2, bool IsKeyed>
+    template<typename T1, typename T2, bool IsKeyed, int MaxIter = 0>
     static void RadixSortThread( SortJob<T1,T2>* job );
-
 };
 
 
@@ -69,7 +74,21 @@ inline void RadixSort256::SortWithKey( ThreadPool& pool, T1* input, T1* tmp, TK*
 }
 
 //-----------------------------------------------------------
-template<uint32 ThreadCount, RadixSort256::SortMode Mode, typename T1, typename TK>
+template<uint32 ThreadCount>
+inline void RadixSort256::SortY( ThreadPool& pool, uint64* input, uint64* tmp, uint64 length )
+{
+    DoSort<ThreadCount, ModeSingle, uint64, void, 5>( pool, input, tmp, nullptr, nullptr, length );
+}
+
+//-----------------------------------------------------------
+template<uint32 ThreadCount>
+inline void RadixSort256::SortYWithKey( ThreadPool& pool, uint64* input, uint64* tmp, uint32* keyInput, uint32* keyTmp, uint64 length )
+{
+    DoSort<ThreadCount, SortAndGenKey, uint64, uint32, 5>( pool, input, tmp, keyInput, keyTmp, length );
+}
+
+//-----------------------------------------------------------
+template<uint32 ThreadCount, RadixSort256::SortMode Mode, typename T1, typename TK, int MaxIter>
 void inline RadixSort256::DoSort( ThreadPool& pool, T1* input, T1* tmp, TK* keyInput, TK* keyTmp, uint64 length )
 {
     const uint   threadCount      = ThreadCount > pool.ThreadCount() ? pool.ThreadCount() : ThreadCount;
@@ -110,22 +129,22 @@ void inline RadixSort256::DoSort( ThreadPool& pool, T1* input, T1* tmp, TK* keyI
     jobs[threadCount-1].length += trailingEntries;
     
     if constexpr ( Mode == SortAndGenKey )
-        pool.RunJob( RadixSortThread<T1, TK, true>, jobs, threadCount );
+        pool.RunJob( RadixSortThread<T1, TK, true, MaxIter>, jobs, threadCount );
     else
-        pool.RunJob( RadixSortThread<T1, TK, false>, jobs, threadCount );
+        pool.RunJob( RadixSortThread<T1, TK, false, MaxIter>, jobs, threadCount );
 }
 
 #pragma GCC diagnostic push 
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 
 //-----------------------------------------------------------
-template<typename T1, typename T2, bool IsKeyed>
+template<typename T1, typename T2, bool IsKeyed, int MaxIter>
 void RadixSort256::RadixSortThread( SortJob<T1, T2>* job )
 {
     constexpr uint Radix = 256;
 
-    const uint32 iterations = sizeof( T1 );
-    const uint32 shiftBase  = 8;
+    constexpr uint32 iterations = MaxIter > 0 ? MaxIter : sizeof( T1 );
+    const     uint32 shiftBase  = 8;
     
     uint32 shift = 0;
 
@@ -150,7 +169,7 @@ void RadixSort256::RadixSortThread( SortJob<T1, T2>* job )
         keyTmp   = job->keyTmp;
     }
 
-    for( uint32 iter = 0; iter < iterations ; iter++, shift += shiftBase  )
+    for( uint32 iter = 0; iter < iterations ; iter++, shift += shiftBase )
     {
         // Zero-out the counts
         memset( counts, 0, sizeof( uint64 ) * Radix );

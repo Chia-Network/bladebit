@@ -4,6 +4,10 @@
 // #TODO: This should perhaps be named max jobs.
 #define MAX_THREADS 256
 
+// Perform Y sorts at the block level.
+// Unrolling loops by chacha block size.
+#define Y_SORT_BLOCK_MODE 1
+
 ///
 /// Debug Stuff
 ///
@@ -34,4 +38,6 @@
 // #define DBG_WRITE_LINE_POINTS 1
 // #define DBG_WRITE_SORTED_F7_TABLE 1
 
+// Enable to test plotting times without writing to disk
+// #define BB_BENCHMARK_MODE 1
 
