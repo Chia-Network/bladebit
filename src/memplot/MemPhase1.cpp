@@ -9,7 +9,6 @@
 #include <cmath>
 
 #include "DbgHelper.h"
-#include <numa.h>
     
     bool DbgVerifySortedY( const uint64 entryCount, const uint64* yBuffer );
     
