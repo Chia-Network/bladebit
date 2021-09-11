@@ -278,10 +278,6 @@ uint64 MemPhase1::GenerateF1()
     Log::Line( "Sorting F1..." );
     auto timeStart = TimerBegin();
 
-    // RadixSort256::SortYWithKey<MAX_THREADS>( *cx.threadPool,
-    //     yTmp, yBuffer,
-    //     xTmp, xBuffer,
-    //     totalEntries );
     YSorter sorter( *cx.threadPool );
     sorter.Sort( totalEntries, yTmp, yBuffer, xTmp, xBuffer );
 
@@ -443,7 +439,6 @@ uint64 MemPhase1::FpComputeSingleTable(
 
         // Use table 7's buffers as a temporary buffer
         uint32* sortKey    = cx.t7YBuffer;
-        // uint64* yTmp       = metaBuffer.write;
         uint32* sortKeyTmp = (uint32*)( metaBuffer.write + ENTRIES_PER_TABLE ); // Use the output metabuffer for now as 
                                                                                 // the temporary sortkey buffer.
         SortFx<MAX_THREADS>(
