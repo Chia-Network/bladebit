@@ -28,11 +28,11 @@
 ///
 struct F1GenJob
 {
-    uint node;
-    uint threadCount;
-    uint cpuId;
-    uint startPage;
-    uint pageCount;
+    // uint node;
+    // uint threadCount;
+    // uint cpuId;
+    // uint startPage;
+    // uint pageCount;
     
     const byte* key;
 
@@ -216,8 +216,8 @@ uint64 MemPhase1::GenerateF1()
             uint64 blockOffset = i * blocksPerThread * CHACHA_BLOCK_SIZE;
 
             F1GenJob& job = jobs[i];
-            job.cpuId       = i;
-            job.threadCount = numThreads;
+            // job.cpuId       = i;
+            // job.threadCount = numThreads;
 
             job.key        = key;
             job.blockCount = blocksPerThread;
