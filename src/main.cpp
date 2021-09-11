@@ -207,7 +207,7 @@ int main( int argc, const char* argv[] )
 
             size_t numEncoded = 0;
             BytesToHexStr( memo, memoSize, memoStr, sizeof( memoStr ) - 1, numEncoded );
-            memoStr[numEncoded] = 0;
+            memoStr[numEncoded*2] = 0;
 
             Log::Line( "Plot Memo: %s", memoStr );
         }
