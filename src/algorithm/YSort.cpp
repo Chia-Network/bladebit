@@ -6,7 +6,6 @@
 #include "Config.h"
 #include "ChiaConsts.h"
 
-#define Y_SORT_BLOCK_MODE 1
 
 template<typename JobT>
 struct SortYBaseJob
@@ -377,7 +376,6 @@ FORCE_INLINE void SortYJob::SortBucket( const uint64 bucket, const uint offset,
     CalculatePrefixSum<Radix>( id, counts, pfxSum );
 
     // Store in new location, iterating backwards
-    // src = (uint32*)end - 1;
     src = (uint32*)start;
     YT* dst = tmp + bucketOffset;
     
@@ -401,21 +399,9 @@ FORCE_INLINE void SortYJob::SortBucket( const uint64 bucket, const uint offset,
         if constexpr ( HasSortKey )
             keyDst[dstIdx] = keySrc[i];
 
-    } //while( src-- > start );
+    }
 
     SyncThreads();
-
-    // for( uint32 i = 1; i < length; i++ )
-    // {
-    //     const byte a = (byte)( dst[i-1] >> shift );
-    //     const byte b = (byte)( dst[i]   >> shift );
-
-    //     if( a > b )
-    //     {
-    //         Log::Line( "Fail" );
-    //         exit( 1 );
-    //     }
-    // }
 }
 
 
