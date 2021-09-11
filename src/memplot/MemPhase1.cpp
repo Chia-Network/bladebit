@@ -536,113 +536,113 @@ void F1JobThread( F1GenJob* job )
 
 
 //-----------------------------------------------------------
-void F1NumaJobThread( F1GenJob* job )
-{
-    // const NumaInfo* numa = SysHost::GetNUMAInfo();
+// void F1NumaJobThread( F1GenJob* job )
+// {
+//     // const NumaInfo* numa = SysHost::GetNUMAInfo();
 
-    const uint32 pageSize           = (uint32)SysHost::GetPageSize();
+//     const uint32 pageSize           = (uint32)SysHost::GetPageSize();
 
-    // const uint   k                  = _K;
-    const size_t CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
-    // const uint64 totalEntries       = 1ull << k;
-    const uint32 entriesPerBlock    = (uint32)( CHACHA_BLOCK_SIZE / sizeof( uint32 ) );
-    const uint32 blocksPerPage      = pageSize / CHACHA_BLOCK_SIZE;
-    const uint32 entriesPerPage32   = entriesPerBlock * blocksPerPage;
-    const uint32 entriesPerPage64   = entriesPerPage32 / 2;
+//     // const uint   k                  = _K;
+//     const size_t CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
+//     // const uint64 totalEntries       = 1ull << k;
+//     const uint32 entriesPerBlock    = (uint32)( CHACHA_BLOCK_SIZE / sizeof( uint32 ) );
+//     const uint32 blocksPerPage      = pageSize / CHACHA_BLOCK_SIZE;
+//     const uint32 entriesPerPage32   = entriesPerBlock * blocksPerPage;
+//     const uint32 entriesPerPage64   = entriesPerPage32 / 2;
     
-    const uint   pageOffset         = job->startPage;
-    const uint   pageCount          = job->pageCount;
+//     const uint   pageOffset         = job->startPage;
+//     const uint   pageCount          = job->pageCount;
 
-    const uint32 pageStride         = job->threadCount;
-    const uint32 blockStride        = pageSize         * pageStride;
-    const uint32 entryStride32      = entriesPerPage32 * pageStride;
-    const uint32 entryStride64      = entriesPerPage64 * pageStride;
+//     const uint32 pageStride         = job->threadCount;
+//     const uint32 blockStride        = pageSize         * pageStride;
+//     const uint32 entryStride32      = entriesPerPage32 * pageStride;
+//     const uint32 entryStride64      = entriesPerPage64 * pageStride;
 
-    // #TODO: Get proper offset depending on node count. Or, figure out if we can always have
-    //        the pages of the buffers simply start at the same location
-    const uint32 blockStartPage    = SysHost::NumaGetNodeFromPage( job->blocks  ) == job->node ? 0 : 1;
-    const uint32 yStartPage        = SysHost::NumaGetNodeFromPage( job->yBuffer ) == job->node ? 0 : 1;
-    const uint32 xStartPage        = SysHost::NumaGetNodeFromPage( job->xBuffer ) == job->node ? 0 : 1;
+//     // #TODO: Get proper offset depending on node count. Or, figure out if we can always have
+//     //        the pages of the buffers simply start at the same location
+//     const uint32 blockStartPage    = SysHost::NumaGetNodeFromPage( job->blocks  ) == job->node ? 0 : 1;
+//     const uint32 yStartPage        = SysHost::NumaGetNodeFromPage( job->yBuffer ) == job->node ? 0 : 1;
+//     const uint32 xStartPage        = SysHost::NumaGetNodeFromPage( job->xBuffer ) == job->node ? 0 : 1;
 
-    // const uint64 x                  = job->x;
-    const uint64 x                  = (blockStartPage + pageOffset) * entriesPerPage32;
-    // const uint32 xStride            = pageStride * entriesPerPage;
+//     // const uint64 x                  = job->x;
+//     const uint64 x                  = (blockStartPage + pageOffset) * entriesPerPage32;
+//     // const uint32 xStride            = pageStride * entriesPerPage;
 
-    byte*   blockBytes = job->blocks + (blockStartPage + pageOffset) * pageSize;
-    uint32* blocks     = (uint32*)blockBytes;
+//     byte*   blockBytes = job->blocks + (blockStartPage + pageOffset) * pageSize;
+//     uint32* blocks     = (uint32*)blockBytes;
     
-    uint64* yBuffer    = job->yBuffer + ( yStartPage + pageOffset ) * entriesPerPage64;
-    uint32* xBuffer    = job->xBuffer + ( xStartPage + pageOffset ) * entriesPerPage32;
+//     uint64* yBuffer    = job->yBuffer + ( yStartPage + pageOffset ) * entriesPerPage64;
+//     uint32* xBuffer    = job->xBuffer + ( xStartPage + pageOffset ) * entriesPerPage32;
 
-    chacha8_ctx chacha;
-    ZeroMem( &chacha );
+//     chacha8_ctx chacha;
+//     ZeroMem( &chacha );
 
-    chacha8_keysetup( &chacha, job->key, 256, NULL );
+//     chacha8_keysetup( &chacha, job->key, 256, NULL );
 
-    for( uint64 p = 0; p < pageCount/4; p+=4 )
-    {
-        ASSERT( SysHost::NumaGetNodeFromPage( blockBytes ) == job->node );
+//     for( uint64 p = 0; p < pageCount/4; p+=4 )
+//     {
+//         ASSERT( SysHost::NumaGetNodeFromPage( blockBytes ) == job->node );
 
-        // blockBytes
-        // Which block are we generating?
-        const uint64 blockIdx = ( x + p * entryStride32 ) * _K / kF1BlockSizeBits;
+//         // blockBytes
+//         // Which block are we generating?
+//         const uint64 blockIdx = ( x + p * entryStride32 ) * _K / kF1BlockSizeBits;
 
-        chacha8_get_keystream( &chacha, blockIdx,  blocksPerPage,   blockBytes );
-        chacha8_get_keystream( &chacha, blockIdx + blocksPerPage,   blocksPerPage, blockBytes + blockStride     );
-        chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*2, blocksPerPage, blockBytes + blockStride * 2 );
-        chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*3, blocksPerPage, blockBytes + blockStride * 3 );
-        blockBytes += blockStride * 4;
-    }
+//         chacha8_get_keystream( &chacha, blockIdx,  blocksPerPage,   blockBytes );
+//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage,   blocksPerPage, blockBytes + blockStride     );
+//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*2, blocksPerPage, blockBytes + blockStride * 2 );
+//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*3, blocksPerPage, blockBytes + blockStride * 3 );
+//         blockBytes += blockStride * 4;
+//     }
 
-    for( uint64 p = 0; p < pageCount; p++ )
-    {
-        ASSERT( SysHost::NumaGetNodeFromPage( yBuffer ) == job->node );
-        ASSERT( SysHost::NumaGetNodeFromPage( blocks  ) == job->node );
+//     for( uint64 p = 0; p < pageCount; p++ )
+//     {
+//         ASSERT( SysHost::NumaGetNodeFromPage( yBuffer ) == job->node );
+//         ASSERT( SysHost::NumaGetNodeFromPage( blocks  ) == job->node );
 
-        const uint64 curX = x + p * entryStride32;
+//         const uint64 curX = x + p * entryStride32;
 
-        for( uint64 i = 0; i < entriesPerPage32; i++ )
-        {
-            // chacha output is treated as big endian, therefore swap, as required by chiapos
-            const uint64 y = Swap32( blocks[i] );
-            yBuffer[i] = ( y << kExtraBits ) | ( (curX+i) >> (_K - kExtraBits) );
-        }
+//         for( uint64 i = 0; i < entriesPerPage32; i++ )
+//         {
+//             // chacha output is treated as big endian, therefore swap, as required by chiapos
+//             const uint64 y = Swap32( blocks[i] );
+//             yBuffer[i] = ( y << kExtraBits ) | ( (curX+i) >> (_K - kExtraBits) );
+//         }
         
-        // for( uint64 i = 0; i < 64; i++ )
-        // {
-        //     yBuffer[0] = ( Swap32( blocks[0] ) << kExtraBits ) | ( (curX+0) >> (_K - kExtraBits) );
-        //     yBuffer[1] = ( Swap32( blocks[1] ) << kExtraBits ) | ( (curX+1) >> (_K - kExtraBits) );
-        //     yBuffer[2] = ( Swap32( blocks[2] ) << kExtraBits ) | ( (curX+2) >> (_K - kExtraBits) );
-        //     yBuffer[3] = ( Swap32( blocks[3] ) << kExtraBits ) | ( (curX+3) >> (_K - kExtraBits) );
-        //     yBuffer[4] = ( Swap32( blocks[4] ) << kExtraBits ) | ( (curX+4) >> (_K - kExtraBits) );
-        //     yBuffer[5] = ( Swap32( blocks[5] ) << kExtraBits ) | ( (curX+5) >> (_K - kExtraBits) );
-        //     yBuffer[6] = ( Swap32( blocks[6] ) << kExtraBits ) | ( (curX+6) >> (_K - kExtraBits) );
-        //     yBuffer[7] = ( Swap32( blocks[7] ) << kExtraBits ) | ( (curX+7) >> (_K - kExtraBits) );
+//         // for( uint64 i = 0; i < 64; i++ )
+//         // {
+//         //     yBuffer[0] = ( Swap32( blocks[0] ) << kExtraBits ) | ( (curX+0) >> (_K - kExtraBits) );
+//         //     yBuffer[1] = ( Swap32( blocks[1] ) << kExtraBits ) | ( (curX+1) >> (_K - kExtraBits) );
+//         //     yBuffer[2] = ( Swap32( blocks[2] ) << kExtraBits ) | ( (curX+2) >> (_K - kExtraBits) );
+//         //     yBuffer[3] = ( Swap32( blocks[3] ) << kExtraBits ) | ( (curX+3) >> (_K - kExtraBits) );
+//         //     yBuffer[4] = ( Swap32( blocks[4] ) << kExtraBits ) | ( (curX+4) >> (_K - kExtraBits) );
+//         //     yBuffer[5] = ( Swap32( blocks[5] ) << kExtraBits ) | ( (curX+5) >> (_K - kExtraBits) );
+//         //     yBuffer[6] = ( Swap32( blocks[6] ) << kExtraBits ) | ( (curX+6) >> (_K - kExtraBits) );
+//         //     yBuffer[7] = ( Swap32( blocks[7] ) << kExtraBits ) | ( (curX+7) >> (_K - kExtraBits) );
 
-        //     yBuffer += 8;
-        //     blocks  += 8;
-        // }
+//         //     yBuffer += 8;
+//         //     blocks  += 8;
+//         // }
 
-        // #TODO: This is wrong. We need to fill more y's before w go to the next block page.
-        yBuffer += entryStride64;
-        blocks  += entryStride32;
-    }
+//         // #TODO: This is wrong. We need to fill more y's before w go to the next block page.
+//         yBuffer += entryStride64;
+//         blocks  += entryStride32;
+//     }
 
-    // Gen the x that generated the y
-    for( uint64 p = 0; p < pageCount; p++ )
-    {
-        ASSERT( SysHost::NumaGetNodeFromPage( xBuffer ) == job->node );
+//     // Gen the x that generated the y
+//     for( uint64 p = 0; p < pageCount; p++ )
+//     {
+//         ASSERT( SysHost::NumaGetNodeFromPage( xBuffer ) == job->node );
 
-        const uint32 curX = (uint32)(x + p * entryStride32);
+//         const uint32 curX = (uint32)(x + p * entryStride32);
 
-        for( uint32 i = 0; i < entriesPerPage32; i++ )
-            xBuffer[i] = curX + i;
+//         for( uint32 i = 0; i < entriesPerPage32; i++ )
+//             xBuffer[i] = curX + i;
 
-        xBuffer += entryStride32;
-    }
+//         xBuffer += entryStride32;
+//     }
 
-    // #TODO: Process last part
-}
+//     // #TODO: Process last part
+// }
 
 
 ///

@@ -313,6 +313,9 @@ void SortYJob::SortYThread( SortYJob* job )
     }
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+
 //-----------------------------------------------------------
 template<bool HasSortKey, uint shift, typename YT>
 FORCE_INLINE void SortYJob::SortBucket( const uint64 bucket, const uint offset,
@@ -516,4 +519,6 @@ FORCE_INLINE void SortYBaseJob<JobT>::ReleaseThreads()
     releaseLock  .store( 0, std::memory_order_release );
     finishedCount.store( 0, std::memory_order_release );
 }
+
+#pragma GCC diagnostic pop
 
