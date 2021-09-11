@@ -33,6 +33,7 @@ struct Config
     uint            plotCount          = 1;
     bool            warmStart          = false;
     bool            disableNuma        = false;
+    bool            disableCpuAffinity = false;
 
     bls::G1Element  farmerPublicKey;
     bls::G1Element* poolPublicKey      = nullptr;
@@ -43,6 +44,7 @@ struct Config
     int             maxFailCount       = 100;
 
     const char*     plotId             = nullptr;
+    const char*     plotMemo           = nullptr;
 
 };
 
@@ -99,11 +101,18 @@ OPTIONS:
 
  -i, --plot-id        : Specify a plot id for debugging.
 
+ --memo               : Specify a plot memo for debugging.
+
  -v, --verbose        : Enable verbose output.
 
  -m, --no-numa        : Disable automatic NUMA aware memory binding.
                         If you set this parameter in a NUMA system you
                         will likely get degraded performance.
+
+ --no-cpu-affinity    : Disable assigning automatic thread affinity.
+                        This is useful when running multiple simultaneous
+                        instances of bladebit as you can manually
+                        assign thread affinity yourself when launching bladebit.
 
  --version            : Display current version.
 )";
@@ -137,7 +146,14 @@ int main( int argc, const char* argv[] )
     PlotRequest req;
     ZeroMem( &req );
 
-    MemPlotter plotter( cfg.threads, cfg.warmStart, cfg.disableNuma );
+    // #TODO: Don't let this config to permanently remain on the stack
+    MemPlotConfig plotCfg;
+    plotCfg.threadCount   = cfg.threads;
+    plotCfg.noCPUAffinity = cfg.disableNuma;
+    plotCfg.noCPUAffinity = cfg.disableCpuAffinity;
+    plotCfg.warmStart     = cfg.warmStart;
+
+    MemPlotter plotter( plotCfg );
 
     byte   plotId[32];
     byte   memo  [48+48+32];
@@ -150,8 +166,15 @@ int main( int argc, const char* argv[] )
         // Generate a new plot id
         GeneratePlotIdAndMemo( cfg, plotId, memo, memoSize );
 
+        // Apply debug plot id and/or memo
         if( cfg.plotId )
             HexStrToBytes( cfg.plotId, 64, plotId, 32 );
+
+        if( cfg.plotMemo )
+        {
+            const size_t memoLen = strlen( cfg.plotMemo );
+            HexStrToBytes( cfg.plotMemo, memoLen, memo, memoLen/2 );
+        }
         
         // Convert plot id to string
         {
@@ -300,9 +323,27 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
                     Fatal( "Invalid plot id." );
             }
         }
+        else if( check( "--memo" ) )
+        {
+            cfg.plotMemo = value();
+
+            size_t len = strlen( cfg.plotMemo );
+            if( len > 2 && cfg.plotMemo[0] == '0' && cfg.plotMemo[1] == 'x' )
+            {
+                cfg.plotMemo += 2;
+                len -= 2;
+            }
+            
+            if( len != (48 + 48 + 32) && len != (32 + 48 + 32) )
+                Fatal( "Invalid plot memo." );
+        }
         else if( check( "-m" ) || check( "--no-numa" ) )
         {
             cfg.disableNuma = true;
+        }
+        else if( check( "--no-cpu-affinity" ) )
+        {
+            cfg.disableCpuAffinity = true;
         }
         else if( check( "-v" ) || check( "--verbose" ) )
         {

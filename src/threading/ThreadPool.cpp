@@ -5,11 +5,12 @@
 
 
 //-----------------------------------------------------------
-ThreadPool::ThreadPool( uint threadCount, Mode mode )
+ThreadPool::ThreadPool( uint threadCount, Mode mode, bool disableAffinity )
     : _threadCount( threadCount )
-    , _mode       ( mode )
-    , _jobSignal  ( 0 )
-    , _poolSignal ( 0 )
+    , _mode           ( mode )
+    , _disableAffinity( disableAffinity )
+    , _jobSignal      ( 0 )
+    , _poolSignal     ( 0 )
 {
     if( threadCount < 1 )
         Fatal( "threadCount must be greater than 0." );
@@ -143,7 +144,8 @@ void ThreadPool::FixedThreadRunner( void* tParam )
     ThreadData& d    = *(ThreadData*)tParam;
     ThreadPool& pool = *d.pool;
 
-    SysHost::SetCurrentThreadAffinityCpuId( d.cpuId );
+    if( !pool._disableAffinity )
+        SysHost::SetCurrentThreadAffinityCpuId( d.cpuId );
 
     const uint index = (uint)d.index;
 
@@ -179,7 +181,8 @@ void ThreadPool::GreedyThreadRunner( void* tParam )
     ThreadData& d    = *(ThreadData*)tParam;
     ThreadPool& pool = *d.pool;
 
-    SysHost::SetCurrentThreadAffinityCpuId( d.cpuId );
+    if( !pool._disableAffinity )
+        SysHost::SetCurrentThreadAffinityCpuId( d.cpuId );
 
     for( ;; )
     {

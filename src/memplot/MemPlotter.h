@@ -3,12 +3,20 @@
 
 struct NumaInfo;
 
+struct MemPlotConfig
+{
+    uint threadCount;
+    bool warmStart;
+    bool noNUMA;
+    bool noCPUAffinity;
+};
+
 // This plotter performs the whole plotting process in-memory.
 class MemPlotter
 {
 public:
 
-    MemPlotter( uint threadCount, bool warmStart, bool noNUMA );
+    MemPlotter( const MemPlotConfig& cfg );
     ~MemPlotter();
 
     bool Run( const PlotRequest& request );
