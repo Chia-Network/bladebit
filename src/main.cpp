@@ -346,7 +346,7 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
                 len -= 2;
             }
             
-            if( len != (48 + 48 + 32) && len != (32 + 48 + 32) )
+            if( len/2 != (48 + 48 + 32) && len != (32 + 48 + 32) )
                 Fatal( "Invalid plot memo." );
         }
         else if( check( "--show-memo" ) )
