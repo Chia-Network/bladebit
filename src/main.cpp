@@ -45,7 +45,7 @@ struct Config
 
     const char*     plotId             = nullptr;
     const char*     plotMemo           = nullptr;
-
+    bool            showMemo           = false;
 };
 
 /// Internal Functions
@@ -102,6 +102,8 @@ OPTIONS:
  -i, --plot-id        : Specify a plot id for debugging.
 
  --memo               : Specify a plot memo for debugging.
+
+ --show-memo          : Output the memo of the next plot the be plotted.
 
  -v, --verbose        : Enable verbose output.
 
@@ -199,6 +201,16 @@ int main( int argc, const char* argv[] )
         }
 
         Log::Line( "Generating plot %d / %d: %s", i+1, cfg.plotCount, plotIdStr );
+        if( cfg.showMemo )
+        {
+            char memoStr[(48+48+32)*2 + 1];
+
+            size_t numEncoded = 0;
+            BytesToHexStr( memo, memoSize, memoStr, sizeof( memoStr ) - 1, numEncoded );
+            memoStr[numEncoded] = 0;
+
+            Log::Line( "Plot Memo: %s", memoStr );
+        }
         Log::Line( "" );
 
         // Prepare the request
@@ -336,6 +348,10 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
             
             if( len != (48 + 48 + 32) && len != (32 + 48 + 32) )
                 Fatal( "Invalid plot memo." );
+        }
+        else if( check( "--show-memo" ) )
+        {
+            cfg.showMemo = true;
         }
         else if( check( "-m" ) || check( "--no-numa" ) )
         {

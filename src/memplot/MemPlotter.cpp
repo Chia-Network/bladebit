@@ -15,6 +15,8 @@ MemPlotter::MemPlotter( const MemPlotConfig& cfg )
 {
     ZeroMem( &_context );
 
+    const bool warmStart = cfg.warmStart;
+
     const NumaInfo* numa = nullptr;
     if( !cfg.noNUMA )
         numa = SysHost::GetNUMAInfo();
