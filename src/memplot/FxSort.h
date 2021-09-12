@@ -1,6 +1,7 @@
 #pragma once
 
 #include "algorithm/RadixSort.h"
+#include "algorithm/YSort.h"
 #include "threading/ThreadPool.h"
 #include "ChiaConsts.h"
 #include "PlotContext.h"
@@ -41,12 +42,8 @@ inline void SortFx(
     // Generate a sort key
     GenSortKey<MAX_JOBS>( pool, length, sortKey );
 
-    // Sort on y along with the sort key
-    RadixSort256::SortWithKey<MAX_JOBS>( pool,
-        yBuffer, yTmp,
-        sortKey, sortKeyTmp, 
-        length
-    );
+    YSorter sorter( pool );
+    sorter.Sort( length, yBuffer, yTmp, sortKey, sortKeyTmp );
 }
 
 

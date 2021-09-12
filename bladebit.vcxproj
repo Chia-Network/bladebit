@@ -222,6 +222,7 @@
 <ItemGroup>
   <!-- ClInclude's -->
   <ClInclude Include="src\algorithm\RadixSort.h"/>
+  <ClInclude Include="src\algorithm\YSort.h"/>
   <ClInclude Include="src\b3\blake3_impl.h"/>
   <ClInclude Include="src\b3\blake3.h"/>
   <ClInclude Include="src\bech32\segwit_addr.h"/>
@@ -260,10 +261,12 @@
   <ClInclude Include="src\Types.h"/>
   <ClInclude Include="src\Util.h"/>
   <ClInclude Include="src\util\Log.h"/>
+  <ClInclude Include="src\Version.h"/>
   <ClInclude Include="src\View.h"/>
 </ItemGroup>
 <ItemGroup>
   <!-- ClCompile's -->
+  <ClCompile Include="src\algorithm\YSort.cpp"/>
   <ClCompile Include="src\b3\blake3_avx2.c">
     <ExcludedFromBuild Condition="'$(Configuration)'=='release'">true</ExcludedFromBuild>
     <ExcludedFromBuild Condition="'$(Configuration)'=='debug'">true</ExcludedFromBuild>
@@ -344,6 +347,12 @@
     <ExcludedFromBuild Condition="'$(Configuration)'=='debug.arm'">true</ExcludedFromBuild>
     <ExcludedFromBuild Condition="'$(Configuration)'=='release.arm'">true</ExcludedFromBuild>
   </ClCompile>
+  <ClCompile Include="src\test\test_numa_sort.cpp">
+    <ExcludedFromBuild Condition="'$(Configuration)'=='release'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='debug'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='debug.arm'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='release.arm'">true</ExcludedFromBuild>
+  </ClCompile>
   <ClCompile Include="src\threading\Semaphore.cpp"/>
   <ClCompile Include="src\threading\Thread.cpp"/>
   <ClCompile Include="src\threading\ThreadPool.cpp"/>
@@ -417,6 +426,7 @@
   <ClInclude Include="lib/include/relic/relic_util.h"/>
   <ClInclude Include="lib/include/relic/relic.h"/>
   <ClInclude Include="src/algorithm/RadixSort.h"/>
+  <ClInclude Include="src/algorithm/YSort.h"/>
   <ClInclude Include="src/b3/blake3_impl.h"/>
   <ClInclude Include="src/b3/blake3.h"/>
   <ClInclude Include="src/bech32/segwit_addr.h"/>
@@ -455,6 +465,7 @@
   <ClInclude Include="src/Types.h"/>
   <ClInclude Include="src/Util.h"/>
   <ClInclude Include="src/util/Log.h"/>
+  <ClInclude Include="src/Version.h"/>
   <ClInclude Include="src/View.h"/>
 </ItemGroup>
 

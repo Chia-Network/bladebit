@@ -20,7 +20,7 @@ public:
                     // as there are jobs available.
     };
 
-    ThreadPool( uint threadCount, Mode mode = Mode::Fixed );
+    ThreadPool( uint threadCount, Mode mode = Mode::Fixed, bool disableAffinity = false );
     ~ThreadPool();
 
     void RunJob( JobFunc func, void* data, uint count, size_t dataSize );
@@ -47,7 +47,8 @@ private:
 
 private:
     uint              _threadCount;         // Reserved number of thread running jobs
-    Mode              _mode        = Mode::Greedy;
+    Mode              _mode;
+    bool              _disableAffinity;
     Thread*           _threads;
     ThreadData*       _threadData;
     Semaphore         _jobSignal;           // Used to signal threads that there's a new job

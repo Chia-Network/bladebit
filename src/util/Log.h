@@ -27,6 +27,9 @@ public:
 private:
 
     static FILE* GetOutStream();
+    static FILE* GetErrStream();
+
 private:
     static FILE* _outStream;
+    static FILE* _errStream;
 };

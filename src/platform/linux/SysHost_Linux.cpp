@@ -9,9 +9,9 @@
 #include <numa.h>
 #include <numaif.h>
 
-#if _DEBUG
+// #if _DEBUG
     #include "util/Log.h"
-#endif
+// #endif
 
 std::atomic<bool> _crashed = false;
 
@@ -364,9 +364,33 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
     if( r )
     {
         int err = errno;
-        Log::Error( "Warning: set_mempolicy() failed with error %d (0x%x).", err, err );
+        Log::Error( "Warning: mbind() failed with error %d (0x%x).", err, err );
     }
     #endif
 
     return r == 0;
+}
+
+//-----------------------------------------------------------
+int SysHost::NumaGetNodeFromPage( void* ptr )
+{
+    const NumaInfo* numa = GetNUMAInfo();
+    if( !numa )
+        return -1;
+
+    int node = -1;
+    int r = numa_move_pages( 0, 1, &ptr, nullptr, &node, 0 );
+
+    if( r )
+    {
+        int err = errno;
+        Log::Error( "Warning: numa_move_pages() failed with error %d (0x%x).", err, err );
+    }
+    else if( node < 0 )
+    {
+        int err = std::abs( node );
+        Log::Error( "Warning: numa_move_pages() node retrieval failed with error %d (0x%x).", err, err );
+    }
+
+    return node;
 }

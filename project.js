@@ -158,6 +158,7 @@ bladebit.configs.test = () => config({
     ,src: [
 
         'src/test/test_main.cpp'
+        ,'src/test/test_numa_sort.cpp'
         // ,'src/test/TestNuma.cpp'
     ]
 

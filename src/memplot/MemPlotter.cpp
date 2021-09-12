@@ -11,12 +11,14 @@
 
 
 //----------------------------------------------------------
-MemPlotter::MemPlotter( uint threadCount, bool warmStart, bool noNUMA )
+MemPlotter::MemPlotter( const MemPlotConfig& cfg )
 {
     ZeroMem( &_context );
 
+    const bool warmStart = cfg.warmStart;
+
     const NumaInfo* numa = nullptr;
-    if( !noNUMA )
+    if( !cfg.noNUMA )
         numa = SysHost::GetNUMAInfo();
     
     if( numa && numa->nodeCount < 2 )
@@ -24,14 +26,14 @@ MemPlotter::MemPlotter( uint threadCount, bool warmStart, bool noNUMA )
     
     if( numa )
     {
-        if( !SysHost::NumaSetThreadInterleavedMode() )
-            Log::Error( "Warning: Failed to set NUMA interleaved mode." );
+        // if( !SysHost::NumaSetThreadInterleavedMode() )
+        //     Log::Error( "Warning: Failed to set NUMA interleaved mode." );
     }
 
-    _context.threadCount = threadCount;
+    _context.threadCount = cfg.threadCount;
     
     // Create a thread pool
-    _context.threadPool = new ThreadPool( threadCount, ThreadPool::Mode::Greedy );
+    _context.threadPool = new ThreadPool( cfg.threadCount, ThreadPool::Mode::Fixed, cfg.noCPUAffinity );
 
     // Allocate buffers
     {
