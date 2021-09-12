@@ -1,7 +1,7 @@
 #pragma once
 
 #define BLADEBIT_VERSION_MAJ 1
-#define BLADEBIT_VERSION_MIN 0
+#define BLADEBIT_VERSION_MIN 1
 #define BLADEBIT_VERSION_REV 0
 
 #define BLADEBIT_VERSION \
