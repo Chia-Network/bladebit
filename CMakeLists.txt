@@ -37,6 +37,11 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_C_FLGS} ${CMAKE_CXX_FLAGS}")
 
 # Main Sources
+include_directories(
+    ${INCLUDE_DIRECTORIES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 file(GLOB_RECURSE bb_sources
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     CONFIGURE_DEPENDS
@@ -104,10 +109,19 @@ if(${CMAKE_BUILD_TYPE} MATCHES "(release|debug)\.test")
     list(APPEND bb_sources ${src_test})
 endif()
 
+# Exe
 add_executable(bladebit ${bb_sources})
 
+# Libs
+find_package(Threads REQUIRED)
 
+set(platform_libs)
 
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    set(platform_libs numa)
+endif()
+
+target_link_libraries(bladebit Threads::Threads bls ${platform_libs})
 
 # message("${bb_sources}")
 # message( "${CMAKE_SYSTEM_NAME}" )
