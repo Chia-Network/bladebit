@@ -16,3 +16,4 @@ dist/
 park*_hash.txt
 
 lib/*
+build/
