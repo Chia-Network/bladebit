@@ -151,7 +151,7 @@ int main( int argc, const char* argv[] )
     // #TODO: Don't let this config to permanently remain on the stack
     MemPlotConfig plotCfg;
     plotCfg.threadCount   = cfg.threads;
-    plotCfg.noCPUAffinity = cfg.disableNuma;
+    plotCfg.noNUMA        = cfg.disableNuma;
     plotCfg.noCPUAffinity = cfg.disableCpuAffinity;
     plotCfg.warmStart     = cfg.warmStart;
 
