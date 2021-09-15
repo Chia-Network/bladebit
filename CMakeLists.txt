@@ -17,7 +17,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     set(CMAKE_C_FLGS " ${CMAKE_C_FLAGS}")
 else()
 
-    set(CMAKE_C_FLGS "-Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
+    set(CMAKE_C_FLGS "--include=src/pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 
     if(${CMAKE_BUILD_TYPE} MATCHES "(release)\.?.*")
