@@ -71,9 +71,7 @@ You can support me by donating to:
 
 
 ## License
-Licensed under AGPLv3 See [LICENSE](LICENSE).
-For special licensing for commercial use, please contact me.
-
+Licensed under the [Apache 2.0 license](https://www.apache.org/licenses/LICENSE-2.0). See [LICENSE](LICENSE).
 
 ## Build Tools
 This project synchronizes Makefiles, VS project files and VS Code c_cpp_properties.json files by a custom tool called psync which is not currently published. I created the tool a while back for cross-platform game engine development and it is scrappy-ly coded and unclean. At some point I will publish it to facilitate development.
