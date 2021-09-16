@@ -5,11 +5,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project(bladebit)
 
-set(CMAKE_CONFIGURATION_TYPES release debug release.test debug.test)
+set(CMAKE_CONFIGURATION_TYPES release debug)# release_dev debug_dev)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "release"
-        CACHE STRING "Possible values are: release, debug, release.test, debug.test"
+        CACHE STRING "Possible values are: release, debug, release_dev, debug_dev"
         FORCE
    )
 endif()
@@ -73,7 +73,7 @@ list(FILTER bb_sources EXCLUDE REGEX "src/(test|platform)/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
 
 # Architecture
-if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64")
+if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "AMD64")
     list(APPEND bb_sources
         src/b3/blake3_avx2.c
         src/b3/blake3_avx512.c
@@ -123,13 +123,13 @@ else()
     message( FATAL_ERROR "Unsupported operating system '${CMAKE_SYSTEM_NAME}'" )
 endif()
 
-# Test config?
-if(${CMAKE_BUILD_TYPE} MATCHES "(release|debug)\.test")
-    file(GLOB_RECURSE src_test RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
+# Dev config?
+if(${CMAKE_BUILD_TYPE} MATCHES "(release|debug)_dev")
+    file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
         CONFIGURE_DEPENDS LIST_DIRECTORIES false
         src/test/*.cpp
     )
-    list(APPEND bb_sources ${src_test})
+    list(APPEND bb_sources ${src_dev})
 endif()
 
 
