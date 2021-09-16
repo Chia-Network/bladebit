@@ -17,3 +17,4 @@ park*_hash.txt
 
 lib/*
 build/
+cmake_modules/
