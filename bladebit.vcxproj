@@ -337,8 +337,17 @@
     <ExcludedFromBuild Condition="'$(Configuration)'=='debug.test'">true</ExcludedFromBuild>
     <ExcludedFromBuild Condition="'$(Configuration)'=='release.test'">true</ExcludedFromBuild>
   </ClCompile>
+  <ClCompile Include="src\platform\unix\Thread_Unix.cpp">
+    <ExcludedFromBuild Condition="'$(Configuration)'=='release'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='debug'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='debug.arm'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='release.arm'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='debug.test'">true</ExcludedFromBuild>
+    <ExcludedFromBuild Condition="'$(Configuration)'=='release.test'">true</ExcludedFromBuild>
+  </ClCompile>
   <ClCompile Include="src\platform\win32\FileStream_Win32.cpp"/>
   <ClCompile Include="src\platform\win32\SysHost_Win32.cpp"/>
+  <ClCompile Include="src\platform\win32\Thread_Win32.cpp"/>
   <ClCompile Include="src\PlotContext.cpp"/>
   <ClCompile Include="src\PlotWriter.cpp"/>
   <ClCompile Include="src\pos\chacha8.cpp"/>
@@ -356,7 +365,6 @@
     <ExcludedFromBuild Condition="'$(Configuration)'=='release.arm'">true</ExcludedFromBuild>
   </ClCompile>
   <ClCompile Include="src\threading\Semaphore.cpp"/>
-  <ClCompile Include="src\threading\Thread.cpp"/>
   <ClCompile Include="src\threading\ThreadPool.cpp"/>
   <ClCompile Include="src\Util.cpp"/>
   <ClCompile Include="src\util\Log.cpp"/>

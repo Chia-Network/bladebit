@@ -23,12 +23,12 @@ SOURCES += \
 	src/pch.cpp \
 	src/platform/linux/SysHost_Linux.cpp \
 	src/platform/unix/FileStream_Unix.cpp \
+	src/platform/unix/Thread_Unix.cpp \
 	src/PlotContext.cpp \
 	src/PlotWriter.cpp \
 	src/pos/chacha8.cpp \
 	src/SysHost.cpp \
 	src/threading/Semaphore.cpp \
-	src/threading/Thread.cpp \
 	src/threading/ThreadPool.cpp \
 	src/Util.cpp \
 	src/util/Log.cpp 

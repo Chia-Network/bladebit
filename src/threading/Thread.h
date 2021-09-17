@@ -29,7 +29,7 @@ private:
     #if PLATFORM_IS_UNIX
         static void* ThreadStarterUnix( Thread* thread );
     #elif PLATFORM_IS_WINDOWS
-        static void* ThreadStarterWin( LPVOID );
+        static DWORD ThreadStarterWin( LPVOID );
     #else
         #error Unimplemented
     #endif

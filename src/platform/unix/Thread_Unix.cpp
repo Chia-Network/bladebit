@@ -1,12 +1,10 @@
-#include "Thread.h"
-#include "../Util.h"
-#include "../Globals.h"
+#include "../../threading/Thread.h"
+#include "../../Util.h"
+#include "../../Globals.h"
 #include "SysHost.h"
 #include "util/Log.h"
 
 typedef void* (*PthreadFunc)( void* param );
-// typedef __start_routine PthreadFunc;
-
 
 //-----------------------------------------------------------
 Thread::Thread( size_t stackSize )
@@ -63,7 +61,7 @@ Thread::~Thread()
 
     if( !didExit )
     {
-        // Thread shold have exited already
+        // Thread should have exited already
         #if PLATFORM_IS_UNIX
             pthread_cancel( _threadId );
 
@@ -198,7 +196,6 @@ bool Thread::WaitForExit( long milliseconds )
 
 // Starts up a thread.
 //-----------------------------------------------------------
-#if PLATFORM_IS_UNIX
 void* Thread::ThreadStarterUnix( Thread* t )
 {
     // On Linux, it suspends it until it is signaled to run.
@@ -232,14 +229,4 @@ void* Thread::ThreadStarterUnix( Thread* t )
     
     return nullptr;
 }
-
-#elif PLATFORM_IS_WINDOWS
-
-//-----------------------------------------------------------
-void* Thread::ThreadStarterWin( LPVOID param )
-{
-    
-}
-
-#endif
 

@@ -410,10 +410,16 @@
     <ClCompile Include="src\platform\unix\FileStream_Unix.cpp">
       <Filter>src\platform\unix</Filter>
     </ClCompile>
+    <ClCompile Include="src\platform\unix\Thread_Unix.cpp">
+      <Filter>src\platform\unix</Filter>
+    </ClCompile>
     <ClCompile Include="src\platform\win32\FileStream_Win32.cpp">
       <Filter>src\platform\win32</Filter>
     </ClCompile>
     <ClCompile Include="src\platform\win32\SysHost_Win32.cpp">
+      <Filter>src\platform\win32</Filter>
+    </ClCompile>
+    <ClCompile Include="src\platform\win32\Thread_Win32.cpp">
       <Filter>src\platform\win32</Filter>
     </ClCompile>
     <ClCompile Include="src\PlotContext.cpp">
@@ -435,9 +441,6 @@
       <Filter>src\test</Filter>
     </ClCompile>
     <ClCompile Include="src\threading\Semaphore.cpp">
-      <Filter>src\threading</Filter>
-    </ClCompile>
-    <ClCompile Include="src\threading\Thread.cpp">
       <Filter>src\threading</Filter>
     </ClCompile>
     <ClCompile Include="src\threading\ThreadPool.cpp">

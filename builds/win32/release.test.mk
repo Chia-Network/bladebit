@@ -25,6 +25,7 @@ SOURCES += \
 	src/pch.cpp \
 	src/platform/win32/FileStream_Win32.cpp \
 	src/platform/win32/SysHost_Win32.cpp \
+	src/platform/win32/Thread_Win32.cpp \
 	src/PlotContext.cpp \
 	src/PlotWriter.cpp \
 	src/pos/chacha8.cpp \
@@ -32,7 +33,6 @@ SOURCES += \
 	src/test/test_main.cpp \
 	src/test/test_numa_sort.cpp \
 	src/threading/Semaphore.cpp \
-	src/threading/Thread.cpp \
 	src/threading/ThreadPool.cpp \
 	src/Util.cpp \
 	src/util/Log.cpp 
