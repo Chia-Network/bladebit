@@ -106,7 +106,7 @@ void PrintHash( FILE* file, uint64 index, const void* input, size_t inputSize )
     blake3_hasher_update( &hasher, input, inputSize );
     blake3_hasher_finalize( &hasher, (uint8_t*)hash, sizeof( hash ) );
     
-    fprintf( file, "[%-12lu] 0x", index );
+    fprintf( file, "[%-12llu] 0x", index );
     for( uint64 i = 0; i < sizeof( hash ); i+=16 )
     {
         fprintf( file, 

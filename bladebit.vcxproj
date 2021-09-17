@@ -96,7 +96,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>$(PCHFile)</PrecompiledHeaderFile>
       -->
-      <AdditionalOptions>/FIsrc\pch.h /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/FIsrc\pch.h /Zc:__cplusplus /wd4068 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
