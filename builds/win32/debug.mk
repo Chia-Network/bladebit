@@ -24,6 +24,7 @@ SOURCES += \
 	src/memplot/MemPhase4.cpp \
 	src/memplot/MemPlotter.cpp \
 	src/pch.cpp \
+	src/platform/win32/FileStream_Win32.cpp \
 	src/platform/win32/SysHost_Win32.cpp \
 	src/PlotContext.cpp \
 	src/PlotWriter.cpp \

@@ -1,4 +1,5 @@
 #pragma once
+#include "Platform.h"
 
 enum class FileAccess : uint16
 {
@@ -58,7 +59,15 @@ public:
 
     bool Flush();
 
-    inline size_t BlockSize() { return _blockSize; }
+    inline size_t BlockSize()
+    {
+        #if PLATFORM_IS_UNIX
+            return _blockSize; 
+        #else
+            // #TODO: Get block size on windows, if we need it
+            return 4096;
+        #endif
+    }
 
     void Close();
 
@@ -72,7 +81,15 @@ public:
 
         return err;
     }
-
+private:
+    inline bool HasValidFD()
+    {
+        #if PLATFORM_IS_UNIX
+            return _fd != -1;
+        #else
+            return _fd != INVALID_HANDLE_VALUE;
+        #endif
+    }
 
 private:
     size_t     _writePosition = 0;
@@ -82,9 +99,11 @@ private:
     int        _error         = 0;
 
     #if PLATFORM_IS_UNIX
-        int    _fd = -1;
+        int    _fd          = -1;
         size_t _blockSize   = 0;        // for O_DIRECT
         // byte*  _blockBuffer = nullptr;  // for O_DIRECT
         // uint32 _blockBytes  = 0;        // Pending block-unaligned bytes to be written to disk.
+    #elif PLATFORM_IS_WINDOWS
+        HANDLE _fd          = INVALID_HANDLE_VALUE;
     #endif
 };

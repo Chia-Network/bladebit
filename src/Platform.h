@@ -6,6 +6,7 @@
     #include <Windows.h>
 
     typedef HANDLE ThreadId;
+    typedef HANDLE SemaphoreId;
 
 // *nix
 #elif __linux__ || __APPLE__

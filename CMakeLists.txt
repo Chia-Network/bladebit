@@ -16,11 +16,6 @@ endif()
 message("Config: ${CMAKE_BUILD_TYPE}")
 
 # Grab BLS
-set(CMAKE_MODULE_PATH
-  ${CMAKE_MODULE_PATH}
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules
-)
-
 include(FetchContent)
 
 set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")

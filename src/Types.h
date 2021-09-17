@@ -10,6 +10,10 @@ typedef uint64_t            uint64;
     typedef uint32          uint;
 #endif
 
+#if !ssize_t
+    typedef int64_t         ssize_t;
+#endif
+
 typedef uint8  u8;
 typedef uint16 u16;
 typedef uint32 u32;

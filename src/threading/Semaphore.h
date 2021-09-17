@@ -18,4 +18,8 @@ public:
 
 private:
     SemaphoreId _id;
+
+#if PLATFORM_IS_WINDOWS
+    std::atomic<int> _count;
+#endif
 };

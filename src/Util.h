@@ -4,6 +4,7 @@
 #include <string.h>
 
 #ifdef _MSC_VER
+    #define Swap16( x ) _byteswap_ushort( x )
     #define Swap32( x ) _byteswap_ulong( x )
     #define Swap64( x ) _byteswap_uint64( x )
 #elif defined( __GNUC__ )
