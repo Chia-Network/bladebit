@@ -178,8 +178,8 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
 //----------------------------------------------------------
 bool FileStream::Reserve( ssize_t size )
 {
-    // #TODO: Use https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfilevaliddata
-    //        SetFileValidData()
+    // #TODO: Use SetFileValidData()?
+    // #See: https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfilevaliddata
     
     return false;
 }

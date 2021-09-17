@@ -7,6 +7,7 @@
 typedef void* (*PthreadFunc)( void* param );
 // typedef __start_routine PthreadFunc;
 
+
 //-----------------------------------------------------------
 Thread::Thread( size_t stackSize )
 {
@@ -17,9 +18,9 @@ Thread::Thread( size_t stackSize )
     // Align to 8 bytes
     stackSize = RoundUpToNextBoundary( stackSize, 8 );
 
-#if PLATFORM_IS_UNIX
-
     _state.store( ThreadState::ReadyToRun, std::memory_order_release );
+
+#if PLATFORM_IS_UNIX
 
     pthread_attr_t  attr;
     
@@ -41,6 +42,9 @@ Thread::Thread( size_t stackSize )
     
     r = pthread_attr_destroy( &attr );
     if( r ) Fatal( "pthread_attr_destroy() failed." );
+
+#elif PLATFORM_IS_WINDOWS
+    
 
 #else
     #error Not implemented
@@ -194,46 +198,48 @@ bool Thread::WaitForExit( long milliseconds )
 
 // Starts up a thread.
 //-----------------------------------------------------------
-void* Thread::ThreadStarter( Thread* t )
+#if PLATFORM_IS_UNIX
+void* Thread::ThreadStarterUnix( Thread* t )
 {
-    // On linux, it suspends it until it is signalled to run.
-    #if PLATFORM_IS_UNIX
+    // On Linux, it suspends it until it is signaled to run.
+    int r = pthread_mutex_lock( &t->_launchMutex );
+    if( r ) Fatal( "pthread_mutex_lock() failed." );
 
-        int r = pthread_mutex_lock( &t->_launchMutex );
-        if( r ) Fatal( "pthread_mutex_lock() failed." );
+    while( t->_state.load( std::memory_order_relaxed ) == ThreadState::ReadyToRun )
+    {
+        r = pthread_cond_wait( &t->_launchCond, &t->_launchMutex );
+        if( r ) Fatal( "pthread_cond_wait() failed." );
+        break;
+    }
 
-        while( t->_state.load( std::memory_order_relaxed ) == ThreadState::ReadyToRun )
-        {
-            r = pthread_cond_wait( &t->_launchCond, &t->_launchMutex );
-            if( r ) Fatal( "pthread_cond_wait() failed." );
-            break;
-        }
+    r = pthread_mutex_unlock( &t->_launchMutex );
+    if( r ) Fatal( "pthread_mutex_unlock() failed." );
 
-        r = pthread_mutex_unlock( &t->_launchMutex );
-        if( r ) Fatal( "pthread_mutex_unlock() failed." );
+    pthread_mutex_destroy( &t->_launchMutex );
+    pthread_cond_destroy ( &t->_launchCond  );
 
-        pthread_mutex_destroy( &t->_launchMutex );
-        pthread_cond_destroy ( &t->_launchCond  );
-
-        ZeroMem( &t->_launchMutex );
-        ZeroMem( &t->_launchCond  );
-
-    #else
-        #error Unimplemented
-    #endif
+    ZeroMem( &t->_launchMutex );
+    ZeroMem( &t->_launchCond  );
 
     // Run the thread function
     t->_runner( t->_runParam );
 
     // Thread has exited
     t->_state.store( ThreadState::Exited, std::memory_order_release );
-
-    #if PLATFORM_IS_UNIX
-        // TODO: Signal if waiting to be joined
-        pthread_exit( nullptr );
-    #else
-        #error Unimplemented
-    #endif
-
+    
+    // TODO: Signal if waiting to be joined
+    pthread_exit( nullptr );
+    
     return nullptr;
 }
+
+#elif PLATFORM_IS_WINDOWS
+
+//-----------------------------------------------------------
+void* Thread::ThreadStarterWin( LPVOID param )
+{
+    
+}
+
+#endif
+

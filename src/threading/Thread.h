@@ -25,7 +25,14 @@ public:
     bool HasExited() const;
 
 private:
-    static void* ThreadStarter( Thread* thread );
+    
+    #if PLATFORM_IS_UNIX
+        static void* ThreadStarterUnix( Thread* thread );
+    #elif PLATFORM_IS_WINDOWS
+        static void* ThreadStarterWin( LPVOID );
+    #else
+        #error Unimplemented
+    #endif
 
 private:
     ThreadId     _threadId = 0;
