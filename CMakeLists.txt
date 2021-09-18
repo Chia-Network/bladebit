@@ -144,8 +144,18 @@ file(GLOB_RECURSE bb_sources
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     CONFIGURE_DEPENDS
     LIST_DIRECTORIES false
-    src/**/*.cpp
-    src/**/*.c
+    src/*.cpp
+    src/*.c
+)
+
+# Headrs
+file(GLOB_RECURSE bb_headers
+    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+    CONFIGURE_DEPENDS
+    LIST_DIRECTORIES false
+    src/*.h
+    src/*.hpp
+    src/*.inl
 )
 
 # Configure dependent on config/platform/architecture
@@ -225,7 +235,7 @@ endif()
 # Exe
 find_package(Threads REQUIRED)
 
-add_executable(bladebit ${bb_sources})
+add_executable(bladebit ${bb_sources} ${bb_headers})
 
 target_include_directories(bladebit
     PRIVATE
