@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project(bladebit)
 
-set(CMAKE_CONFIGURATION_TYPES release debug)# release_dev debug_dev)
+set(CMAKE_CONFIGURATION_TYPES release debug release_dev debug_dev)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "release"
@@ -14,6 +14,7 @@ if(NOT CMAKE_BUILD_TYPE)
    )
 endif()
 message("Config: ${CMAKE_BUILD_TYPE}")
+
 
 # Grab BLS
 include(FetchContent)
@@ -29,30 +30,107 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(bls)
 
+set(release_c_opts)
+set(debug_c_opts)
+set(dev_c_opts)
+
+set(release_link_opts)
+set(debug_link_opts)
 
 # Config
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
-    set(CMAKE_C_FLGS " ${CMAKE_C_FLAGS}")
+
+    # MSVC
+    set(CMAKE_C_FLAGS "
+        /std:c++17
+        /Zc:__cplusplus 
+        /D_HAS_EXCEPTIONS=0
+        /MP
+        /Zi
+        /Wall
+        /WX
+        /FIsrc\\pch.h 
+        /wd4068
+        /DUNICODE=1
+        /DWIN32_LEAN_AND_MEAN=1
+        ${CMAKE_C_FLAGS}")
+    
+    set(CMAKE_EXE_LINKER_FLAGS "
+        /SUBSYSTEM:WINDOWS
+        ${CMAKE_EXE_LINKER_FLAGS}")
+
+    set(release_c_opts "
+        /MT
+        /O2
+        /Oi
+        /Gy
+        /GL
+        /DNDEBUG=1
+        /DNDEBUG=1
+        ${release_c_opts}")
+
+    set(debug_c_opts "
+        /MTd
+        /Od
+        ${debug_c_opts}")
+
+    set(dev_c_opts "
+        ${dev_c_opts}")
+
+    
+    set(release_link_opts "
+        /DEBUG:FULL
+        /OPT:REF,IFC,LBR
+        ${release_link_opts}")
+
+    set(debug_link_opts "
+        /DEBUG:FASTLINK
+        /OPT:NOREF,NOICF,NOLBR
+        /INCREMENTAL
+        ${debug_link_opts}")
+    
 else()
 
-    set(CMAKE_C_FLGS "--include=src/pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
+    # *Nix
+    set(CMAKE_C_FLAGS "--include=src/pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
 
     if(${CMAKE_BUILD_TYPE} MATCHES "(release)\.?.*")
-        set(CMAKE_C_FLGS "-O3 -flto ${CMAKE_C_FLAGS}")
+        set(CMAKE_C_FLAGS "-O3 -flto ${CMAKE_C_FLAGS}")
     else()
-        set(CMAKE_C_FLGS "-O0 ${CMAKE_C_FLAGS}")
+        set(CMAKE_C_FLAGS "-O0 ${CMAKE_C_FLAGS}")
     endif()
 
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-        set(CMAKE_C_FLGS "-fmax-errors=5 ${CMAKE_C_FLAGS}")
+    
+        # GCC
+        set(CMAKE_C_FLAGS "-fmax-errors=5 ${CMAKE_C_FLAGS}")
+
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-        set(CMAKE_C_FLGS "-ferror-limit=5 -fdeclspec -fno-exceptions -Wunknown-pragmas ${CMAKE_C_FLAGS}")
+        
+        # Clang
+        set(CMAKE_C_FLAGS "-ferror-limit=5 -fdeclspec -fno-exceptions -Wunknown-pragmas ${CMAKE_C_FLAGS}")
+
     endif()
 
 endif()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLGS} ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS}")
+
+set(CMAKE_C_FLAGS_RELEASE       "${CMAKE_C_FLAGS} ${release_c_opts}")
+set(CMAKE_C_FLAGS_DEBUG         "${CMAKE_C_FLAGS} ${debug_c_opts}")
+set(CMAKE_C_FLAGS_RELEASE_DEV   "${CMAKE_C_FLAGS_RELEASE} ${dev_c_opts}")
+set(CMAKE_C_FLAGS_DEBUG_DEV     "${CMAKE_C_FLAGS_DEBUG} ${dev_c_opts}")
+
+set(CMAKE_CXX_FLAGS_RELEASE     "${CMAKE_CXX_FLAGS} ${release_c_opts}")
+set(CMAKE_CXX_FLAGS_DEBUG       "${CMAKE_CXX_FLAGS} ${debug_c_opts}")
+set(CMAKE_CXX_FLAGS_RELEASE_DEV "${CMAKE_CXX_FLAGS_RELEASE} ${dev_c_opts}")
+set(CMAKE_CXX_FLAGS_DEBUG_DEV   "${CMAKE_CXX_FLAGS_DEBUG} ${dev_c_opts}")
+
+set(CMAKE_EXE_LINKER_FLAGS_RELEASE      "${CMAKE_EXE_LINKER_FLAGS} ${release_link_opts}" )
+set(CMAKE_EXE_LINKER_FLAGS_DEBUG        "${CMAKE_EXE_LINKER_FLAGS} ${debug_link_opts}" )
+set(CMAKE_EXE_LINKER_FLAGS_RELEASE_DEV  "${CMAKE_EXE_LINKER_FLAGS_RELEASE}" )
+set(CMAKE_EXE_LINKER_FLAGS_DEBUG_DEV    "${CMAKE_EXE_LINKER_FLAGS_DEBUG}" )
 
 # Main Sources
 file(GLOB_RECURSE bb_sources
