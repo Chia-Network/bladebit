@@ -95,20 +95,25 @@ else()
     set(CMAKE_C_FLAGS "--include=src/pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
 
-    if(${CMAKE_BUILD_TYPE} MATCHES "(release)\.?.*")
-        set(CMAKE_C_FLAGS "-O3 -flto ${CMAKE_C_FLAGS}")
-    else()
-        set(CMAKE_C_FLAGS "-O0 ${CMAKE_C_FLAGS}")
-    endif()
+    set(release_c_opts "
+        -O3 -flto
+        ${release_c_opts}")
 
+    set(debug_c_opts "
+        -O0
+        ${debug_c_opts}")
+
+    set(dev_c_opts "
+        ${dev_c_opts}")
+
+    # GCC
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     
-        # GCC
         set(CMAKE_C_FLAGS "-fmax-errors=5 ${CMAKE_C_FLAGS}")
 
+    # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         
-        # Clang
         set(CMAKE_C_FLAGS "-ferror-limit=5 -fdeclspec -fno-exceptions -Wunknown-pragmas ${CMAKE_C_FLAGS}")
 
     endif()
