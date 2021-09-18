@@ -56,13 +56,13 @@ inline void MapFxWithSortKey(
     const Pair*   pairSrc, Pair*   pairDst )
 {
     // Sort metadata and pairs on y via the sort key
-    const uint64 threadCount      = pool.ThreadCount();
+    const uint32 threadCount      = pool.ThreadCount();
     const uint64 entriesPerThread = length / threadCount;
     const uint64 trailingEntries  = length - ( entriesPerThread * threadCount );
 
     MapFxJob<TMeta> jobs[MAX_JOBS];
 
-    for( uint64 i = 0; i < threadCount; i++ )
+    for( uint32 i = 0; i < threadCount; i++ )
     {
         auto& job = jobs[i];
 

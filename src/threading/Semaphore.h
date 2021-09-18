@@ -1,5 +1,6 @@
 #pragma once
 #include "Platform.h"
+#include <atomic>
 
 /// These are lightweight single-process semaphores.
 /// (As opposed to system-wide "named" semaphores)

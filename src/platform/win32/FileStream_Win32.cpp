@@ -187,8 +187,6 @@ bool FileStream::Reserve( ssize_t size )
 //----------------------------------------------------------
 bool FileStream::Seek( int64 offset, SeekOrigin origin )
 {
-    uint64 position;
-
     if( !IsOpen() || !HasValidFD() )
         return false;
 

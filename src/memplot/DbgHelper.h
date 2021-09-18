@@ -83,7 +83,7 @@ inline bool DbgReadTableFromFile( ThreadPool& pool, const char* path, uint64& ou
             if( !block )
             {
                 Log::Line( "Failed to allocate aligned block." );
-                return;
+                return false;
             }
         #endif
     }
@@ -266,7 +266,7 @@ inline void DbgWriteTableToFile( ThreadPool& pool, const char* path, uint64 entr
 
     ASSERT( size > blockSize );
 
-    if( !file.Reserve( blockSize + CDiv( size, blockSize ) ) )
+    if( !file.Reserve( blockSize + CDiv( size, (int)blockSize ) ) )
     {
         Log::Line( "Failed to reserve size with error %d for table '%s'.", file.GetError(), path );
     }

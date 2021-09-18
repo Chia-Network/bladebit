@@ -49,10 +49,12 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /Zi
         /Wall
         /WX
-        /FIsrc\\pch.h 
+        /FIpch.h 
         /wd4068
         /DUNICODE=1
         /DWIN32_LEAN_AND_MEAN=1
+        /DNOMINMAX=1
+        /D_CRT_SECURE_NO_WARNINGS=1
         ${CMAKE_C_FLAGS}")
     
     set(CMAKE_EXE_LINKER_FLAGS "
@@ -92,7 +94,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 else()
 
     # *Nix
-    set(CMAKE_C_FLAGS "--include=src/pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
+    set(CMAKE_C_FLAGS "--include=pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
 
     set(release_c_opts "
@@ -163,6 +165,15 @@ if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCES
             src/b3/blake3_avx2_x86-64_unix.S
             src/b3/blake3_avx512_x86-64_unix.S
             src/b3/blake3_sse41_x86-64_unix.S
+        )
+    else()
+        # Disable blake3 convertion loss of data warnings 
+        set_source_files_properties( 
+            src/b3/blake3_avx2.c
+            src/b3/blake3_avx512.c
+            src/b3/blake3_sse41.c
+            PROPERTIES COMPILE_FLAGS
+            "/wd4244"
         )
     endif()
 elseif(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "aarch64")
