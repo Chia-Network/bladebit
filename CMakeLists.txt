@@ -121,26 +121,26 @@ else()
     set(CMAKE_C_FLAGS "--include=pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
 
-    set(release_c_opts "
+    set(release_c_opts 
         -O3 -flto
-        ${release_c_opts}")
+        ${release_c_opts})
 
-    set(debug_c_opts "
+    set(debug_c_opts 
         -O0
-        ${debug_c_opts}")
+        ${debug_c_opts})
 
-    set(dev_c_opts "
-        ${dev_c_opts}")
+    set(dev_c_opts 
+        ${dev_c_opts})
 
     # GCC
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     
-        set(CMAKE_C_FLAGS "-fmax-errors=5 ${CMAKE_C_FLAGS}")
+        set(CMAKE_C_FLAGS -fmax-errors=5 ${CMAKE_C_FLAGS})
 
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         
-        set(CMAKE_C_FLAGS "-ferror-limit=5 -fdeclspec -fno-exceptions -Wunknown-pragmas ${CMAKE_C_FLAGS}")
+        set(CMAKE_C_FLAGS -ferror-limit=5 -fdeclspec -fno-exceptions -Wunknown-pragmas ${CMAKE_C_FLAGS})
 
     endif()
 
