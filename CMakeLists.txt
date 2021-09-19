@@ -133,22 +133,6 @@ else()
 
 endif()
 
-# set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS}")
-
-# set(CMAKE_C_FLAGS_RELEASE       "${CMAKE_C_FLAGS} ${release_c_opts}")
-# set(CMAKE_C_FLAGS_DEBUG         "${CMAKE_C_FLAGS} ${debug_c_opts}")
-# set(CMAKE_C_FLAGS_RELEASE_DEV   "${CMAKE_C_FLAGS_RELEASE} ${dev_c_opts}")
-# set(CMAKE_C_FLAGS_DEBUG_DEV     "${CMAKE_C_FLAGS_DEBUG} ${dev_c_opts}")
-
-# set(CMAKE_CXX_FLAGS_RELEASE     "${CMAKE_CXX_FLAGS} ${release_c_opts}")
-# set(CMAKE_CXX_FLAGS_DEBUG       "${CMAKE_CXX_FLAGS} ${debug_c_opts}")
-# set(CMAKE_CXX_FLAGS_RELEASE_DEV "${CMAKE_CXX_FLAGS_RELEASE} ${dev_c_opts}")
-# set(CMAKE_CXX_FLAGS_DEBUG_DEV   "${CMAKE_CXX_FLAGS_DEBUG} ${dev_c_opts}")
-
-# set(CMAKE_EXE_LINKER_FLAGS_RELEASE      "${CMAKE_EXE_LINKER_FLAGS} ${release_link_opts}" )
-# set(CMAKE_EXE_LINKER_FLAGS_DEBUG        "${CMAKE_EXE_LINKER_FLAGS} ${debug_link_opts}" )
-# set(CMAKE_EXE_LINKER_FLAGS_RELEASE_DEV  "${CMAKE_EXE_LINKER_FLAGS_RELEASE}" )
-# set(CMAKE_EXE_LINKER_FLAGS_DEBUG_DEV    "${CMAKE_EXE_LINKER_FLAGS_DEBUG}" )
 
 # Main Sources
 file(GLOB_RECURSE bb_sources
@@ -250,13 +234,25 @@ find_package(Threads REQUIRED)
 add_executable(bladebit ${bb_sources} ${bb_headers})
 
 target_compile_options(bladebit
-    PUBLIC
+    PRIVATE
     $<$<CONFIG:release>:${c_opts} ${release_c_opts}>
-)
+    )
 target_compile_options(bladebit
-    PUBLIC
+    PRIVATE
     $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>
 )
+
+target_compile_options(bls     PRIVATE /MP)
+target_compile_options(relic_s PRIVATE /MP)
+target_compile_options(sodium  PRIVATE /MP)
+
+target_compile_options(bls     PRIVATE $<$<CONFIG:release>:/MT>)
+target_compile_options(relic_s PRIVATE $<$<CONFIG:release>:/MT>)
+target_compile_options(sodium  PRIVATE $<$<CONFIG:release>:/MT>)
+
+target_compile_options(bls     PRIVATE $<$<CONFIG:debug>:/MTd>)
+target_compile_options(relic_s PRIVATE $<$<CONFIG:debug>:/MTd>)
+target_compile_options(sodium  PRIVATE $<$<CONFIG:debug>:/MTd>)
 
 target_link_options(bladebit
     PUBLIC

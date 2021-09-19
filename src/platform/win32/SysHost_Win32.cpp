@@ -5,6 +5,13 @@
 #include <processthreadsapi.h>
 
 //-----------------------------------------------------------
+size_t SysHost::GetPageSize()
+{
+    ASSERT( 0 );
+    return 0;
+}
+
+//-----------------------------------------------------------
 size_t SysHost::GetTotalSystemMemory()
 {
     MEMORYSTATUSEX statex;
@@ -62,6 +69,26 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
 }
 
 //-----------------------------------------------------------
+void SysHost::VirtualFree( void* ptr )
+{
+    ASSERT( ptr );
+    if( !ptr )
+        return;
+
+    // #TODO: Implement me
+    ASSERT( 0 ); 
+}
+
+//-----------------------------------------------------------
+bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
+{
+    ASSERT( ptr );
+
+    // #TODO: Implement me
+    ASSERT( 0 ); return false;
+}
+
+//-----------------------------------------------------------
 uint64 SysHost::SetCurrentProcessAffinityMask( uint64 mask )
 {
     HANDLE hProcess = ::GetCurrentProcess();
@@ -81,4 +108,59 @@ uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
     ASSERT( newMask = mask );
 
     return newMask;
+}
+
+//-----------------------------------------------------------
+bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
+{
+    // #TODO: Implement me
+    ASSERT( 0 ); return false;
+}
+
+//-----------------------------------------------------------
+void SysHost::InstallCrashHandler()
+{
+    // #TODO: Implement me
+}
+
+//-----------------------------------------------------------
+void SysHost::Random( byte* buffer, size_t size )
+{
+    // #TODO: Implement me
+    ASSERT( 0 ); 
+}
+
+// #NOTE: This is not thread-safe
+//-----------------------------------------------------------
+const NumaInfo* SysHost::GetNUMAInfo()
+{
+    // #TODO: Implement me
+    return nullptr;
+}
+
+//-----------------------------------------------------------
+void SysHost::NumaAssignPages( void* ptr, size_t size, uint node )
+{
+    // #TODO: Implement me
+}
+
+//-----------------------------------------------------------
+bool SysHost::NumaSetThreadInterleavedMode()
+{
+    // #TODO: Implement me
+    return false;
+}
+
+//-----------------------------------------------------------
+bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
+{
+    // #TODO: Implement me
+    return false;
+}
+
+//-----------------------------------------------------------
+int SysHost::NumaGetNodeFromPage( void* ptr )
+{
+    // #TODO: Implement me
+    return -1;
 }
