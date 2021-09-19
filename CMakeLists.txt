@@ -193,7 +193,7 @@ if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCES
             src/b3/blake3_avx512.c
             src/b3/blake3_sse41.c
             PROPERTIES COMPILE_FLAGS
-            "/wd4244"
+            /wd4244
         )
     endif()
 elseif(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "aarch64")
