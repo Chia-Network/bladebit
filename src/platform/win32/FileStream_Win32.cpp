@@ -3,9 +3,12 @@
 #include "util/Log.h"
 
 #include <winioctl.h>
+#include <shlwapi.h>
+#pragma comment( lib, "Shlwapi.lib" )
 
 const size_t BUF16_STACK_LEN = 1024;
 
+//bool GetFileClusterSize( wchar_t* filePath, size_t& outClusterSize );
 bool GetFileClusterSize( HANDLE hFile, size_t& outClusterSize );
 
 wchar_t* Utf8ToUtf16( const char* utf8Str, wchar_t* stackBuffer16, const size_t stackBuf16Size );
@@ -277,9 +280,9 @@ wchar_t* Utf8ToUtf16( const char* utf8Str, wchar_t* stackBuffer16, const size_t 
     }
 
 
-    const int requiredLen16 = MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, utf8Str, (int)length8, NULL, 0 );
+    const int requiredLen16 = MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, utf8Str, (int)length8, NULL, 0 ) + 1;
 
-    if( requiredLen16 < 1 )
+    if( requiredLen16 <= 1 )
     {
         Log::Error( "Could not get encoded file path length." );
         return nullptr;
@@ -307,33 +310,83 @@ wchar_t* Utf8ToUtf16( const char* utf8Str, wchar_t* stackBuffer16, const size_t 
         str16, requiredLen16
     );
 
-    ASSERT( numEncoded == requiredLen16 );
+    ASSERT( numEncoded == requiredLen16-1 );
+
+    str16[numEncoded] = 0;
 
     return str16;
 }
 
 //-----------------------------------------------------------
+//bool GetFileClusterSize( wchar_t* filePath, size_t& outClusterSize )
 bool GetFileClusterSize( HANDLE hFile, size_t& outClusterSize )
 {
-    ASSERT( hFile != INVALID_HANDLE_VALUE );
-    
     outClusterSize = 4096;
 
-    STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR desc = { 0 };
-    DWORD bytesReturned;
-    
-    BOOL r = DeviceIoControl(
-                hFile,
-                IOCTL_STORAGE_QUERY_PROPERTY,
-                NULL, 0,
-                &desc, sizeof( desc ),
-                &bytesReturned,
-                NULL );
+    ASSERT( hFile != INVALID_HANDLE_VALUE );
 
-    // MS recommends the use the physical sector size
-    // #See: https://docs.microsoft.com/en-us/windows/win32/fileio/file-buffering
+    FILE_STORAGE_INFO info = { 0 };
+    const BOOL r = GetFileInformationByHandleEx( hFile, FileStorageInfo, &info, (DWORD)sizeof( info ) );
+
     if( r )
-        outClusterSize = desc.BytesPerPhysicalSector;
+        outClusterSize = info.PhysicalBytesPerSectorForPerformance;
 
     return (bool)r;
+    //
+    //ASSERT( filePath );
+
+    //// Get path to the device
+    //if (!PathStripToRootW( filePath ) )
+    //    return false;
+    //
+    //const size_t len = std::char_traits<wchar_t>::length( filePath );
+
+    //// #TODO: Do this properly by copying to another buffer that we're sure has enough size
+    //memmove( filePath + 4, filePath, (len + 1) * sizeof( wchar_t ) );
+    //filePath[0] = u'\\';
+    //filePath[1] = u'\\';
+    //filePath[2] = u'.' ;
+    //filePath[3] = u'\\';
+
+    //HANDLE hDevice = INVALID_HANDLE_VALUE;
+
+    //// #See: https://docs.microsoft.com/en-us/windows/win32/devio/calling-deviceiocontrol
+    //hDevice = CreateFileW( filePath,    // drive to open
+    //            0,                      // no access to the drive
+    //            FILE_SHARE_READ |       // share mode
+    //            FILE_SHARE_WRITE, 
+    //            NULL,                   // default security attributes
+    //            OPEN_EXISTING,          // disposition
+    //            0,                      // file attributes
+    //            NULL ); 
+
+    //if( hDevice == INVALID_HANDLE_VALUE )
+    //    return false;
+
+    //STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR desc = { 0 };
+    //DWORD bytesReturned;
+
+    //STORAGE_PROPERTY_QUERY spq = { StorageAccessAlignmentProperty, PropertyStandardQuery }; 
+
+    //BOOL r = DeviceIoControl(
+    //            hDevice,
+    //            IOCTL_STORAGE_QUERY_PROPERTY,
+    //            &spq, sizeof( spq ),
+    //            &desc, sizeof( desc ),
+    //            &bytesReturned,
+    //            NULL );
+    //
+    //// MS recommends the use the physical sector size
+    //// #See: https://docs.microsoft.com/en-us/windows/win32/fileio/file-buffering
+    //if( r )
+    //    outClusterSize = desc.BytesPerPhysicalSector;
+    //else
+    //{
+    //    const DWORD err = GetLastError();
+    //    Log::Error( "Error getting block size: %d (0x%x)", err );
+    //}
+
+    //CloseHandle( hDevice );
+
+    //return (bool)r;
 }

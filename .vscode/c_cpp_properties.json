@@ -1691,7 +1691,8 @@
             "compilerArgs": [],
             "forcedInclude": [
                 "src/pch.h"
-            ]
+            ],
+            "configurationProvider": "ms-vscode.cmake-tools"
         }
     ]
 }

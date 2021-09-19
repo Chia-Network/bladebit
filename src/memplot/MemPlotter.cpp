@@ -130,19 +130,20 @@ bool MemPlotter::Run( const PlotRequest& request )
     FileStream* plotfile = new FileStream();
     ASSERT( plotfile );
 
-    for( int i = 0;; )
+    for( int i = 0; i < PLOT_FILE_RETRIES; i++ )
     {
         if( !plotfile->Open( request.outPath, FileMode::Create, FileAccess::Write, FileFlags::NoBuffering | FileFlags::LargeFile ) )
         {
-            if( ++i > PLOT_FILE_RETRIES )
+            if( i+1 >= PLOT_FILE_RETRIES )
             {
                 Log::Error( "Error: Failed to open plot output file at %s for writing after %d tries.", request.outPath, PLOT_FILE_RETRIES );
                 delete plotfile;
                 return false;
             }
+
+            continue;
         }
 
-        ASSERT( plotfile->IsOpen() );
         break;
     }
     

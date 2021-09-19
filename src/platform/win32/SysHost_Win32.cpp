@@ -1,14 +1,27 @@
 #include "SysHost.h"
 #include "Platform.h"
 #include "Util.h"
-
+#include "util//Log.h"
 #include <processthreadsapi.h>
+
+/*
+* Based on source from libSodium: ref: https://github.com/jedisct1/libsodium/blob/master/src/libsodium/randombytes/sysrandom/randombytes_sysrandom.c
+* ISC License
+* Copyright( c ) 2013 - 2020
+* Frank Denis <j at pureftpd dot org>
+*/
+#define RtlGenRandom SystemFunction036
+extern "C" BOOLEAN NTAPI RtlGenRandom( PVOID RandomBuffer, ULONG RandomBufferLength );
+#pragma comment( lib, "advapi32.lib" )
 
 //-----------------------------------------------------------
 size_t SysHost::GetPageSize()
 {
-    ASSERT( 0 );
-    return 0;
+    SYSTEM_INFO info;
+    ::GetSystemInfo( &info );
+
+    const size_t pageSize = (size_t)info.dwPageSize;
+    return pageSize;
 }
 
 //-----------------------------------------------------------
@@ -21,6 +34,7 @@ size_t SysHost::GetTotalSystemMemory()
     if( !r )
         return 0;
 
+    // #TODO: Return total virtual... We will let the user use a page file.
     return statex.ullTotalPhys;
 }
 
@@ -34,6 +48,7 @@ size_t SysHost::GetAvailableSystemMemory()
     if( !r )
         return 0;
 
+    // #TODO: Return total virtual... We will let the user use a page file.
     return statex.ullAvailPhys;
 }
 
@@ -50,8 +65,7 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
 
     if( ptr && initialize )
     {
-        // Initialize memory 
-        // (since physical pages are not allocated until the actual pages are accessed)
+        // Fault memory pages
 
         byte* page = (byte*)ptr;
 
@@ -75,8 +89,12 @@ void SysHost::VirtualFree( void* ptr )
     if( !ptr )
         return;
 
-    // #TODO: Implement me
-    ASSERT( 0 ); 
+    const BOOL r = ::VirtualFree( (LPVOID)ptr, 0, MEM_RELEASE );
+    if( !r )
+    {
+        const DWORD err = GetLastError();
+        Log::Error( "VirtualFree() failed with error: %d", err );
+    }
 }
 
 //-----------------------------------------------------------
@@ -85,7 +103,7 @@ bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
     ASSERT( ptr );
 
     // #TODO: Implement me
-    ASSERT( 0 ); return false;
+    return true;
 }
 
 //-----------------------------------------------------------
@@ -104,17 +122,20 @@ uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
 {
     HANDLE hThread = ::GetCurrentThread();
 
-    uint64 newMask = ::SetThreadAffinityMask( hThread, mask );
-    ASSERT( newMask = mask );
+    const uint64 oldMask = ::SetThreadAffinityMask( hThread, mask );
+    
+    if( oldMask == 0 )
+        return 0;
 
-    return newMask;
+    return mask;
 }
 
 //-----------------------------------------------------------
 bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
 {
     // #TODO: Implement me
-    ASSERT( 0 ); return false;
+    const uint64 mask = 1ull << ((uint64)cpuId);
+    return mask == SetCurrentThreadAffinityMask( mask );
 }
 
 //-----------------------------------------------------------
@@ -126,8 +147,10 @@ void SysHost::InstallCrashHandler()
 //-----------------------------------------------------------
 void SysHost::Random( byte* buffer, size_t size )
 {
-    // #TODO: Implement me
-    ASSERT( 0 ); 
+    if( !RtlGenRandom( (PVOID)buffer, (ULONG)size ) )
+    {
+        Fatal( "System entropy gen failure." );
+    }    
 }
 
 // #NOTE: This is not thread-safe
