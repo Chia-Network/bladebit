@@ -34,7 +34,7 @@ void DumpTestProofs( const MemPlotContext& cx, const uint64 f7Index )
     for( uint i = 1; i < 6; i++ )
     {
         const uint32 rCount = 1ul << (i-1);
-        const uint32 lCount = 1 << i;
+        const uint32 lCount = 1ul << i;
 
         const Pair* table = tables[i];
         Log::Line( "Table %d", 7-i );

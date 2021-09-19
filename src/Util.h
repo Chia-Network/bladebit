@@ -229,10 +229,10 @@ inline void HexStrToBytes( const char* str, const size_t strSize,
     int i = 0;
     while( str < end )
     {
-        byte msb = HEX_TO_BIN[(int)str[0]];
-        byte lsb = HEX_TO_BIN[(int)str[1]];
+        byte msb = (byte)HEX_TO_BIN[(int)str[0]];
+        byte lsb = (byte)HEX_TO_BIN[(int)str[1]];
 
-        byte v = lsb + msb * 16;
+        byte v = lsb + msb * 16u;
         dst[i++] = v;
         str += 2;
     }

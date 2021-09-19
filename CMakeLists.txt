@@ -5,11 +5,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project(bladebit)
 
-set(CMAKE_CONFIGURATION_TYPES release debug release_dev debug_dev)
+set(CMAKE_CONFIGURATION_TYPES release debug)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "release"
-        CACHE STRING "Possible values are: release, debug, release_dev, debug_dev"
+        CACHE STRING "Possible values are: release, debug"
         FORCE
    )
 endif()
@@ -30,6 +30,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(bls)
 
+set(c_opts)
+set(link_opts)
+# set(cxx_opts)
+
 set(release_c_opts)
 set(debug_c_opts)
 set(dev_c_opts)
@@ -41,27 +45,34 @@ set(debug_link_opts)
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 
     # MSVC
-    set(CMAKE_C_FLAGS "
+    set(c_opts
         /std:c++17
         /Zc:__cplusplus 
         /D_HAS_EXCEPTIONS=0
         /MP
         /Zi
-        /Wall
+        # /Wall
+        /W3
         /WX
         /FIpch.h 
         /wd4068
+        /wd4464
+        /wd4668
+        /wd4820
+        /wd4514
+        /wd4626
+        /wd5027
         /DUNICODE=1
         /DWIN32_LEAN_AND_MEAN=1
         /DNOMINMAX=1
         /D_CRT_SECURE_NO_WARNINGS=1
-        ${CMAKE_C_FLAGS}")
+        ${c_opts})
     
-    set(CMAKE_EXE_LINKER_FLAGS "
-        /SUBSYSTEM:WINDOWS
-        ${CMAKE_EXE_LINKER_FLAGS}")
+    set(link_opts 
+        /SUBSYSTEM:CONSOLE
+        ${link_opts})
 
-    set(release_c_opts "
+    set(release_c_opts 
         /MT
         /O2
         /Oi
@@ -69,27 +80,27 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /GL
         /DNDEBUG=1
         /DNDEBUG=1
-        ${release_c_opts}")
+        ${release_c_opts})
 
-    set(debug_c_opts "
+    set(debug_c_opts 
         /MTd
         /Od
-        ${debug_c_opts}")
+        ${debug_c_opts})
 
-    set(dev_c_opts "
-        ${dev_c_opts}")
+    set(dev_c_opts 
+        ${dev_c_opts})
 
     
-    set(release_link_opts "
+    set(release_link_opts 
         /DEBUG:FULL
         /OPT:REF,IFC,LBR
-        ${release_link_opts}")
+        ${release_link_opts})
 
-    set(debug_link_opts "
+    set(debug_link_opts
         /DEBUG:FASTLINK
         /OPT:NOREF,NOICF,NOLBR
         /INCREMENTAL
-        ${debug_link_opts}")
+        ${debug_link_opts})
     
 else()
 
@@ -122,22 +133,22 @@ else()
 
 endif()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS}")
+# set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS}")
 
-set(CMAKE_C_FLAGS_RELEASE       "${CMAKE_C_FLAGS} ${release_c_opts}")
-set(CMAKE_C_FLAGS_DEBUG         "${CMAKE_C_FLAGS} ${debug_c_opts}")
-set(CMAKE_C_FLAGS_RELEASE_DEV   "${CMAKE_C_FLAGS_RELEASE} ${dev_c_opts}")
-set(CMAKE_C_FLAGS_DEBUG_DEV     "${CMAKE_C_FLAGS_DEBUG} ${dev_c_opts}")
+# set(CMAKE_C_FLAGS_RELEASE       "${CMAKE_C_FLAGS} ${release_c_opts}")
+# set(CMAKE_C_FLAGS_DEBUG         "${CMAKE_C_FLAGS} ${debug_c_opts}")
+# set(CMAKE_C_FLAGS_RELEASE_DEV   "${CMAKE_C_FLAGS_RELEASE} ${dev_c_opts}")
+# set(CMAKE_C_FLAGS_DEBUG_DEV     "${CMAKE_C_FLAGS_DEBUG} ${dev_c_opts}")
 
-set(CMAKE_CXX_FLAGS_RELEASE     "${CMAKE_CXX_FLAGS} ${release_c_opts}")
-set(CMAKE_CXX_FLAGS_DEBUG       "${CMAKE_CXX_FLAGS} ${debug_c_opts}")
-set(CMAKE_CXX_FLAGS_RELEASE_DEV "${CMAKE_CXX_FLAGS_RELEASE} ${dev_c_opts}")
-set(CMAKE_CXX_FLAGS_DEBUG_DEV   "${CMAKE_CXX_FLAGS_DEBUG} ${dev_c_opts}")
+# set(CMAKE_CXX_FLAGS_RELEASE     "${CMAKE_CXX_FLAGS} ${release_c_opts}")
+# set(CMAKE_CXX_FLAGS_DEBUG       "${CMAKE_CXX_FLAGS} ${debug_c_opts}")
+# set(CMAKE_CXX_FLAGS_RELEASE_DEV "${CMAKE_CXX_FLAGS_RELEASE} ${dev_c_opts}")
+# set(CMAKE_CXX_FLAGS_DEBUG_DEV   "${CMAKE_CXX_FLAGS_DEBUG} ${dev_c_opts}")
 
-set(CMAKE_EXE_LINKER_FLAGS_RELEASE      "${CMAKE_EXE_LINKER_FLAGS} ${release_link_opts}" )
-set(CMAKE_EXE_LINKER_FLAGS_DEBUG        "${CMAKE_EXE_LINKER_FLAGS} ${debug_link_opts}" )
-set(CMAKE_EXE_LINKER_FLAGS_RELEASE_DEV  "${CMAKE_EXE_LINKER_FLAGS_RELEASE}" )
-set(CMAKE_EXE_LINKER_FLAGS_DEBUG_DEV    "${CMAKE_EXE_LINKER_FLAGS_DEBUG}" )
+# set(CMAKE_EXE_LINKER_FLAGS_RELEASE      "${CMAKE_EXE_LINKER_FLAGS} ${release_link_opts}" )
+# set(CMAKE_EXE_LINKER_FLAGS_DEBUG        "${CMAKE_EXE_LINKER_FLAGS} ${debug_link_opts}" )
+# set(CMAKE_EXE_LINKER_FLAGS_RELEASE_DEV  "${CMAKE_EXE_LINKER_FLAGS_RELEASE}" )
+# set(CMAKE_EXE_LINKER_FLAGS_DEBUG_DEV    "${CMAKE_EXE_LINKER_FLAGS_DEBUG}" )
 
 # Main Sources
 file(GLOB_RECURSE bb_sources
@@ -164,6 +175,7 @@ list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
 
 # Architecture
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "AMD64")
+    
     list(APPEND bb_sources
         src/b3/blake3_avx2.c
         src/b3/blake3_avx512.c
@@ -236,6 +248,25 @@ endif()
 find_package(Threads REQUIRED)
 
 add_executable(bladebit ${bb_sources} ${bb_headers})
+
+target_compile_options(bladebit
+    PUBLIC
+    $<$<CONFIG:release>:${c_opts} ${release_c_opts}>
+)
+target_compile_options(bladebit
+    PUBLIC
+    $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>
+)
+
+target_link_options(bladebit
+    PUBLIC
+    $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>
+)
+
+target_link_options(bladebit
+    PUBLIC
+    $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>
+)
 
 target_include_directories(bladebit
     PRIVATE
