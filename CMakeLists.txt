@@ -101,6 +101,19 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /OPT:NOREF,NOICF,NOLBR
         /INCREMENTAL
         ${debug_link_opts})
+
+    # Dependency config
+    target_compile_options(bls     PRIVATE /MP)
+    target_compile_options(relic_s PRIVATE /MP)
+    target_compile_options(sodium  PRIVATE /MP)
+
+    target_compile_options(bls     PRIVATE $<$<CONFIG:release>:/MT>)
+    target_compile_options(relic_s PRIVATE $<$<CONFIG:release>:/MT>)
+    target_compile_options(sodium  PRIVATE $<$<CONFIG:release>:/MT>)
+
+    target_compile_options(bls     PRIVATE $<$<CONFIG:debug>:/MTd>)
+    target_compile_options(relic_s PRIVATE $<$<CONFIG:debug>:/MTd>)
+    target_compile_options(sodium  PRIVATE $<$<CONFIG:debug>:/MTd>)
     
 else()
 
@@ -143,7 +156,7 @@ file(GLOB_RECURSE bb_sources
     src/*.c
 )
 
-# Headrs
+# Headers
 file(GLOB_RECURSE bb_headers
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     CONFIGURE_DEPENDS
@@ -154,6 +167,7 @@ file(GLOB_RECURSE bb_headers
 )
 
 # Configure dependent on config/platform/architecture
+list(FILTER bb_sources EXCLUDE REGEX "src/main\.cpp")
 list(FILTER bb_sources EXCLUDE REGEX "src/(test|platform)/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
 
@@ -219,58 +233,19 @@ else()
 endif()
 
 # Dev config?
-if(${CMAKE_BUILD_TYPE} MATCHES "(release|debug)_dev")
-    file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
-        CONFIGURE_DEPENDS LIST_DIRECTORIES false
-        src/test/*.cpp
-    )
-    list(APPEND bb_sources ${src_dev})
-endif()
+file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
+    CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    src/test/*.cpp
+)
+
+file(GLOB_RECURSE headers_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
+    CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    src/test/*.h
+)
 
 
 # Exe
 find_package(Threads REQUIRED)
-
-add_executable(bladebit ${bb_sources} ${bb_headers})
-
-target_compile_options(bladebit
-    PRIVATE
-    $<$<CONFIG:release>:${c_opts} ${release_c_opts}>
-    )
-target_compile_options(bladebit
-    PRIVATE
-    $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>
-)
-
-target_compile_options(bls     PRIVATE /MP)
-target_compile_options(relic_s PRIVATE /MP)
-target_compile_options(sodium  PRIVATE /MP)
-
-target_compile_options(bls     PRIVATE $<$<CONFIG:release>:/MT>)
-target_compile_options(relic_s PRIVATE $<$<CONFIG:release>:/MT>)
-target_compile_options(sodium  PRIVATE $<$<CONFIG:release>:/MT>)
-
-target_compile_options(bls     PRIVATE $<$<CONFIG:debug>:/MTd>)
-target_compile_options(relic_s PRIVATE $<$<CONFIG:debug>:/MTd>)
-target_compile_options(sodium  PRIVATE $<$<CONFIG:debug>:/MTd>)
-
-target_link_options(bladebit
-    PUBLIC
-    $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>
-)
-
-target_link_options(bladebit
-    PUBLIC
-    $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>
-)
-
-target_include_directories(bladebit
-    PRIVATE
-    ${INCLUDE_DIRECTORIES}
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${bls_SOURCE_DIR}/include
-    ${relic_SOURCE_DIR}/include
-)
 
 set(platform_libs)
 
@@ -278,18 +253,32 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     set(platform_libs numa)
 endif()
 
+set(bb_include_dirs 
+    ${INCLUDE_DIRECTORIES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${bls_SOURCE_DIR}/include
+    ${relic_SOURCE_DIR}/include
+)
+
+# BladeBit
+add_executable(bladebit src/main.cpp ${bb_sources} ${bb_headers})
+
+target_compile_options(bladebit PRIVATE $<$<CONFIG:release>:${c_opts} ${release_c_opts}>)
+target_compile_options(bladebit PRIVATE $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>)
+target_link_options(bladebit PRIVATE $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>)
+target_link_options(bladebit PRIVATE $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>)
+
+target_include_directories(bladebit PRIVATE ${bb_include_dirs})
 target_link_libraries(bladebit Threads::Threads bls ${platform_libs})
 
+# BladeBit Dev
+add_executable(bladebit_dev src/test/test_main.cpp ${bb_sources} ${src_dev} ${bb_headers} ${headers_dev})
 
+target_compile_options(bladebit_dev PRIVATE $<$<CONFIG:release>:${c_opts} ${release_c_opts}>)
+target_compile_options(bladebit_dev PRIVATE $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>)
+target_link_options(bladebit_dev PRIVATE $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>)
+target_link_options(bladebit_dev PRIVATE $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>)
 
-# message("${bb_sources}")
-# message( "${CMAKE_SYSTEM_NAME}" )
-# message( "${CMAKE_HOST_SYSTEM_PROCESSOR}" )
+target_include_directories(bladebit_dev PRIVATE ${bb_include_dirs})
+target_link_libraries(bladebit_dev Threads::Threads bls ${platform_libs})
 
-macro(dump_list ls)
-    foreach(l ${bb_sources})
-        message("> ${l}")
-    endforeach()
-endmacro()
-
-# dump_list(${bb_sources})
