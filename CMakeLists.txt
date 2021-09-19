@@ -30,6 +30,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(bls)
 
+set(CMAKE_C_FLAGS_RELEASE_INIT)
+set(CMAKE_C_FLAGS_DEBUG_INIT)
+set(CMAKE_CXX_FLAGS_RELEASE_INIT)
+set(CMAKE_CXX_FLAGS_DEBUG_INIT)
+
+
 set(c_opts)
 set(link_opts)
 # set(cxx_opts)
@@ -47,10 +53,10 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     # MSVC
     set(c_opts
         /std:c++17
-        /Zc:__cplusplus 
-        /D_HAS_EXCEPTIONS=0
+        /Zc:__cplusplus
         /MP
         /Zi
+        /EHsc-
         # /Wall
         /W3
         /WX
@@ -66,6 +72,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /DWIN32_LEAN_AND_MEAN=1
         /DNOMINMAX=1
         /D_CRT_SECURE_NO_WARNINGS=1
+        /D_HAS_EXCEPTIONS=0
         ${c_opts})
     
     set(link_opts 
@@ -118,8 +125,8 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 else()
 
     # *Nix
-    set(CMAKE_C_FLAGS "--include=pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
+    set(CMAKE_C_FLAGS --include=pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS})
+    set(CMAKE_CXX_FLAGS -std=c++17 ${CMAKE_CXX_FLAGS})
 
     set(release_c_opts 
         -O3 -flto
@@ -263,6 +270,8 @@ set(bb_include_dirs
 # BladeBit
 add_executable(bladebit src/main.cpp ${bb_sources} ${bb_headers})
 
+# target_compile_definitions(bladebit PRIVATE D_HAS_EXCEPTIONS=0)
+
 target_compile_options(bladebit PRIVATE $<$<CONFIG:release>:${c_opts} ${release_c_opts}>)
 target_compile_options(bladebit PRIVATE $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>)
 target_link_options(bladebit PRIVATE $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>)
@@ -282,3 +291,4 @@ target_link_options(bladebit_dev PRIVATE $<$<CONFIG:debug>:${link_opts} ${debug_
 target_include_directories(bladebit_dev PRIVATE ${bb_include_dirs})
 target_link_libraries(bladebit_dev Threads::Threads bls ${platform_libs})
 
+set_target_properties(bladebit bladebit_dev PROPERTIES ExceptionHandling false) 
