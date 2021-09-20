@@ -285,7 +285,6 @@ endmacro()
 
 config_proj(bladebit)
 config_proj(bladebit_dev)
-config_proj(bladebit128)
 
 
 # Pretty source view for IDE projects
