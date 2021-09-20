@@ -267,28 +267,29 @@ set(bb_include_dirs
     ${relic_SOURCE_DIR}/include
 )
 
+
 # BladeBit
-add_executable(bladebit src/main.cpp ${bb_sources} ${bb_headers})
-
-# target_compile_definitions(bladebit PRIVATE D_HAS_EXCEPTIONS=0)
-
-target_compile_options(bladebit PRIVATE $<$<CONFIG:release>:${c_opts} ${release_c_opts}>)
-target_compile_options(bladebit PRIVATE $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>)
-target_link_options(bladebit PRIVATE $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>)
-target_link_options(bladebit PRIVATE $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>)
-
-target_include_directories(bladebit PRIVATE ${bb_include_dirs})
-target_link_libraries(bladebit Threads::Threads bls ${platform_libs})
-
-# BladeBit Dev
+add_executable(bladebit     src/main.cpp ${bb_sources} ${bb_headers})
 add_executable(bladebit_dev src/test/test_main.cpp ${bb_sources} ${src_dev} ${bb_headers} ${headers_dev})
 
-target_compile_options(bladebit_dev PRIVATE $<$<CONFIG:release>:${c_opts} ${release_c_opts}>)
-target_compile_options(bladebit_dev PRIVATE $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>)
-target_link_options(bladebit_dev PRIVATE $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>)
-target_link_options(bladebit_dev PRIVATE $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>)
+macro(config_proj tgt)
 
-target_include_directories(bladebit_dev PRIVATE ${bb_include_dirs})
-target_link_libraries(bladebit_dev Threads::Threads bls ${platform_libs})
+    target_compile_options(${tgt} PRIVATE $<$<CONFIG:release>:${c_opts} ${release_c_opts}>)
+    target_compile_options(${tgt} PRIVATE $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>)
+    target_link_options(${tgt} PRIVATE $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>)
+    target_link_options(${tgt} PRIVATE $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>)
 
-set_target_properties(bladebit bladebit_dev PROPERTIES ExceptionHandling false) 
+    target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
+    target_link_libraries(${tgt} Threads::Threads bls ${platform_libs})
+endmacro()
+
+config_proj(bladebit)
+config_proj(bladebit_dev)
+config_proj(bladebit128)
+
+
+# Pretty source view for IDE projects
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
+    FILES ${bb_sources} ${bb_headers} ${src_dev} ${headers_dev}
+)
+
