@@ -2,7 +2,9 @@
 #include "Platform.h"
 #include "Util.h"
 #include "util//Log.h"
+
 #include <processthreadsapi.h>
+#include <systemtopologyapi.h>
 
 /*
 * Based on source from libSodium: ref: https://github.com/jedisct1/libsodium/blob/master/src/libsodium/randombytes/sysrandom/randombytes_sysrandom.c
@@ -133,7 +135,7 @@ uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
 //-----------------------------------------------------------
 bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
 {
-    // #TODO: Implement me
+    // #TODO: Implement me to use masks > 64bits
     const uint64 mask = 1ull << ((uint64)cpuId);
     return mask == SetCurrentThreadAffinityMask( mask );
 }
@@ -157,8 +159,94 @@ void SysHost::Random( byte* buffer, size_t size )
 //-----------------------------------------------------------
 const NumaInfo* SysHost::GetNUMAInfo()
 {
-    // #TODO: Implement me
-    return nullptr;
+    // #TODO: Check _WIN32_WINNT >= 0x0601
+
+    static NumaInfo  _info;
+    static NumaInfo* _pInfo = nullptr;
+
+    if( !_pInfo )
+    {
+        uint nodeCount = 0;
+
+        if( !GetNumaHighestNodeNumber( (PULONG)&nodeCount ) )
+        {
+            const DWORD err= GetLastError();
+            Log::Error( "Warning: Failed to get NUMA info with error %d (0x%x).", err, err );
+            return nullptr;
+        }
+
+        if( nodeCount < 2 )
+            return nullptr;
+
+        ZeroMem( &_pInfo );
+
+        uint procGroupCount = 0;
+        uint totalCpuCount  = 0;
+
+        // Get number of processor groups in this system
+        procGroupCount = (uint)GetActiveProcessorGroupCount();
+        if( procGroupCount == 0 )
+        {
+            const DWORD err = GetLastError();
+            Fatal( "GetActiveProcessorGroupCount() failed with error: %d (0x%x).", err, err );
+        }
+
+        // Get the total number of active CPUs
+        totalCpuCount = (uint)GetActiveProcessorCount( ALL_PROCESSOR_GROUPS );
+        if( totalCpuCount == 0 )
+        {
+            const DWORD err = GetLastError();
+            Fatal( "GetActiveProcessorCount() failed with error: %d (0x%x).", err, err );
+        }
+
+        _info.procGroup.length = procGroupCount;
+        _info.procGroup.values = (uint16*)malloc( procGroupCount * sizeof( uint16 ) );
+        memset( _info.procGroup.values, 0, procGroupCount * sizeof( uint16 ) );
+
+        for( uint i = 0; i < procGroupCount; i++ )
+        {
+            // Get the number of processors in this group
+            const uint procCount = (uint)GetActiveProcessorCount( (WORD)i );
+            if( procCount == 0 )
+            {
+                const DWORD err = GetLastError();
+                Fatal( "GetActiveProcessorCount( %u ) failed with error: %d (0x%x).", i, err, err );
+            }
+
+            GROUP_AFFINITY grp = { 0 };
+
+            if( !GetNumaNodeProcessorMaskEx( (USHORT)i, &grp ) )
+            {
+                const DWORD err = GetLastError();
+                Fatal( "GetNumaNodeProcessorMaskEx( %u ) failed with error: %d (0x%x).", i, err, err );
+            }
+
+        }
+
+        _info.nodeCount = nodeCount;
+        _info.cpuCount  = totalCpuCount;
+
+        // #NOTE: Based on:
+        // #See: https://docs.microsoft.com/en-us/windows/win32/memory/allocating-memory-from-a-numa-node
+        for( uint8 i = 0; i < (uint8)totalCpuCount; i++ )
+        {
+            // int8 proc;
+
+            // GetNumaProcessorNode()
+            // uint64 cpuMask = 0;
+            
+            // if( !GetNumaNodeProcessorMask( i, (PULONGLONG)&cpuMask ) )
+            // {
+            //     DWORD err = GetLastError();
+            //     Fatal( "Failed to get NUMA node cpu count eith error %d (0x%x).", err, err );
+            // }
+
+            
+        }
+    }
+    
+    
+    return _pInfo;
 }
 
 //-----------------------------------------------------------
