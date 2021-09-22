@@ -160,6 +160,7 @@ void SysHost::Random( byte* buffer, size_t size )
 const NumaInfo* SysHost::GetNUMAInfo()
 {
     // #TODO: Check _WIN32_WINNT >= 0x0601
+    //                              Build 20348
 
     static NumaInfo  _info;
     static NumaInfo* _pInfo = nullptr;
@@ -175,7 +176,7 @@ const NumaInfo* SysHost::GetNUMAInfo()
             return nullptr;
         }
 
-        if( nodeCount < 2 )
+        if( ++nodeCount < 2 )
             return nullptr;
 
         ZeroMem( &_pInfo );
@@ -203,28 +204,46 @@ const NumaInfo* SysHost::GetNUMAInfo()
 //         _info.procGroup.values = (uint16*)malloc( procGroupCount * sizeof( uint16 ) );
 //         memset( _info.procGroup.values, 0, procGroupCount * sizeof( uint16 ) );
 
-        for( uint i = 0; i < procGroupCount; i++ )
+        // for( uint i = 0; i < procGroupCount; i++ )
+        // {
+        //     // Get the number of processors in this group
+        //     const uint procCount = (uint)GetActiveProcessorCount( (WORD)i );
+        //     if( procCount == 0 )
+        //     {
+        //         const DWORD err = GetLastError();
+        //         Fatal( "GetActiveProcessorCount( %u ) failed with error: %d (0x%x).", i, err, err );
+        //     }
+
+        //     GROUP_AFFINITY grp = { 0 };
+
+        //     if( !GetNumaNodeProcessorMaskEx( (USHORT)i, &grp ) )
+        //     {
+        //         const DWORD err = GetLastError();
+        //         Fatal( "GetNumaNodeProcessorMaskEx( %u ) failed with error: %d (0x%x).", i, err, err );
+        //     }
+
+            
+        //     // Count nodes int 
+
+        // }
+
+        const uint MAX_PROC_GROUPS = 32;
+        GROUP_AFFINITY* procGroups = (GROUP_AFFINITY*)malloc( procGroupCount * sizeof( GROUP_AFFINITY ) );
+        if( !procGroups )
+            Fatal( "Failed to allocator processor groups affinity buffer." );
+
+        // Get cpu info per node
+        for( uint i = 0; i < nodeCount; i++ )
         {
-            // Get the number of processors in this group
-            const uint procCount = (uint)GetActiveProcessorCount( (WORD)i );
-            if( procCount == 0 )
+            USHORT numGroupsForNode = 0;
+            if( !GetNumaNodeProcessorMask2( (USHORT)i, procGroups, (USHORT)procGroupCount, &numGroupsForNode ) )
             {
                 const DWORD err = GetLastError();
-                Fatal( "GetActiveProcessorCount( %u ) failed with error: %d (0x%x).", i, err, err );
+                    Fatal( "GetNumaNodeProcessorMask2( %u ) failed with error: %d (0x%x).", i, err, err );
             }
-
-            GROUP_AFFINITY grp = { 0 };
-
-            if( !GetNumaNodeProcessorMaskEx( (USHORT)i, &grp ) )
-            {
-                const DWORD err = GetLastError();
-                Fatal( "GetNumaNodeProcessorMaskEx( %u ) failed with error: %d (0x%x).", i, err, err );
-            }
-
-
-            // Count nodes int 
 
         }
+
 
         _info.nodeCount = nodeCount;
         _info.cpuCount  = totalCpuCount;

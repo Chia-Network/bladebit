@@ -104,5 +104,6 @@
     "cSpell.words": [
         "Ryzen"
     ],
-    "C_Cpp.errorSquiggles": "Enabled"
+    "C_Cpp.errorSquiggles": "Enabled",
+    "cmake.configureOnOpen": true
 }
