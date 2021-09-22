@@ -170,7 +170,7 @@ const NumaInfo* SysHost::GetNUMAInfo()
 
         if( !GetNumaHighestNodeNumber( (PULONG)&nodeCount ) )
         {
-            const DWORD err= GetLastError();
+            const DWORD err = GetLastError();
             Log::Error( "Warning: Failed to get NUMA info with error %d (0x%x).", err, err );
             return nullptr;
         }
@@ -199,9 +199,9 @@ const NumaInfo* SysHost::GetNUMAInfo()
             Fatal( "GetActiveProcessorCount() failed with error: %d (0x%x).", err, err );
         }
 
-        _info.procGroup.length = procGroupCount;
-        _info.procGroup.values = (uint16*)malloc( procGroupCount * sizeof( uint16 ) );
-        memset( _info.procGroup.values, 0, procGroupCount * sizeof( uint16 ) );
+//         _info.procGroup.length = procGroupCount;
+//         _info.procGroup.values = (uint16*)malloc( procGroupCount * sizeof( uint16 ) );
+//         memset( _info.procGroup.values, 0, procGroupCount * sizeof( uint16 ) );
 
         for( uint i = 0; i < procGroupCount; i++ )
         {
@@ -220,6 +220,9 @@ const NumaInfo* SysHost::GetNUMAInfo()
                 const DWORD err = GetLastError();
                 Fatal( "GetNumaNodeProcessorMaskEx( %u ) failed with error: %d (0x%x).", i, err, err );
             }
+
+
+            // Count nodes int 
 
         }
 
