@@ -34,6 +34,8 @@
 //-----------------------------------------------------------
 void Fatal( const char* message, ... );
 
+void FatalIf( bool condition, const char* message, ... );
+
 //-----------------------------------------------------------
 template<typename T>
 inline void ZeroMem( T* ptr )

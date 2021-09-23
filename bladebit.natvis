@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
 
-  <Type Name="View&lt;*&gt;">
-    <DisplayString>[{_count}]</DisplayString>
+  <Type Name="Span&lt;*&gt;">
+    <DisplayString>[{length}]</DisplayString>
     <Expand>
       <IndexListItems>
-        <Size>_count</Size>
-        <ValueNode>_ptr[$i]</ValueNode>
+        <Size>length</Size>
+        <ValueNode>values[$i]</ValueNode>
       </IndexListItems>
     </Expand>
   </Type>

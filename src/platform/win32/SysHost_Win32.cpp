@@ -16,6 +16,88 @@
 extern "C" BOOLEAN NTAPI RtlGenRandom( PVOID RandomBuffer, ULONG RandomBufferLength );
 #pragma comment( lib, "advapi32.lib" )
 
+// Helper structs to help us iterate these variable-length structs
+template<typename T>
+class PocessorInfoIter
+{
+    using ProcInfo = SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
+
+    byte*       _current;
+    const byte* _end    ;
+
+public:
+    //-----------------------------------------------------------
+    inline PocessorInfoIter( SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* info, DWORD size )
+        : _current( (byte*)info )
+        , _end    ( ((byte*)info) + size )
+    {}
+
+    //-----------------------------------------------------------
+    inline bool HasNext() const
+    {
+        return _current < _end;
+    }
+
+    //-----------------------------------------------------------
+    inline T& Next()
+    {
+        ASSERT( this->HasNext() );
+
+        ProcInfo* info = (ProcInfo*)_current;
+
+        T& r = *(T*)&info->Processor;
+
+        _current += info->Size;
+        return r;
+    }
+};
+
+template<typename T>
+struct PocessorInfo
+{
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* info;
+    DWORD                                    size;
+
+    //-----------------------------------------------------------
+    PocessorInfo( SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* info, DWORD size )
+        : info( info )
+        , size( size )
+    {}
+
+    //-----------------------------------------------------------
+    inline const T& Get( size_t index ) const
+    {
+        using ProcInfo = SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
+
+        const byte* ptr = (byte*)this->info;
+        const byte* end = ptr + this->size;
+
+        size_t i = 0;
+        
+        do
+        {
+            if( i == index )
+                return *(T*)&((ProcInfo*)ptr)->Processor;
+            
+            i++;
+            ptr += ((ProcInfo*)ptr)->Size;
+        } while( ptr < end );
+
+        Fatal( "PocessorInfo: Index out of range." );
+        return *(T*)(nullptr);
+    }
+
+    //-----------------------------------------------------------
+    inline T& operator[]( size_t  index ) const { return this->Get( index ); }
+    inline T& operator[]( ssize_t index ) const
+    {
+        ASSERT( index >= 0 ); return this->Get( (size_t)index );
+    }
+};
+
+static GROUP_RELATIONSHIP* _procGroupInfo = nullptr;
+
+
 //-----------------------------------------------------------
 size_t SysHost::GetPageSize()
 {
@@ -155,12 +237,15 @@ void SysHost::Random( byte* buffer, size_t size )
     }    
 }
 
-// #NOTE: This is not thread-safe
+// #SEE: https://docs.microsoft.com/en-us/windows/win32/procthread/numa-support
+// #SEE: https://docs.microsoft.com/en-us/windows/win32/procthread/processor-groups
+// #NOTE: This is not thread-safe on the first time is called
 //-----------------------------------------------------------
 const NumaInfo* SysHost::GetNUMAInfo()
 {
     // #TODO: Check _WIN32_WINNT >= 0x0601
     //                              Build 20348
+    // and support new NUMA method/API.
 
     static NumaInfo  _info;
     static NumaInfo* _pInfo = nullptr;
@@ -175,11 +260,14 @@ const NumaInfo* SysHost::GetNUMAInfo()
             Log::Error( "Warning: Failed to get NUMA info with error %d (0x%x).", err, err );
             return nullptr;
         }
+        
+        // The above returns the highest node index (0-based), we want the count.
+        nodeCount++;
 
-        if( ++nodeCount < 2 )
+        if( nodeCount < 2 )
             return nullptr;
 
-        ZeroMem( &_pInfo );
+        ZeroMem( &_info );
 
         uint procGroupCount = 0;
         uint totalCpuCount  = 0;
@@ -200,73 +288,109 @@ const NumaInfo* SysHost::GetNUMAInfo()
             Fatal( "GetActiveProcessorCount() failed with error: %d (0x%x).", err, err );
         }
 
-//         _info.procGroup.length = procGroupCount;
-//         _info.procGroup.values = (uint16*)malloc( procGroupCount * sizeof( uint16 ) );
-//         memset( _info.procGroup.values, 0, procGroupCount * sizeof( uint16 ) );
+        // Allocate required buffers
+        _info.cpuIds = ( Span<uint>* )malloc( sizeof( Span<uint> ) * nodeCount );
+        FatalIf( !_info.cpuIds, "Failed to allocate NUMA node buffer." );
+        memset( _info.cpuIds, 0, sizeof( Span<uint> ) * nodeCount );
 
-        // for( uint i = 0; i < procGroupCount; i++ )
-        // {
-        //     // Get the number of processors in this group
-        //     const uint procCount = (uint)GetActiveProcessorCount( (WORD)i );
-        //     if( procCount == 0 )
-        //     {
-        //         const DWORD err = GetLastError();
-        //         Fatal( "GetActiveProcessorCount( %u ) failed with error: %d (0x%x).", i, err, err );
-        //     }
+        uint* cpuIds = (uint*)malloc( sizeof( uint ) * totalCpuCount );
+        FatalIf( !cpuIds, "Failed to allocate CPU id buffer." );
+        memset( cpuIds, 0, sizeof( uint ) * totalCpuCount );
 
-        //     GROUP_AFFINITY grp = { 0 };
 
-        //     if( !GetNumaNodeProcessorMaskEx( (USHORT)i, &grp ) )
-        //     {
-        //         const DWORD err = GetLastError();
-        //         Fatal( "GetNumaNodeProcessorMaskEx( %u ) failed with error: %d (0x%x).", i, err, err );
-        //     }
+        // Get nodes & process group information
+        DWORD nodeInfoLength = 0, procInfoLength = 0;
+        DWORD result = 0;
 
-            
-        //     // Count nodes int 
+        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* nodeInfo = nullptr, *procInfo = nullptr;
 
-        // }
+        // Get node info size
+        if( GetLogicalProcessorInformationEx( RelationNumaNode, nullptr, &nodeInfoLength ) )
+            Fatal( "Unexpected result from GetLogicalProcessorInformationEx( RelationNumaNode )." );
 
-        const uint MAX_PROC_GROUPS = 32;
-        GROUP_AFFINITY* procGroups = (GROUP_AFFINITY*)malloc( procGroupCount * sizeof( GROUP_AFFINITY ) );
-        if( !procGroups )
-            Fatal( "Failed to allocator processor groups affinity buffer." );
+        result = GetLastError();
+        if( result != ERROR_INSUFFICIENT_BUFFER )
+            Fatal( "GetLogicalProcessorInformationEx( RelationNumaNode, null ) with error: %d (0x%x).", result, result );
+        
+        ASSERT( nodeInfoLength >= ( sizeof( DWORD ) + sizeof( LOGICAL_PROCESSOR_RELATIONSHIP ) ) );
 
-        // Get cpu info per node
-        for( uint i = 0; i < nodeCount; i++ )
+
+        // Get process info size
+        if( GetLogicalProcessorInformationEx( RelationGroup, nullptr, &procInfoLength ) )
+            Fatal( "Unexpected result from GetLogicalProcessorInformationEx( RelationGroup )." );
+
+        result = GetLastError();
+        if( result != ERROR_INSUFFICIENT_BUFFER )
+            Fatal( "GetLogicalProcessorInformationEx( RelationGroup, null  ) with error: %d (0x%x).", result, result );
+
+        ASSERT( procInfoLength >= ( sizeof( DWORD ) + sizeof( LOGICAL_PROCESSOR_RELATIONSHIP ) ) );
+
+        // Allocate the buffers and fetch the actual info now
+        nodeInfo = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)malloc( nodeInfoLength );
+        procInfo = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)malloc( procInfoLength );
+
+        if( !nodeInfo )
+            Fatal( "Failed to allocate node info buffer." );
+        if( !procInfo )
+            Fatal( "Failed to allocate processor info buffer." );
+        
+        if( !GetLogicalProcessorInformationEx( RelationNumaNode, nodeInfo, &nodeInfoLength ) )
         {
-            USHORT numGroupsForNode = 0;
-            if( !GetNumaNodeProcessorMask2( (USHORT)i, procGroups, (USHORT)procGroupCount, &numGroupsForNode ) )
+            const DWORD err = GetLastError();
+            Fatal( "GetLogicalProcessorInformationEx( RelationNumaNode ) failed with error: %d (0x%x).", err, err );
+        }
+
+        if( !GetLogicalProcessorInformationEx( RelationGroup, procInfo, &procInfoLength ) )
+        {
+            const DWORD err = GetLastError();
+            Fatal( "GetLogicalProcessorInformationEx( RelationGroup ) failed with error: %d (0x%x).", err, err );
+        }
+
+        ASSERT( procInfo->Size == procInfoLength ); // Only expect a single instance here
+
+
+        // Save an instance of process group info as we need to refer to it when setting thread affinity
+        _procGroupInfo = &procInfo->Group;
+        
+        // Get info from each node
+        for( PocessorInfoIter<NUMA_NODE_RELATIONSHIP> numaIter( nodeInfo, nodeInfoLength ); numaIter.HasNext(); )
+        {
+            const NUMA_NODE_RELATIONSHIP& node = numaIter.Next();
+            ASSERT( node.NodeNumber < nodeCount );
+            ASSERT( node.GroupMask.Group < procInfo->Group.ActiveGroupCount );
+
+            const WORD                  targetGroupId = node.GroupMask.Group;
+            const PROCESSOR_GROUP_INFO& targetGroup   = procInfo->Group.GroupInfo[targetGroupId];
+
+            // Find the starting cpuId for this group by 
+            // adding all the active processors on the groups before ours
+            uint cpuBase = 0;
+            for( WORD i = 0; i < targetGroupId; i++ )
+                cpuBase += procInfo->Group.GroupInfo[i].ActiveProcessorCount;
+
+            // Save CPUids for this node
+            uint* nodeCpus = cpuIds;
+            for( BYTE i = 0; i < targetGroup.MaximumProcessorCount; i++ )
             {
-                const DWORD err = GetLastError();
-                    Fatal( "GetNumaNodeProcessorMask2( %u ) failed with error: %d (0x%x).", i, err, err );
+                if( targetGroup.ActiveProcessorMask & ( 1ull << i ) )
+                    *nodeCpus++ = i;
             }
 
+            ASSERT( (intptr_t)( nodeCpus - cpuIds ) == (intptr_t)targetGroup.ActiveProcessorCount );
+
+            // Save node info
+            _info.cpuIds[node.NodeNumber].length = targetGroup.ActiveProcessorCount;
+            _info.cpuIds[node.NodeNumber].values = cpuIds;
+
+            cpuIds += targetGroup.ActiveProcessorCount;
+            ASSERT( cpuIds == nodeCpus );
         }
 
-
+        // All done
         _info.nodeCount = nodeCount;
         _info.cpuCount  = totalCpuCount;
-
-        // #NOTE: Based on:
-        // #See: https://docs.microsoft.com/en-us/windows/win32/memory/allocating-memory-from-a-numa-node
-        for( uint8 i = 0; i < (uint8)totalCpuCount; i++ )
-        {
-            // int8 proc;
-
-            // GetNumaProcessorNode()
-            // uint64 cpuMask = 0;
-            
-            // if( !GetNumaNodeProcessorMask( i, (PULONGLONG)&cpuMask ) )
-            // {
-            //     DWORD err = GetLastError();
-            //     Fatal( "Failed to get NUMA node cpu count eith error %d (0x%x).", err, err );
-            // }
-
-            
-        }
+        _pInfo          = &_info;
     }
-    
     
     return _pInfo;
 }
