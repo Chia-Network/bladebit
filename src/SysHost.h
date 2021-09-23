@@ -49,7 +49,7 @@ public:
     static uint64 SetCurrentProcessAffinityMask( uint64 mask );
 
     /// Set the processor affinity mask for the current thread
-    static uint64 SetCurrentThreadAffinityMask( uint64 mask );
+//     static uint64 SetCurrentThreadAffinityMask( uint64 mask );
 
     /// Set the processor affinity mask to a specific cpu id for the current thread
     static bool   SetCurrentThreadAffinityCpuId( uint32 cpuId );

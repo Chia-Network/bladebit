@@ -47,12 +47,6 @@ Thread::~Thread()
 }
 
 //-----------------------------------------------------------
-uint64 Thread::SetAffinity( uint64 affinity )
-{
-    return SysHost::SetCurrentThreadAffinityMask( affinity );
-}
-
-//-----------------------------------------------------------
 bool Thread::HasExited() const
 {
     return _state.load( std::memory_order_relaxed ) == ThreadState::Exited;

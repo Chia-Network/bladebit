@@ -52,49 +52,6 @@ public:
     }
 };
 
-template<typename T>
-struct PocessorInfo
-{
-    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* info;
-    DWORD                                    size;
-
-    //-----------------------------------------------------------
-    PocessorInfo( SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* info, DWORD size )
-        : info( info )
-        , size( size )
-    {}
-
-    //-----------------------------------------------------------
-    inline const T& Get( size_t index ) const
-    {
-        using ProcInfo = SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
-
-        const byte* ptr = (byte*)this->info;
-        const byte* end = ptr + this->size;
-
-        size_t i = 0;
-        
-        do
-        {
-            if( i == index )
-                return *(T*)&((ProcInfo*)ptr)->Processor;
-            
-            i++;
-            ptr += ((ProcInfo*)ptr)->Size;
-        } while( ptr < end );
-
-        Fatal( "PocessorInfo: Index out of range." );
-        return *(T*)(nullptr);
-    }
-
-    //-----------------------------------------------------------
-    inline T& operator[]( size_t  index ) const { return this->Get( index ); }
-    inline T& operator[]( ssize_t index ) const
-    {
-        ASSERT( index >= 0 ); return this->Get( (size_t)index );
-    }
-};
-
 static GROUP_RELATIONSHIP* _procGroupInfo = nullptr;
 
 
@@ -201,25 +158,72 @@ uint64 SysHost::SetCurrentProcessAffinityMask( uint64 mask )
     return r ? mask : 0;
 }
 
-//-----------------------------------------------------------
-uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
-{
-    HANDLE hThread = ::GetCurrentThread();
-
-    const uint64 oldMask = ::SetThreadAffinityMask( hThread, mask );
-    
-    if( oldMask == 0 )
-        return 0;
-
-    return mask;
-}
+// //-----------------------------------------------------------
+// uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
+// {
+//     HANDLE hThread = ::GetCurrentThread();
+// 
+//     const uint64 oldMask = ::SetThreadAffinityMask( hThread, mask );
+//     
+//     if( oldMask == 0 )
+//         return 0;
+// 
+//     return mask;
+// }
 
 //-----------------------------------------------------------
 bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
 {
-    // #TODO: Implement me to use masks > 64bits
-    const uint64 mask = 1ull << ((uint64)cpuId);
-    return mask == SetCurrentThreadAffinityMask( mask );
+    ASSERT( cpuId < (uint)GetActiveProcessorGroupCount() );
+
+    HANDLE hThread = ::GetCurrentThread();
+
+    // #TODO: We might have to check for single-node system with more than 64 threads.
+    // If in NUMA, we need to find the correct process group given a cpuId
+    const NumaInfo* numa = GetNUMAInfo();
+    if( numa )
+    {
+        ASSERT( _procGroupInfo );
+
+        WORD processGroupId = 0;
+
+        // Shave-out any process groups below the requested one
+        for( WORD i = 0; i < _procGroupInfo->ActiveGroupCount; i++ )
+        {
+            const uint groupProcCount = _procGroupInfo->GroupInfo[i].ActiveProcessorCount;
+            if( cpuId < groupProcCount )
+            {
+                processGroupId = i;
+                break;
+            }
+
+            cpuId -= groupProcCount;
+        }
+        
+        // Move this thread to the target process group
+        GROUP_AFFINITY grpAffinity, prevGprAffinity;
+
+        ZeroMem( &grpAffinity );
+        grpAffinity.Mask  = 1ull << cpuId;
+        grpAffinity.Group = processGroupId;
+        if( !SetThreadGroupAffinity( hThread, &grpAffinity, &prevGprAffinity ) )
+        {
+            const DWORD err = GetLastError();
+            Log::Error( "Error: Failed to set thread group affinity with error: %d (0x%x).", err, err );
+            return false;
+        }
+    }
+
+    const uint64 mask    = 1ull << cpuId;
+    const uint64 oldMask = (uint64)::SetThreadAffinityMask( hThread, mask );
+
+    if( oldMask == 0 )
+    {
+        const DWORD err = GetLastError();
+        Log::Error( "Error: Failed to set thread affinity with error: %d (0x%x).", err, err );
+    }
+
+    return oldMask != 0;
 }
 
 //-----------------------------------------------------------
@@ -404,14 +408,82 @@ void SysHost::NumaAssignPages( void* ptr, size_t size, uint node )
 //-----------------------------------------------------------
 bool SysHost::NumaSetThreadInterleavedMode()
 {
-    // #TODO: Implement me
+    // Not a thing on windows
+    // #TODO: Remove this function
     return false;
 }
 
 //-----------------------------------------------------------
 bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
 {
+    ASSERT( ptr && size );
+
     // #TODO: Implement me
+    ULONG nodeCount = 0;
+    
+    if( !GetNumaHighestNodeNumber( (PULONG)&nodeCount ) )
+    {
+        const DWORD err = GetLastError();
+        Log::Error( "Failed to get NUMA nodes to interleave memory with error %d (0x%x).", err, err );
+        return false;
+    }
+
+    const size_t pageSize   = GetPageSize();
+    const size_t pageCount  = size / pageSize;
+
+    const size_t blockStride = pageSize * nodeCount;
+    const size_t blockCount  = pageCount / nodeCount;
+
+    const byte* pages    = (byte*)ptr;
+    const byte* endPage  = pages + pageCount  * pageSize;
+    const byte* endBlock = pages + blockCount * blockStride;
+
+    HANDLE gProcess = GetCurrentProcess();
+
+    DWORD dwNodes = (DWORD)nodeCount;
+
+    while( pages < endBlock )
+    {
+        for( DWORD i = 0; i < nodeCount; i++ )
+        {
+            LPVOID r = VirtualAllocExNuma( 
+                            gProcess, 
+                            (LPVOID)(pages+i), pageSize,
+                            MEM_RESERVE | MEM_COMMIT, 
+                            PAGE_READWRITE,
+                            i );
+
+            if( !r )
+            {
+                const DWORD err = GetLastError();
+                Log::Error( "Failed to assigned memory to NUMA node with error: %d (0x%x).", err, err );
+                return false;
+            }
+        }
+
+        pages += blockStride;
+    }
+
+    DWORD node = 0;
+    while( pages < endPage )
+    {
+        LPVOID r = VirtualAllocExNuma( 
+                            gProcess, 
+                            (LPVOID)pages, pageSize,
+                            MEM_RESERVE | MEM_COMMIT, 
+                            PAGE_READWRITE,
+                            node++ );
+
+        if( !r )
+        {
+            const DWORD err = GetLastError();
+            Log::Error( "Failed to assigned memory to NUMA node with error: %d (0x%x).", err, err );
+            return false;
+        }
+
+        pages += pageSize;
+    }
+
     return false;
 }
 

@@ -12,7 +12,7 @@ public:
     Thread();
     ~Thread();
 
-    static uint64 SetAffinity( uint64 affinity );
+//     static uint64 SetAffinity( uint64 affinity );
     // void SetName( const char* name );
 
     void Run( ThreadRunner runner, void* param );
