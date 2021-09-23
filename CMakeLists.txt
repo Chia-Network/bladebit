@@ -285,10 +285,10 @@ set(bb_include_dirs
 )
 
 # BladeBit
-add_executable(bladebit     src/main.cpp ${bb_sources} ${bb_headers})
-add_executable(bladebit_dev EXCLUDE_FROM_ALL src/test/test_main.cpp ${bb_sources} ${src_dev} ${bb_headers} ${headers_dev})
-add_executable(bladebit128  src/plot128/main_128.cpp ${bb_sources} ${bb_headers})
-
+add_executable(bladebit      src/main.cpp ${bb_sources} ${bb_headers})
+add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/test/test_main.cpp ${bb_sources} ${src_dev} ${bb_headers} ${headers_dev})
+add_executable(bladebit_128  src/plot128/main_128.cpp ${bb_sources} ${bb_headers})
+add_executable(bladebit_disk src/diskplot/main_diskplot.cpp ${bb_sources} ${bb_headers})
 
 macro(config_proj tgt)
 
@@ -303,7 +303,8 @@ endmacro()
 
 config_proj(bladebit)
 config_proj(bladebit_dev)
-config_proj(bladebit128)
+config_proj(bladebit_128)
+config_proj(bladebit_disk)
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
