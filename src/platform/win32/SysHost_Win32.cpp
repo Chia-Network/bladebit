@@ -373,7 +373,7 @@ const NumaInfo* SysHost::GetNUMAInfo()
             for( BYTE i = 0; i < targetGroup.MaximumProcessorCount; i++ )
             {
                 if( targetGroup.ActiveProcessorMask & ( 1ull << i ) )
-                    *nodeCpus++ = i;
+                    *nodeCpus++ = cpuBase + i;
             }
 
             ASSERT( (intptr_t)( nodeCpus - cpuIds ) == (intptr_t)targetGroup.ActiveProcessorCount );
