@@ -5,6 +5,7 @@
 
 #include <processthreadsapi.h>
 #include <systemtopologyapi.h>
+#include <psapi.h>
 
 /*
 * Based on source from libSodium: ref: https://github.com/jedisct1/libsodium/blob/master/src/libsodium/randombytes/sysrandom/randombytes_sysrandom.c
@@ -94,6 +95,12 @@ size_t SysHost::GetAvailableSystemMemory()
 }
 
 //-----------------------------------------------------------
+uint SysHost::GetLogicalCPUCount()
+{
+    return (uint)GetActiveProcessorCount( ALL_PROCESSOR_GROUPS );
+}
+
+//-----------------------------------------------------------
 void* SysHost::VirtualAlloc( size_t size, bool initialize )
 {
     SYSTEM_INFO info;
@@ -102,7 +109,7 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
     const size_t pageSize = (size_t)info.dwPageSize;
     size = CeildDiv( size, pageSize );
 
-    void* ptr = ::VirtualAlloc( NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
+    void* ptr = ::VirtualAlloc( NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE | PAGE_NOCACHE );
 
     if( ptr && initialize )
     {
@@ -174,7 +181,7 @@ uint64 SysHost::SetCurrentProcessAffinityMask( uint64 mask )
 //-----------------------------------------------------------
 bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
 {
-    ASSERT( cpuId < (uint)GetActiveProcessorGroupCount() );
+    ASSERT( cpuId < (uint)GetActiveProcessorCount( ALL_PROCESSOR_GROUPS ) );
 
     HANDLE hThread = ::GetCurrentThread();
 
@@ -418,7 +425,6 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
 {
     ASSERT( ptr && size );
 
-    // #TODO: Implement me
     ULONG nodeCount = 0;
     
     if( !GetNumaHighestNodeNumber( (PULONG)&nodeCount ) )
@@ -427,6 +433,8 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
         Log::Error( "Failed to get NUMA nodes to interleave memory with error %d (0x%x).", err, err );
         return false;
     }
+
+    nodeCount++;
 
     const size_t pageSize   = GetPageSize();
     const size_t pageCount  = size / pageSize;
@@ -448,11 +456,12 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
         {
             LPVOID r = VirtualAllocExNuma( 
                             gProcess, 
-                            (LPVOID)(pages+i), pageSize,
-                            MEM_RESERVE | MEM_COMMIT, 
+                            (LPVOID)pages, pageSize,
+                            MEM_COMMIT, 
                             PAGE_READWRITE,
                             i );
 
+            pages += pageSize;
             if( !r )
             {
                 const DWORD err = GetLastError();
@@ -460,8 +469,6 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
                 return false;
             }
         }
-
-        pages += blockStride;
     }
 
     DWORD node = 0;
@@ -470,7 +477,7 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
         LPVOID r = VirtualAllocExNuma( 
                             gProcess, 
                             (LPVOID)pages, pageSize,
-                            MEM_RESERVE | MEM_COMMIT, 
+                            MEM_COMMIT, 
                             PAGE_READWRITE,
                             node++ );
 
@@ -484,12 +491,21 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
         pages += pageSize;
     }
 
-    return false;
+    return true;
 }
 
 //-----------------------------------------------------------
 int SysHost::NumaGetNodeFromPage( void* ptr )
 {
     // #TODO: Implement me
+    // PSAPI_WORKING_SET_EX_INFORMATION info;
+
+    // BOOL r = QueryWorkingSetEx( GetCurrentProcess(), (PVOID)&info, (DWORD)GetPageSize() );
+    // if( !r )
+    // {
+    //     const DWORD err = GetLastError();
+    //     Log::Error( "Failed to call QueryWorkingSetEx with error: %d (0x%x).", err, err );
+    // }
+
     return -1;
 }

@@ -294,7 +294,7 @@ void TestYSort()
     const uint   k   = 30;
     const uint64 len = (1ull << k);
 
-    const uint   threadCount = std::thread::hardware_concurrency();
+    const uint   threadCount = SysHost::GetLogicalCPUCount();
 
     ThreadPool pool( threadCount, ThreadPool::Mode::Fixed );
 

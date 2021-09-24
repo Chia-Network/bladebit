@@ -55,8 +55,8 @@ struct Config
 };
 
 /// Internal Functions
-void           ParseCommandLine( int argc, const char* argv[], Config& cfg );
-bool           HexPKeyToG1Element( const char* hexKey, bls::G1Element& pkey );
+void            ParseCommandLine( int argc, const char* argv[], Config& cfg );
+bool            HexPKeyToG1Element( const char* hexKey, bls::G1Element& pkey );
 
 ByteSpan        DecodePuzzleHash( const char* poolContractAddress );
 void            GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32], uint16& outMemoSize );
@@ -426,7 +426,7 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
         Fatal( "Error: Either a pool public key or a pool contract address must be specified." );
 
 
-    const uint threadCount = std::thread::hardware_concurrency();
+    const uint threadCount = SysHost::GetLogicalCPUCount();
 
     if( cfg.threads == 0 )
         cfg.threads = threadCount;

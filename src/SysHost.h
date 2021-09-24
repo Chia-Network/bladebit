@@ -36,6 +36,9 @@ public:
     /// Gets the currently available (unused) system ram in bytes
     static size_t GetAvailableSystemMemory();
 
+    /// Get the total number of logical CPUs in the system
+    static uint GetLogicalCPUCount();
+
     /// Create an allocation in the virtual memory space
     /// If initialize == true, then all pages are touched so that
     /// the pages are actually assigned.
