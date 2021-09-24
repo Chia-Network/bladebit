@@ -73,7 +73,7 @@ MemPlotter::MemPlotter( const MemPlotConfig& cfg )
             metaBuffer0 +
             metaBuffer1;
 
-        Log::Line( "Memory required: %lu GiB.", reqMem BtoGB );
+        Log::Line( "Memory required: %llu GiB.", reqMem BtoGB );
         if( availMemory < reqMem  )
             Log::Line( "Warning: Not enough memory available. Buffer allocation may fail." );
 

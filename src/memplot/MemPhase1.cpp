@@ -803,7 +803,7 @@ uint64 MemPhase1::FpScan( const uint64 entryCount, const uint64* yBuffer, uint32
                 {
                     // ASSERT( group > prevGroup );
                     ASSERT( 0 );
-                    Fatal( "Invalid group sequence. Job: %u Idx: %lu, Ridx: %lu, Group: %lu", t, i, rIdx, group );
+                    Fatal( "Invalid group sequence. Job: %u Idx: %llu, Ridx: %llu, Group: %llu", t, i, rIdx, group );
                 }
                 prevGroup = group;
             }
@@ -826,7 +826,7 @@ uint64 MemPhase1::FpScan( const uint64 entryCount, const uint64* yBuffer, uint32
                         if( group != groupL )
                         {
                             ASSERT( 0 );
-                            Fatal( "Group validation failed @ job %lu index: %lu. L: %lu R: %lu", i, j, groupL, group );
+                            Fatal( "Group validation failed @ job %llu index: %llu. L: %llu R: %llu", i, j, groupL, group );
                         }
                         ASSERT( group == groupL );
                     }
@@ -946,7 +946,7 @@ uint64 MemPhase1::FpPair( const uint64* yBuffer, kBCJob jobs[MAX_THREADS],
     }, jobs, threadCount, sizeof( kBCJob ) );
 
     auto elapsed = TimerEnd( timer );
-    Log::Line( "  Finished pairing L/R groups in %.4lf seconds. Created %lu pairs.", elapsed, pairCount );
+    Log::Line( "  Finished pairing L/R groups in %.4lf seconds. Created %llu pairs.", elapsed, pairCount );
     Log::Line( "  Average of %.4lf pairs per group.", pairCount / (float64)groupCount );
 
     ASSERT( pairCount <= ENTRIES_PER_TABLE );

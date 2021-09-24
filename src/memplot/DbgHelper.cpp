@@ -20,7 +20,7 @@ void DumpTestProofs( const MemPlotContext& cx, const uint64 f7Index )
     const uint32 f7     = cx.t7YBuffer [f7Index];
     const Pair&  f7Pair = cx.t7LRBuffer[f7Index];
 
-    Log::Line( "T7 [%-2llu] f7  : %lu : 0x%08lx", f7Index, f7, f7 );
+    Log::Line( "T7 [%-2llu] f7  : %llu : 0x%08lx", f7Index, f7, f7 );
     Log::Line( "T7 [%-2llu] L/R : %-8lu | %-8lu", f7Index, f7Pair.left, f7Pair.right );
 
     const Pair* rPairs[16]; // R table pairs

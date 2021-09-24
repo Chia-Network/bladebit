@@ -64,7 +64,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
         size_t blockSize;
 
         if( !GetFileClusterSize( fd, blockSize ) )
-            Log::Error( "Failed to obtain file block size. Defaulting to %lu, but writes may fail.", blockSize );
+            Log::Error( "Failed to obtain file block size. Defaulting to %llu, but writes may fail.", blockSize );
 
         file._fd            = fd;
         file._blockSize     = blockSize;

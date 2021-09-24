@@ -57,7 +57,7 @@ void MemPhase3::Run()
 
         double tElapsed = TimerEnd( tableTimer );
         Log::Line( "  Finished compressing tables %u and %u in %.2lf seconds", i+1, i+2, tElapsed );
-        Log::Line( "  Table %d now has %lu / %lu entries ( %.2lf%% ).", 
+        Log::Line( "  Table %d now has %llu / %llu entries ( %.2lf%% ).", 
             i+1, newCount, rTableCount, (newCount / (double)rTableCount) * 100 );
     }
 }

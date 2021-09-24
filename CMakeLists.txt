@@ -77,21 +77,24 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     
     set(link_opts 
         /SUBSYSTEM:CONSOLE
+        /STACK:33554432,1048576
         ${link_opts})
 
     set(release_c_opts 
         /MT
-        /O2
         /Oi
+        /O2
         /Gy
         /GL
         /DNDEBUG=1
-        /DNDEBUG=1
+        /D_NDEBUG=1
         ${release_c_opts})
 
     set(debug_c_opts 
         /MTd
         /Od
+        /DDEBUG=1
+        /D_DEBUG=1
         ${debug_c_opts})
 
     set(dev_c_opts 
@@ -100,7 +103,8 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     
     set(release_link_opts 
         /DEBUG:FULL
-        /OPT:REF,IFC,LBR
+        /LTCG
+        /OPT:REF,ICF,LBR
         ${release_link_opts})
 
     set(debug_link_opts
@@ -276,7 +280,7 @@ macro(config_proj tgt)
 
     target_compile_options(${tgt} PRIVATE $<$<CONFIG:release>:${c_opts} ${release_c_opts}>)
     target_compile_options(${tgt} PRIVATE $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>)
-    target_link_options(${tgt} PRIVATE $<$<CONFIG:release>:${link_opts} ${debug_link_opts}>)
+    target_link_options(${tgt} PRIVATE $<$<CONFIG:release>:${link_opts} ${release_link_opts}>)
     target_link_options(${tgt} PRIVATE $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>)
 
     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
