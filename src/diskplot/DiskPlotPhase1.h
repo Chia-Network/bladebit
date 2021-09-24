@@ -6,8 +6,7 @@ struct GenF1Job;
 class DiskPlotPhase1
 {
 
-private:
-
+public:
     DiskPlotPhase1( DiskPlotContext& cx );
 
     void Run();

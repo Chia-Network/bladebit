@@ -173,6 +173,7 @@ file(GLOB_RECURSE bb_sources
     src/*.cpp
     src/*.c
 )
+set(src_full ${bb_sources})
 
 # Headers
 file(GLOB_RECURSE bb_headers
@@ -184,8 +185,10 @@ file(GLOB_RECURSE bb_headers
     src/*.inl
 )
 
+
 # Configure dependent on config/platform/architecture
 list(FILTER bb_sources EXCLUDE REGEX "src/main\.cpp")
+list(FILTER bb_sources EXCLUDE REGEX "src/(memplot|plot128|diskplot)")
 list(FILTER bb_sources EXCLUDE REGEX "src/(test|platform)/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
 
@@ -257,7 +260,25 @@ else()
     message( FATAL_ERROR "Unsupported operating system '${CMAKE_SYSTEM_NAME}'" )
 endif()
 
-# Dev config?
+# Project-specific sources
+file(GLOB_RECURSE src_memplot RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
+    CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    src/memplot/*.cpp
+)
+set(src_memplot ${src_memplot} src/main.cpp ${bb_sources})
+
+file(GLOB_RECURSE src_plot128 RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
+    CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    src/plot128/*.cpp
+)
+set(src_plot128 ${src_plot128} ${bb_sources})
+
+file(GLOB_RECURSE src_diskplot RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
+    CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    src/diskplot/*.cpp
+)
+set(src_diskplot ${src_diskplot} ${bb_sources})
+
 file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
     CONFIGURE_DEPENDS LIST_DIRECTORIES false
     src/test/*.cpp
@@ -285,10 +306,10 @@ set(bb_include_dirs
 )
 
 # BladeBit
-add_executable(bladebit      src/main.cpp ${bb_sources} ${bb_headers})
+add_executable(bladebit      ${src_memplot} ${bb_headers})
 add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/test/test_main.cpp ${bb_sources} ${src_dev} ${bb_headers} ${headers_dev})
-add_executable(bladebit_128  src/plot128/main_128.cpp ${bb_sources} ${bb_headers})
-add_executable(bladebit_disk src/diskplot/main_diskplot.cpp ${bb_sources} ${bb_headers})
+add_executable(bladebit_128  ${src_plot128} ${bb_headers})
+add_executable(bladebit_disk ${src_diskplot} ${bb_headers})
 
 macro(config_proj tgt)
 
@@ -308,5 +329,5 @@ config_proj(bladebit_disk)
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
-    FILES ${bb_sources} ${bb_headers} ${src_dev} ${headers_dev}
+    FILES ${src_full}
 )

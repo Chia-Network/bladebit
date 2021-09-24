@@ -106,6 +106,8 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
     SYSTEM_INFO info;
     ::GetSystemInfo( &info );
 
+//     const size_t largePageMin = GetLargePageMinimum();
+
     const size_t pageSize = (size_t)info.dwPageSize;
     size = CeildDiv( size, pageSize );
 

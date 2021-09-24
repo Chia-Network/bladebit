@@ -6,6 +6,8 @@
 int main( int arg, const char* argv[] )
 {
     DiskPlotter::Config plotCfg;
+    ZeroMem( &plotCfg );
+
     DiskPlotter plotter( plotCfg );
 
     DiskPlotter::PlotRequest req;
