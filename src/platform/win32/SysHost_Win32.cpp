@@ -109,7 +109,7 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
     const size_t pageSize = (size_t)info.dwPageSize;
     size = CeildDiv( size, pageSize );
 
-    void* ptr = ::VirtualAlloc( NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE | PAGE_NOCACHE );
+    void* ptr = ::VirtualAlloc( NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
 
     if( ptr && initialize )
     {
