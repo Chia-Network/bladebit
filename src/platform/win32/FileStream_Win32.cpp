@@ -129,10 +129,20 @@ ssize_t FileStream::Read( void* buffer, size_t size )
     if( size < 1 )
         return 0;
 
+    DWORD bytesToRead = size > std::numeric_limits<DWORD>::max() ?
+                               std::numeric_limits<DWORD>::max() : 
+                               (DWORD)size;
+
+    if( IsFlagSet( _flags, FileFlags::NoBuffering ) )
+    {
+        // #NOTE: See comment on Write() about this.
+        bytesToRead = (DWORD)( bytesToRead / _blockSize * _blockSize );
+    }
+
     DWORD bytesRead = 0;
 
     // Cap size to 32-bit range
-    const BOOL r = ReadFile( _fd, buffer, (DWORD)size, &bytesRead, NULL );
+    const BOOL r = ReadFile( _fd, buffer, bytesToRead, &bytesRead, NULL );
     
     if( r )
         _readPosition += (size_t)bytesRead;
@@ -164,8 +174,22 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
     if( size < 1 )
         return 0;
 
+    DWORD bytesToWrite = size > std::numeric_limits<DWORD>::max() ?
+                                std::numeric_limits<DWORD>::max() : 
+                                (DWORD)size;
+
+    if( IsFlagSet( _flags, FileFlags::NoBuffering ) )
+    {
+        // We can only write in block sizes. But since the user may have
+        // specified a size greater than DWORD, our clamping it to 
+        // DWORD's max can cause it to become not bounded to block size,
+        // even if the user's original size was block-bound.
+        // So let's limit this to a block size.
+        bytesToWrite = (DWORD)(bytesToWrite / _blockSize * _blockSize);
+    }
+
     DWORD bytesWritten = 0;
-    BOOL r = WriteFile( _fd, buffer, (DWORD)size, &bytesWritten, NULL );
+    BOOL r = WriteFile( _fd, buffer, bytesToWrite, &bytesWritten, NULL );
 
     if( r )
         _writePosition += (size_t)bytesWritten;
