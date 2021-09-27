@@ -61,12 +61,7 @@ public:
 
     inline size_t BlockSize()
     {
-        #if PLATFORM_IS_UNIX
-            return _blockSize; 
-        #else
-            // #TODO: Get block size on windows, if we need it
-            return 4096;
-        #endif
+        return _blockSize;
     }
 
     void Close();
