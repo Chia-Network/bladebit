@@ -3,8 +3,6 @@ cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-project(bladebit)
-
 set(CMAKE_CONFIGURATION_TYPES Release Debug)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -14,6 +12,8 @@ if(NOT CMAKE_BUILD_TYPE)
    )
 endif()
 message("Config: ${CMAKE_BUILD_TYPE}")
+
+project(bladebit)
 
 
 set(CMAKE_MODULE_PATH
@@ -44,7 +44,6 @@ set(CMAKE_CXX_FLAGS_DEBUG_INIT)
 
 set(c_opts)
 set(link_opts)
-# set(cxx_opts)
 
 set(release_c_opts)
 set(debug_c_opts)
@@ -283,8 +282,6 @@ endif()
 set(bb_include_dirs 
     ${INCLUDE_DIRECTORIES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${bls_SOURCE_DIR}/include
-    ${relic_SOURCE_DIR}/include
 )
 
 
