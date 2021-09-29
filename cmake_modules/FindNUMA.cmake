@@ -8,11 +8,11 @@ include(FindPackageHandleStandardArgs)
 
 find_path(NUMA_INCLUDE_DIR
   NAMES numa.h numaif.h
-  HINTS ${NUMA_ROOT_DIR}/include)
+  HINTS ${INCLUDE_INSTALL_DIR})
 
 find_library(NUMA_LIBRARY
   NAMES numa
-  HINTS ${NUMA_ROOT_DIR}/lib)
+  HINTS ${LIB_INSTALL_DIR})
 
 
 include(FindPackageHandleStandardArgs)
