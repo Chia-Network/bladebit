@@ -35,7 +35,7 @@ Thread::Thread( size_t stackSize )
     r = pthread_mutex_init( &_launchMutex, NULL );
     if( r ) Fatal( "pthread_mutex_init() failed." );
     
-    r = pthread_create( &_threadId, &attr, (PthreadFunc)&Thread::ThreadStarter, this );
+    r = pthread_create( &_threadId, &attr, (PthreadFunc)&Thread::ThreadStarterUnix, this );
     if( r ) Fatal( "pthread_create() failed." );
     
     r = pthread_attr_destroy( &attr );
@@ -79,10 +79,10 @@ Thread::~Thread()
 }
 
 //-----------------------------------------------------------
-uint64 Thread::SetAffinity( uint64 affinity )
-{
-    return SysHost::SetCurrentThreadAffinityMask( affinity );
-}
+// uint64 Thread::SetAffinity( uint64 affinity )
+// {
+//     return SysHost::SetCurrentThreadAffinityMask( affinity );
+// }
 
 //-----------------------------------------------------------
 bool Thread::HasExited() const

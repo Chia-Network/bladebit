@@ -134,15 +134,18 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 else()
 
     # *Nix
-    set(CMAKE_C_FLAGS --include=pch.h -Wall -Wno-comment -g ${CMAKE_C_FLAGS})
-    set(CMAKE_CXX_FLAGS -std=c++17 ${CMAKE_CXX_FLAGS})
+    set(c_opts --include=pch.h -march=native -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
 
     set(release_c_opts 
         -O3 -flto
+        -D_NDEBUG=1
+        -DNDEBUG=1
         ${release_c_opts})
 
     set(debug_c_opts 
         -O0
+        -DDEBUG=1
+        -D_DEBUG=1
         ${debug_c_opts})
 
     set(dev_c_opts 
@@ -151,12 +154,12 @@ else()
     # GCC
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     
-        set(CMAKE_C_FLAGS -fmax-errors=5 ${CMAKE_C_FLAGS})
+        set(c_opts -fmax-errors=5 ${c_opts})
 
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         
-        set(CMAKE_C_FLAGS -ferror-limit=5 -fdeclspec -fno-exceptions -Wunknown-pragmas ${CMAKE_C_FLAGS})
+        set(c_opts_FLAGS -ferror-limit=5 -fdeclspec -Wunknown-pragmas ${c_opts})
 
     endif()
 
@@ -189,20 +192,26 @@ list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
 
 # Architecture
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "AMD64")
-    
-    list(APPEND bb_sources
-        src/b3/blake3_avx2.c
-        src/b3/blake3_avx512.c
-        src/b3/blake3_sse41.c
-    )
 
     if(NOT MSVC)
+        
         list(APPEND bb_sources
             src/b3/blake3_avx2_x86-64_unix.S
             src/b3/blake3_avx512_x86-64_unix.S
             src/b3/blake3_sse41_x86-64_unix.S
         )
+
+        set_source_files_properties(
+            src/b3/blake3_avx2_x86-64_unix.S
+            src/b3/blake3_avx512_x86-64_unix.S
+            src/b3/blake3_sse41_x86-64_unix.S
+            PROPERTIES LANGUAGE C)
     else()
+        list(APPEND bb_sources
+            src/b3/blake3_avx2.c
+            src/b3/blake3_avx512.c
+            src/b3/blake3_sse41.c
+        )
         # Disable blake3 convertion loss of data warnings 
         set_source_files_properties( 
             src/b3/blake3_avx2.c
@@ -212,6 +221,7 @@ if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCES
             /wd4244
         )
     endif()
+
 elseif(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "aarch64")
 else()
     message( FATAL_ERROR "Unsupported architecture '${CMAKE_HOST_SYSTEM_PROCESSOR}'" )

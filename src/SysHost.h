@@ -49,7 +49,7 @@ public:
     static bool VirtualProtect( void* ptr, size_t size, VProtect flags = VProtect::NoAccess );
 
     /// Set the processor affinity mask for the current process
-    static uint64 SetCurrentProcessAffinityMask( uint64 mask );
+    // static uint64 SetCurrentProcessAffinityMask( uint64 mask );
 
     /// Set the processor affinity mask for the current thread
 //     static uint64 SetCurrentThreadAffinityMask( uint64 mask );

@@ -264,7 +264,7 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
         const char* val = value();
         int64 v = 0;
         
-        int r = sscanf( val, "%lld", &v );
+        int r = sscanf( val, "%lli", &v );
         if( r != 1 )
             Fatal( "Invalid value for argument '%s'.", arg );
 
