@@ -290,7 +290,7 @@ set(bb_include_dirs
 
 # BladeBit
 add_executable(bladebit     src/main.cpp ${bb_sources} ${bb_headers})
-add_executable(bladebit_dev src/test/test_main.cpp ${bb_sources} ${src_dev} ${bb_headers} ${headers_dev})
+add_executable(bladebit_dev EXCLUDE_FROM_ALL src/test/test_main.cpp ${bb_sources} ${src_dev} ${bb_headers} ${headers_dev})
 
 macro(config_proj tgt)
 
