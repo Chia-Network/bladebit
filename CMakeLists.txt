@@ -16,20 +16,26 @@ endif()
 message("Config: ${CMAKE_BUILD_TYPE}")
 
 
+set(CMAKE_MODULE_PATH
+  ${CMAKE_MODULE_PATH}
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules
+)
+
 # Grab BLS
 include(FetchContent)
-
-set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")
-set(BUILD_BLS_TESTS "0" CACHE STRING "")
-set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 
 FetchContent_Declare(
   bls
   GIT_REPOSITORY https://github.com/Chia-Network/bls-signatures.git
   GIT_TAG        1.0.6
 )
+
+set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")
+set(BUILD_BLS_TESTS "0" CACHE STRING "")
+set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
 
+# Config
 set(CMAKE_C_FLAGS_RELEASE_INIT)
 set(CMAKE_C_FLAGS_DEBUG_INIT)
 set(CMAKE_CXX_FLAGS_RELEASE_INIT)
@@ -47,7 +53,6 @@ set(dev_c_opts)
 set(release_link_opts)
 set(debug_link_opts)
 
-# Config
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 
     # MSVC
@@ -261,7 +266,8 @@ find_package(Threads REQUIRED)
 set(platform_libs)
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    set(platform_libs numa)
+    find_package(NUMA REQUIRED)
+    set(platform_libs ${NUMA_LIBRARY} gmp)
 endif()
 
 set(bb_include_dirs 
