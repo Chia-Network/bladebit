@@ -23,6 +23,9 @@ sudo apt install -y build-essential
 sudo apt install -y cmake libgmp-dev libnuma-dev
 ```
 
+### Windows
+Must have [Visual Sudio 2019](https://visualstudio.microsoft.com/vs/) or its build tools installed.
+
 ## Building
 
 

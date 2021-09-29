@@ -155,15 +155,15 @@ bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
 }
 
 //-----------------------------------------------------------
-uint64 SysHost::SetCurrentProcessAffinityMask( uint64 mask )
-{
-    HANDLE hProcess = ::GetCurrentProcess();
+// uint64 SysHost::SetCurrentProcessAffinityMask( uint64 mask )
+// {
+//     HANDLE hProcess = ::GetCurrentProcess();
 
-    BOOL r = ::SetProcessAffinityMask( hProcess, mask );
-    ASSERT( r );
+//     BOOL r = ::SetProcessAffinityMask( hProcess, mask );
+//     ASSERT( r );
 
-    return r ? mask : 0;
-}
+//     return r ? mask : 0;
+// }
 
 // //-----------------------------------------------------------
 // uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
