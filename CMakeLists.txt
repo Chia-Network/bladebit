@@ -5,11 +5,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project(bladebit)
 
-set(CMAKE_CONFIGURATION_TYPES release debug)
+set(CMAKE_CONFIGURATION_TYPES Release Debug)
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "release"
-        CACHE STRING "Possible values are: release, debug"
+    set(CMAKE_BUILD_TYPE "Release"
+        CACHE STRING "Possible values are: Release, Debug"
         FORCE
    )
 endif()
@@ -61,7 +61,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /Zc:__cplusplus
         /MP
         /Zi
-        /EHsc-
+        # /EHsc-
         # /Wall
         /W3
         /WX
