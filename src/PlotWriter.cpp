@@ -241,7 +241,7 @@ bool DiskPlotWriter::WaitUntilFinishedWriting()
 //-----------------------------------------------------------
 void DiskPlotWriter::WriterMain( void* data )
 {
-    SysHost::SetCurrentThreadAffinityMask( 1 );
+    SysHost::SetCurrentThreadAffinityCpuId( 0 );
     
     ASSERT( data );
     DiskPlotWriter* self = reinterpret_cast<DiskPlotWriter*>( data );

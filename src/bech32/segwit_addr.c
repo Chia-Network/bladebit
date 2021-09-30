@@ -35,7 +35,8 @@ static uint32_t bech32_polymod_step(uint32_t pre) {
         (-((b >> 4) & 1) & 0x2a1462b3UL);
 }
 
-
+#pragma warning( push  )
+#pragma warning( disable : 4715 ) // Not all control paths retrn a value
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wreturn-type"
 static uint32_t bech32_final_constant(bech32_encoding enc) {
@@ -44,6 +45,7 @@ static uint32_t bech32_final_constant(bech32_encoding enc) {
     assert(0);
 }
 #pragma GCC diagnostic pop
+#pragma warning( pop )
 
 static const char* charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 

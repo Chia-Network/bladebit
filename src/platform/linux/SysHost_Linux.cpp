@@ -36,6 +36,12 @@ size_t SysHost::GetAvailableSystemMemory()
 }
 
 //-----------------------------------------------------------
+ uint SysHost::GetLogicalCPUCount()
+ {
+    return (uint)get_nprocs();
+ }
+
+//-----------------------------------------------------------
 void* SysHost::VirtualAlloc( size_t size, bool initialize )
 {
     // Align size to page boundary
@@ -124,46 +130,46 @@ bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
 }
 
 //-----------------------------------------------------------
-uint64 SysHost::SetCurrentProcessAffinityMask( uint64 mask )
-{
-    return SetCurrentThreadAffinityMask( mask );
-}
+// uint64 SysHost::SetCurrentProcessAffinityMask( uint64 mask )
+// {
+//     return SetCurrentThreadAffinityMask( mask );
+// }
 
-//-----------------------------------------------------------
-uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
-{
-    pthread_t thread = pthread_self();
+// //-----------------------------------------------------------
+// uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
+// {
+//     pthread_t thread = pthread_self();
 
-    cpu_set_t cpuSet;
-    CPU_ZERO( &cpuSet );
+//     cpu_set_t cpuSet;
+//     CPU_ZERO( &cpuSet );
 
-    if( mask == 0 )
-        CPU_SET( 1, &cpuSet );
-    else
-    {
-        for( uint i = 0; i < 64; i++ )
-        {
-            if( mask & (1ull << i ) )
-                CPU_SET( i+1, &cpuSet );
-        }
-    }
+//     if( mask == 0 )
+//         CPU_SET( 1, &cpuSet );
+//     else
+//     {
+//         for( uint i = 0; i < 64; i++ )
+//         {
+//             if( mask & (1ull << i ) )
+//                 CPU_SET( i+1, &cpuSet );
+//         }
+//     }
 
-    int r = pthread_setaffinity_np( thread, sizeof(cpu_set_t), &cpuSet );
-    if( r != 0 )
-    {
-        ASSERT( 0 );
-        return 0;
-    }
+//     int r = pthread_setaffinity_np( thread, sizeof(cpu_set_t), &cpuSet );
+//     if( r != 0 )
+//     {
+//         ASSERT( 0 );
+//         return 0;
+//     }
 
-    r = pthread_getaffinity_np( thread, sizeof(cpu_set_t), &cpuSet );
-    if( r != 0 )
-    {
-        ASSERT( 0 );
-        return 0;
-    }
+//     r = pthread_getaffinity_np( thread, sizeof(cpu_set_t), &cpuSet );
+//     if( r != 0 )
+//     {
+//         ASSERT( 0 );
+//         return 0;
+//     }
 
-    return mask;
-}
+//     return mask;
+// }
 
 //-----------------------------------------------------------
 bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )

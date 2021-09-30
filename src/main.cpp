@@ -12,16 +12,22 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
+#pragma warning( push )
+
 extern "C" {
     #include "bech32/segwit_addr.h"
 }
 
 #pragma GCC diagnostic ignored "-Wsign-compare"
-#include "bls/bls.hpp"
-#include "bls/elements.hpp"
-#include "bls/schemes.hpp"
-#include "bls/util.hpp"
+#pragma warning( disable : 6287  )
+#pragma warning( disable : 4267  )
+#pragma warning( disable : 26495 )
+#include "bls.hpp"
+#include "elements.hpp"
+#include "schemes.hpp"
+#include "util.hpp"
 #pragma GCC diagnostic pop
+#pragma warning( pop )
 
 #define PLOT_FILE_PREFIX_LEN (sizeof("plot-k32-2021-08-05-18-55-")-1)
 #define PLOT_FILE_FMT_LEN (sizeof( "/plot-k32-2021-08-05-18-55-77a011fc20f0003c3adcc739b615041ae56351a22b690fd854ccb6726e5f43b7.plot.tmp" ))
@@ -49,8 +55,8 @@ struct Config
 };
 
 /// Internal Functions
-void           ParseCommandLine( int argc, const char* argv[], Config& cfg );
-bool           HexPKeyToG1Element( const char* hexKey, bls::G1Element& pkey );
+void            ParseCommandLine( int argc, const char* argv[], Config& cfg );
+bool            HexPKeyToG1Element( const char* hexKey, bls::G1Element& pkey );
 
 ByteSpan        DecodePuzzleHash( const char* poolContractAddress );
 void            GeneratePlotIdAndMemo( Config& cfg, byte plotId[32], byte plotMemo[48+48+32], uint16& outMemoSize );
@@ -137,7 +143,7 @@ int main( int argc, const char* argv[] )
 
     if( outputFolderLen )
     {
-        mempcpy( plotOutPath, cfg.outputFolder, outputFolderLen );
+        memcpy( plotOutPath, cfg.outputFolder, outputFolderLen );
 
         // Add a trailing slash, if we need one.
         if( plotOutPath[outputFolderLen-1] != '/' )
@@ -258,7 +264,7 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
         const char* val = value();
         int64 v = 0;
         
-        int r = sscanf( val, "%ld", &v );
+        int r = sscanf( val, "%lli", &v );
         if( r != 1 )
             Fatal( "Invalid value for argument '%s'.", arg );
 
@@ -420,7 +426,7 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
         Fatal( "Error: Either a pool public key or a pool contract address must be specified." );
 
 
-    const uint threadCount = std::thread::hardware_concurrency();
+    const uint threadCount = SysHost::GetLogicalCPUCount();
 
     if( cfg.threads == 0 )
         cfg.threads = threadCount;
@@ -616,7 +622,7 @@ ByteSpan DecodePuzzleHash( const char* poolContractAddress )
     {
         uint value = data[i];
 
-        if( value < 0 or (value >> fromBits) )
+        if( value < 0 || (value >> fromBits) )
             Fatal( "Error: Invalid pool contract address '%s'. Could not decode bits.", poolContractAddress );
 
         acc = ((acc << fromBits) | value) & maxAcc;

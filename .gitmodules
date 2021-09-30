@@ -1,4 +1,0 @@
-[submodule "modules/bls-signatures"]
-	path = modules/bls-signatures
-	url = https://github.com/harold-b/bls-signatures.git
-	branch = bladebit

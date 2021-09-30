@@ -43,7 +43,7 @@
         error Unsupported Apple platform.
     #endif
 
-#elif defined( __WIN32 )
+#elif defined( _WIN32 )
     #define PLATFORM_IS_WINDOWS 1
 #endif
 

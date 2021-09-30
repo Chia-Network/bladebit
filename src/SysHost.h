@@ -17,6 +17,10 @@ struct NumaInfo
     uint        nodeCount;  // How many NUMA nodes in the system
     uint        cpuCount;   // Total cpu count used by nodes
     Span<uint>* cpuIds;     // CPU ids of each node
+
+    #ifdef _WIN32
+//         Span<uint16> procGroup; // Processor group each cpu belongs to.
+    #endif
 };
 
 class SysHost
@@ -32,6 +36,9 @@ public:
     /// Gets the currently available (unused) system ram in bytes
     static size_t GetAvailableSystemMemory();
 
+    /// Get the total number of logical CPUs in the system
+    static uint GetLogicalCPUCount();
+
     /// Create an allocation in the virtual memory space
     /// If initialize == true, then all pages are touched so that
     /// the pages are actually assigned.
@@ -42,10 +49,10 @@ public:
     static bool VirtualProtect( void* ptr, size_t size, VProtect flags = VProtect::NoAccess );
 
     /// Set the processor affinity mask for the current process
-    static uint64 SetCurrentProcessAffinityMask( uint64 mask );
+    // static uint64 SetCurrentProcessAffinityMask( uint64 mask );
 
     /// Set the processor affinity mask for the current thread
-    static uint64 SetCurrentThreadAffinityMask( uint64 mask );
+//     static uint64 SetCurrentThreadAffinityMask( uint64 mask );
 
     /// Set the processor affinity mask to a specific cpu id for the current thread
     static bool   SetCurrentThreadAffinityCpuId( uint32 cpuId );

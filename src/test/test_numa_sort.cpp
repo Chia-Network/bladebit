@@ -93,7 +93,7 @@ void RadixSortYNUMA( ThreadPool& pool,
     const uint pageCount      = (uint)( (length  * sizeof( uint64 )) / pageSize );// (uint)CDiv( length * sizeof( uint64 ),  (uint64)pageSize );
     const uint nodeCount      = numa->nodeCount;
     const uint pagesPerNode   = pageCount    / nodeCount;
-    const uint pagesPerThread = pagesPerNode / numa->cpuIds->length;    // #TODO: Only supports nodes with even number of CPUs
+    const uint pagesPerThread = (uint)(pagesPerNode / numa->cpuIds->length);    // #TODO: Only supports nodes with even number of CPUs
     const uint blockPerPage   = pageSize     / blockSize;
     const uint threadCount    = numa->cpuCount;
 
@@ -213,7 +213,7 @@ void TestNumaSort( int argc, const char* argv[] )
         Fatal( "Failed to interleave yTmpBuffer." );
 
     // Fault pages
-    const size_t pageCount = CDiv( size, pageSize );
+    const size_t pageCount = CDiv( size, (int)pageSize );
 
     byte* pages    = (byte*)yBuffer;
     byte* tmpPages = (byte*)yTmp;
@@ -294,7 +294,7 @@ void TestYSort()
     const uint   k   = 30;
     const uint64 len = (1ull << k);
 
-    const uint   threadCount = std::thread::hardware_concurrency();
+    const uint   threadCount = SysHost::GetLogicalCPUCount();
 
     ThreadPool pool( threadCount, ThreadPool::Mode::Fixed );
 
@@ -454,7 +454,7 @@ void NumaRadixSortThread( NumaYSortJob* job )
     const uint nodeCount       = job->nodeCount;
     const uint node            = job->node;
     
-    const uint pageSize        = SysHost::GetPageSize();
+    const uint pageSize        = (uint)SysHost::GetPageSize();
     const uint pageCount       = job->pageCount;
     const uint pageStart       = job->pageStart;
     const uint blocksPerPage   = pageSize / 64;
@@ -822,7 +822,7 @@ void FaultPageThread( FaultPageJob* job )
     if( job->id == job->threadCount - 1 )
         size += job->size - size * job->threadCount;
 
-    const size_t pageCount = CDiv( size, pageSize );
+    const size_t pageCount = CDiv( size, (int)pageSize );
 
     for( uint64 i = 0; i < pageCount; i++ )
     {
@@ -879,7 +879,7 @@ void GenChaChaThread( ChaChaJob* job )
     ZeroMem( &chacha );
 
     chacha8_keysetup( &chacha, job->key, 256, NULL );
-    chacha8_get_keystream( &chacha, blockIdx, blockCount, (byte*)blocks );
+    chacha8_get_keystream( &chacha, blockIdx, (uint)blockCount, (byte*)blocks );
 
     const uint64 length = blocksPerThread * entriesPerBlock;
     
