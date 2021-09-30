@@ -79,7 +79,7 @@ Memory is bound on interleaved mode for NUMA systems which currently gives the b
 This is not supported yet. Some folks have reported some gains when using huge page sizes. Although this was something I wanted to test, I focused first instead on things that did not necessarily depended on system config. But I'd like to add support for it in the future (trivial from the development point of view, I have just not configured the test system with huge page sizes).
 
 ## Other Observations
-This implementation is very memory-boundz so optimizing your system towards fast memory access is essential. CPUs with large caches will benefit as well.
+This implementation is highly memory-bound so optimizing your system towards fast memory access is essential. CPUs with large caches will benefit as well.
 
 
 Copyright 2021 Harold Brenes, Chia Network Inc
