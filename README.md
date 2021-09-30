@@ -19,8 +19,7 @@ sudo yum group install -y "Development Tools"
 sudo yum install -y cmake gmp-devel numactl-devel
 
 # Ubuntu or Debian-based
-sudo apt install -y build-essential
-sudo apt install -y cmake libgmp-dev libnuma-dev
+sudo apt install -y build-essential cmake libgmp-dev libnuma-dev
 ```
 
 ### Windows
