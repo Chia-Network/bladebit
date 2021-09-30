@@ -220,7 +220,7 @@ uint64 MemPhase1::GenerateF1()
             // job.threadCount = numThreads;
 
             job.key        = key;
-            job.blockCount = blocksPerThread;
+            job.blockCount = (uint32)blocksPerThread;
             job.entryCount = (uint32)entriesPerThread;
             job.x          = (uint32)offset;
             job.blocks     = blocks  + blockOffset;
@@ -228,8 +228,8 @@ uint64 MemPhase1::GenerateF1()
             job.xBuffer    = xTmp    + offset;
         }
 
-        jobs[numThreads-1].entryCount += trailingEntries;
-        jobs[numThreads-1].blockCount += trailingBlocks;
+        jobs[numThreads-1].entryCount += (uint32)trailingEntries;
+        jobs[numThreads-1].blockCount += (uint32)trailingBlocks;
 
         // Initialize NUMA pages
         // if( numa )
@@ -525,7 +525,7 @@ void F1JobThread( F1GenJob* job )
     // Gen the x that generated the y
     uint32* xBuffer = job->xBuffer;
     for( uint64 i = 0; i < entryCount; i++ )
-        xBuffer[i] = x + i;
+        xBuffer[i] = (uint32)( x + i );
 }
 
 
@@ -777,9 +777,9 @@ uint64 MemPhase1::FpScan( const uint64 entryCount, const uint64* yBuffer, uint32
     // This is an overflow if the last group ends @ k^32, if so,
     // then have it end just before that.
     if( entryCount == ENTRIES_PER_TABLE )
-        lastJob.groupBoundaries[lastJob.groupCount] = entryCount-1;
+        lastJob.groupBoundaries[lastJob.groupCount] = (uint32)(entryCount-1);
     else
-        lastJob.groupBoundaries[lastJob.groupCount] = entryCount;
+        lastJob.groupBoundaries[lastJob.groupCount] = (uint32)entryCount;
 
     // double elapsed = TimerEnd( timer );
     // Log::Line( "  Finished scanning kBC groups in %.2lf seconds.", elapsed );
@@ -803,7 +803,7 @@ uint64 MemPhase1::FpScan( const uint64 entryCount, const uint64* yBuffer, uint32
                 {
                     // ASSERT( group > prevGroup );
                     ASSERT( 0 );
-                    Fatal( "Invalid group sequence. Job: %u Idx: %lu, Ridx: %lu, Group: %lu", t, i, rIdx, group );
+                    Fatal( "Invalid group sequence. Job: %u Idx: %llu, Ridx: %llu, Group: %llu", t, i, rIdx, group );
                 }
                 prevGroup = group;
             }
@@ -826,7 +826,7 @@ uint64 MemPhase1::FpScan( const uint64 entryCount, const uint64* yBuffer, uint32
                         if( group != groupL )
                         {
                             ASSERT( 0 );
-                            Fatal( "Group validation failed @ job %lu index: %lu. L: %lu R: %lu", i, j, groupL, group );
+                            Fatal( "Group validation failed @ job %llu index: %llu. L: %llu R: %llu", i, j, groupL, group );
                         }
                         ASSERT( group == groupL );
                     }
@@ -863,7 +863,7 @@ void FpScanThread( kBCJob* job )
         {
             ASSERT( group > lastGroup );
 
-            groupBoundaries[groupCount++] = i;
+            groupBoundaries[groupCount++] = (uint32)i;
             lastGroup = group;
 
             if( groupCount == maxGroups )
@@ -885,7 +885,7 @@ uint64 MemPhase1::FpPair( const uint64* yBuffer, kBCJob jobs[MAX_THREADS],
 {
     MemPlotContext& cx = _context;
 
-    const uint64 threadCount = cx.threadCount;
+    const uint32 threadCount = cx.threadCount;
 
     uint64 pairCount = 0;
 
@@ -895,7 +895,7 @@ uint64 MemPhase1::FpPair( const uint64* yBuffer, kBCJob jobs[MAX_THREADS],
     const uint64 maxTotalpairs     = cx.maxPairs;
     const uint64 maxPairsPerThread = maxTotalpairs / threadCount;
 
-    for( uint64 i = 0; i < threadCount; i++ )
+    for( uint32 i = 0; i < threadCount; i++ )
     {
         auto& job = jobs[i];
 
@@ -909,7 +909,7 @@ uint64 MemPhase1::FpPair( const uint64* yBuffer, kBCJob jobs[MAX_THREADS],
         // job.jobIdx          = (uint32)i;
     }
 
-    cx.threadPool->RunJob( FpPairThread, jobs, (uint)threadCount );
+    cx.threadPool->RunJob( FpPairThread, jobs, threadCount );
 
     // Count the total pairs and copy the pair buffers
     // to the actual destination pair buffer.
@@ -946,7 +946,7 @@ uint64 MemPhase1::FpPair( const uint64* yBuffer, kBCJob jobs[MAX_THREADS],
     }, jobs, threadCount, sizeof( kBCJob ) );
 
     auto elapsed = TimerEnd( timer );
-    Log::Line( "  Finished pairing L/R groups in %.4lf seconds. Created %lu pairs.", elapsed, pairCount );
+    Log::Line( "  Finished pairing L/R groups in %.4lf seconds. Created %llu pairs.", elapsed, pairCount );
     Log::Line( "  Average of %.4lf pairs per group.", pairCount / (float64)groupCount );
 
     ASSERT( pairCount <= ENTRIES_PER_TABLE );

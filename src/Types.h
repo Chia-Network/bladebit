@@ -1,13 +1,17 @@
 #pragma once
 
-typedef uint8_t             byte;
-typedef uint8_t             uint8;
-typedef uint16_t            uint16;
-typedef uint32_t            uint32;
-typedef uint64_t            uint64;
+typedef uint8_t                 byte;
+typedef uint8_t                 uint8;
+typedef uint16_t                uint16;
+typedef uint32_t                uint32;
+typedef unsigned long long int  uint64;
 
 #if !uint
     typedef uint32          uint;
+#endif
+
+#if !ssize_t
+    typedef int64_t         ssize_t;
 #endif
 
 typedef uint8  u8;
@@ -19,7 +23,7 @@ typedef int8_t              sbyte;
 typedef int8_t              int8;
 typedef int16_t             int16;
 typedef int32_t             int32;
-typedef int64_t             int64;
+typedef long long int       int64;
 
 typedef int8  i8;
 typedef int16 i16;

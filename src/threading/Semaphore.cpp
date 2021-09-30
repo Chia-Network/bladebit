@@ -6,11 +6,18 @@
 
 //-----------------------------------------------------------
 Semaphore::Semaphore( int initialCount )
+    #if PLATFORM_IS_WINDOWS
+    : _count( initialCount )
+    #endif
 {
     #if PLATFORM_IS_UNIX
         int r = sem_init( &_id, 0, initialCount );
         if( r != 0 )
             Fatal( "sem_init() failed." );
+    #elif PLATFORM_IS_WINDOWS
+        _id = CreateSemaphore( NULL,(LONG)initialCount, std::numeric_limits<LONG>::max(), NULL );
+        if( _id == NULL )
+            Fatal( "CreateSemaphore() failed." );
     #else
         #error Unimplemented
     #endif
@@ -22,7 +29,10 @@ Semaphore::~Semaphore()
     #if PLATFORM_IS_UNIX
         int r = sem_destroy( &_id );
         if( r != 0 )
-            Fatal( "sem_destroy() failed." );    
+            Fatal( "sem_destroy() failed." );
+    #elif PLATFORM_IS_WINDOWS
+        if( !CloseHandle( _id ) )
+            Fatal( "CloseHandle( semaphore ) failed." );
     #else
         #error Unimplemented
     #endif
@@ -32,9 +42,13 @@ Semaphore::~Semaphore()
 void Semaphore::Wait()
 {
     #if PLATFORM_IS_UNIX
-        int r = sem_wait( &_id );
+        const int r = sem_wait( &_id );
         if( r != 0 )
             Fatal( "sem_wait() failed." );    
+    #elif PLATFORM_IS_WINDOWS
+        const DWORD r = WaitForSingleObject( _id, INFINITE );
+        if( r != WAIT_OBJECT_0 )
+            Fatal( "PLATFORM_IS_WINDOWS( semaphore ) failed." );
     #else
         #error Unimplemented
     #endif
@@ -71,6 +85,9 @@ bool Semaphore::Wait( long milliseconds )
     #elif PLATFORM_IS_MACOS
         // #TODO: Implement on macOS with condition variable 
         return false;
+    #elif PLATFORM_IS_WINDOWS
+        const DWORD r = WaitForSingleObject( _id, (DWORD)milliseconds );
+        return r == WAIT_OBJECT_0 || r == WAIT_TIMEOUT;
     #else
         #error Unimplemented
     #endif
@@ -88,6 +105,8 @@ int Semaphore::GetCount()
             Fatal( "sem_getvalue() failed." );    
 
         return value;
+    #elif PLATFORM_IS_WINDOWS
+        return _count.load( std::memory_order::memory_order_release );
     #else
         #error Unimplemented
     #endif
@@ -99,7 +118,15 @@ void Semaphore::Release()
     #if PLATFORM_IS_UNIX
         int r = sem_post( &_id );
         if( r != 0 )
-            Fatal( "sem_post() failed." );    
+            Fatal( "sem_post() failed." );
+    #elif PLATFORM_IS_WINDOWS
+        LONG prevCount;
+        BOOL r = ::ReleaseSemaphore( _id, 1, &prevCount );
+        
+        if( !r )
+            Fatal( "ReleaseSemaphore() failed." );
+
+        _count++;
     #else
         #error Unimplemented
     #endif

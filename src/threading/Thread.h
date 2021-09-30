@@ -12,7 +12,7 @@ public:
     Thread();
     ~Thread();
 
-    static uint64 SetAffinity( uint64 affinity );
+//     static uint64 SetAffinity( uint64 affinity );
     // void SetName( const char* name );
 
     void Run( ThreadRunner runner, void* param );
@@ -25,7 +25,14 @@ public:
     bool HasExited() const;
 
 private:
-    static void* ThreadStarter( Thread* thread );
+    
+    #if PLATFORM_IS_UNIX
+        static void* ThreadStarterUnix( Thread* thread );
+    #elif PLATFORM_IS_WINDOWS
+        static DWORD ThreadStarterWin( LPVOID );
+    #else
+        #error Unimplemented
+    #endif
 
 private:
     ThreadId     _threadId = 0;

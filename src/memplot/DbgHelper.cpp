@@ -20,7 +20,7 @@ void DumpTestProofs( const MemPlotContext& cx, const uint64 f7Index )
     const uint32 f7     = cx.t7YBuffer [f7Index];
     const Pair&  f7Pair = cx.t7LRBuffer[f7Index];
 
-    Log::Line( "T7 [%-2llu] f7  : %lu : 0x%08lx", f7Index, f7, f7 );
+    Log::Line( "T7 [%-2llu] f7  : %llu : 0x%08lx", f7Index, f7, f7 );
     Log::Line( "T7 [%-2llu] L/R : %-8lu | %-8lu", f7Index, f7Pair.left, f7Pair.right );
 
     const Pair* rPairs[16]; // R table pairs
@@ -34,7 +34,7 @@ void DumpTestProofs( const MemPlotContext& cx, const uint64 f7Index )
     for( uint i = 1; i < 6; i++ )
     {
         const uint32 rCount = 1ul << (i-1);
-        const uint32 lCount = 1 << i;
+        const uint32 lCount = 1ul << i;
 
         const Pair* table = tables[i];
         Log::Line( "Table %d", 7-i );
@@ -106,7 +106,7 @@ void PrintHash( FILE* file, uint64 index, const void* input, size_t inputSize )
     blake3_hasher_update( &hasher, input, inputSize );
     blake3_hasher_finalize( &hasher, (uint8_t*)hash, sizeof( hash ) );
     
-    fprintf( file, "[%-12lu] 0x", index );
+    fprintf( file, "[%-12llu] 0x", index );
     for( uint64 i = 0; i < sizeof( hash ); i+=16 )
     {
         fprintf( file, 

@@ -70,12 +70,22 @@ inline bool DbgReadTableFromFile( ThreadPool& pool, const char* path, uint64& ou
     static void* block = nullptr;
     if( !block )
     {
-        int r = posix_memalign( &block, blockSize, blockSize );
-        if( r != 0 )
-        {
-            Log::Line( "Failed to get aligned block with error %d.", r );
-            return false;
-        }
+        #if PLATFORM_IS_UNIX
+            int r = posix_memalign( &block, blockSize, blockSize );
+            if( r != 0 )
+            {
+                Log::Line( "Failed to get aligned block with error %d.", r );
+                return false;
+            }
+        #else
+            block = _aligned_malloc( blockSize, blockSize );
+
+            if( !block )
+            {
+                Log::Line( "Failed to allocate aligned block." );
+                return false;
+            }
+        #endif
     }
     ASSERT( block );
     memset( block, 0, blockSize );
@@ -256,7 +266,7 @@ inline void DbgWriteTableToFile( ThreadPool& pool, const char* path, uint64 entr
 
     ASSERT( size > blockSize );
 
-    if( !file.Reserve( blockSize + CDiv( size, blockSize ) ) )
+    if( !file.Reserve( blockSize + CDiv( size, (int)blockSize ) ) )
     {
         Log::Line( "Failed to reserve size with error %d for table '%s'.", file.GetError(), path );
     }
@@ -265,12 +275,22 @@ inline void DbgWriteTableToFile( ThreadPool& pool, const char* path, uint64 entr
     static void* block = nullptr;
     if( !block )
     {
-        int r = posix_memalign( &block, blockSize, blockSize );
-        if( r != 0 )
-        {
-            Log::Line( "Failed to get aligned block with error %d.", r );
-            return;
-        }
+        #if PLATFORM_IS_UNIX
+            int r = posix_memalign( &block, blockSize, blockSize );
+            if( r != 0 )
+            {
+                Log::Line( "Failed to get aligned block with error %d.", r );
+                return;
+            }
+        #else
+            block = _aligned_malloc( blockSize, blockSize );
+            
+            if( !block )
+            {
+                Log::Line( "Failed to allocate aligned block." );
+                return;
+            }
+        #endif
     }
     ASSERT( block );
     

@@ -1,11 +1,13 @@
 #pragma once
 
 #ifdef _WIN32
-
+    
+    #define NOMINMAX 1
     #define WIN32_LEAN_AND_MEAN 1
     #include <Windows.h>
 
     typedef HANDLE ThreadId;
+    typedef HANDLE SemaphoreId;
 
 // *nix
 #elif __linux__ || __APPLE__

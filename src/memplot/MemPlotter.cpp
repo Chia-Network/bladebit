@@ -73,7 +73,7 @@ MemPlotter::MemPlotter( const MemPlotConfig& cfg )
             metaBuffer0 +
             metaBuffer1;
 
-        Log::Line( "Memory required: %lu GiB.", reqMem BtoGB );
+        Log::Line( "Memory required: %llu GiB.", reqMem BtoGB );
         if( availMemory < reqMem  )
             Log::Line( "Warning: Not enough memory available. Buffer allocation may fail." );
 
@@ -130,19 +130,20 @@ bool MemPlotter::Run( const PlotRequest& request )
     FileStream* plotfile = new FileStream();
     ASSERT( plotfile );
 
-    for( int i = 0;; )
+    for( int i = 0; i < PLOT_FILE_RETRIES; i++ )
     {
         if( !plotfile->Open( request.outPath, FileMode::Create, FileAccess::Write, FileFlags::NoBuffering | FileFlags::LargeFile ) )
         {
-            if( ++i > PLOT_FILE_RETRIES )
+            if( i+1 >= PLOT_FILE_RETRIES )
             {
                 Log::Error( "Error: Failed to open plot output file at %s for writing after %d tries.", request.outPath, PLOT_FILE_RETRIES );
                 delete plotfile;
                 return false;
             }
+
+            continue;
         }
 
-        ASSERT( plotfile->IsOpen() );
         break;
     }
     
