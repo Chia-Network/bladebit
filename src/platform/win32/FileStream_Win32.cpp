@@ -39,7 +39,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     if( access == FileAccess::None )
         access = FileAccess::Read;
 
-    const DWORD dwShareMode           = FILE_SHARE_READ;
+    const DWORD dwShareMode           = 0;
     const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS : 
                                         mode == FileMode::Open   ? OPEN_ALWAYS   :
                                                                    OPEN_EXISTING;
@@ -79,7 +79,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     else
     {
         // #TODO: Use GetLastError report error in utf8
-        file. _error = (int)GetLastError();
+        file._error = (int)GetLastError();
     }
 
     if( path16 != path16Stack )

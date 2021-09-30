@@ -6,11 +6,20 @@
 
 struct DiskPlotContext
 {
-    size_t      ramSizeBytes;         // Size in bytes of our RAM buffer?
-    uint        threadCount;          // How many threads to use when plotting
-    uint        diskQueueThreadCount; 
+    size_t      bufferSizeBytes;      // Size in bytes of our work buffer
+    byte*       workBuffer;           // Buffer allocated for in-memory work
+
+    size_t      diskFlushSize;        // How many bytes to fill in order to flush the disk.
+                                      // This divides work up in chunks of this size.
+                                      // This is rounded down to entry sizes.
+
+    uint        threadCount;          // How many threads to use for in-memory plot work
+    uint        diskQueueThreadCount; // How many threads to use for the disk buffer writer/reader
 
     byte*       plotId;
+    byte*       plotMemo;
+    uint        plotMemoSize;
+
     
     ThreadPool* threadPool;
 };
