@@ -121,6 +121,11 @@ OPTIONS:
                         This is useful when running multiple simultaneous
                         instances of bladebit as you can manually
                         assign thread affinity yourself when launching bladebit.
+ 
+ --memory             : Display system memory available, in bytes, and the 
+                        required memory to run Bladebit, in bytes.
+ 
+ --memory-json        : Same as --memory, but formats the output as json.
 
  --version            : Display current version.
 )";
@@ -264,7 +269,7 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
         const char* val = value();
         int64 v = 0;
         
-        int r = sscanf( val, "%lli", &v );
+        int r = sscanf( val, "%lld", &v );
         if( r != 1 )
             Fatal( "Invalid value for argument '%s'.", arg );
 
@@ -370,6 +375,31 @@ void ParseCommandLine( int argc, const char* argv[], Config& cfg )
         else if( check( "-v" ) || check( "--verbose" ) )
         {
             Log::SetVerbose( true );
+        }
+        else if( check( "--memory" ) )
+        {
+            // #TODO: Get this value from Memplotter
+            const size_t requiredMem  = 416ull GB;
+            const size_t availableMem = SysHost::GetAvailableSystemMemory();
+            const size_t totalMem     = SysHost::GetTotalSystemMemory();
+
+            Log::Line( "required : %llu", requiredMem  );
+            Log::Line( "total    : %llu", totalMem     );
+            Log::Line( "available: %llu", availableMem );
+
+            exit( 0 );
+        }
+        else if( check( "--memory-json" ) )
+        {
+            // #TODO: Get this value from Memplotter
+            const size_t requiredMem  = 416ull GB;
+            const size_t availableMem = SysHost::GetAvailableSystemMemory();
+            const size_t totalMem     = SysHost::GetTotalSystemMemory();
+
+            Log::Line( "{ \"required\": %llu, \"total\": %llu, \"available\": %llu }",
+                         requiredMem, totalMem, availableMem );
+
+            exit( 0 );
         }
         else if( check( "--version" ) )
         {
