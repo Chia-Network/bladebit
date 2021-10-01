@@ -329,5 +329,5 @@ config_proj(bladebit_disk)
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
-    FILES ${src_full}
+    FILES ${src_full} ${bb_headers}
 )
