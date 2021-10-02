@@ -32,7 +32,7 @@ Must have [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its bu
 ```bash
 
 # Clone the repo & its submodules
-git clone && cd bladebit
+git clone https://github.com/Chia-Network/bladebit.git && cd bladebit
 
 # Create a build directory for cmake and cd into it
 mkdir -p build && cd build
