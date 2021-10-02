@@ -10,11 +10,11 @@
 struct WriteFileJob
 {
     const char* filePath;
-    
-    size_t size  ;
-    size_t offset;
-    byte*  buffer;
-    bool   success;
+
+    size_t      size  ;
+    size_t      offset;
+    byte*       buffer;
+    bool        success;
 
     static void Run( WriteFileJob* job );
 };
@@ -28,7 +28,7 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 //-----------------------------------------------------------
 void DiskPlotPhase1::Run()
 {
-    
+    GenF1();
 }
 
 //-----------------------------------------------------------
@@ -37,41 +37,81 @@ void DiskPlotPhase1::GenF1()
     DiskPlotContext& cx   = _cx;
     ThreadPool&      pool = *cx.threadPool;
 
-    const uint threadCount = pool.ThreadCount();
-
     // Prepare ChaCha key
     byte key[32] = { 1 };
     memcpy( key + 1, cx.plotId, 31 );
 
     // Prepare jobs
-    const size_t chaChaBlockSize = kF1BlockSizeBits / 8;
+    const uint threadCount = pool.ThreadCount();
 
     const uint64 entryCount      = 1ull << _K;
+    const size_t entryTotalSize  = entryCount * sizeof( uint32 );
+    const size_t chaChaBlockSize = kF1BlockSizeBits / 8u;
+    const uint32 entriesPerBlock = chaChaBlockSize / sizeof( uint32 );
+
+    const uint   chunkCount      = (uint)(entryTotalSize / cx.diskFlushSize);
     const uint32 blockCount      = (uint32)(entryCount / chaChaBlockSize);
-    const uint32 blocksPerBucket = blockCount / BB_DP_BUCKET_COUNT;
-    const uint32 blocksPerThread = blocksPerBucket / threadCount;
+    const uint32 blocksPerChunk  = (uint32)(cx.diskFlushSize / chaChaBlockSize);
+    const uint32 blocksPerThread = blocksPerChunk / threadCount;
+    
+    uint32 trailingBlocks = blocksPerChunk - ( blocksPerThread * threadCount );
 
-//     const uint64 entriesPerThread = entryCount / threadCount;
+    // #TODO: Ensure each thread has at least one block.
+    ASSERT( blocksPerThread > 0 );
 
+    uint  x      = 0;
+    byte* buffer = _cx.workBuffer;
 
-    GenF1Job jobs[BB_DP_MAX_JOBS];
+    MTJobRunner<GenF1Job> f1Job( pool );
 
     for( uint i = 0; i < threadCount; i++ )
     {
-        GenF1Job& job = jobs[i];
-        job.jobId      = i;
-        job.jobCount   = threadCount;
-        job.key        = key;
-        job.blockCount = blocksPerThread;
+        GenF1Job& job = f1Job[i];
+        job.key          = key;
+        job.buffer       = buffer;
+        job.blockCount   = blocksPerThread;
+        job.chunkCount   = chunkCount;
+        job.x            = x;
+
+        if( trailingBlocks > 0 )
+        {
+            job.blockCount++;
+            trailingBlocks--;
+        }
+
+        x      += job.blockCount * entriesPerBlock;
+        buffer += job.blockCount * chaChaBlockSize;
     }
 
-    pool.RunJob( GenF1Thread, jobs, threadCount );
+    Log::Line( "Generating f1..." );
+    const double elapsed = f1Job.Run();
+    Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
 }
 
-//-----------------------------------------------------------
-void DiskPlotPhase1::GenF1Thread( GenF1Job* job )
-{
 
+//-----------------------------------------------------------
+void GenF1Job::Run()
+{
+    const uint32 blockCount   = this->blockCount;
+    const uint32 chunkCount   = this->chunkCount;
+    
+    uint32 x = this->x;
+
+    chacha8_ctx chacha;
+    chacha8_keysetup( &chacha, key, 256, NULL );
+
+    for( uint i = 0; i < chunkCount; i++ )
+    {
+        chacha8_get_keystream( &chacha, x, blockCount, (byte*)buffer );
+        SyncThreads();
+
+        // #TODO:
+        // Count each bucket's entries
+        // Sort in the buffer itself, per bucket
+        // Dispatch sorted buffer to the wite queue
+        // Take new buffer from read queue (may suspend the thread
+        // if there's no more buffers)
+    }
 }
 
 //-----------------------------------------------------------
@@ -228,3 +268,4 @@ void TestWrites()
         Log::Line( "Finished writing to file in %.2lf seconds @ %.2lf MB/s.", elapsed, ((double)bytesPerSecond) BtoMB );
     }
 }
+

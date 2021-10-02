@@ -3,9 +3,15 @@
 #include "Config.h"
 #include "threading/ThreadPool.h"
 
+template<typename TJob, uint MaxJobs>
+struct MTJobRunner;
+
 template<typename TJob>
 struct MTJob
 {
+    template<typename,uint>
+    friend struct MTJobRunner;
+
     // Override in the job itself
     virtual void Run() = 0;
 
@@ -44,8 +50,8 @@ struct MTJobRunner
 
     double Run();
 
-    inline TJob& operator[]( uint index ) const { return this->_jobs[index]; }
-    inline TJob& operator[]( int index )  const { return this->_jobs[index]; }
+    inline TJob& operator[]( uint index ) { return this->_jobs[index]; }
+    inline TJob& operator[]( int index  ) { return this->_jobs[index]; }
 
 private:
     static void RunJobWrapper( TJob* job );
@@ -84,7 +90,7 @@ inline double MTJobRunner<TJob, MaxJobs>::Run()
 
     // Run the job
     const auto timer = TimerBegin();
-    _pool->RunJob( RunJobWrapper, _jobs, threadCount );
+    _pool.RunJob( RunJobWrapper, _jobs, threadCount );
     const double elapsed = TimerEnd( timer );
 
     return elapsed;
@@ -101,34 +107,10 @@ inline void MTJobRunner<TJob, MaxJobs>::RunJobWrapper( TJob* job )
 template<typename TJob>
 inline void MTJob<TJob>::SyncThreads()
 {
-    auto& finishedCount        = *this->finishedCount;
-    auto& releaseLock          = *this->releaseLock;
-    const uint threadThreshold = this->threadCount - 1;
-
-    // Are we the control thread?
-    if( id == 0 ) 
-    {
-        // Wait for all threads to finish
-        while( finishedCount.load( std::memory_order_relaxed ) != threadThreshold );
-
-        // Release lock & signal other threads
-        releaseLock  .store( 0, std::memory_order_release );
-        finishedCount.store( 0, std::memory_order_release );
-    }
+    if( LockThreads() )
+        ReleaseThreads();
     else
-    {
-        // Signal we're ready to sync
-        uint count = finishedCount.load( std::memory_order_acquire );
-        while( !finishedCount.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
-        
-        // Wait for the control thread (id == 0 ) to signal us
-        while( finishedCount.load( std::memory_order_relaxed ) != 0 );
-
-        // Ensure all threads have been released
-        count = releaseLock.load( std::memory_order_acquire );
-        while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
-        while( releaseLock.load( std::memory_order_relaxed ) != threadThreshold );
-    }
+        WaitForRelease();
 }
 
 template<typename TJob>
@@ -136,11 +118,14 @@ inline bool MTJob<TJob>::LockThreads()
 {
     if( this->_jobId == 0 )
     {
-        auto& finishedCount        = *this->finishedCount;
-        const uint threadThreshold = this->threadCount - 1;
+        ASSERT( _jobId == 0 );
+
+        auto& finishedCount        = *this->_finishedCount;
+        const uint threadThreshold = this->_jobCount - 1;
     
         // Wait for all threads to finish
         while( finishedCount.load( std::memory_order_relaxed ) != threadThreshold );
+        return true;
     }
 
     return false;
@@ -148,8 +133,35 @@ inline bool MTJob<TJob>::LockThreads()
 
 template<typename TJob>
 inline void MTJob<TJob>::ReleaseThreads()
-{}
+{
+    ASSERT( _jobId == 0 );
+
+    auto& finishedCount        = *this->_finishedCount;
+    auto& releaseLock          = *this->_releaseLock;
+    
+    // Release lock & signal other threads
+    releaseLock  .store( 0, std::memory_order_release );
+    finishedCount.store( 0, std::memory_order_release );
+}
 
 template<typename TJob>
 inline void MTJob<TJob>::WaitForRelease()
-{}
+{
+    ASSERT( _jobId != 0 );
+
+    auto& finishedCount        = *this->_finishedCount;
+    auto& releaseLock          = *this->_releaseLock;
+    const uint threadThreshold = this->_jobCount - 1;
+
+    // Signal the control thread that we're ready to sync
+    uint count = finishedCount.load( std::memory_order_acquire );
+    while( !finishedCount.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+        
+    // Wait for the control thread (id == 0 ) to signal us
+    while( finishedCount.load( std::memory_order_relaxed ) != 0 );
+
+    // Ensure all threads have been released (prevent re-locking before another thread has been released)
+    count = releaseLock.load( std::memory_order_acquire );
+    while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+    while( releaseLock.load( std::memory_order_relaxed ) != threadThreshold );
+}
