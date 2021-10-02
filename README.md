@@ -28,14 +28,14 @@ Must have [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its bu
 ## Building
 
 
-### Linux
 ```bash
 
 # Clone the repo & its submodules
 git clone https://github.com/Chia-Network/bladebit.git && cd bladebit
 
 # Create a build directory for cmake and cd into it
-mkdir -p build && cd build
+mkdir build
+cd build
 
 # Generate config files & build
 cmake ..
