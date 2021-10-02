@@ -16,9 +16,9 @@ struct DiskPlotContext
     uint        threadCount;          // How many threads to use for in-memory plot work
     uint        diskQueueThreadCount; // How many threads to use for the disk buffer writer/reader
 
-    byte*       plotId;
-    byte*       plotMemo;
-    uint        plotMemoSize;
+    const byte*  plotId;
+    const byte*  plotMemo;
+    uint         plotMemoSize;
 
     
     ThreadPool* threadPool;

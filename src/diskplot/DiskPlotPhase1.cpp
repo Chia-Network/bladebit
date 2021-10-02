@@ -19,14 +19,6 @@ struct WriteFileJob
     static void Run( WriteFileJob* job );
 };
 
-struct GenF1Job : MTJob
-{
-    const byte* key;
-
-    uint32  blockCount;
-    uint32  entryCount;
-    uint32  x;
-};
 
 //-----------------------------------------------------------
 DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
@@ -35,6 +27,88 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 
 //-----------------------------------------------------------
 void DiskPlotPhase1::Run()
+{
+    
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::GenF1()
+{
+    DiskPlotContext& cx   = _cx;
+    ThreadPool&      pool = *cx.threadPool;
+
+    const uint threadCount = pool.ThreadCount();
+
+    // Prepare ChaCha key
+    byte key[32] = { 1 };
+    memcpy( key + 1, cx.plotId, 31 );
+
+    // Prepare jobs
+    const size_t chaChaBlockSize = kF1BlockSizeBits / 8;
+
+    const uint64 entryCount      = 1ull << _K;
+    const uint32 blockCount      = (uint32)(entryCount / chaChaBlockSize);
+    const uint32 blocksPerBucket = blockCount / BB_DP_BUCKET_COUNT;
+    const uint32 blocksPerThread = blocksPerBucket / threadCount;
+
+//     const uint64 entriesPerThread = entryCount / threadCount;
+
+
+    GenF1Job jobs[BB_DP_MAX_JOBS];
+
+    for( uint i = 0; i < threadCount; i++ )
+    {
+        GenF1Job& job = jobs[i];
+        job.jobId      = i;
+        job.jobCount   = threadCount;
+        job.key        = key;
+        job.blockCount = blocksPerThread;
+    }
+
+    pool.RunJob( GenF1Thread, jobs, threadCount );
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::GenF1Thread( GenF1Job* job )
+{
+
+}
+
+//-----------------------------------------------------------
+void WriteFileJob::Run( WriteFileJob* job )
+{
+    job->success = false;
+
+    FileStream file;
+    if( !file.Open( job->filePath, FileMode::Open, FileAccess::Write, FileFlags::NoBuffering | FileFlags::LargeFile ) )
+        return;
+
+    ASSERT( job->offset == ( job->offset / file.BlockSize() ) * file.BlockSize() );
+
+    if( !file.Seek( (int64)job->offset, SeekOrigin::Begin ) )
+        return;
+
+    // Begin writing at offset
+    size_t sizeToWrite = job->size;
+    byte*  buffer      = job->buffer;
+
+    while( sizeToWrite )
+    {
+        const ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
+        if( sizeWritten < 1 )
+            return;
+
+        ASSERT( (size_t)sizeWritten >= sizeToWrite );
+        sizeToWrite -= (size_t)sizeWritten;
+    }
+
+    // OK
+    job->success = true;
+}
+
+
+//-----------------------------------------------------------
+void TestWrites()
 {
     // Test file
     const char* filePath = "E:/bbtest.data";
@@ -154,81 +228,3 @@ void DiskPlotPhase1::Run()
         Log::Line( "Finished writing to file in %.2lf seconds @ %.2lf MB/s.", elapsed, ((double)bytesPerSecond) BtoMB );
     }
 }
-
-//-----------------------------------------------------------
-void DiskPlotPhase1::GenF1()
-{
-    DiskPlotContext& cx   = _cx;
-    ThreadPool&      pool = *cx.threadPool;
-
-    const uint threadCount = pool.ThreadCount();
-
-    // Prepare ChaCha key
-    byte key[32] = { 1 };
-    memcpy( key + 1, cx.plotId, 31 );
-
-    // Prepare jobs
-    const size_t chaChaBlockSize = kF1BlockSizeBits / 8;
-
-    const uint64 entryCount      = 1ull << _K;
-    const uint32 blockCount      = (uint32)(entryCount / chaChaBlockSize);
-    const uint32 blocksPerBucket = blockCount / BB_DP_BUCKET_COUNT;
-    const uint32 blocksPerThread = blocksPerBucket / threadCount;
-
-//     const uint64 entriesPerThread = entryCount / threadCount;
-
-
-    GenF1Job jobs[BB_DP_MAX_JOBS];
-
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        GenF1Job& job = jobs[i];
-        job.jobId      = i;
-        job.jobCount   = threadCount;
-        job.key        = key;
-        job.blockCount = blocksPerThread;
-    }
-
-    pool.RunJob( GenF1Thread, jobs, threadCount );
-}
-
-//-----------------------------------------------------------
-void DiskPlotPhase1::GenF1Thread( GenF1Job* job )
-{
-
-}
-
-//-----------------------------------------------------------
-void WriteFileJob::Run( WriteFileJob* job )
-{
-    job->success = false;
-
-    FileStream file;
-    if( !file.Open( job->filePath, FileMode::Open, FileAccess::Write, FileFlags::NoBuffering | FileFlags::LargeFile ) )
-        return;
-
-    ASSERT( job->offset == ( job->offset / file.BlockSize() ) * file.BlockSize() );
-
-    if( !file.Seek( (int64)job->offset, SeekOrigin::Begin ) )
-        return;
-
-    // Begin writing at offset
-    size_t sizeToWrite = job->size;
-    byte*  buffer      = job->buffer;
-
-    while( sizeToWrite )
-    {
-        const ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
-        if( sizeWritten < 1 )
-            return;
-
-        ASSERT( (size_t)sizeWritten >= sizeToWrite );
-        sizeToWrite -= (size_t)sizeWritten;
-    }
-
-    // OK
-    job->success = true;
-}
-
-
-
