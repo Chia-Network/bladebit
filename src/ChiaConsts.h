@@ -29,6 +29,8 @@ enum class TableId
 // ChaCha8 block size
 #define kF1BlockSizeBits 512
 
+#define kF1BlockSize (kF1BlockSizeBits / 8u)
+
 // Extra bits of output from the f functions. Instead of being a function from k -> k bits,
 // it's a function from k -> k + kExtraBits bits. This allows less collisions in matches.
 // Refer to the paper for mathematical motivations.

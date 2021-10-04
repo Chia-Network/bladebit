@@ -18,7 +18,7 @@ struct MTJob
     // Synchronize all threads before continuing to the next step
     inline void SyncThreads();
 
-    // Lock Threads & to perform something before continueing ot the next parallel step.
+    // Lock Threads & to perform something before continuing to the next parallel step.
     // Returns true if the job id is 0, that is, the control thread.
     inline bool LockThreads();
 
@@ -35,11 +35,18 @@ struct MTJob
     inline uint JobId()    const { return _jobId; }
     inline uint JobCount() const { return _jobCount; }
 
+    inline const TJob& GetJob( uint index )
+    {
+        ASSERT( index < _jobCount );
+        return _jobs[index];
+    };
+
 protected:
     std::atomic<uint>* _finishedCount;
     std::atomic<uint>* _releaseLock;
     uint               _jobId;
     uint               _jobCount;
+    TJob*              _jobs;
 };
 
 
@@ -86,6 +93,7 @@ inline double MTJobRunner<TJob, MaxJobs>::Run()
         job._releaseLock   = &releaseLock;
         job._jobId         = i;
         job._jobCount      = threadCount;
+        job._jobs          = _jobs;
     }
 
     // Run the job

@@ -3,6 +3,7 @@
 #include "Util.h"
 #include "util/Log.h"
 
+
 // Test
 #include "io/FileStream.h"
 #include "SysHost.h"
@@ -23,6 +24,7 @@ struct WriteFileJob
 //-----------------------------------------------------------
 DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     : _cx( cx )
+    , _diskQueue( cx.workBuffer, cx.diskFlushSize, (uint)(cx.bufferSizeBytes / cx.diskFlushSize) - 1 )
 {}
 
 //-----------------------------------------------------------
@@ -46,12 +48,11 @@ void DiskPlotPhase1::GenF1()
 
     const uint64 entryCount      = 1ull << _K;
     const size_t entryTotalSize  = entryCount * sizeof( uint32 );
-    const size_t chaChaBlockSize = kF1BlockSizeBits / 8u;
-    const uint32 entriesPerBlock = chaChaBlockSize / sizeof( uint32 );
+    const uint32 entriesPerBlock = kF1BlockSize / sizeof( uint32 );
 
     const uint   chunkCount      = (uint)(entryTotalSize / cx.diskFlushSize);
-    const uint32 blockCount      = (uint32)(entryCount / chaChaBlockSize);
-    const uint32 blocksPerChunk  = (uint32)(cx.diskFlushSize / chaChaBlockSize);
+    const uint32 blockCount      = (uint32)(entryCount / kF1BlockSize );
+    const uint32 blocksPerChunk  = (uint32)(cx.diskFlushSize / kF1BlockSize );
     const uint32 blocksPerThread = blocksPerChunk / threadCount;
     
     uint32 trailingBlocks = blocksPerChunk - ( blocksPerThread * threadCount );
@@ -72,6 +73,7 @@ void DiskPlotPhase1::GenF1()
         job.blockCount   = blocksPerThread;
         job.chunkCount   = chunkCount;
         job.x            = x;
+        job.diskQueue    = &_diskQueue;
 
         if( trailingBlocks > 0 )
         {
@@ -80,7 +82,7 @@ void DiskPlotPhase1::GenF1()
         }
 
         x      += job.blockCount * entriesPerBlock;
-        buffer += job.blockCount * chaChaBlockSize;
+        buffer += job.blockCount * kF1BlockSize;
     }
 
     Log::Line( "Generating f1..." );
@@ -88,27 +90,84 @@ void DiskPlotPhase1::GenF1()
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
 }
 
-
 //-----------------------------------------------------------
 void GenF1Job::Run()
 {
-    const uint32 blockCount   = this->blockCount;
-    const uint32 chunkCount   = this->chunkCount;
+    const uint32 blockCount = this->blockCount;
+    const uint32 chunkCount = this->chunkCount;
+
+    DiskBufferQueue& queue  = *this->diskQueue;
     
     uint32 x = this->x;
 
     chacha8_ctx chacha;
     chacha8_keysetup( &chacha, key, 256, NULL );
 
+    const uint32 entriesPerBlock = kF1BlockSize / sizeof( uint32 );
+    const uint32 bucketShift     = (32u - (uint)kExtraBits);
+
+    uint counts[BB_DP_BUCKET_COUNT];
+
     for( uint i = 0; i < chunkCount; i++ )
     {
         chacha8_get_keystream( &chacha, x, blockCount, (byte*)buffer );
-        SyncThreads();
+
+        // Count how many entries we have per bucket
+        memset( counts, 0, sizeof( counts ) );
+
+        const uint* block = (uint*)block;
+
+        for( uint j = 0; j < blockCount; j++ )
+        {
+            const uint e0 = block[0] >> bucketShift;
+            const uint e1 = block[1] >> bucketShift;
+            const uint e2 = block[2] >> bucketShift;
+            const uint e3 = block[3] >> bucketShift;
+            const uint e4 = block[4] >> bucketShift;
+            const uint e5 = block[5] >> bucketShift;
+            const uint e6 = block[6] >> bucketShift;
+            const uint e7 = block[7] >> bucketShift;
+
+            counts[e0] ++;
+            counts[e1] ++;
+            counts[e2] ++;
+            counts[e3] ++;
+            counts[e4] ++;
+            counts[e5] ++;
+            counts[e6] ++;
+            counts[e7] ++;
+        }
+
+        block += entriesPerBlock;
+
+        this->counts = counts;
+
+        if( LockThreads() )
+        {
+            const uint jobCount = JobCount();
+            
+            for( uint j = 0; j < jobCount; j++ )
+            {
+                const uint* tCounts = GetJob( j ).counts;
+
+                // Add all of the other job's counts
+                for( uint k = 0; k < BB_DP_BUCKET_COUNT; k++ )
+                    counts[k] += tCounts[k];
+            }
+
+            ReleaseThreads();
+        }
+        else
+        {
+            WaitForRelease();
+        }
+
+        // Count up the total
 
         // #TODO:
         // Count each bucket's entries
         // Sort in the buffer itself, per bucket
-        // Dispatch sorted buffer to the wite queue
+        // Dispatch sorted buffer to the write queue
         // Take new buffer from read queue (may suspend the thread
         // if there's no more buffers)
     }

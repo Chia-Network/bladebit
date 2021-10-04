@@ -1,15 +1,19 @@
 #pragma once
 #include "DiskPlotContext.h"
 #include "plotshared/MTJob.h"
+#include "DiskBufferQueue.h"
 
 struct GenF1Job : MTJob<GenF1Job>
 {
     const byte* key;
     
-    byte*  buffer;;
-    uint32 blockCount;
-    uint32 chunkCount;
-    uint32 x;
+    byte*   buffer;;
+    uint32  blockCount;
+    uint32  chunkCount;
+    uint32  x;
+    uint32* counts;
+    
+    DiskBufferQueue* diskQueue;
 
     void Run() override;
 };
@@ -25,5 +29,6 @@ private:
 
 private:
     DiskPlotContext& _cx;
+    DiskBufferQueue  _diskQueue;
 };
 
