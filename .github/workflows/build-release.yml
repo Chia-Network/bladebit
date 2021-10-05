@@ -1,0 +1,9 @@
+name: Build Release Packages
+on: [workflow_dispatch]
+jobs:
+  build-ubuntu-x86-64:
+    run-on: ubuntu-20.04
+    steps:
+      - run: |
+        echo "Hello World"
+    
