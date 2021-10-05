@@ -1,5 +1,5 @@
 name: Build Release Packages
-on: [workflow_dispatch]
+on: [push]
 jobs:
   build-ubuntu-x86-64:
     run-on: ubuntu-20.04
