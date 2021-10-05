@@ -8,3 +8,5 @@ jobs:
           echo "Hello World"
           ls -la
           ls -la ..
+          ls -la ../bladebit
+          pwd
