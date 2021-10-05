@@ -10,7 +10,6 @@ jobs:
       - run: |
           echo "Hello World"
           ls -la
-          cd bladebit
           mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release
