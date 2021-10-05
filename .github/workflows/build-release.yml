@@ -25,5 +25,20 @@ jobs:
           tar -czvf bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz bladebit
           ls -la
 
-  # build-windows-x86-64:
-  #   run-on: 
+  build-windows-x86-64:
+    runs-on: windows-2019
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: master
+
+      - name: Build
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build . --target bladebit --config Release
+
+          7z a -tzip Release/bladebit-v%BB_VERSION%-windows-x86-64.zip bladebit.exe
+          dir
