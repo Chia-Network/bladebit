@@ -6,4 +6,3 @@ jobs:
     steps:
       - run: |
         echo "Hello World"
-    
