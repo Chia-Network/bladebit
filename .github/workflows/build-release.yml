@@ -6,42 +6,47 @@ env:
   BB_VERSION: 1.2.0
 
 jobs:
-  # build-ubuntu-x86-64:
-  #   runs-on: ubuntu-20.04
-  #   steps:
-  #     - name: Checkout Repo
-  #       uses: actions/checkout@v2
-  #       with:
-  #         ref: master
-
-  #     - name: Install Prerequisites
-  #       run: sudo apt install -y libgmp-dev libnuma-dev
-
-  #     - name: Build
-  #       run: |
-  #         mkdir build && cd build
-  #         cmake ..
-  #         cmake --build . --target bladebit --config Release
-  #         tar -czvf bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz bladebit
-  #         ls -la
-
-  build-windows-x86-64:
-    runs-on: windows-2019
+  build-ubuntu-x86-64:
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
           ref: master
 
+      - name: Install Prerequisites
+        run: sudo apt install -y libgmp-dev libnuma-dev
+
       - name: Build
-        shell: bash
         run: |
           mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release
-
-          cd Release
-          7z.exe a -tzip ../bladebit-v${BB_VERSION}-windows-x86-64.zip bladebit.exe
-          cd ..
+          tar -czvf bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz bladebit
           ls -la
-          
+      
+      - name: Upload Artifact Ubuntu x86-64
+        uses: actions/upload-artifact@v2
+        with:
+          name: bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
+          path: bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
+
+  # build-windows-x86-64:
+  #   runs-on: windows-2019
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v2
+  #       with:
+  #         ref: master
+
+  #     - name: Build
+  #       shell: bash
+  #       run: |
+  #         mkdir build && cd build
+  #         cmake ..
+  #         cmake --build . --target bladebit --config Release
+
+  #         cd Release
+  #         7z.exe a -tzip ../bladebit-v${BB_VERSION}-windows-x86-64.zip bladebit.exe
+  #         cd ..
+  #         ls -la
