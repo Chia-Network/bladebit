@@ -5,4 +5,4 @@ jobs:
     run-on: ubuntu-20.04
     steps:
       - run: |
-        echo "Hello World"
+          echo "Hello World"
