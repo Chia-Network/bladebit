@@ -43,4 +43,5 @@ jobs:
           cd Release
           7z a -tzip ../bladebit-v%BB_VERSION%-windows-x86-64.zip bladebit.exe
           cd ..
+          dir
           
