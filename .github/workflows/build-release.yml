@@ -29,7 +29,8 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
-          path: bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
+          path: bladebit-v*-ubuntu-x86-64.tar.gz
+          if-no-files-found: error
 
   # build-windows-x86-64:
   #   runs-on: windows-2019
