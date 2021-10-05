@@ -24,8 +24,8 @@ jobs:
           cmake --build . --target bladebit --config Release
           chmod +x ./bladebit
           tar -czvf bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz bladebit
-          mkdir artifacts
-          mv bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz artifacts/
+          mkdir ../artifacts
+          mv bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz ../artifacts/
           ls -la artifacts
       
       - name: Upload Artifact Ubuntu x86-64
