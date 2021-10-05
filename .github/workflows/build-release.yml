@@ -28,7 +28,7 @@ jobs:
       - name: Upload Artifact Ubuntu x86-64
         uses: actions/upload-artifact@v2
         with:
-          name: bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
+          name: bladebit-ubuntu-x86-64.tar.gz
           path: bladebit-v*-ubuntu-x86-64.tar.gz
           if-no-files-found: error
 
