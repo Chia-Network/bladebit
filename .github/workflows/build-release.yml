@@ -4,7 +4,7 @@ jobs:
   build-ubuntu-x86-64:
     runs-on: ubuntu-20.04
     steps:
-      - actions/checkout@v2
+      - uses: actions/checkout@v2:
         with:
           ref: master
       - run: |
