@@ -17,4 +17,8 @@ jobs:
           mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release
+          tar -czvf bladebit.tar.gz bladebit
+          mkdir out_test
+          tar -xzvf bladebit.tar.gz -C out_test
+          ls -la out_test
           ls -la
