@@ -1,5 +1,10 @@
 name: Build Release Packages
 on: [push]
+
+env:
+  # Hard-coded for testing
+  BB_VERSION: 1.2.0
+
 jobs:
   build-ubuntu-x86-64:
     runs-on: ubuntu-20.04
@@ -17,8 +22,8 @@ jobs:
           mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release
-          tar -czvf bladebit.tar.gz bladebit
-          mkdir out_test
-          tar -xzvf bladebit.tar.gz -C out_test
-          ls -la out_test
+          tar -czvf bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz bladebit
           ls -la
+
+  # build-windows-x86-64:
+  #   run-on: 
