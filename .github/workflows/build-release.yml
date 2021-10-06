@@ -4,8 +4,8 @@ on: [push]
 #   release:
 #     types: [created]
 
-env:
-  BB_VERSION: 1.2.0 # Hard-coded for testing
+# env:
+#   BB_VERSION: 1.2.0 # Hard-coded for testing
 
 jobs:
   list-artifacts:
@@ -15,17 +15,33 @@ jobs:
         uses: actions/checkout@v2
         with:
           ref: ci-workflow
-      
+
+      - name: Get Version Number
+        id: version_number
+        run: echo "::set-output name=BB_VERSION::$(cat ${{ github.workspace }}/VERSION)"
+
       # Setup Node
-      - uses: actions/setup-node@v2
-        with: { node-version: '14' }
-      - run: cd .github/actions && npm install @octokit/action
-      
-      - name: List Artifacts
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node .github/actions/artifacts.js upload-release-asset $BB_VERSION
+      # - uses: actions/setup-node@v2
+      #   with: { node-version: '14' }
+      # - run: cd .github/actions && npm install @octokit/action
+        
+      - run: mkdir -p bin
+      - name: Download Artifacts for Release
+        uses: actions/download-artifact@v2
+        with:
+          name: bladebit-v${{ steps.version_number.outputs.BB_VERSION }}-ubuntu-x86-64.tar.gz
+          path: bin/
+          
+      - run: ls -la bin
+
+
+      # - name: Upload Artifacts as Release Assets
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     node .github/actions/artifacts.mjs upload-release-asset \
+      #       $BB_VERSION \
+      #       bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
  
   # build-ubuntu-x86-64:
   #   runs-on: ubuntu-20.04

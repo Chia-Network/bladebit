@@ -1,7 +1,12 @@
-const { Octokit } = require( '@octokit/action' );
+import { Octokit } from '@octokit/action';
+import * as FS   from 'fs';
+import * as Path from 'path';
+
 const log = console.log;
 
-const API_BASE = '/repos/Chia-Network/bladebit';
+const OWNER    = 'Chia-Network';
+const REPO     = 'bladebit';
+const API_BASE = `/repos/${OWNER}/${REPO}`;
 
 function failIf( condition, error )
 {
@@ -68,10 +73,20 @@ async function uploadReleaseAsset( argv )
     failIfErrorResponse( response, 'Failed to retrieve releases' );
     // log( JSON.stringify( response.data, null, 4 ) );
 
+    // Find the specified release
     const release = response.data.find( a => a.tag_name === tag );
     failIf( !release, `Failed to obtain release for version ${version}` );
+    // log( JSON.stringify( release, null, 4 ) );
+
+    // Upload the artifact to the release as an asset
+    octokit.rest.repos.uploadReleaseAsset({
+        owner     : OWNER,
+        repo      : REPO,
+        release_id: release.id,
+        name,
+        data,
+    });
     
-    log( JSON.stringify( release, null, 4 ) );
 }
 
 async function main()
