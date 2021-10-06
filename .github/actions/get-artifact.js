@@ -51,6 +51,8 @@ async function main()
         archive_format: 'zip'
     });
 
+    log( JSON.stringify( response, 4 ) );
+
     if( response !== 302 )
         throw new Error( `Failed to download artifact.` );
     
