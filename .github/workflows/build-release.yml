@@ -25,7 +25,7 @@ jobs:
       - name: List Artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .github/actions/get-artifact.mjs
+        run: node .github/actions/get-artifact.js
  
   # build-ubuntu-x86-64:
   #   runs-on: ubuntu-20.04
