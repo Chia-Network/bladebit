@@ -16,7 +16,9 @@ jobs:
 
       - name: Get Version Number
         id: version_number
-        run: echo "::set-output name=BB_VERSION::$(cat VERSION)"
+        run: |
+          ls -la
+          echo "::set-output name=BB_VERSION::$(cat ${{ github.workspace }}/VERSION)"
 
       - name: Install Prerequisites
         run: sudo apt install -y libgmp-dev libnuma-dev
