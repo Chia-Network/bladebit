@@ -12,7 +12,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ref: master
+          ref: ci-workflow
 
       - name: Get Version Number
         id: version_number
