@@ -53,7 +53,7 @@ async function main()
 
     log( JSON.stringify( response, 4 ) );
 
-    if( response !== 302 )
+    if( response !== 200 && response !== 302 )
         throw new Error( `Failed to download artifact.` );
     
     // const artifactUrl = artifact.archive_download_url;
