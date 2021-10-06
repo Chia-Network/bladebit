@@ -3,7 +3,7 @@ on: [push]
 
 env:
   # Hard-coded for testing
-  BB_VERSION: 1.2.0
+  # BB_VERSION: 1.2.0
 
 jobs:
   build-ubuntu-x86-64:
