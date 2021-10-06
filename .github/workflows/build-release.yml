@@ -10,6 +10,7 @@ on: [push]
 
 jobs:
   list-artifacts:
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
