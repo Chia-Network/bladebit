@@ -48,7 +48,7 @@ async function main()
     log( `Downloading ${artifactName}` );
     response = await octokit.request( `GET ${API}/{artifact_id}/{archive_format}`, {
         artifact_id   : artifact.id,
-        archive_format: 'archive_format'
+        archive_format: 'zip'
     });
 
     if( response !== 302 )
