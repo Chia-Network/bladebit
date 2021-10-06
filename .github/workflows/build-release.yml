@@ -14,10 +14,16 @@ jobs:
         with:
           ref: master
 
+      - name: Get Version Number
+        id: version_number
+        run: echo "::set-output name=BB_VERSION::$(cat VERSION)"
+
       - name: Install Prerequisites
         run: sudo apt install -y libgmp-dev libnuma-dev
 
       - name: Build
+        env:
+          BB_VERSION: ${{ steps.version_number.outputs.BB_VERSION }}
         run: |
           mkdir build && cd build
           cmake ..
@@ -31,7 +37,7 @@ jobs:
       - name: Upload Artifact Ubuntu x86-64
         uses: actions/upload-artifact@v2
         with:
-          name: BladeBit Ubuntu x86-64
+          name: BladeBit Ubuntu x86-64 v${{ steps.version_number.outputs.BB_VERSION }}
           path: ${{ github.workspace }}/artifacts/bladebit-v*-ubuntu-x86-64.tar.gz
           if-no-files-found: error
 
