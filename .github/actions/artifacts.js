@@ -65,7 +65,7 @@ async function uploadReleaseAsset( argv )
 
 async function main()
 {
-    const command = argv[2];
+    const command = process.args[2];
     const argv    = process.args.slice( 3 );
     
     switch( command )
