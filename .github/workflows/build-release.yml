@@ -25,7 +25,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          node .github/actions/artifactS.js upload-release-asset $BB_VERSION
+          node .github/actions/artifacts.js upload-release-asset $BB_VERSION
  
   # build-ubuntu-x86-64:
   #   runs-on: ubuntu-20.04
