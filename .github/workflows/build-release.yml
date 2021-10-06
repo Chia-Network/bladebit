@@ -4,9 +4,8 @@ on: [push]
 #   release:
 #     types: [created]
 
-# env:
-  # Hard-coded for testing
-  # BB_VERSION: 1.2.0
+env:
+  BB_VERSION: 1.2.0 # Hard-coded for testing
 
 jobs:
   list-artifacts:
@@ -25,7 +24,8 @@ jobs:
       - name: List Artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .github/actions/get-artifact.js
+        run: |
+          node .github/actions/get-artifact.js
  
   # build-ubuntu-x86-64:
   #   runs-on: ubuntu-20.04
