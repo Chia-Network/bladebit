@@ -55,6 +55,8 @@ async function main()
     // FS.
 }
 
-main().then( () => {} );
+main()
+.then( () => {} )
+.catch( err => { throw err; } );
 
 
