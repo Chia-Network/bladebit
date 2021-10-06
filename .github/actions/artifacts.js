@@ -3,7 +3,13 @@ const log = console.log;
 
 const API_BASE = '/repos/Chia-Network/bladebit';
 
-function failIfError( response, error )
+function failIf( condition, error )
+{
+    if( condition )
+        throw new Error( error );
+}
+
+function failIfErrorResponse( response, error )
 {
     if( response.status !== 200 )
         throw new Error( error );
@@ -20,7 +26,7 @@ async function getArtifactUrl( argv )
     const octokit = new Octokit();
 
     let response = await octokit.request( `GET ${API}` );
-    failIfError( resposne, 'Invalid artifacts response.' );
+    failIfErrorResponse( resposne, 'Invalid artifacts response.' );
     
     // log( `Looking for artifact for version ${opts.version}` );
     const artifacts = response.data.artifacts;
@@ -42,7 +48,7 @@ async function getArtifactUrl( argv )
     // log( JSON.stringify( response, 4 ) );
 
     // Docs say 302, but the returned code is actually 200
-    failIfError( resposne, 'Failed to retrieve artifact download url.'  );
+    failIfErrorResponse( resposne, 'Failed to retrieve artifact download url.'  );
     
     const downloadUrl = response.url;
     return downloadUrl;
@@ -54,13 +60,18 @@ async function uploadReleaseAsset( argv )
 
     const version   = argv[0];
     const assetPath = argv[1];
+    const tag       = 'v' + version;
     
     const octokit = new Octokit();
 
     let response = await octokit.request( `GET ${API}` );
-    failIfError( response, 'Failed to retrieve releases' );
+    failIfErrorResponse( response, 'Failed to retrieve releases' );
+    // log( JSON.stringify( response.data, null, 4 ) );
 
-    log( JSON.stringify( response.data, null, 4 ) );
+    const release = response.data.find( a => a.tag_name === tag );
+    failIf( !release, `Failed to obtain release for version ${version}` );
+    
+    log( JSON.stringify( release, null, 4 ) );
 }
 
 async function main()
