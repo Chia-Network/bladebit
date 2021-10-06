@@ -20,7 +20,7 @@ jobs:
       # Setup Node
       - uses: actions/setup-node@v2
         with: { node-version: '14' }
-      - run: npm install @octokit/action
+      - run: npm install -g @octokit/action
       
       - name: List Artifacts
         env:
