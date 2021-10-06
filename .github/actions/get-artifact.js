@@ -18,7 +18,8 @@ const API = '/repos/Chia-Network/bladebit/actions/artifacts';
 async function main()
 {
     // const argv = process.args.slice( 2 );
-    // const opts = JSON.parse( argv[0] );
+    // const opts = JSON.parse( argv[0] )
+    const opts = { version: '1.2.0' };
 
     const octokit = new Octokit();
     
