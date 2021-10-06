@@ -32,10 +32,12 @@ async function main()
     log( `Looking for artifact for version ${opts.version}` );
     
     const artifacts = response.data.artifacts;
-    log( JSON.stringify( artifacts, 4 ) );
+    // log( JSON.stringify( artifacts, 4 ) );
 
     const artifactName = 'bladebit-v1.2.0-ubuntu-x86-64.tar.gz'// getArtifactName( opts.os, opts.version, opts.arch );
     const artifact     = artifacts.find( a => a.name === artifactName );
+
+    log( JSON.stringify( artifact, 4 ) );
 
     if( !artifact )
         throw new Error( `Failed to find an artifact name '${artifactName}'.` );
