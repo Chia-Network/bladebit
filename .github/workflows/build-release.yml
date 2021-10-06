@@ -1,7 +1,7 @@
 name: Build Release Packages
 on: [push]
 
-env:
+# env:
   # Hard-coded for testing
   # BB_VERSION: 1.2.0
 
