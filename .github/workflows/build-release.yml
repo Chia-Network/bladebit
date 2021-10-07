@@ -92,6 +92,7 @@ jobs:
       - name: Get Version Number
         id: version_number
         run: |
+          ls -la
           version=$(cat ${{ github.workspace }}/VERSION)
           echo "::set-output name=BB_VERSION::$version"
           echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-centos-x86-64.tar.gz"
