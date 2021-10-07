@@ -81,7 +81,10 @@ jobs:
   #         if-no-files-found: error
 
   build-ubuntu-arm64:
-    runs-on: [ ARM64 ]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ARM64]
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
