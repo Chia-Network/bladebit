@@ -177,6 +177,7 @@ jobs:
           ref: master
 
       - name: Get Version Number
+        shell: bash
         id: version_number
         run: |
           version=$(cat VERSION)
