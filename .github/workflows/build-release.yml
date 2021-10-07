@@ -172,7 +172,7 @@ jobs:
         run: |
           rm -rf ${{ github.workspace }}/*
 
- build-centos-arm64:
+  build-centos-arm64:
     runs-on: [ARM64]
     container:
       image: centos:8
