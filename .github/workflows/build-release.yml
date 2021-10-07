@@ -174,14 +174,14 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ref: master
+          ref: ci-workflow
 
       - name: Get Version Number
         shell: bash
         id: version_number
         run: |
           ls -la
-          version=$(cat ${{ github.workspace }}/VERSION)
+          version=$(cat VERSION)
           echo "::set-output name=BB_VERSION::$version"
           echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-windows-x86-64.tar.gz"
 
