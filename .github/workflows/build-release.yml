@@ -63,7 +63,7 @@ jobs:
 
       - name: Build
         env:
-          BB_VERSION: ${{ steps.version_number.outputs.BB_VERSION }}
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
         run: |
           
           # TODO: Use specific GCC version
@@ -180,12 +180,14 @@ jobs:
         shell: bash
         id: version_number
         run: |
-          version=$(cat VERSION)
+          version=$(cat ${{ github.workspace }}/VERSION)
           echo "::set-output name=BB_VERSION::$version"
           echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-windows-x86-64.tar.gz"
 
       - name: Build
         shell: bash
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
         run: |
           mkdir build && cd build
           cmake ..
