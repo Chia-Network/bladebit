@@ -183,7 +183,7 @@ jobs:
           ls -la
           version=$(cat VERSION)
           echo "::set-output name=BB_VERSION::$version"
-          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-windows-x86-64.tar.gz"
+          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-windows-x86-64.zip"
 
       - name: Build
         shell: bash
@@ -196,7 +196,7 @@ jobs:
           
           mkdir ../bin
           cd Release
-          7z.exe a -tzip ../../bin/bladebit-v${BB_VERSION}-windows-x86-64.zip bladebit.exe
+          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
           ls -la ../../bin
 
       - name: Upload Artifact Windows x86-64
