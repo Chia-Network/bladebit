@@ -172,6 +172,51 @@ jobs:
         run: |
           rm -rf ${{ github.workspace }}/*
 
+ build-centos-arm64:
+    runs-on: [ARM64]
+    container:
+      image: centos:8
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: ci-workflow
+
+      - name: Get Version Number
+        id: version_number
+        run: |
+          version=$(cat VERSION)
+          echo "::set-output name=BB_VERSION::$version"
+          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-centos-arm64.tar.gz"
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+        run: |
+          
+          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+                         cmake gmp-devel numactl-devel make git
+
+          source /opt/rh/gcc-toolset-9/enable
+
+          gcc --version
+
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --target bladebit --config Release -j $(nproc --all)
+          chmod +x ./bladebit
+          tar -czvf $BB_ARTIFACT_NAME bladebit
+          mkdir ../bin
+          mv $BB_ARTIFACT_NAME ../bin/
+          ls -la ../bin
+      
+      - name: Upload Artifact CentOS ARM64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
   build-windows-x86-64:
     runs-on: windows-2019
     steps:
