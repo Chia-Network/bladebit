@@ -8,40 +8,40 @@ on: [push]
 #   BB_VERSION: 1.2.0 # Hard-coded for testing
 
 jobs:
-  list-artifacts:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v2
-        with:
-          ref: ci-workflow
+  # list-artifacts:
+  #   runs-on: ubuntu-20.04
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v2
+  #       with:
+  #         ref: ci-workflow
 
-      - name: Get Version Number
-        id: version_number
-        run: echo "::set-output name=BB_VERSION::$(cat ${{ github.workspace }}/VERSION)"
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: echo "::set-output name=BB_VERSION::$(cat ${{ github.workspace }}/VERSION)"
 
-      # Setup Node
-      # - uses: actions/setup-node@v2
-      #   with: { node-version: '14' }
-      # - run: cd .github/actions && npm install @octokit/action
+  #     # Setup Node
+  #     # - uses: actions/setup-node@v2
+  #     #   with: { node-version: '14' }
+  #     # - run: cd .github/actions && npm install @octokit/action
         
-      - run: mkdir -p bin
-      - name: Download Artifacts for Release
-        uses: actions/download-artifact@v2
-        with:
-          name: bladebit-v${{ steps.version_number.outputs.BB_VERSION }}-ubuntu-x86-64.tar.gz
-          path: bin/
+  #     - run: mkdir -p bin
+  #     - name: Download Artifacts for Release
+  #       uses: actions/download-artifact@v2
+  #       with:
+  #         name: bladebit-v${{ steps.version_number.outputs.BB_VERSION }}-ubuntu-x86-64.tar.gz
+  #         path: bin/
           
-      - run: ls -la bin
+  #     - run: ls -la bin
 
 
-      # - name: Upload Artifacts as Release Assets
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   run: |
-      #     node .github/actions/artifacts.mjs upload-release-asset \
-      #       $BB_VERSION \
-      #       bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
+  #     # - name: Upload Artifacts as Release Assets
+  #     #   env:
+  #     #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     #   run: |
+  #     #     node .github/actions/artifacts.mjs upload-release-asset \
+  #     #       $BB_VERSION \
+  #     #       bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
  
   # build-ubuntu-x86-64:
   #   runs-on: ubuntu-20.04
@@ -79,6 +79,44 @@ jobs:
   #         name: bladebit-v${{ steps.version_number.outputs.BB_VERSION }}-ubuntu-x86-64.tar.gz
   #         path: ${{ github.workspace }}/bin/bladebit-v${{ steps.version_number.outputs.BB_VERSION }}-ubuntu-x86-64.tar.gz
   #         if-no-files-found: error
+
+  build-ubuntu-arm64:
+    runs-on: [ ARM64 ]
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: ci-workflow
+
+      - name: Get Version Number
+        id: version_number
+        run: |
+          version=$(cat ${{ github.workspace }}/VERSION)
+          echo "::set-output name=BB_VERSION::$version"
+          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-ubuntu-arm64.tar.gz"
+
+      - name: Install Prerequisites
+        run: sudo apt install -y libgmp-dev libnuma-dev
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+        run: |
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --target bladebit --config Release
+          chmod +x ./bladebit
+          tar -czvf $BB_ARTIFACT_NAME bladebit
+          mkdir ../bin
+          mv $BB_ARTIFACT_NAME ../bin/
+          ls -la ../bin
+      
+      - name: Upload Artifact Ubuntu ARM64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
 
   # build-windows-x86-64:
   #   runs-on: windows-2019
