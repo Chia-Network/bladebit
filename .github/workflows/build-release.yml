@@ -104,6 +104,9 @@ jobs:
         run: |
           
           dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ cmake gmp-devel numactl-devel
+          source /opt/rh/gcc-toolset-9/enable
+
+          gcc --version
 
           mkdir build && cd build
           cmake ..
