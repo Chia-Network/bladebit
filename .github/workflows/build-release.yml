@@ -10,7 +10,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ref: ci-workflow
+          ref: master
 
       - name: Get Version Number
         id: version_number
@@ -54,7 +54,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ref: ci-workflow
+          ref: master
 
       - name: Get Version Number
         id: version_number
@@ -97,7 +97,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ref: ci-workflow
+          ref: master
 
       - name: Get Version Number
         id: version_number
@@ -141,7 +141,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ref: ci-workflow
+          ref: master
 
       - name: Get Version Number
         id: version_number
@@ -184,7 +184,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ref: ci-workflow
+          ref: master
 
       - name: Get Version Number
         shell: bash
