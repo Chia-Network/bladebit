@@ -33,11 +33,11 @@ jobs:
         run: |
 
           mkdir -p bin
-          cd bin
 
           url=$(node .github/actions/artifacts.mjs get-artifact-url $BB_VERSION ubuntu arm64)
           echo "URL: $url"
 
+          cd bin
           curl -O -J "$url"
           ls -la bin/
       
