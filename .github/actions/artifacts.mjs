@@ -14,11 +14,18 @@ function failIf( condition, error )
         throw new Error( error );
 }
 
+function failIfResponseIsNot( response, expectedCode, error )
+{
+    if( response.status !== expectedCode )
+        throw new Error( error );
+}
+
 function failIfErrorResponse( response, error )
 {
     if( response.status !== 200 )
         throw new Error( error );
 }
+
 
 async function getArtifactUrl( argv )
 {
@@ -96,8 +103,7 @@ async function uploadReleaseAsset( argv )
         name      : assetName,
         data      : asset,
     });
-    
-    log( response );
+    failIfResponseIsNot( response, 201, `Failed to upload asset ${assetName]}` );
 }
 
 async function main()

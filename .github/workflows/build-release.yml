@@ -34,6 +34,7 @@ jobs:
 
           artifacts=(
             bladebit-v${BB_VERSION}-ubuntu-arm64.tar.gz
+            bladebit-v${BB_VERSION}-centos-arm64.tar.gz
           )
 
           mkdir -p bin
@@ -56,19 +57,6 @@ jobs:
             echo "Uploading release asset"
             node .github/actions/artifacts.mjs upload-release-asset $BB_VERSION $artifact_name bin/$artifact_name
           done
-
-
-          # cd bin
-          # curl -O -J "$url"
-          # ls -la
-      
-      # - name: Download Artifacts for Release
-      #   uses: actions/download-artifact@v2
-      #   with:
-      #     name: bladebit-v${{ steps.version_number.outputs.BB_VERSION }}-ubuntu-arm64.tar.gz
-      #     path: bin/
-          
-      - run: ls -la bin
 
 
   #     # - name: Upload Artifacts as Release Assets
