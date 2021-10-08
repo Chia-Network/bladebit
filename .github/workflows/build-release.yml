@@ -45,7 +45,7 @@ jobs:
             echo "URL: $url"
             
             # Download zipped artifact and unzip the contents
-            curl --fail-with-body -o "bin/${artifact_name}.zip" "$url"
+            curl -o "bin/${artifact_name}.zip" "$url"
             unzip -d bin "bin/${artifact_name}.zip"
             
             # Upload artifact to release
