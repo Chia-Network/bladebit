@@ -49,7 +49,7 @@ jobs:
             echo "Response: $response_code"
             if [[ $response_code -ne 200 ]]; then
               >&2 echo "Failed to download artifact"
-              exit( 1 )
+              exit 1 
             fi
 
             unzip -d bin "bin/${artifact_name}.zip"
