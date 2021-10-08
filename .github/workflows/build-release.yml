@@ -26,12 +26,22 @@ jobs:
       - uses: actions/setup-node@v2
         with: { node-version: '14' }
       - run: cd .github/actions && npm install @octokit/action
+
+      # Download Artifacts for Version
+      - name: Download Artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BB_VERSION: ${{ steps.version_number.outputs.BB_VERSION }}
+        run: |
+          url=$(node .github/actions/artifacts.mjs get-artifact-url $BB_VERSION ubuntu arm64)
+
+          echo "URL: $url"
       
-      - name: Download Artifacts for Release
-        uses: actions/download-artifact@v2
-        with:
-          name: bladebit-v${{ steps.version_number.outputs.BB_VERSION }}-ubuntu-arm64.tar.gz
-          path: bin/
+      # - name: Download Artifacts for Release
+      #   uses: actions/download-artifact@v2
+      #   with:
+      #     name: bladebit-v${{ steps.version_number.outputs.BB_VERSION }}-ubuntu-arm64.tar.gz
+      #     path: bin/
           
       - run: ls -la bin
 

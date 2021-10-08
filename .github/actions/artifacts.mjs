@@ -22,10 +22,16 @@ function failIfErrorResponse( response, error )
 
 async function getArtifactUrl( argv )
 {
-    const artifactName = argv[0];
+    // Get args
+    const version      = argv[0].toLowerCase();
+    const os           = argv[1].toLowerCase();
+    const arch         = argv[2].toLowerCase();
+    const ext          = os === 'windows' ? 'zip' : 'tar.gz';
+
+    const artifactName = `bladebit-v${version}-${os}-${arch}.${ext}`;
     
-    if( !artifactName )
-        throw new Error( 'No artifact name given.' );
+    // if( !artifactName )
+    //     throw new Error( 'No artifact name given.' );
     
     const API     = `${API_BASE}/actions/artifacts`;
     const octokit = new Octokit();
