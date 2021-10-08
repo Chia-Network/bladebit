@@ -18,9 +18,7 @@ jobs:
 
       - name: Get Version Number
         id: version_number
-        run: |
-          mkdir -p bin
-          echo "::set-output name=BB_VERSION::$(cat ${{ github.workspace }}/VERSION)"
+        run: echo "::set-output name=BB_VERSION::$(cat ${{ github.workspace }}/VERSION)"
 
       # Setup Node
       - uses: actions/setup-node@v2
@@ -35,6 +33,7 @@ jobs:
         run: |
 
           mkdir -p bin
+          cd bin
 
           url=$(node .github/actions/artifacts.mjs get-artifact-url $BB_VERSION ubuntu arm64)
           echo "URL: $url"
