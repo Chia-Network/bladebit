@@ -17,25 +17,25 @@ size_t SysHost::GetPageSize()
 size_t SysHost::GetTotalSystemMemory()
 {   
     uint count = HOST_VM_INFO64_COUNT;
-    vm_statistics64_t vmstat;
+    vm_statistics64_data_t vmstat;
     ZeroMem( &vmstat );
 
-    if( host_statistics64( mach_host_self(), HOST_VM_INFO, (host_info64_t)&vmstat, &count ) != KERN_SUCCESS )
+    if( host_statistics64( mach_host_self(), HOST_VM_INFO64, (host_info64_t)&vmstat, &count ) != KERN_SUCCESS )
         return 0;
     
     const size_t pageSize = GetPageSize();
     
-    return ( vmstat->free_count     +
-             vmstat->active_count   +
-             vmstat->inactive_count + 
-             vmstat->wire_count ) * pageSize;
+    return ( vmstat.free_count     +
+             vmstat.active_count   +
+             vmstat.inactive_count +
+             vmstat.wire_count ) * pageSize;
 }
 
 //-----------------------------------------------------------
 size_t SysHost::GetAvailableSystemMemory()
 {
     uint count = HOST_VM_INFO64_COUNT;
-    vm_statistics64_t vmstat;
+    vm_statistics64_data_t vmstat;
     ZeroMem( &vmstat );
 
     if( host_statistics64( mach_host_self(), HOST_VM_INFO, (host_info64_t)&vmstat, &count ) != KERN_SUCCESS )
@@ -43,8 +43,8 @@ size_t SysHost::GetAvailableSystemMemory()
     
     const size_t pageSize = GetPageSize();
     
-    return ( vmstat->free_count     +
-             vmstat->inactive_count ) * pageSize;
+    return ( vmstat.free_count     +
+             vmstat.inactive_count ) * pageSize;
 }
 
 //-----------------------------------------------------------
