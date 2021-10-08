@@ -44,7 +44,7 @@ jobs:
             url=$(node .github/actions/artifacts.mjs get-artifact-url $artifact_name)
             echo "URL: $url"
             
-            curl -o "bin/${artifact_name}.zip"
+            curl -o "bin/${artifact_name}.zip" "$url"
             ls -la bin
 
             unzip -d bin "bin/${artifact_name}.zip"
