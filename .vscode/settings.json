@@ -105,5 +105,6 @@
         "Ryzen"
     ],
     "C_Cpp.errorSquiggles": "Enabled",
-    "cmake.configureOnOpen": true
+    "cmake.configureOnOpen": true,
+    "cmake.sourceDirectory": "${workspaceFolder}/."
 }

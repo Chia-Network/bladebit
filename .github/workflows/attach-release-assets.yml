@@ -1,0 +1,60 @@
+name: Attach Release Assets
+on:
+  workflow_dispatch:
+  release:
+    types: [created]  # Note: Neither create nor publish trigger if a release is drafted first.
+                      #       In order of it to trigger the release needs to be published when created.
+
+jobs:
+  upload-release-assets:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: master
+
+      # Setup Node
+      - uses: actions/setup-node@v2
+        with: { node-version: '14' }
+      - run: cd .github/actions && npm install @octokit/action
+
+      # Upload Artifacts as Release Assets
+      - name: Upload Release Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+
+          BB_VERSION=$(basename $GITHUB_REF)
+          BB_VERSION=${BB_VERSION:1}
+          echo "Release Version: $BB_VERSION"
+
+          artifacts=(
+            bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz
+            bladebit-v${BB_VERSION}-centos-x86-64.tar.gz
+            bladebit-v${BB_VERSION}-ubuntu-arm64.tar.gz
+            bladebit-v${BB_VERSION}-centos-arm64.tar.gz
+            bladebit-v${BB_VERSION}-windows-x86-64.zip
+          )
+
+          mkdir -p bin
+
+          for artifact_name in "${artifacts[@]}"; do
+            
+            echo "Fetching $artifact_name"
+            url=$(node .github/actions/artifacts.mjs get-artifact-url $artifact_name)
+            
+            # Download zipped artifact and unzip the contents
+            response_code=$(curl -w "%{http_code}" -o "bin/${artifact_name}.zip" "$url")
+            if [[ $response_code -ne 200 ]]; then
+              >&2 echo "Failed to download artifact"
+              exit 1 
+            fi
+
+            unzip -d bin "bin/${artifact_name}.zip"
+            
+            # Upload artifact to release
+            echo "Uploading release asset '${artifact_name}'"
+            node .github/actions/artifacts.mjs upload-release-asset $BB_VERSION $artifact_name bin/$artifact_name
+          done
+ 

@@ -1,0 +1,218 @@
+name: Build Release Assets
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build-ubuntu-x86-64:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: master
+
+      - name: Get Version Number
+        id: version_number
+        run: |
+          version=$(cat VERSION)
+          echo "::set-output name=BB_VERSION::$version"
+          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-ubuntu-x86-64.tar.gz"
+
+      - name: Install Prerequisites
+        run: sudo apt install -y libgmp-dev libnuma-dev
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+        run: |
+          
+          # TODO: Use specific GCC version
+          gcc --version
+
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --target bladebit --config Release -j $(nproc --all)
+          chmod +x ./bladebit
+          tar -czvf $BB_ARTIFACT_NAME bladebit
+          mkdir ../bin
+          mv $BB_ARTIFACT_NAME ../bin/
+          ls -la ../bin
+      
+      - name: Upload Artifact Ubuntu x86-64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
+  build-centos-x86-64:
+    runs-on: ubuntu-20.04
+    container:
+      image: centos:8
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: master
+
+      - name: Get Version Number
+        id: version_number
+        run: |
+          version=$(cat VERSION)
+          echo "::set-output name=BB_VERSION::$version"
+          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-centos-x86-64.tar.gz"
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+        run: |
+          
+          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+                         cmake gmp-devel numactl-devel make git
+
+          source /opt/rh/gcc-toolset-9/enable
+
+          gcc --version
+
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --target bladebit --config Release -j $(nproc --all)
+          chmod +x ./bladebit
+          tar -czvf $BB_ARTIFACT_NAME bladebit
+          mkdir ../bin
+          mv $BB_ARTIFACT_NAME ../bin/
+          ls -la ../bin
+      
+      - name: Upload Artifact CentOS x86-64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
+  build-ubuntu-arm64:
+    runs-on: [ ARM64 ]
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: master
+
+      - name: Get Version Number
+        id: version_number
+        run: |
+          version=$(cat ${{ github.workspace }}/VERSION)
+          echo "::set-output name=BB_VERSION::$version"
+          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-ubuntu-arm64.tar.gz"
+
+      - name: Install Prerequisites
+        run: sudo apt install -y libgmp-dev libnuma-dev
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+        run: |
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --target bladebit --config Release
+          chmod +x ./bladebit
+          tar -czvf $BB_ARTIFACT_NAME bladebit
+          mkdir ../bin
+          mv $BB_ARTIFACT_NAME ../bin/
+          ls -la ../bin
+      
+      - name: Upload Artifact Ubuntu ARM64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
+      - name: Clean Up
+        run: |
+          rm -rf ${{ github.workspace }}/*
+
+  build-centos-arm64:
+    runs-on: [ARM64]
+    container:
+      image: centos:8
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: master
+
+      - name: Get Version Number
+        id: version_number
+        run: |
+          version=$(cat VERSION)
+          echo "::set-output name=BB_VERSION::$version"
+          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-centos-arm64.tar.gz"
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+        run: |
+          
+          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+                         cmake gmp-devel numactl-devel make git
+
+          source /opt/rh/gcc-toolset-9/enable
+
+          gcc --version
+
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --target bladebit --config Release -j $(nproc --all)
+          chmod +x ./bladebit
+          tar -czvf $BB_ARTIFACT_NAME bladebit
+          mkdir ../bin
+          mv $BB_ARTIFACT_NAME ../bin/
+          ls -la ../bin
+      
+      - name: Upload Artifact CentOS ARM64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
+  build-windows-x86-64:
+    runs-on: windows-2019
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          ref: master
+
+      - name: Get Version Number
+        shell: bash
+        id: version_number
+        run: |
+          ls -la
+          version=$(cat VERSION)
+          echo "::set-output name=BB_VERSION::$version"
+          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-windows-x86-64.zip"
+
+      - name: Build
+        shell: bash
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+        run: |
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --target bladebit --config Release
+          
+          mkdir ../bin
+          cd Release
+          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
+          ls -la ../../bin
+
+      - name: Upload Artifact Windows x86-64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
