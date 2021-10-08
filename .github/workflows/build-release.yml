@@ -44,11 +44,13 @@ jobs:
             url=$(node .github/actions/artifacts.mjs get-artifact-url $artifact_name)
             echo "URL: $url"
             
-            curl -o "bin/${artifact_name}.zip" "$url"
-            ls -la bin
-
+            # Download zipped artifact and unzip the contents
+            curl --fail-with-body -o "bin/${artifact_name}.zip" "$url"
             unzip -d bin "bin/${artifact_name}.zip"
-            ls -la bin
+            
+            # Upload artifact to release
+            echo "Uploading release asset"
+            node .github/actions/artifacts.mjs upload-release-asset $BB_VERSION $artifact_name bin/$artifact_name
           done
 
 

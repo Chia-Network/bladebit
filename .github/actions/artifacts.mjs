@@ -71,7 +71,8 @@ async function uploadReleaseAsset( argv )
     const API = `${API_BASE}/releases`;
 
     const version   = argv[0];
-    const assetPath = argv[1];
+    const assetName = argv[1];
+    const assetPath = argv[2];
     const tag       = 'v' + version;
     
     const octokit = new Octokit();
@@ -83,17 +84,18 @@ async function uploadReleaseAsset( argv )
     // Find the specified release
     const release = response.data.find( a => a.tag_name === tag );
     failIf( !release, `Failed to obtain release for version ${version}` );
-    // log( JSON.stringify( release, null, 4 ) );
+    log( JSON.stringify( release, null, 4 ) );
 
     // Upload the artifact to the release as an asset
-    octokit.rest.repos.uploadReleaseAsset({
-        owner     : OWNER,
-        repo      : REPO,
-        release_id: release.id,
-        name,
-        data,
-    });
+    // response = await octokit.rest.repos.uploadReleaseAsset({
+    //     owner     : OWNER,
+    //     repo      : REPO,
+    //     release_id: release.id,
+    //     name      : assetName,
+    //     data      : assetData,
+    // });
     
+    // log( response );
 }
 
 async function main()
