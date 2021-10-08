@@ -38,7 +38,7 @@ jobs:
 
           mkdir -p bin
 
-          for artifact_name in "${artifacts[@]}""; do
+          for artifact_name in "${artifacts[@]}"; do
             
             echo "Fetching $artifact_name"
             url=$(node .github/actions/artifacts.mjs get-artifact-url $artifact_name)
