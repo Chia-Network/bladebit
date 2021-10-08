@@ -32,14 +32,29 @@ jobs:
           BB_VERSION: ${{ steps.version_number.outputs.BB_VERSION }}
         run: |
 
+          artifacts=(
+            bladebit-v${BB_VERSION}-ubuntu-arm64.tar.gz
+          )
+
           mkdir -p bin
 
-          url=$(node .github/actions/artifacts.mjs get-artifact-url $BB_VERSION ubuntu arm64)
-          echo "URL: $url"
+          for artifact_name in "${artifacts[@]}""; do
+            
+            echo "Fetching $artifact_name"
+            url=$(node .github/actions/artifacts.mjs get-artifact-url $artifact_name)
+            echo "URL: $url"
+            
+            curl -o "bin/${artifact_name}.zip"
+            ls -la bin
 
-          cd bin
-          curl -O -J "$url"
-          ls -la
+            unzip -d bin "bin/${artifact_name}.zip"
+            ls -la bin
+          done
+
+
+          # cd bin
+          # curl -O -J "$url"
+          # ls -la
       
       # - name: Download Artifacts for Release
       #   uses: actions/download-artifact@v2
