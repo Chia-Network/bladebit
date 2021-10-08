@@ -37,7 +37,7 @@ async function getArtifactUrl( argv )
     const octokit = new Octokit();
 
     let response = await octokit.request( `GET ${API}` );
-    failIfErrorResponse( resposne, 'Invalid artifacts response.' );
+    failIfErrorResponse( response, 'Invalid artifacts response.' );
     
     // log( `Looking for artifact for version ${opts.version}` );
     const artifacts = response.data.artifacts;
@@ -59,7 +59,7 @@ async function getArtifactUrl( argv )
     // log( JSON.stringify( response, 4 ) );
 
     // Docs say 302, but the returned code is actually 200
-    failIfErrorResponse( resposne, 'Failed to retrieve artifact download url.'  );
+    failIfErrorResponse( response, 'Failed to retrieve artifact download url.'  );
     
     const downloadUrl = response.url;
     return downloadUrl;
