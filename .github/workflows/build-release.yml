@@ -33,10 +33,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BB_VERSION: ${{ steps.version_number.outputs.BB_VERSION }}
         run: |
-          url=$(node .github/actions/artifacts.mjs get-artifact-url $BB_VERSION ubuntu arm64)
 
+          mkdir -p bin
+
+          url=$(node .github/actions/artifacts.mjs get-artifact-url $BB_VERSION ubuntu arm64)
           echo "URL: $url"
-          curl -o bin/ -OJ "$url"
+
+          curl -o bin/ -O -J "$url"
           ls -la bin/
       
       # - name: Download Artifacts for Release
