@@ -42,10 +42,10 @@ jobs:
             
             echo "Fetching $artifact_name"
             url=$(node .github/actions/artifacts.mjs get-artifact-url $artifact_name)
-            echo "URL: $url"
+            # echo "URL: $url"
             
             # Download zipped artifact and unzip the contents
-            response_code=$(curl -s -w -o "bin/${artifact_name}.zip" "$url")
+            response_code=$(curl -w "%{http_code}" -o "bin/${artifact_name}.zip" "$url")
             echo "Response: $response_code"
             if [[ $response_code -ne 200 ]]; then
               >&2 echo "Failed to download artifact"
