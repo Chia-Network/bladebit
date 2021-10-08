@@ -48,7 +48,7 @@ jobs:
             response_code=$(curl -o "bin/${artifact_name}.zip" "$url")
             echo "Response: $response_code"
             if [[ $response_code -ne 200 ]]; then
-              >&2 "Failed to download artifact"
+              >&2 echo "Failed to download artifact"
               exit( 1 )
             fi
 
