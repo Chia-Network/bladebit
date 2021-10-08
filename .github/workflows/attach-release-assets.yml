@@ -1,8 +1,9 @@
 name: Attach Release Assets
 on:
-  release:
-    types: [created]
   workflow_dispatch:
+  release:
+    types: [created]  # Note: Neither create nor publish trigger if a release is drafted first.
+                      #       In order of it to trigger the release needs to be published when created.
 
 jobs:
   upload-release-assets:
@@ -13,10 +14,6 @@ jobs:
         with:
           ref: master
 
-      - name: Get Version Number
-        id: version_number
-        run: echo "::set-output name=BB_VERSION::$(cat ${{ github.workspace }}/VERSION)"
-
       # Setup Node
       - uses: actions/setup-node@v2
         with: { node-version: '14' }
@@ -26,8 +23,11 @@ jobs:
       - name: Upload Release Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BB_VERSION: ${{ steps.version_number.outputs.BB_VERSION }}
         run: |
+
+          BB_VERSION=$(basename $GITHUB_REF)
+          BB_VERSION=${BB_VERSION:1}
+          echo "Release Version: $BB_VERSION"
 
           artifacts=(
             bladebit-v${BB_VERSION}-ubuntu-x86-64.tar.gz

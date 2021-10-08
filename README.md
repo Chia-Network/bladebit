@@ -1,9 +1,11 @@
 # BladeBit Chia Plotter
 
+[![Release Builds](https://github.com/Chia-Network/bladebit/actions/workflows/build-release.yml/badge.svg?branch=master&event=push)](https://github.com/Chia-Network/bladebit/actions/workflows/build-release.yml)
+
 A fast **RAM-only**, **k32-only**, Chia plotter.
 
 ## Requirements
-**416 GiB of RAM are required** to run it, plus a few more megabytes for stack space and small allocations. 
+**416 GiB of RAM are required** to run it, plus a few more megabytes for stack space and small allocations.
 
 64-bit is supported only, for obvious reasons.
 
