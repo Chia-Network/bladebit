@@ -103,7 +103,7 @@ async function uploadReleaseAsset( argv )
         name      : assetName,
         data      : asset,
     });
-    failIfResponseIsNot( response, 201, `Failed to upload asset ${assetName]}` );
+    failIfResponseIsNot( response, 201, `Failed to upload asset ${assetName}` );
 }
 
 async function main()
