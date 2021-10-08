@@ -36,6 +36,8 @@ jobs:
           url=$(node .github/actions/artifacts.mjs get-artifact-url $BB_VERSION ubuntu arm64)
 
           echo "URL: $url"
+          curl -o bin/ -OJ "$url"
+          ls -la bin/
       
       # - name: Download Artifacts for Release
       #   uses: actions/download-artifact@v2
