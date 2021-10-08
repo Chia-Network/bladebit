@@ -22,12 +22,12 @@ function failIfErrorResponse( response, error )
 
 async function getArtifactUrl( argv )
 {
-    const API = `${API_BASE}/actions/artifacts`;
-    
     const artifactName = argv[0];
+    
     if( !artifactName )
         throw new Error( 'No artifact name given.' );
-
+    
+    const API     = `${API_BASE}/actions/artifacts`;
     const octokit = new Octokit();
 
     let response = await octokit.request( `GET ${API}` );
