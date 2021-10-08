@@ -45,7 +45,13 @@ jobs:
             echo "URL: $url"
             
             # Download zipped artifact and unzip the contents
-            curl -o "bin/${artifact_name}.zip" "$url"
+            response_code=$(curl -o "bin/${artifact_name}.zip" "$url")
+            echo "Response: $response_code"
+            if [[ $response_code -ne 200 ]]; then
+              >&2 "Failed to download artifact"
+              exit( 1 )
+            fi
+
             unzip -d bin "bin/${artifact_name}.zip"
             
             # Upload artifact to release
