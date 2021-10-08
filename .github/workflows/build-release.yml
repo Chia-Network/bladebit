@@ -39,7 +39,7 @@ jobs:
 
           cd bin
           curl -O -J "$url"
-          ls -la bin/
+          ls -la
       
       # - name: Download Artifacts for Release
       #   uses: actions/download-artifact@v2
