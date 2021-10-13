@@ -51,8 +51,7 @@ inline void ZeroMem( T* ptr, size_t count )
     memset( ptr, 0, sizeof( T ) * count );
 }
 
-// Like ceil div, but tells you how man times to multiply
-// a in order to fit into b-sized chunks
+// Divide a by b and apply ceiling if needed.
 //-----------------------------------------------------------
 template <typename T>
 constexpr inline T CDiv( T a, int b )
@@ -60,24 +59,26 @@ constexpr inline T CDiv( T a, int b )
     return ( a + (T)b - 1 ) / (T)b;
 }
 
-/// Divides <deividend> by <divisor> and rounds
-/// it up to the next factor of <divisor>
 //-----------------------------------------------------------
-template<typename T>
-inline T CeildDiv( T dividend, T divisor )
+template <typename T>
+constexpr inline T CDivT( T a, T b )
 {
-    return dividend + ( divisor - ( dividend % divisor ) ) % divisor;
+    return ( a + b - (T)1 ) / b;
 }
 
 // Round up a number to the next upper boundary.
-// For example, if we want to round up some bytes to the
-// next 8-byte boundary.
-// This is the same as CeilDiv, but with a more intuitive name.
+// For example, if we want to round up some bytes to the next 8-byte boundary.
 //-----------------------------------------------------------
 template<typename T>
 inline T RoundUpToNextBoundary( T value, int boundary )
 {
-    return CeildDiv( value, (T)boundary );
+    return value + ( boundary - ( value % boundary ) ) % boundary;
+}
+
+template<typename T>
+inline T RoundUpToNextBoundaryT( T value, T boundary )
+{
+    return value + ( boundary - ( value % boundary ) ) % boundary;
 }
 
 const char HEX_TO_BIN[256] = {

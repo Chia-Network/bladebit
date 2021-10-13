@@ -44,24 +44,36 @@ void DiskPlotPhase1::GenF1()
     memcpy( key + 1, cx.plotId, 31 );
 
     // Prepare jobs
-    const uint threadCount = pool.ThreadCount();
-
     const uint64 entryCount      = 1ull << _K;
     const size_t entryTotalSize  = entryCount * sizeof( uint32 );
-    const uint32 entriesPerBlock = kF1BlockSize / sizeof( uint32 );
+    const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
+    const uint32 blockCount      = (uint32)( entryCount / kF1BlockSize );
 
-    const uint   chunkCount      = (uint)(entryTotalSize / cx.diskFlushSize);
-    const uint32 blockCount      = (uint32)(entryCount / kF1BlockSize );
-    const uint32 blocksPerChunk  = (uint32)(cx.diskFlushSize / kF1BlockSize );
-    const uint32 blocksPerThread = blocksPerChunk / threadCount;
+    // "-1" because we reserve 1 chunk buffer for blocks and count buffers
+    const size_t chunkBufferCount = ( cx.bufferSizeBytes / cx.diskFlushSize ) - 1;
+    ASSERT( chunkBufferCount > 0 );
+
+    // #TODO: Actually ensure that we have enough space to store this
+    const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
+    ASSERT( countsBufferSize * chunkBufferCount );
+
+    const uint32 blocksPerChunk   = (uint32)( cx.diskFlushSize / ( kF1BlockSize * 2 ) );
+    const uint32 chunkCount       = CDivT( blockCount, blocksPerChunk );                                // How many chunks we need to process
+    const uint32 lastChunkBlocks  = blocksPerChunk - ( ( chunkCount * blocksPerChunk ) - blockCount );  // Last chunk might not need to process all blocks
+
+    // Theads operate on a chunk at a time.
+    const uint32 threadCount      = pool.ThreadCount();
+    const uint32 blocksPerThread  = blocksPerChunk / threadCount;
     
     uint32 trailingBlocks = blocksPerChunk - ( blocksPerThread * threadCount );
 
     // #TODO: Ensure each thread has at least one block.
     ASSERT( blocksPerThread > 0 );
 
-    uint  x      = 0;
-    byte* buffer = _cx.workBuffer;
+    uint  x       = 0;
+    byte* blocks  = _cx.workBuffer;
+    byte* buckets = blocks  + cx.diskFlushSize;
+    byte* xBuffer = buckets + cx.diskFlushSize;
 
     uint32 bucketCounts[BB_DP_BUCKET_COUNT];
 
@@ -71,7 +83,13 @@ void DiskPlotPhase1::GenF1()
     {
         GenF1Job& job = f1Job[i];
         job.key          = key;
-        job.buffer       = buffer;
+        job.buffer       = blocks;
+        job.buckets      = (uint32*)buckets;
+        job.xBuffer      = (uint32*)xBuffer;
+
+        job.counts       = nullptr;
+        job.bucketCounts = nullptr;
+
         job.blockCount   = blocksPerThread;
         job.chunkCount   = chunkCount;
         job.x            = x;
@@ -83,8 +101,10 @@ void DiskPlotPhase1::GenF1()
             trailingBlocks--;
         }
 
-        x      += job.blockCount * entriesPerBlock;
-        buffer += job.blockCount * kF1BlockSize;
+        x       += job.blockCount * entriesPerBlock;
+        blocks  += job.blockCount * kF1BlockSize;
+        buckets += job.blockCount * kF1BlockSize;
+        xBuffer += job.blockCount * kF1BlockSize;
     }
 
     f1Job[0].bucketCounts = bucketCounts;
@@ -126,6 +146,9 @@ void GenF1Job::Run()
         memset( counts, 0, sizeof( counts ) );
 
         const uint32* block = (uint32*)buffer;
+
+        // #TODO: If last chunk, get the block count for last chunk.
+        // #TODO: Process chunk in its own function
 
         for( uint j = 0; j < blockCount; j++ )
         {
@@ -209,9 +232,10 @@ void GenF1Job::Run()
 
         // Now we know the offset where we can start storing bucketized y values
         block = (uint*)buffer;
-        uint32* buckets = this->buckets;
+        uint32* buckets = this->buckets;    // #TODO: These buffer must be taken from the queue
+        uint32* xBuffer = this->xBuffer;
 
-        for( uint64 i = 0; i < blockCount; i++ )
+        for( uint j = 0; j < blockCount; j++ )
         {
             // chacha output is treated as big endian, therefore swap, as required by chiapos
             const uint32 y0  = Swap32( block[0 ] );
@@ -231,23 +255,40 @@ void GenF1Job::Run()
             const uint32 y14 = Swap32( block[14] );
             const uint32 y15 = Swap32( block[15] );
 
+            const uint32 bucket0  = y0  >> kMinusKExtraBits;
+            const uint32 bucket1  = y1  >> kMinusKExtraBits;
+            const uint32 bucket2  = y2  >> kMinusKExtraBits;
+            const uint32 bucket3  = y3  >> kMinusKExtraBits;
+            const uint32 bucket4  = y4  >> kMinusKExtraBits;
+            const uint32 bucket5  = y5  >> kMinusKExtraBits;
+            const uint32 bucket6  = y6  >> kMinusKExtraBits;
+            const uint32 bucket7  = y7  >> kMinusKExtraBits;
+            const uint32 bucket8  = y8  >> kMinusKExtraBits;
+            const uint32 bucket9  = y9  >> kMinusKExtraBits;
+            const uint32 bucket10 = y10 >> kMinusKExtraBits;
+            const uint32 bucket11 = y11 >> kMinusKExtraBits;
+            const uint32 bucket12 = y12 >> kMinusKExtraBits;
+            const uint32 bucket13 = y13 >> kMinusKExtraBits;
+            const uint32 bucket14 = y14 >> kMinusKExtraBits;
+            const uint32 bucket15 = y15 >> kMinusKExtraBits;
+
             // 0x3F == 6 bits (kExtraBits)
-            const uint32 idx0  = --pfxSum[y0  & 0x3F];
-            const uint32 idx1  = --pfxSum[y1  & 0x3F];
-            const uint32 idx2  = --pfxSum[y2  & 0x3F];
-            const uint32 idx3  = --pfxSum[y3  & 0x3F];
-            const uint32 idx4  = --pfxSum[y4  & 0x3F];
-            const uint32 idx5  = --pfxSum[y5  & 0x3F];
-            const uint32 idx6  = --pfxSum[y6  & 0x3F];
-            const uint32 idx7  = --pfxSum[y7  & 0x3F];
-            const uint32 idx8  = --pfxSum[y8  & 0x3F];
-            const uint32 idx9  = --pfxSum[y9  & 0x3F];
-            const uint32 idx10 = --pfxSum[y10 & 0x3F];
-            const uint32 idx11 = --pfxSum[y11 & 0x3F];
-            const uint32 idx12 = --pfxSum[y12 & 0x3F];
-            const uint32 idx13 = --pfxSum[y13 & 0x3F];
-            const uint32 idx14 = --pfxSum[y14 & 0x3F];
-            const uint32 idx15 = --pfxSum[y15 & 0x3F];
+            const uint32 idx0  = --pfxSum[bucket0 ]; //y0  & 0x3F];
+            const uint32 idx1  = --pfxSum[bucket1 ]; //y1  & 0x3F];
+            const uint32 idx2  = --pfxSum[bucket2 ]; //y2  & 0x3F];
+            const uint32 idx3  = --pfxSum[bucket3 ]; //y3  & 0x3F];
+            const uint32 idx4  = --pfxSum[bucket4 ]; //y4  & 0x3F];
+            const uint32 idx5  = --pfxSum[bucket5 ]; //y5  & 0x3F];
+            const uint32 idx6  = --pfxSum[bucket6 ]; //y6  & 0x3F];
+            const uint32 idx7  = --pfxSum[bucket7 ]; //y7  & 0x3F];
+            const uint32 idx8  = --pfxSum[bucket8 ]; //y8  & 0x3F];
+            const uint32 idx9  = --pfxSum[bucket9 ]; //y9  & 0x3F];
+            const uint32 idx10 = --pfxSum[bucket10]; //y10 & 0x3F];
+            const uint32 idx11 = --pfxSum[bucket11]; //y11 & 0x3F];
+            const uint32 idx12 = --pfxSum[bucket12]; //y12 & 0x3F];
+            const uint32 idx13 = --pfxSum[bucket13]; //y13 & 0x3F];
+            const uint32 idx14 = --pfxSum[bucket14]; //y14 & 0x3F];
+            const uint32 idx15 = --pfxSum[bucket15]; //y15 & 0x3F];
 
             // Add the x as the kExtraBits, and strip away the high kExtraBits,
             // which is now our bucket id, and place each entry into it's respective bucket
@@ -269,23 +310,23 @@ void GenF1Job::Run()
             buckets[idx14] = ( y14 << kExtraBits ) | ( ( x + 14 ) >> kMinusKExtraBits );
             buckets[idx15] = ( y15 << kExtraBits ) | ( ( x + 15 ) >> kMinusKExtraBits );
 
-            // Store the x that generated this y/ the sort key
-            sortKey[idx0 ] = x + 0 ;
-            sortKey[idx1 ] = x + 1 ;
-            sortKey[idx2 ] = x + 2 ;
-            sortKey[idx3 ] = x + 3 ;
-            sortKey[idx4 ] = x + 4 ;
-            sortKey[idx5 ] = x + 5 ;
-            sortKey[idx6 ] = x + 6 ;
-            sortKey[idx7 ] = x + 7 ;
-            sortKey[idx8 ] = x + 8 ;
-            sortKey[idx9 ] = x + 9 ;
-            sortKey[idx10] = x + 10;
-            sortKey[idx11] = x + 11;
-            sortKey[idx12] = x + 12;
-            sortKey[idx13] = x + 13;
-            sortKey[idx14] = x + 14;
-            sortKey[idx15] = x + 15;
+            // Store the x that generated this y
+            xBuffer[idx0 ] = x + 0 ;
+            xBuffer[idx1 ] = x + 1 ;
+            xBuffer[idx2 ] = x + 2 ;
+            xBuffer[idx3 ] = x + 3 ;
+            xBuffer[idx4 ] = x + 4 ;
+            xBuffer[idx5 ] = x + 5 ;
+            xBuffer[idx6 ] = x + 6 ;
+            xBuffer[idx7 ] = x + 7 ;
+            xBuffer[idx8 ] = x + 8 ;
+            xBuffer[idx9 ] = x + 9 ;
+            xBuffer[idx10] = x + 10;
+            xBuffer[idx11] = x + 11;
+            xBuffer[idx12] = x + 12;
+            xBuffer[idx13] = x + 13;
+            xBuffer[idx14] = x + 14;
+            xBuffer[idx15] = x + 15;
             
             block += entriesPerBlock;
             x     += entriesPerBlock;
