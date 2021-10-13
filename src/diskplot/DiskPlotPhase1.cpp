@@ -157,6 +157,7 @@ void GenF1Job::Run()
             // Determine the bucket id by grabbing the lowest kExtrabits, the highest
             // kExtraBits from the LSB. This is equivalent to the kExtraBits MSbits of the entry
             // once it is endian-swapped later.
+            // 0x3F == 6 bits( kExtraBits )
             const uint32 e0  = ( block[0 ] >> bucketShift ) & 0x3F; ASSERT( e0  < 256u );
             const uint32 e1  = ( block[1 ] >> bucketShift ) & 0x3F; ASSERT( e1  < 256u );
             const uint32 e2  = ( block[2 ] >> bucketShift ) & 0x3F; ASSERT( e2  < 256u );
@@ -255,40 +256,22 @@ void GenF1Job::Run()
             const uint32 y14 = Swap32( block[14] );
             const uint32 y15 = Swap32( block[15] );
 
-            const uint32 bucket0  = y0  >> kMinusKExtraBits;
-            const uint32 bucket1  = y1  >> kMinusKExtraBits;
-            const uint32 bucket2  = y2  >> kMinusKExtraBits;
-            const uint32 bucket3  = y3  >> kMinusKExtraBits;
-            const uint32 bucket4  = y4  >> kMinusKExtraBits;
-            const uint32 bucket5  = y5  >> kMinusKExtraBits;
-            const uint32 bucket6  = y6  >> kMinusKExtraBits;
-            const uint32 bucket7  = y7  >> kMinusKExtraBits;
-            const uint32 bucket8  = y8  >> kMinusKExtraBits;
-            const uint32 bucket9  = y9  >> kMinusKExtraBits;
-            const uint32 bucket10 = y10 >> kMinusKExtraBits;
-            const uint32 bucket11 = y11 >> kMinusKExtraBits;
-            const uint32 bucket12 = y12 >> kMinusKExtraBits;
-            const uint32 bucket13 = y13 >> kMinusKExtraBits;
-            const uint32 bucket14 = y14 >> kMinusKExtraBits;
-            const uint32 bucket15 = y15 >> kMinusKExtraBits;
-
-            // 0x3F == 6 bits (kExtraBits)
-            const uint32 idx0  = --pfxSum[bucket0 ]; //y0  & 0x3F];
-            const uint32 idx1  = --pfxSum[bucket1 ]; //y1  & 0x3F];
-            const uint32 idx2  = --pfxSum[bucket2 ]; //y2  & 0x3F];
-            const uint32 idx3  = --pfxSum[bucket3 ]; //y3  & 0x3F];
-            const uint32 idx4  = --pfxSum[bucket4 ]; //y4  & 0x3F];
-            const uint32 idx5  = --pfxSum[bucket5 ]; //y5  & 0x3F];
-            const uint32 idx6  = --pfxSum[bucket6 ]; //y6  & 0x3F];
-            const uint32 idx7  = --pfxSum[bucket7 ]; //y7  & 0x3F];
-            const uint32 idx8  = --pfxSum[bucket8 ]; //y8  & 0x3F];
-            const uint32 idx9  = --pfxSum[bucket9 ]; //y9  & 0x3F];
-            const uint32 idx10 = --pfxSum[bucket10]; //y10 & 0x3F];
-            const uint32 idx11 = --pfxSum[bucket11]; //y11 & 0x3F];
-            const uint32 idx12 = --pfxSum[bucket12]; //y12 & 0x3F];
-            const uint32 idx13 = --pfxSum[bucket13]; //y13 & 0x3F];
-            const uint32 idx14 = --pfxSum[bucket14]; //y14 & 0x3F];
-            const uint32 idx15 = --pfxSum[bucket15]; //y15 & 0x3F];
+            const uint32 idx0  = --pfxSum[y0  >> kMinusKExtraBits];
+            const uint32 idx1  = --pfxSum[y1  >> kMinusKExtraBits];
+            const uint32 idx2  = --pfxSum[y2  >> kMinusKExtraBits];
+            const uint32 idx3  = --pfxSum[y3  >> kMinusKExtraBits];
+            const uint32 idx4  = --pfxSum[y4  >> kMinusKExtraBits];
+            const uint32 idx5  = --pfxSum[y5  >> kMinusKExtraBits];
+            const uint32 idx6  = --pfxSum[y6  >> kMinusKExtraBits];
+            const uint32 idx7  = --pfxSum[y7  >> kMinusKExtraBits];
+            const uint32 idx8  = --pfxSum[y8  >> kMinusKExtraBits];
+            const uint32 idx9  = --pfxSum[y9  >> kMinusKExtraBits];
+            const uint32 idx10 = --pfxSum[y10 >> kMinusKExtraBits];
+            const uint32 idx11 = --pfxSum[y11 >> kMinusKExtraBits];
+            const uint32 idx12 = --pfxSum[y12 >> kMinusKExtraBits];
+            const uint32 idx13 = --pfxSum[y13 >> kMinusKExtraBits];
+            const uint32 idx14 = --pfxSum[y14 >> kMinusKExtraBits];
+            const uint32 idx15 = --pfxSum[y15 >> kMinusKExtraBits];
 
             // Add the x as the kExtraBits, and strip away the high kExtraBits,
             // which is now our bucket id, and place each entry into it's respective bucket
@@ -333,7 +316,6 @@ void GenF1Job::Run()
         }
 
         // Now this chunk can be submitted to the write queue, and we can continue to the next one.
-
         // Afte all the chunks have been written, we can read back from disk to sort each bucket
     }
 }
