@@ -63,6 +63,8 @@ void DiskPlotPhase1::GenF1()
     uint  x      = 0;
     byte* buffer = _cx.workBuffer;
 
+    uint32 bucketCounts[BB_DP_BUCKET_COUNT];
+
     MTJobRunner<GenF1Job> f1Job( pool );
 
     for( uint i = 0; i < threadCount; i++ )
@@ -85,6 +87,8 @@ void DiskPlotPhase1::GenF1()
         buffer += job.blockCount * kF1BlockSize;
     }
 
+    f1Job[0].bucketCounts = bucketCounts;
+
     Log::Line( "Generating f1..." );
     const double elapsed = f1Job.Run();
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
@@ -93,8 +97,16 @@ void DiskPlotPhase1::GenF1()
 //-----------------------------------------------------------
 void GenF1Job::Run()
 {
+    const uint32 entriesPerBlock  = kF1BlockSize / sizeof( uint32 );
+    const uint32 kMinusKExtraBits = _K - kExtraBits;
+    const uint32 bucketShift      = (8u - (uint)kExtraBits);
+    
+    const uint32 jobId      = this->JobId();
+    const uint32 jobCount   = this->JobCount();
+
     const uint32 blockCount = this->blockCount;
     const uint32 chunkCount = this->chunkCount;
+    const uint64 entryCount = blockCount * (uint64)entriesPerBlock;
 
     DiskBufferQueue& queue  = *this->diskQueue;
     
@@ -103,10 +115,8 @@ void GenF1Job::Run()
     chacha8_ctx chacha;
     chacha8_keysetup( &chacha, key, 256, NULL );
 
-    const uint32 entriesPerBlock = kF1BlockSize / sizeof( uint32 );
-    const uint32 bucketShift     = (32u - (uint)kExtraBits);
-
     uint counts[BB_DP_BUCKET_COUNT];
+    uint pfxSum[BB_DP_BUCKET_COUNT];
 
     for( uint i = 0; i < chunkCount; i++ )
     {
@@ -115,61 +125,175 @@ void GenF1Job::Run()
         // Count how many entries we have per bucket
         memset( counts, 0, sizeof( counts ) );
 
-        const uint* block = (uint*)block;
+        const uint32* block = (uint32*)buffer;
 
         for( uint j = 0; j < blockCount; j++ )
         {
-            const uint e0 = block[0] >> bucketShift;
-            const uint e1 = block[1] >> bucketShift;
-            const uint e2 = block[2] >> bucketShift;
-            const uint e3 = block[3] >> bucketShift;
-            const uint e4 = block[4] >> bucketShift;
-            const uint e5 = block[5] >> bucketShift;
-            const uint e6 = block[6] >> bucketShift;
-            const uint e7 = block[7] >> bucketShift;
+            // Unroll a whole block
 
-            counts[e0] ++;
-            counts[e1] ++;
-            counts[e2] ++;
-            counts[e3] ++;
-            counts[e4] ++;
-            counts[e5] ++;
-            counts[e6] ++;
-            counts[e7] ++;
+            // Determine the bucket id by grabbing the lowest kExtrabits, the highest
+            // kExtraBits from the LSB. This is equivalent to the kExtraBits MSbits of the entry
+            // once it is endian-swapped later.
+            const uint32 e0  = ( block[0 ] >> bucketShift ) & 0x3F; ASSERT( e0  < 256u );
+            const uint32 e1  = ( block[1 ] >> bucketShift ) & 0x3F; ASSERT( e1  < 256u );
+            const uint32 e2  = ( block[2 ] >> bucketShift ) & 0x3F; ASSERT( e2  < 256u );
+            const uint32 e3  = ( block[3 ] >> bucketShift ) & 0x3F; ASSERT( e3  < 256u );
+            const uint32 e4  = ( block[4 ] >> bucketShift ) & 0x3F; ASSERT( e4  < 256u );
+            const uint32 e5  = ( block[5 ] >> bucketShift ) & 0x3F; ASSERT( e5  < 256u );
+            const uint32 e6  = ( block[6 ] >> bucketShift ) & 0x3F; ASSERT( e6  < 256u );
+            const uint32 e7  = ( block[7 ] >> bucketShift ) & 0x3F; ASSERT( e7  < 256u );
+            const uint32 e8  = ( block[8 ] >> bucketShift ) & 0x3F; ASSERT( e8  < 256u );
+            const uint32 e9  = ( block[9 ] >> bucketShift ) & 0x3F; ASSERT( e9  < 256u );
+            const uint32 e10 = ( block[10] >> bucketShift ) & 0x3F; ASSERT( e10 < 256u );
+            const uint32 e11 = ( block[11] >> bucketShift ) & 0x3F; ASSERT( e11 < 256u );
+            const uint32 e12 = ( block[12] >> bucketShift ) & 0x3F; ASSERT( e12 < 256u );
+            const uint32 e13 = ( block[13] >> bucketShift ) & 0x3F; ASSERT( e13 < 256u );
+            const uint32 e14 = ( block[14] >> bucketShift ) & 0x3F; ASSERT( e14 < 256u );
+            const uint32 e15 = ( block[15] >> bucketShift ) & 0x3F; ASSERT( e15 < 256u );
+
+            counts[e0 ] ++;
+            counts[e1 ] ++;
+            counts[e2 ] ++;
+            counts[e3 ] ++;
+            counts[e4 ] ++;
+            counts[e5 ] ++;
+            counts[e6 ] ++;
+            counts[e7 ] ++;
+            counts[e8 ] ++;
+            counts[e9 ] ++;
+            counts[e10] ++;
+            counts[e11] ++;
+            counts[e12] ++;
+            counts[e13] ++;
+            counts[e14] ++;
+            counts[e15] ++;
+
+            block += entriesPerBlock;
         }
 
-        block += entriesPerBlock;
 
+        // Wait for all threads to finish ChaCha generation
         this->counts = counts;
+        SyncThreads();
 
-        if( LockThreads() )
+        // Add up all of the jobs counts
+        memset( pfxSum, 0, sizeof( pfxSum ) );
+
+        for( uint j = 0; j < jobCount; j++ )
         {
-            const uint jobCount = JobCount();
+            const uint* tCounts = GetJob( j ).counts;
+
+            for( uint k = 0; k < BB_DP_BUCKET_COUNT; k++ )
+                pfxSum[k] += tCounts[k];
+        }
+
+        // If we're job 0, retain the total bucket count
+        if( jobId == 0 )
+        {
+            memcpy( this->bucketCounts, pfxSum, sizeof( pfxSum ) );
+        }
+
+        // Calculate the prefix sum for this thread
+        for( uint j = 1; j < BB_DP_BUCKET_COUNT; j++ )
+            pfxSum[j] += pfxSum[j-1];
+
+
+        // Substract the count from all threads after ours
+        for( uint t = jobId+1; t < jobCount; t++ )
+        {
+            const uint* tCounts = GetJob( t ).counts;
+
+            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                pfxSum[i] -= tCounts[i];
+        }
+
+        // Now we know the offset where we can start storing bucketized y values
+        block = (uint*)buffer;
+        uint32* buckets = this->buckets;
+
+        for( uint64 i = 0; i < blockCount; i++ )
+        {
+            // chacha output is treated as big endian, therefore swap, as required by chiapos
+            const uint32 y0  = Swap32( block[0 ] );
+            const uint32 y1  = Swap32( block[1 ] );
+            const uint32 y2  = Swap32( block[2 ] );
+            const uint32 y3  = Swap32( block[3 ] );
+            const uint32 y4  = Swap32( block[4 ] );
+            const uint32 y5  = Swap32( block[5 ] );
+            const uint32 y6  = Swap32( block[6 ] );
+            const uint32 y7  = Swap32( block[7 ] );
+            const uint32 y8  = Swap32( block[8 ] );
+            const uint32 y9  = Swap32( block[9 ] );
+            const uint32 y10 = Swap32( block[10] );
+            const uint32 y11 = Swap32( block[11] );
+            const uint32 y12 = Swap32( block[12] );
+            const uint32 y13 = Swap32( block[13] );
+            const uint32 y14 = Swap32( block[14] );
+            const uint32 y15 = Swap32( block[15] );
+
+            // 0x3F == 6 bits (kExtraBits)
+            const uint32 idx0  = --pfxSum[y0  & 0x3F];
+            const uint32 idx1  = --pfxSum[y1  & 0x3F];
+            const uint32 idx2  = --pfxSum[y2  & 0x3F];
+            const uint32 idx3  = --pfxSum[y3  & 0x3F];
+            const uint32 idx4  = --pfxSum[y4  & 0x3F];
+            const uint32 idx5  = --pfxSum[y5  & 0x3F];
+            const uint32 idx6  = --pfxSum[y6  & 0x3F];
+            const uint32 idx7  = --pfxSum[y7  & 0x3F];
+            const uint32 idx8  = --pfxSum[y8  & 0x3F];
+            const uint32 idx9  = --pfxSum[y9  & 0x3F];
+            const uint32 idx10 = --pfxSum[y10 & 0x3F];
+            const uint32 idx11 = --pfxSum[y11 & 0x3F];
+            const uint32 idx12 = --pfxSum[y12 & 0x3F];
+            const uint32 idx13 = --pfxSum[y13 & 0x3F];
+            const uint32 idx14 = --pfxSum[y14 & 0x3F];
+            const uint32 idx15 = --pfxSum[y15 & 0x3F];
+
+            // Add the x as the kExtraBits, and strip away the high kExtraBits,
+            // which is now our bucket id, and place each entry into it's respective bucket
+            // #NOTE: False sharing can occurr here
+            buckets[idx0 ] = ( y0  << kExtraBits ) | ( ( x + 0  ) >> kMinusKExtraBits );
+            buckets[idx1 ] = ( y1  << kExtraBits ) | ( ( x + 1  ) >> kMinusKExtraBits );
+            buckets[idx2 ] = ( y2  << kExtraBits ) | ( ( x + 2  ) >> kMinusKExtraBits );
+            buckets[idx3 ] = ( y3  << kExtraBits ) | ( ( x + 3  ) >> kMinusKExtraBits );
+            buckets[idx4 ] = ( y4  << kExtraBits ) | ( ( x + 4  ) >> kMinusKExtraBits );
+            buckets[idx5 ] = ( y5  << kExtraBits ) | ( ( x + 5  ) >> kMinusKExtraBits );
+            buckets[idx6 ] = ( y6  << kExtraBits ) | ( ( x + 6  ) >> kMinusKExtraBits );
+            buckets[idx7 ] = ( y7  << kExtraBits ) | ( ( x + 7  ) >> kMinusKExtraBits );
+            buckets[idx8 ] = ( y8  << kExtraBits ) | ( ( x + 8  ) >> kMinusKExtraBits );
+            buckets[idx9 ] = ( y9  << kExtraBits ) | ( ( x + 9  ) >> kMinusKExtraBits );
+            buckets[idx10] = ( y10 << kExtraBits ) | ( ( x + 10 ) >> kMinusKExtraBits );
+            buckets[idx11] = ( y11 << kExtraBits ) | ( ( x + 11 ) >> kMinusKExtraBits );
+            buckets[idx12] = ( y12 << kExtraBits ) | ( ( x + 12 ) >> kMinusKExtraBits );
+            buckets[idx13] = ( y13 << kExtraBits ) | ( ( x + 13 ) >> kMinusKExtraBits );
+            buckets[idx14] = ( y14 << kExtraBits ) | ( ( x + 14 ) >> kMinusKExtraBits );
+            buckets[idx15] = ( y15 << kExtraBits ) | ( ( x + 15 ) >> kMinusKExtraBits );
+
+            // Store the x that generated this y/ the sort key
+            sortKey[idx0 ] = x + 0 ;
+            sortKey[idx1 ] = x + 1 ;
+            sortKey[idx2 ] = x + 2 ;
+            sortKey[idx3 ] = x + 3 ;
+            sortKey[idx4 ] = x + 4 ;
+            sortKey[idx5 ] = x + 5 ;
+            sortKey[idx6 ] = x + 6 ;
+            sortKey[idx7 ] = x + 7 ;
+            sortKey[idx8 ] = x + 8 ;
+            sortKey[idx9 ] = x + 9 ;
+            sortKey[idx10] = x + 10;
+            sortKey[idx11] = x + 11;
+            sortKey[idx12] = x + 12;
+            sortKey[idx13] = x + 13;
+            sortKey[idx14] = x + 14;
+            sortKey[idx15] = x + 15;
             
-            for( uint j = 0; j < jobCount; j++ )
-            {
-                const uint* tCounts = GetJob( j ).counts;
-
-                // Add all of the other job's counts
-                for( uint k = 0; k < BB_DP_BUCKET_COUNT; k++ )
-                    counts[k] += tCounts[k];
-            }
-
-            ReleaseThreads();
-        }
-        else
-        {
-            WaitForRelease();
+            block += entriesPerBlock;
+            x     += entriesPerBlock;
         }
 
-        // Count up the total
+        // Now this chunk can be submitted to the write queue, and we can continue to the next one.
 
-        // #TODO:
-        // Count each bucket's entries
-        // Sort in the buffer itself, per bucket
-        // Dispatch sorted buffer to the write queue
-        // Take new buffer from read queue (may suspend the thread
-        // if there's no more buffers)
+        // Afte all the chunks have been written, we can read back from disk to sort each bucket
     }
 }
 
