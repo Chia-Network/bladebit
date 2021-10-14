@@ -1,8 +1,10 @@
 #pragma once
 
 #include "io/FileStream.h"
+#include "threading/AutoResetSignal.h"
 
 class Thread;
+#define BB_DISK_QUEUE_MAX_CMDS 256
 
 class DiskBufferQueue
 {
@@ -41,15 +43,19 @@ class DiskBufferQueue
 
 public:
 
-    DiskBufferQueue( const char* workDir, byte* workBuffer, size_t workBufferSize, size_t chunkSize );
+    DiskBufferQueue( const char* workDir, byte* workBuffer, 
+                     size_t workBufferSize, size_t chunkSize,
+                     uint ioThreadCount );
 
     ~DiskBufferQueue();
 
     uint CreateFile( const char* name, uint bucketCount );
 
-    //void WriteBuckets( uint id, )
+    void WriteBuckets( uint id, const byte* bucket, const uint* sizes );
     
-    void WriteFile( uint id, uint bucket, const byte* buffer, size_t size );
+    //void WriteFile( uint id, uint bucket, const byte* buffer, size_t size );
+
+    void FlushCommands();
 
     // Obtain a chunk buffer for use.
     // May block until there's a buffer available if there was none.
@@ -64,6 +70,16 @@ public:
 
 private:
 
+    Command* GetCommandObject();
+    void CommitCommand();
+
+
+    static void CommandThreadMain( DiskBufferQueue* self );
+    void CommandMain();
+    void DispatchCommand( Command& cmd );
+
+private:
+
     const char*   _workDir;
     byte*         _workBuffer;
     size_t        _workBufferSize;
@@ -74,5 +90,15 @@ private:
 
     Span<FileSet> _files;
 
-    Thread*       _dispatchThread;
+    Thread*          _dispatchThread;
+    Command          _commands[BB_DISK_QUEUE_MAX_CMDS];
+
+    int              _cmdWritePos = 0;
+    int              _cmdsPending = 0;
+    std::atomic<int> _cmdCount    = 0;
+
+    AutoResetSignal _cmdReadySignal;
+    AutoResetSignal _cmdConsumedSignal;
+
+
 };

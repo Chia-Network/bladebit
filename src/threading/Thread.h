@@ -1,6 +1,5 @@
 #pragma once
 #include "Platform.h"
-#include <atomic>
 
 typedef void (*ThreadRunner)( void* data );
 
