@@ -8,6 +8,7 @@
 #include <string>
 #include <cstdarg>
 #include <chrono>
+#include <atomic>
 
 #if _DEBUG
     #include <assert.h>
