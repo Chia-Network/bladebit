@@ -25,8 +25,9 @@ DiskPlotter::DiskPlotter( const Config cfg )
 
     
     // Test values
-    _cx.threadCount   = SysHost::GetLogicalCPUCount();
-    _cx.diskFlushSize = 128ull MB;
+    _cx.threadCount          = SysHost::GetLogicalCPUCount();
+    _cx.diskFlushSize        = 128ull MB;
+    _cx.diskQueueThreadCount = 1;
 
     _cx.threadPool    = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
     

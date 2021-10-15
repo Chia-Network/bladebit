@@ -1,5 +1,6 @@
 #include "DiskBufferQueue.h"
 #include "Util.h"
+#include "diskplot/DiskPlotConfig.h"
 
 #define NULL_BUFFER -1
 
@@ -12,7 +13,8 @@ DiskBufferQueue::DiskBufferQueue(
     , _workBuffer    ( workBuffer     )
     , _workBufferSize( workBufferSize )
     , _chunkSize     ( chunkSize      )
-    , _files         ( nullptr, 0     )
+    , _threadPool    ( ioThreadCount, ThreadPool::Mode::Fixed, true )
+    , _dispatchThread()
 {
     ASSERT( workDir    );
     ASSERT( workBuffer );
@@ -29,12 +31,44 @@ DiskBufferQueue::DiskBufferQueue(
     freeList[bufferCount-1] = NULL_BUFFER;
     _nextBuffer = 0;
     _bufferList = Span<int>( freeList, (size_t)bufferCount );
+
+    // Initialize Files
+    _files[(uint)FileId::Y].name         = "y.tmp";
+    _files[(uint)FileId::Y].files.length = BB_DP_BUCKET_COUNT;
+
+    _files[(uint)FileId::X].name         = "x.tmp";
+    _files[(uint)FileId::X].files.length = BB_DP_BUCKET_COUNT;
+
+
+    // Initialize I/O thread
+    _dispatchThread.Run( CommandThreadMain, this );
 }
 
 //-----------------------------------------------------------
 DiskBufferQueue::~DiskBufferQueue()
 {
     free( _bufferList.values );
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::WriteBuckets( FileId id, const byte* buckets, const uint* sizes )
+{
+    Command* cmd = GetCommandObject();
+    cmd->type            = Command::WriteBuckets;
+    cmd->buckets.buffers = buckets;
+    cmd->buckets.sizes   = sizes;
+    cmd->buckets.fileId  = id;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::ReleaseBuffer( byte* buffer )
+{
+    ASSERT( buffer );
+    ASSERT( buffer >= _workBuffer && buffer < _workBuffer + _workBufferSize );
+
+    Command* cmd = GetCommandObject();
+    cmd->type                 = Command::ReleaseBuffer;
+    cmd->releaseBuffer.buffer = buffer;
 }
 
 //-----------------------------------------------------------
@@ -58,8 +92,8 @@ byte* DiskBufferQueue::GetBuffer()
     // # NOTE: This should be safe as in a single-producer/consumer scenario.
     int newNextBuffer = _bufferList[nextIdx];
     while( !_nextBuffer.compare_exchange_weak( nextIdx, newNextBuffer,
-                                                std::memory_order_release,
-                                                std::memory_order_relaxed ) )
+                                               std::memory_order_release,
+                                               std::memory_order_relaxed ) )
     {
         newNextBuffer = _bufferList[nextIdx];
     }
@@ -71,6 +105,7 @@ byte* DiskBufferQueue::GetBuffer()
 DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject()
 {
     int cmdCount = _cmdCount.load( std::memory_order_acquire );
+    cmdCount += _cmdsPending;
 
     // Have to wait until there's new commands
     if( cmdCount == BB_DISK_QUEUE_MAX_CMDS )
@@ -90,18 +125,18 @@ DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject()
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::CommitCommand()
+void DiskBufferQueue::CommitCommands()
 {
     ASSERT( _cmdsPending );
 
     int cmdCount = _cmdCount.load( std::memory_order_acquire );
     ASSERT( cmdCount < BB_DISK_QUEUE_MAX_CMDS );
 
-    while( !_cmdCount.compare_exchange_weak( cmdCount, cmdCount + 1,
+    while( !_cmdCount.compare_exchange_weak( cmdCount, cmdCount + _cmdsPending,
                                              std::memory_order_release,
-                                             std::memory_order_relaxed ) )
-
+                                             std::memory_order_relaxed ) );
     _cmdsPending = 0;
+    _cmdReadySignal.Signal();
 }
 
 //-----------------------------------------------------------
@@ -135,18 +170,69 @@ void DiskBufferQueue::CommandMain()
         {
             for( ; i < cmdEnd; i++ )
             {
-                DispatchCommand( _commands[i] );
+                ExecuteCommand( _commands[i] );
             }
 
-            i = 0;
+            i      = 0;
             cmdEnd = secondPassCount;
         }
 
+        // Release commands
+        int curCmdCount = cmdCount;
+        while( !_cmdCount.compare_exchange_weak( curCmdCount, curCmdCount - cmdCount,
+                                                 std::memory_order_release,
+                                                 std::memory_order_relaxed ) );
+        _cmdConsumedSignal.Signal();
     }
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::DispatchCommand( Command& cmd )
+void DiskBufferQueue::ExecuteCommand( Command& cmd )
 {
+    switch( cmd.type )
+    {
+        case Command::WriteBuckets:
+        {
+            const FileId fileId  = cmd.buckets.fileId;
+            const uint*  sizes   = cmd.buckets.sizes;
+            const byte*  buffers = cmd.buckets.buffers;
 
+            FileSet& fileBuckets = _files[(int)fileId];
+
+            const uint bucketCount = (uint)fileBuckets.files.length;
+
+            for( uint i = 0; i < bucketCount; i++ )
+            {
+                FileStream& file = fileBuckets.files[i];
+                
+                //MTJobRunner
+            }
+        }
+        break;
+
+        case Command::ReleaseBuffer:
+        {
+            ASSERT( cmd.releaseBuffer.buffer >= _workBuffer && cmd.releaseBuffer.buffer < _workBuffer + _workBufferSize );
+
+            int bufferIndex = (int)( (uintptr_t)(cmd.releaseBuffer.buffer - _workBuffer) / _chunkSize );
+            ASSERT( (size_t)bufferIndex < _workBufferSize / _chunkSize );
+
+            int curNextIndex = _nextBuffer.load( std::memory_order_acquire );
+            _bufferList[bufferIndex] = curNextIndex;
+
+            while( !_nextBuffer.compare_exchange_weak( curNextIndex, bufferIndex,
+                                                       std::memory_order_release,
+                                                       std::memory_order_relaxed ) )
+            {
+                curNextIndex = _nextBuffer.load( std::memory_order_acquire );
+                _bufferList[bufferIndex] = curNextIndex;
+            }
+        }
+        break;
+
+        default:
+        break;
+    }
 }
+
+

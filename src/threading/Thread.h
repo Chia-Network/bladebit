@@ -13,6 +13,8 @@ public:
 
 //     static uint64 SetAffinity( uint64 affinity );
     // void SetName( const char* name );
+    template<typename TParam>
+    void Run( void (*runner)( TParam* param ), TParam* param );
 
     void Run( ThreadRunner runner, void* param );
 
@@ -54,3 +56,12 @@ private:
 
     std::atomic<ThreadState> _state;
 };
+
+
+//-----------------------------------------------------------
+template<typename TParam>
+inline void Thread::Run( void ( *runner )( TParam* param ), TParam* param )
+{
+    Run( reinterpret_cast<ThreadRunner>( runner ), (void*)param );
+}
+

@@ -7,16 +7,19 @@ struct GenF1Job : MTJob<GenF1Job>
 {
     const byte* key;
     
+    uint32  chunkCount;
+    uint32  blockCount;
+    uint32  x;
+
     byte*   buffer;
-    uint32* buckets;        // Bucketized entries
-    uint32* xBuffer;        // Buffer for sort key, same size as buffer
+
     uint32* counts;         // Each thread's entry count per bucket
     uint32* bucketCounts;   // Total counts per for all buckets. Used by the control thread
-    uint32  blockCount;
-    uint32  chunkCount;
-    uint32  x;
+    uint32* buckets;        // Set by the control thread when writing entries to buckets
+    uint32* xBuffer;        // Buffer for sort key. Also set by the control thread
     
     DiskBufferQueue* diskQueue;
+
 
     void Run() override;
 };
@@ -32,6 +35,6 @@ private:
 
 private:
     DiskPlotContext& _cx;
-    DiskBufferQueue  _diskQueue;
+    DiskBufferQueue* _diskQueue;
 };
 
