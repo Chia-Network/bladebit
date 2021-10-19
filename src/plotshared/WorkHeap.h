@@ -7,7 +7,6 @@
 // for doing plotting work in memory and I/O operations.
 // It is meant to have a very small amount of allocations, therefore
 // allocations are tracked in a small table that is searched linerarly.
-
 class WorkHeap
 {
 private:
@@ -16,6 +15,8 @@ private:
     {
         byte*  address;
         size_t size;
+
+        inline byte* EndAddress() const { return address + size; }
     };
 
 public:

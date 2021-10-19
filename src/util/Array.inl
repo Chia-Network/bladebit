@@ -77,6 +77,25 @@ inline T& Array<T>::Insert( const T& value, size_t index )
 }
 
 template<typename T>
+inline T& Array<T>::Insert( size_t index )
+{
+    ASSERT( index <= _length );
+    
+    CheckCapacity( 1u );
+
+    // Append to the end of the array?
+    if( index == _length )
+        return Push( value );
+
+    const size_t remainder = _length - index;
+    bbmemcpy_t(  _elements + index + i, _elements + index, remainder );
+
+    T* value = new ( (void*)&_elements[index] ) T();
+
+    return *value;
+}
+
+template<typename T>
 inline void Array<T>::Remove( size_t index )
 {
     ASSERT( index < _length );

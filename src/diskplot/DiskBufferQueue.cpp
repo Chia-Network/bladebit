@@ -112,6 +112,7 @@ void DiskBufferQueue::ReleaseBuffer( byte* buffer )
 //-----------------------------------------------------------
 byte* DiskBufferQueue::GetBuffer( size_t size )
 {
+    return _workHeap.Alloc( size );
     // First, add any pending released buffers back to the heap
     ConsumeReleasedBuffers();
 

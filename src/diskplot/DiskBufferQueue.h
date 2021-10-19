@@ -4,6 +4,7 @@
 #include "threading/AutoResetSignal.h"
 #include "threading/ThreadPool.h"
 #include "plotshared/MTJob.h"
+#include "plotshared/WorkHeap.h"
 
 class Thread;
 #define BB_DISK_QUEUE_MAX_CMDS 256
@@ -176,13 +177,8 @@ private:
 private:
 
     const char*      _workDir;              // Temporary directory in which we will store our temporary files
-    byte*            _workHeap;             // Our working heap
-    size_t           _workHeapSize;         // Size of our work heap
-    size_t           _usedHeapSize   = 0;   // How much heap space is currently being used
-
-    size_t           _heapTableCapacity;    // Tracks the capacity of the heap table buffer (how many HeapEntry's we can currently track without reallocating)
-    Span<HeapEntry>  _heapTable;            // Tracks unallocated space in our work heap
-
+    WorkHeap         _workHeap;             // Our working heap
+    
     // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];
     byte*            _blockBuffer   = nullptr;

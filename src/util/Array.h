@@ -15,6 +15,7 @@ public:
     T Pop();
 
     T& Insert( const T& value, size_t index );
+    T& Insert( size_t index );
 
     void Remove( size_t index );
 
