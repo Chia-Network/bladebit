@@ -49,7 +49,7 @@ void DiskPlotPhase1::GenF1()
     const uint64 entryCount      = 1ull << _K;
     const size_t entryTotalSize  = entryCount * sizeof( uint32 );
     const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
-    const uint32 blockCount      = (uint32)( entryCount / kF1BlockSize );
+    const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
 
     // #TODO: Enforce a minimum chunk size, and ensure that a (chunk size - counts) / threadCount
     // /      is sufficient to bee larger that the cache line size
@@ -241,6 +241,7 @@ void GenF1Job::Run()
         uint32* buckets = nullptr;
         uint32* xBuffer = nullptr;
         
+        // Grab a buffer from the queue
         if( this->LockThreads() )
         {
             sizes   = (uint32*)queue.GetBuffer();
@@ -258,7 +259,7 @@ void GenF1Job::Run()
             xBuffer = GetJob( 0 ).xBuffer;
         }
 
-
+        // Distribute values into buckets at each thread's given offset
         for( uint j = 0; j < blockCount; j++ )
         {
             // chacha output is treated as big endian, therefore swap, as required by chiapos
@@ -346,6 +347,26 @@ void GenF1Job::Run()
 
             for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
                 sizes[j] = bucketCounts[j] * sizeof( uint32 );
+
+            // If we're not at our last chunk, we need to shave-off
+            // any entries that will not align to the file block size and
+            // leave them in our buckets for the next run.
+            if( i+1 < chunkCount )
+            {
+                const size_t blockSize = queue.BlockSize();
+
+                for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
+                {
+                    const size_t blockAlignedSize = sizes[j] / blockSize * blockSize;
+                    const size_t remainderEntries = ( sizes[j] - blockAlignedSize ) / sizeof( uint32 );
+                    ASSERT( remainderEntries * sizeof( uint32 ) == sizes[j] - blockAlignedSize );
+
+                    if( remainderEntries )
+                    {
+                        // Need to copy over the remainder as the beginning of the next buffers
+                    }
+                }
+            }
 
             queue.WriteBuckets( FileId::Y, (byte*)buckets, sizes );
             queue.WriteBuckets( FileId::X, (byte*)xBuffer, sizes );

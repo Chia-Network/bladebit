@@ -51,6 +51,49 @@ inline void ZeroMem( T* ptr, size_t count )
     memset( ptr, 0, sizeof( T ) * count );
 }
 
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbmalloc( size_t size )
+{
+    void* ptr = malloc( size );
+    FatalIf( !ptr, "bbmalloc(): Out of memory." );
+    
+    return reinterpret_cast<T*>( ptr );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbrealloc( T* ptr, size_t newSize )
+{
+    ptr = realloc( ptr, size );
+    FatalIf( !ptr, "bbrealloc(): Out of memory." );
+
+    return reinterpret_cast<T*>( ptr );
+}
+
+// #NOTE: Unlike calloc, this does not initialize memory to 0
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbcalloc( size_t count )
+{
+    return bbcalloc<T>( count * sizeof( T ) );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbcrealloc( T* ptr, size_t newCount )
+{
+    return bbrealloc( ptr, newCount * sizeof( T ) );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbmemcpy_t( T* dst, T* src, size_t count )
+{
+    memcpy( dst, src, sizeof( T ) * count );
+}
+
+
 // Divide a by b and apply ceiling if needed.
 //-----------------------------------------------------------
 template <typename T>

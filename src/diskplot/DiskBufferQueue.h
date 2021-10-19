@@ -31,12 +31,13 @@ struct FileSet
     Span<FileStream> files;
 };
 
-struct WriteBucketsJob
+struct WriteBucketsJob : MTJob<WriteBucketsJob>
 {
-    FileSet* fileSet;
+    FileSet*       fileSet;
+    const uint*    sizes;
+    const byte*    buffers;
 
-    uint*    sizes;
-    byte*    buffers;
+    void Run() override;
 };
 
 struct WriteToFileJob : MTJob<WriteToFileJob>
@@ -47,6 +48,40 @@ struct WriteToFileJob : MTJob<WriteToFileJob>
     FileStream* file;
 
     void Run() override;
+};
+
+template<typename T, int Capacity>
+class ProducerConsumerQueue
+{
+public:
+    struct Iterator
+    {
+        int _iteration;     // One of potentially 2
+        int _endIndex[2];
+
+        bool Finished() const;
+        void Next();
+    };
+
+    ProducerConsumerQueue( T* buffer );
+
+
+    void Produce();
+    T*   Consume();
+
+    Iterator Begin() const;
+
+    T& Get( const Iterator& iter );
+
+    // Block and wait to be signaled that the
+    // producer thread has added something to the buffer
+    void WaitForProduction();
+
+private:
+    int              _writePosition;
+    std::atomic<int> _count;
+    T                _buffer[Capacity];
+    AutoResetSignal  _signal;
 };
 
 
@@ -94,7 +129,7 @@ public:
 
     ~DiskBufferQueue();
 
-    uint CreateFile( const char* name, uint bucketCount );
+//     uint CreateFile( const char* name, uint bucketCount );
 
     void WriteBuckets( FileId id, const byte* buckets, const uint* sizes );
     
@@ -102,18 +137,24 @@ public:
 
     void CommitCommands();
 
-    // Obtain a chunk buffer for use.
+    // Obtain a buffer allocated from the work heap.
     // May block until there's a buffer available if there was none.
-    // This assumes a single consumer
-    byte* GetBuffer();
+    // This assumes a single consumer.
+    byte* GetBuffer( size_t size );
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
     // These returns the buffer back to the queue so that it is in use.
-    // This command is serialized and should be added after any writing/reding has finished
+    // This command is serialized and should be added after any writing/reading has finished
     // with said buffer
     void ReleaseBuffer( byte* buffer );
 
+    inline size_t BlockSize() const { return _blockSize; }
+
 private:
+
+    void InitFileSet( FileId fileId, const char* name, uint bucketCount, char* pathBuffer, size_t workDirLength );
+
+    void ConsumeReleasedBuffers();
 
     Command* GetCommandObject();
 
@@ -121,29 +162,46 @@ private:
     void CommandMain();
     void ExecuteCommand( Command& cmd );
 
+    void CmdWriteBuckets( const Command& cmd );
+
 private:
 
-    const char*      _workDir;
-    byte*            _workBuffer;
-    size_t           _workBufferSize;
-    size_t           _chunkSize;
+    // Represents a portion of unallocated space in our heap/work buffer
+    struct HeapEntry
+    {
+        byte*  address;
+        size_t size;
+    };
 
-    ThreadPool       _threadPool;
+private:
 
-    std::atomic<int> _nextBuffer;   // Next available buffer in the list. If < 0, then we have none.
-    Span<int>        _bufferList;   // Free list of buffers
+    const char*      _workDir;              // Temporary directory in which we will store our temporary files
+    byte*            _workHeap;             // Our working heap
+    size_t           _workHeapSize;         // Size of our work heap
+    size_t           _usedHeapSize   = 0;   // How much heap space is currently being used
 
+    size_t           _heapTableCapacity;    // Tracks the capacity of the heap table buffer (how many HeapEntry's we can currently track without reallocating)
+    Span<HeapEntry>  _heapTable;            // Tracks unallocated space in our work heap
+
+    // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];
+    byte*            _blockBuffer   = nullptr;
+    size_t           _blockSize     = 0;
 
-    Thread           _dispatchThread;
-    Command          _commands[BB_DISK_QUEUE_MAX_CMDS];
+    // I/O thread stuff
+    Thread            _dispatchThread;
+    Command           _commands[BB_DISK_QUEUE_MAX_CMDS];
 
-    int              _cmdWritePos = 0;
-    int              _cmdsPending = 0;
-    std::atomic<int> _cmdCount    = 0;
+    ThreadPool        _threadPool;
 
-    AutoResetSignal _cmdReadySignal;
-    AutoResetSignal _cmdConsumedSignal;
+    int               _cmdWritePos   = 0;
+    int               _cmdsPending   = 0;
+    std::atomic<int>  _cmdCount      = 0;
+
+    ProducerConsumerQueue<HeapEntry> _releasedBuffers;  // Queue used to return buffers back to the consumer
+
+    AutoResetSignal   _cmdReadySignal;
+    AutoResetSignal   _cmdConsumedSignal;
 
 
 };
