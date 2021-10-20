@@ -43,7 +43,7 @@ bool SPCQueue<T, Capacity>::Write( T*& outValue )
     {
         outValue = &_buffer[_writePosition];
 
-        ++_writePosition %= BB_DISK_QUEUE_MAX_CMDS;
+        ++_writePosition %= Capacity;
         _pendingCount++;
 
         return true;
@@ -59,7 +59,7 @@ void SPCQueue<T, Capacity>::Commit()
     ASSERT( _pendingCount );
  
     int count = _committedCount.load( std::memory_order_acquire );
-    ASSERT( count < Capcity );
+    ASSERT( count < Capacity );
 
     // Publish entries to the consumer thread
     while( !_committedCount.compare_exchange_weak( count, count + _pendingCount,
@@ -77,7 +77,7 @@ int SPCQueue<T, Capacity>::Dequeue( T* values, int capacity )
     ASSERT( capacity > 0 );
 
     int curCount = _committedCount.load( std::memory_order_acquire );
-    int count    = std::min( capacity, entryCount );
+    int count    = std::min( capacity, curCount );
 
     if( count < 1 )
         return 0;
@@ -99,6 +99,8 @@ int SPCQueue<T, Capacity>::Dequeue( T* values, int capacity )
     while( !_committedCount.compare_exchange_weak( curCount, curCount - count,
                                                    std::memory_order_release,
                                                    std::memory_order_relaxed ) );
+
+    return count;
 }
 
 

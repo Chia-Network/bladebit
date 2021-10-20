@@ -12,7 +12,7 @@ public:
     T& Push();
     T& Push( const T& value );
 
-    T Pop();
+    void Pop();
 
     T& Insert( const T& value, size_t index );
     T& Insert( size_t index );
@@ -21,7 +21,7 @@ public:
 
     // Remove an element, and if it was not the last one in
     // the array, the last element is placed in its index.
-    void  UnorderedRemove( size_t index );
+    void UnorderedRemove( size_t index );
 
     size_t Length() const;
 

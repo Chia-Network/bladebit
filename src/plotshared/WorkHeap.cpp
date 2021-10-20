@@ -25,13 +25,13 @@ byte* WorkHeap::Alloc( size_t size )
 {
     ASSERT( size <= _heapSize );
 
-    // First, add any pending released buffers back to the heap
-    AddPendingReleases();
-
     // If we have such a buffer available, grab it, if not, we will
     // have to wait for enough deallocations in order to continue
     for( ;; )
     {
+        // First, add any pending released buffers back to the heap
+        AddPendingReleases();
+
         byte* buffer = nullptr;
 
         for( size_t i = 0; i < _heapTable.Length(); i++ )
@@ -69,7 +69,6 @@ byte* WorkHeap::Alloc( size_t size )
 
         // No buffer found, we have to wait until buffers are released and then try again
         _releaseSignal.Wait();
-        AddPendingReleases();
     }
 }
 
@@ -108,7 +107,9 @@ void WorkHeap::AddPendingReleases()
                     #endif
 
                     HeapEntry allocation = _allocationTable[j];
-                    _allocationTable.Remove( j );
+                    _allocationTable.UnorderedRemove( j );
+
+                    _usedHeapSize -= allocation.size;
 
                     size_t insertIndex = 0;
 

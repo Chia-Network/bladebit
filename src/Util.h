@@ -65,7 +65,7 @@ inline T* bbmalloc( size_t size )
 template<typename T>
 inline T* bbrealloc( T* ptr, size_t newSize )
 {
-    ptr = realloc( ptr, size );
+    ptr = reinterpret_cast<T*>( realloc( ptr, newSize ) );
     FatalIf( !ptr, "bbrealloc(): Out of memory." );
 
     return reinterpret_cast<T*>( ptr );
@@ -76,7 +76,7 @@ inline T* bbrealloc( T* ptr, size_t newSize )
 template<typename T>
 inline T* bbcalloc( size_t count )
 {
-    return bbcalloc<T>( count * sizeof( T ) );
+    return bbmalloc<T>( count * sizeof( T ) );
 }
 
 //-----------------------------------------------------------
@@ -88,7 +88,7 @@ inline T* bbcrealloc( T* ptr, size_t newCount )
 
 //-----------------------------------------------------------
 template<typename T>
-inline T* bbmemcpy_t( T* dst, T* src, size_t count )
+inline void bbmemcpy_t( T* dst, T* src, size_t count )
 {
     memcpy( dst, src, sizeof( T ) * count );
 }

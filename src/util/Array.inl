@@ -41,19 +41,18 @@ inline T& Array<T>::Push( const T& value )
 {
     CheckCapacity( 1u );
 
-    T* value = &_elements[_length++];
+    T* e = &_elements[_length++];
     
-    *value = value;
-    return *value;
+    *e = value;
+    return *e;
 }
 
 template<typename T>
-inline T Array<T>::Pop()
+inline void Array<T>::Pop()
 {
     ASSERT( _length );
     
-    T& value = _elements[--_length];
-    value::~T();
+    T& value = _elements[--_length].~T();
 }
 
 template<typename T>
@@ -67,13 +66,16 @@ inline T& Array<T>::Insert( const T& value, size_t index )
     if( index == _length )
         return Push( value );
 
+    // Move-up remainder elements
     const size_t remainder = _length - index;
-    bbmemcpy_t(  _elements + index + i, _elements + index, remainder );
+    _length++;
 
-    T* value = &_elements[index];
-    *value = value;
+    bbmemcpy_t( _elements + index + 1, _elements + index, remainder );
 
-    return *value;
+    T* e = &_elements[index];
+    *e = value;
+
+    return *e;
 }
 
 template<typename T>
@@ -88,7 +90,9 @@ inline T& Array<T>::Insert( size_t index )
         return Push( value );
 
     const size_t remainder = _length - index;
-    bbmemcpy_t(  _elements + index + i, _elements + index, remainder );
+    _length++;
+
+    bbmemcpy_t(  _elements + index + 1, _elements + index, remainder );
 
     T* value = new ( (void*)&_elements[index] ) T();
 
@@ -101,7 +105,12 @@ inline void Array<T>::Remove( size_t index )
     ASSERT( index < _length );
 
     if( index == _length - 1 )
-        return Pop();
+    {
+        Pop();
+        return;
+    }
+    
+    _elements[index].~T();
 
     --_length;
     const size_t remainder = _length - index;
@@ -115,8 +124,12 @@ inline void Array<T>::UnorderedRemove( size_t index )
     ASSERT( index < _length );
 
     if( index == _length - 1 )
-        return Pop();
+    {
+        Pop();
+        return;
+    }
 
+    _elements[index].~T();
     _elements[index] = _elements[--_length];
 }
 
@@ -140,14 +153,14 @@ inline void Array<T>::CheckCapacity( size_t count )
     const size_t newLength = _length + count;
     
     // Do we need to resize our buffer?
-    if( newLength < _capacity )
+    if( newLength > _capacity )
     {
         size_t capacityGrow = 8;
 
         if( _capacity )
             capacityGrow = _capacity < 1024u ? _capacity * 2 : 1024u;
         
-        const size_t newCapacity = _capacity + capacityGrow;
+        size_t newCapacity = _capacity + capacityGrow;
         if( newCapacity < _capacity )
         {
             if( _capacity == 0xFFFFFFFFFFFFFFFF )

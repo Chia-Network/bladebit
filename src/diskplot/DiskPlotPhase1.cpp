@@ -55,9 +55,8 @@ void DiskPlotPhase1::GenF1()
     // /      is sufficient to bee larger that the cache line size
     const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
 
-    // "-1" because we reserve 1 chunk buffer for blocks and count buffers
-    const size_t chunkBufferSize  = cx.diskFlushSize - countsBufferSize;
-    const uint32 blocksPerChunk   = (uint32)( chunkBufferSize / ( kF1BlockSize * 2 ) );
+    const size_t chunkBufferSize  = cx.diskFlushSize;
+    const uint32 blocksPerChunk   = (uint32)( chunkBufferSize / ( kF1BlockSize * 2 ) );                 // * 2 because we also have to process/write the x values
     const uint32 chunkCount       = CDivT( blockCount, blocksPerChunk );                                // How many chunks we need to process
     const uint32 lastChunkBlocks  = blocksPerChunk - ( ( chunkCount * blocksPerChunk ) - blockCount );  // Last chunk might not need to process all blocks
 
@@ -71,7 +70,7 @@ void DiskPlotPhase1::GenF1()
     ASSERT( blocksPerThread > 0 );
 
     uint  x       = 0;
-    byte* blocks  = _diskQueue->GetBuffer();
+    byte* blocks  = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
     byte* xBuffer = blocks + blocksPerChunk * kF1BlockSize;
 
     uint32 bucketCounts[BB_DP_BUCKET_COUNT];
@@ -128,6 +127,8 @@ void GenF1Job::Run()
     const uint32 blockCount = this->blockCount;
     const uint32 chunkCount = this->chunkCount;
     const uint64 entryCount = blockCount * (uint64)entriesPerBlock;
+
+    const size_t bufferSize = blockCount * kF1BlockSize;
 
     DiskBufferQueue& queue  = *this->diskQueue;
     
@@ -244,9 +245,9 @@ void GenF1Job::Run()
         // Grab a buffer from the queue
         if( this->LockThreads() )
         {
-            sizes   = (uint32*)queue.GetBuffer();
+            sizes   = (uint32*)queue.GetBuffer( bufferSize + (sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
             buckets = sizes + BB_DP_BUCKET_COUNT;       // First portion of the buffer is saved for the sizes
-            xBuffer = buckets = buckets + totalCount;
+            xBuffer = (uint32*)queue.GetBuffer( bufferSize );
 
             this->buckets = buckets;
             this->xBuffer = xBuffer;
@@ -368,9 +369,10 @@ void GenF1Job::Run()
                 }
             }
 
-            queue.WriteBuckets( FileId::Y, (byte*)buckets, sizes );
-            queue.WriteBuckets( FileId::X, (byte*)xBuffer, sizes );
-            queue.ReleaseBuffer( (byte*)sizes );
+            queue.WriteBuckets( FileId::Y, buckets, sizes );
+            queue.WriteBuckets( FileId::X, xBuffer, sizes );
+            queue.ReleaseBuffer( sizes   );
+            queue.ReleaseBuffer( xBuffer );
             queue.CommitCommands();
 
             this->ReleaseThreads();

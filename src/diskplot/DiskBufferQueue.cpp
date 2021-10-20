@@ -77,24 +77,24 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::WriteBuckets( FileId id, const byte* buckets, const uint* sizes )
+void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* sizes )
 {
     Command* cmd = GetCommandObject();
     cmd->type            = Command::WriteBuckets;
-    cmd->buckets.buffers = buckets;
+    cmd->buckets.buffers = (byte*)buckets;
     cmd->buckets.sizes   = sizes;
     cmd->buckets.fileId  = id;
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::ReleaseBuffer( byte* buffer )
+void DiskBufferQueue::ReleaseBuffer( void* buffer )
 {
     ASSERT( buffer );
     //ASSERT( buffer >= _workHeap && buffer < _workHeap + _workHeapSize );
 
     Command* cmd = GetCommandObject();
     cmd->type                 = Command::ReleaseBuffer;
-    cmd->releaseBuffer.buffer = buffer;
+    cmd->releaseBuffer.buffer = (byte*)buffer;
 }
 
 //-----------------------------------------------------------
@@ -257,7 +257,7 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
         {
             ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
             if( sizeWritten < 1 )
-                Fatal( "Failed to write to work %s work file.", fileBuckets.name );
+                Fatal( "Failed to write to '%s.%u' work file.", fileBuckets.name, i );
 
             ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
             sizeToWrite -= (size_t)sizeWritten;
@@ -284,5 +284,6 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
 //                 
 //         //MTJobRunner
 //     }
+
 }
 

@@ -95,7 +95,7 @@ public:
     ~DiskBufferQueue();
 
 
-    void WriteBuckets( FileId id, const byte* buckets, const uint* sizes );
+    void WriteBuckets( FileId id, const void* buckets, const uint* sizes );
     
     //void WriteFile( uint id, uint bucket, const byte* buffer, size_t size );
 
@@ -110,7 +110,7 @@ public:
     // These returns the buffer back to the queue so that it is in use.
     // This command is serialized and should be added after any writing/reading has finished
     // with said buffer
-    void ReleaseBuffer( byte* buffer );
+    void ReleaseBuffer( void* buffer );
 
     inline size_t BlockSize() const { return _blockSize; }
 
