@@ -26,7 +26,7 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     : _cx( cx )
     //, _diskQueue( cx.workBuffer, cx.diskFlushSize, (uint)(cx.bufferSizeBytes / cx.diskFlushSize) - 1 )
 {
-    _diskQueue = new DiskBufferQueue( "E:/", cx.workBuffer, cx.bufferSizeBytes, cx.diskFlushSize, cx.diskQueueThreadCount );
+    _diskQueue = new DiskBufferQueue( "E:/", cx.workBuffer, cx.bufferSizeBytes, cx.diskQueueThreadCount );
 }
 
 //-----------------------------------------------------------

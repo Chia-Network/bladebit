@@ -39,7 +39,6 @@ DiskBufferQueue::DiskBufferQueue(
 //-----------------------------------------------------------
 DiskBufferQueue::~DiskBufferQueue()
 {
-    free( _heapTable.values );
 }
 
 //-----------------------------------------------------------
@@ -104,60 +103,55 @@ byte* DiskBufferQueue::GetBuffer( size_t size )
     return _workHeap.Alloc( size );
 }
 
-//-----------------------------------------------------------
-void DiskBufferQueue::ConsumeReleasedBuffers()
-{
-    for( auto i = _releasedBuffers.Begin(); !i.Finished(); i.Next() )
-    {
-        HeapEntry& entry = _releasedBuffers.Get( i );
-
-        if( _heapTable.length == 0 )
-        {
-            _heapTable[0] = entry;
-            _heapTable.length++;
-        }
-        else
-        {
-
-        }
-    }
-}
 
 //-----------------------------------------------------------
 DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject()
 {
-    int cmdCount = _cmdCount.load( std::memory_order_acquire );
-    cmdCount += _cmdsPending;
-
-    // Have to wait until there's new commands
-    if( cmdCount == BB_DISK_QUEUE_MAX_CMDS )
+    Command* cmd;
+    while( !_commands.Write( cmd ) )
     {
+        // Block and wait until we have commands free in the buffer
+        // #TODO: We should track this and let the user know that he's running slow
         _cmdConsumedSignal.Wait();
-        cmdCount =_cmdCount.load( std::memory_order_acquire );
-        ASSERT( cmdCount < BB_DISK_QUEUE_MAX_CMDS );
     }
 
-    Command* cmd = &_commands[_cmdWritePos];
     ZeroMem( cmd );
-
-    ++_cmdWritePos %= BB_DISK_QUEUE_MAX_CMDS;
-    _cmdsPending++;
-
     return cmd;
+
+//     int cmdCount = _cmdCount.load( std::memory_order_acquire );
+//     cmdCount += _cmdsPending;
+// 
+//     // Have to wait until there's new commands
+//     if( cmdCount == BB_DISK_QUEUE_MAX_CMDS )
+//     {
+//         _cmdConsumedSignal.Wait();
+//         cmdCount =_cmdCount.load( std::memory_order_acquire );
+//         ASSERT( cmdCount < BB_DISK_QUEUE_MAX_CMDS );
+//     }
+// 
+//     Command* cmd = &_commands[_cmdWritePos];
+//     ZeroMem( cmd );
+// 
+//     ++_cmdWritePos %= BB_DISK_QUEUE_MAX_CMDS;
+//     _cmdsPending++;
+// 
+//     return cmd;
 }
 
 //-----------------------------------------------------------
 void DiskBufferQueue::CommitCommands()
 {
-    ASSERT( _cmdsPending );
+//     ASSERT( _cmdsPending );
+// 
+//     int cmdCount = _cmdCount.load( std::memory_order_acquire );
+//     ASSERT( cmdCount < BB_DISK_QUEUE_MAX_CMDS );
+// 
+//     while( !_cmdCount.compare_exchange_weak( cmdCount, cmdCount + _cmdsPending,
+//                                              std::memory_order_release,
+//                                              std::memory_order_relaxed ) );
+//     _cmdsPending = 0;
 
-    int cmdCount = _cmdCount.load( std::memory_order_acquire );
-    ASSERT( cmdCount < BB_DISK_QUEUE_MAX_CMDS );
-
-    while( !_cmdCount.compare_exchange_weak( cmdCount, cmdCount + _cmdsPending,
-                                             std::memory_order_release,
-                                             std::memory_order_relaxed ) );
-    _cmdsPending = 0;
+    _commands.Commit();
     _cmdReadySignal.Signal();
 }
 
@@ -170,41 +164,53 @@ void DiskBufferQueue::CommandThreadMain( DiskBufferQueue* self )
 //-----------------------------------------------------------
 void DiskBufferQueue::CommandMain()
 {
+    const int CMD_BUF_SIZE = 64;
+    Command commands[CMD_BUF_SIZE];
+
     for( ;; )
     {
         _cmdReadySignal.Wait();
 
-        const int cmdCount = _cmdCount.load( std::memory_order_acquire );
-        ASSERT( cmdCount );
-
-        if( cmdCount < 1 )
-            continue;
-
-        const int cmdWritePos = _cmdWritePos;
-
-        int readPos = ( cmdWritePos - cmdCount + BB_DISK_QUEUE_MAX_CMDS ) % BB_DISK_QUEUE_MAX_CMDS;
-        
-        int cmdEnd          = std::min( BB_DISK_QUEUE_MAX_CMDS, readPos + cmdCount );
-        int secondPassCount = readPos + cmdCount - cmdEnd;
-
-        int i = readPos;
-        for( int pass = 0; pass < 2; pass++ )
+        int cmdCount;
+        while( cmdCount = _commands.Dequeue( commands, CMD_BUF_SIZE ) )
         {
-            for( ; i < cmdEnd; i++ )
-            {
-                ExecuteCommand( _commands[i] );
-            }
+            _cmdConsumedSignal.Signal();
 
-            i      = 0;
-            cmdEnd = secondPassCount;
+            for( int i = 0; i < cmdCount; i++ )
+                ExecuteCommand( commands[i] );
         }
-
-        // Release commands
-        int curCmdCount = cmdCount;
-        while( !_cmdCount.compare_exchange_weak( curCmdCount, curCmdCount - cmdCount,
-                                                 std::memory_order_release,
-                                                 std::memory_order_relaxed ) );
-        _cmdConsumedSignal.Signal();
+        
+//         const int cmdCount = _cmdCount.load( std::memory_order_acquire );
+//         ASSERT( cmdCount );
+// 
+//         if( cmdCount < 1 )
+//             continue;
+// 
+//         const int cmdWritePos = _cmdWritePos;
+// 
+//         int readPos = ( cmdWritePos - cmdCount + BB_DISK_QUEUE_MAX_CMDS ) % BB_DISK_QUEUE_MAX_CMDS;
+//         
+//         int cmdEnd          = std::min( BB_DISK_QUEUE_MAX_CMDS, readPos + cmdCount );
+//         int secondPassCount = readPos + cmdCount - cmdEnd;
+// 
+//         int i = readPos;
+//         for( int pass = 0; pass < 2; pass++ )
+//         {
+//             for( ; i < cmdEnd; i++ )
+//             {
+//                 ExecuteCommand( _commands[i] );
+//             }
+// 
+//             i      = 0;
+//             cmdEnd = secondPassCount;
+//         }
+// 
+//         // Release commands
+//         int curCmdCount = cmdCount;
+//         while( !_cmdCount.compare_exchange_weak( curCmdCount, curCmdCount - cmdCount,
+//                                                  std::memory_order_release,
+//                                                  std::memory_order_relaxed ) );
+//         _cmdConsumedSignal.Signal();
     }
 }
 
@@ -218,23 +224,7 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
         break;
 
         case Command::ReleaseBuffer:
-        {
-            ASSERT( cmd.releaseBuffer.buffer >= _workHeap && cmd.releaseBuffer.buffer < _workHeap + _workHeapSize );
-
-            int bufferIndex = (int)( (uintptr_t)(cmd.releaseBuffer.buffer - _workHeap) / _chunkSize );
-            ASSERT( (size_t)bufferIndex < _workHeapSize / _chunkSize );
-
-            int curNextIndex = _nextBuffer.load( std::memory_order_acquire );
-            _bufferList[bufferIndex] = curNextIndex;
-
-            while( !_nextBuffer.compare_exchange_weak( curNextIndex, bufferIndex,
-                                                       std::memory_order_release,
-                                                       std::memory_order_relaxed ) )
-            {
-                curNextIndex             = _nextBuffer.load( std::memory_order_acquire );
-                _bufferList[bufferIndex] = curNextIndex;
-            }
-        }
+            _workHeap.Release( cmd.releaseBuffer.buffer );
         break;
 
         default:
@@ -245,13 +235,13 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
 //-----------------------------------------------------------
 void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
 {
-    const FileId fileId  = cmd.buckets.fileId;
-    const uint*  sizes   = cmd.buckets.sizes;
-    const byte*  buffers = cmd.buckets.buffers;
+    const FileId fileId      = cmd.buckets.fileId;
+    const uint*  sizes       = cmd.buckets.sizes;
+    const byte*  buffers     = cmd.buckets.buffers;
 
-    FileSet& fileBuckets = _files[(int)fileId];
+    FileSet&     fileBuckets = _files[(int)fileId];
 
-    const uint bucketCount = (uint)fileBuckets.files.length;
+    const uint   bucketCount = (uint)fileBuckets.files.length;
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
     const byte* buffer = buffers;

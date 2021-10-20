@@ -118,8 +118,6 @@ private:
 
     void InitFileSet( FileId fileId, const char* name, uint bucketCount, char* pathBuffer, size_t workDirLength );
 
-    void ConsumeReleasedBuffers();
-
     Command* GetCommandObject();
 
     static void CommandThreadMain( DiskBufferQueue* self );
@@ -140,7 +138,9 @@ private:
 
     // I/O thread stuff
     Thread            _dispatchThread;
-    Command           _commands[BB_DISK_QUEUE_MAX_CMDS];
+    
+//     Command           _commands[BB_DISK_QUEUE_MAX_CMDS];
+    SPCQueue<Command, BB_DISK_QUEUE_MAX_CMDS> _commands;
 
     ThreadPool        _threadPool;
 
