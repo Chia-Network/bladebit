@@ -1,7 +1,7 @@
 name: Build Release Assets
 on:
   push:
-    branches: [master]
+    branches: [ci-pre-cleanup]
   workflow_dispatch:
 
 jobs:
@@ -93,7 +93,9 @@ jobs:
           if-no-files-found: error
 
   build-ubuntu-arm64:
-    runs-on: [ ARM64 ]
+    runs-on: [ARM64]
+    container:
+      image: ubuntu:20.04
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
