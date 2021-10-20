@@ -113,7 +113,9 @@ jobs:
           echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-ubuntu-arm64.tar.gz"
 
       - name: Install Prerequisites
-        run: apt install -y libgmp-dev libnuma-dev
+        run: |
+          apt update
+          apt install -y libgmp-dev libnuma-dev
 
       - name: Build
         env:
