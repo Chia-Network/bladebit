@@ -1,7 +1,7 @@
 name: Build Release Assets
 on:
   push:
-    branches: [ci-pre-cleanup]
+    branches: [master]
   workflow_dispatch:
 
 jobs:
