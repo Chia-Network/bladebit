@@ -5,26 +5,27 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name"       : "BladeBit",
-            "request"    : "launch",
-            "type"       : "cppvsdbg",
-            "stopAtEntry": false,
-            "cwd"        : "${workspaceFolder}",
-            // "console"    : "externalTerminal",
-
-            "preLaunchTask": "build_debug",
-
-            "console": "internalConsole",
+            "name"          : "Bladebit",
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "console"       : "internalConsole",
+            "preLaunchTask" : "build_debug",
+            
             "windows": {
-                "program": "${workspaceFolder}/build/debug/bladebit.exe"
+                "type"   : "cppvsdbg",
+                "program": "${workspaceFolder}/build/Debug/bladebit.exe"
             },
             
             "linux": {
-                "program": "${workspaceFolder}/build/debug/bladebit"
+                "MIMode": "gdb",
+                "miDebuggerPath": "/usr/bin/gdb",
+                "program": "${workspaceFolder}/build/bladebit"
             },
 
             "osx": {
-                "program": "${workspaceFolder}/build/debug/bladebit"
+                "program": "${workspaceFolder}/build/bladebit"
             },
             
             "environment": [],
@@ -36,6 +37,35 @@
                 "-w",
                 "-v",
                 "${workspaceFolder}/.sandbox"
+            ]
+        }
+
+        ,{
+            "name"       : "Bladebit Dev",
+            
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_dev_debug",
+            "console"       : "internalConsole",
+
+            "windows": {
+                "type"   : "cppvsdbg",
+                "program": "${workspaceFolder}/build/debug/bladebit_dev.exe"
+            },
+            
+            "linux": {
+                "program": "${workspaceFolder}/build/bladebit_dev"
+            },
+
+            "osx": {
+                "program": "${workspaceFolder}/build/bladebit_dev"
+            },
+            
+            "environment": [],
+
+            "args": [
             ]
         }
     ]

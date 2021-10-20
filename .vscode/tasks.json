@@ -2,34 +2,61 @@
     "version": "2.0.0",
     "tasks": [
 		{
-			"type" : "shell",
-			"label" : "build_debug",
-			"detail": "Build Debug BladeBit",
+			"type"   : "shell",
+			"label"  : "build_debug",
+			"detail" : "Build Debug Bladebit",
+			"command": "cmake",
+
+			"args": [
+				"--build", ".",
+				"--target", "bladebit",
+				"--config", "Debug",
+				"-j", "24"
+			],
 			
 			"windows":{
-				"command": "cmake",
-				"args": [
-					"--build", ".",
-					"--target", "bladebit",
-					"--config", "Debug"
-				]
 			},
 
 			"linux":{
-				"command": "/usr/bin/bash",
-				"args": [
-					"-c",
-					"make clean && make CONFIG=debug.arm -j64"
-				],
 				"problemMatcher": [ "$gcc" ]
 			},
 
 			"osx":{
-				"command": "/bin/bash",
-				"args": [
-					"-c",
-					"make CONFIG=debug.arm -j8"
-				],
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+
+		// Build Debug Develop
+		,{
+			"type"   : "shell",
+			"label"  : "build_dev_debug",
+			"detail" : "Build Develop Debug",
+			"command": "cmake",
+			
+			"args": [
+				"--build", ".",
+				"--target", "bladebit_dev",
+				"--config", "Debug",
+				"-j", "24"
+			],
+			
+			"windows":{
+			},
+
+			"linux":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"osx":{
 				"problemMatcher": [ "$gcc" ]
 			},
 

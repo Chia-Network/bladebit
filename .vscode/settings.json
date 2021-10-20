@@ -107,4 +107,6 @@
     "C_Cpp.errorSquiggles": "Enabled",
     "cmake.configureOnOpen": true,
     "cmake.sourceDirectory": "${workspaceFolder}/."
+
+    ,"cmake.generator": "Unix Makefiles"
 }
