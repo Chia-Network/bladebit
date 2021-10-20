@@ -116,7 +116,7 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt update
-          apt install -y build-essential cmake libgmp-dev libnuma-dev
+          apt install -y build-essential git cmake libgmp-dev libnuma-dev
 
       - name: Build
         env:
@@ -137,10 +137,6 @@ jobs:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           if-no-files-found: error
-
-      - name: Clean Up
-        run: |
-          rm -rf ${{ github.workspace }}/*
 
   build-centos-arm64:
     runs-on: [ARM64]
