@@ -124,7 +124,7 @@ jobs:
         run: |
           mkdir build && cd build
           cmake ..
-          cmake --build . --target bladebit --config Release
+          cmake --build . --target bladebit --config Release -j $(nproc --all)
           chmod +x ./bladebit
           tar -czvf $BB_ARTIFACT_NAME bladebit
           mkdir ../bin
