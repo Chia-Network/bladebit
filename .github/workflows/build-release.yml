@@ -114,6 +114,7 @@ jobs:
 
       - name: Install Prerequisites
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           apt update
           apt install -y build-essential cmake libgmp-dev libnuma-dev
 
