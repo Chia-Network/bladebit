@@ -115,7 +115,7 @@ jobs:
       - name: Install Prerequisites
         run: |
           apt update
-          apt install -y libgmp-dev libnuma-dev
+          apt install -y build-essential cmake libgmp-dev libnuma-dev
 
       - name: Build
         env:
