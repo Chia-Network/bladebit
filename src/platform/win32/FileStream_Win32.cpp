@@ -39,7 +39,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     if( access == FileAccess::None )
         access = FileAccess::Read;
 
-    const DWORD dwShareMode           = FILE_SHARE_READ;
+    const DWORD dwShareMode           = 0;
     const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS : 
                                         mode == FileMode::Open   ? OPEN_ALWAYS   :
                                                                    OPEN_EXISTING;
@@ -79,7 +79,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     else
     {
         // #TODO: Use GetLastError report error in utf8
-        file. _error = (int)GetLastError();
+        file._error = (int)GetLastError();
     }
 
     if( path16 != path16Stack )
@@ -148,8 +148,8 @@ ssize_t FileStream::Read( void* buffer, size_t size )
         _readPosition += (size_t)bytesRead;
     else
     {
-        _error    = (int)GetLastError();
-        bytesRead = -1;
+        _error = (int)GetLastError();
+        return (ssize_t)-1;
     }
 
     return (ssize_t)bytesRead;
@@ -195,11 +195,11 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
         _writePosition += (size_t)bytesWritten;
     else
     {
-        _error       = (int)GetLastError();
-        bytesWritten = -1;
+        _error = (int)GetLastError();
+        return (ssize_t)-1;
     }
 
-    return bytesWritten;
+    return (ssize_t)bytesWritten;
 }
 
 //----------------------------------------------------------
