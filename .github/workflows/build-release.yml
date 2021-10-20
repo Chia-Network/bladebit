@@ -105,7 +105,7 @@ jobs:
       - name: Get Version Number
         id: version_number
         run: |
-          version=$(cat ${{ github.workspace }}/VERSION)
+          version=$(cat VERSION)
           echo "::set-output name=BB_VERSION::$version"
           echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-ubuntu-arm64.tar.gz"
 
