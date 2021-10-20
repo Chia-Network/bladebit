@@ -7,24 +7,13 @@
 //-----------------------------------------------------------
 DiskBufferQueue::DiskBufferQueue( 
     const char* workDir, byte* workBuffer, 
-    size_t workBufferSize, size_t chunkSize,
-    uint ioThreadCount )
+    size_t workBufferSize, uint ioThreadCount )
     : _workDir          ( workDir        )
-    , _workHeap         ( workBuffer     )
-    , _workHeapSize     ( workBufferSize )
-    , _heapTableCapacity( 256u )
-    , _heapTable        ( bbcalloc<HeapEntry>( _heapTableCapacity ), 1 )
+    , _workHeap         ( workBufferSize, workBuffer )
     , _threadPool       ( ioThreadCount, ThreadPool::Mode::Fixed, true )
-    , _releasedBuffers  ( 64 )
     , _dispatchThread()
 {
-    ASSERT( workDir    );
-    ASSERT( workBuffer );
-
-    // Initialize our heap table
-    _heapTable.values[0].address = _workHeap;
-    _heapTable.values[0].size    = _workHeapSize;
-
+    ASSERT( workDir );
 
     // Initialize Files
     size_t workDirLen = strlen( workDir );
@@ -102,7 +91,7 @@ void DiskBufferQueue::WriteBuckets( FileId id, const byte* buckets, const uint* 
 void DiskBufferQueue::ReleaseBuffer( byte* buffer )
 {
     ASSERT( buffer );
-    ASSERT( buffer >= _workHeap && buffer < _workHeap + _workHeapSize );
+    //ASSERT( buffer >= _workHeap && buffer < _workHeap + _workHeapSize );
 
     Command* cmd = GetCommandObject();
     cmd->type                 = Command::ReleaseBuffer;
@@ -113,54 +102,6 @@ void DiskBufferQueue::ReleaseBuffer( byte* buffer )
 byte* DiskBufferQueue::GetBuffer( size_t size )
 {
     return _workHeap.Alloc( size );
-    // First, add any pending released buffers back to the heap
-    ConsumeReleasedBuffers();
-
-    ASSERT( size <= _workHeapSize );
-
-    // If we have such a buffer available, grab it, if not, we will
-    // have to wait for enough deallocations in order to continue
-    for( ;; )
-    {
-        byte* buffer = nullptr;
-
-        for( size_t i = 0; i < _heapTable.length; i++ )
-        {
-            if( _heapTable[i].size >= size )
-            {
-                // Found a big enough slice to use
-                _usedHeapSize += size;
-                
-                buffer = _heapTable[i].address;
-
-                // #TODO: We need to track the size of our buffers for when they are released.
-
-                if( size < _heapTable[i].size )
-                {
-                    // Split/fragment the current entry
-                    _heapTable[i].address += size;
-                    _heapTable[i].size    -= size;
-                }
-                else
-                {
-                    // We took the whole entry, remove it from the table
-                    // and move down any subsequent entries.
-                    const size_t remainder = --_heapTable.length - i;
-                    if( remainder > 0 )
-                        bbmemcpy_t( _heapTable.values + i, _heapTable.values + i + 1, remainder );
-                }
-
-                break;
-            }
-        }
-
-        if( buffer )
-            return buffer;
-
-        // No buffer found, we have to wait until buffers are released and then try again
-        _releasedBuffers.WaitForProduction();
-        ConsumeReleasedBuffers();
-    }
 }
 
 //-----------------------------------------------------------

@@ -51,40 +51,6 @@ struct WriteToFileJob : MTJob<WriteToFileJob>
     void Run() override;
 };
 
-template<typename T, int Capacity>
-class ProducerConsumerQueue
-{
-public:
-    struct Iterator
-    {
-        int _iteration;     // One of potentially 2
-        int _endIndex[2];
-
-        bool Finished() const;
-        void Next();
-    };
-
-    ProducerConsumerQueue( T* buffer );
-
-
-    void Produce();
-    T*   Consume();
-
-    Iterator Begin() const;
-
-    T& Get( const Iterator& iter );
-
-    // Block and wait to be signaled that the
-    // producer thread has added something to the buffer
-    void WaitForProduction();
-
-private:
-    int              _writePosition;
-    std::atomic<int> _count;
-    T                _buffer[Capacity];
-    AutoResetSignal  _signal;
-};
-
 
 class DiskBufferQueue
 {
@@ -125,12 +91,9 @@ class DiskBufferQueue
 public:
 
     DiskBufferQueue( const char* workDir, byte* workBuffer, 
-                     size_t workBufferSize, size_t chunkSize,
-                     uint ioThreadCount );
-
+                     size_t workBufferSize, uint ioThreadCount );
     ~DiskBufferQueue();
 
-//     uint CreateFile( const char* name, uint bucketCount );
 
     void WriteBuckets( FileId id, const byte* buckets, const uint* sizes );
     
@@ -167,17 +130,8 @@ private:
 
 private:
 
-    // Represents a portion of unallocated space in our heap/work buffer
-    struct HeapEntry
-    {
-        byte*  address;
-        size_t size;
-    };
-
-private:
-
     const char*      _workDir;              // Temporary directory in which we will store our temporary files
-    WorkHeap         _workHeap;             // Our working heap
+    WorkHeap         _workHeap;             // Reserved memory for performing plot work and I/O
     
     // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];
@@ -193,8 +147,6 @@ private:
     int               _cmdWritePos   = 0;
     int               _cmdsPending   = 0;
     std::atomic<int>  _cmdCount      = 0;
-
-    ProducerConsumerQueue<HeapEntry> _releasedBuffers;  // Queue used to return buffers back to the consumer
 
     AutoResetSignal   _cmdReadySignal;
     AutoResetSignal   _cmdConsumedSignal;

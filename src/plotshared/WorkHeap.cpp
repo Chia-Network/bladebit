@@ -5,8 +5,8 @@ WorkHeap::WorkHeap( size_t size, byte* heapBuffer )
     : _heap             ( heapBuffer )
     , _heapSize         ( size       )
     , _usedHeapSize     ( 0          )
-    , _heapTable        ( 128        )
-    , _allocationTable  ( 128        )
+    , _heapTable        ( 256u       )
+    , _allocationTable  ( 256u       )
 {
     ASSERT( _heap     );
     ASSERT( _heapSize );
