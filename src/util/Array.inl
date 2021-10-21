@@ -87,7 +87,7 @@ inline T& Array<T>::Insert( size_t index )
 
     // Append to the end of the array?
     if( index == _length )
-        return Push( value );
+        return Push();
 
     const size_t remainder = _length - index;
     _length++;
@@ -158,7 +158,7 @@ inline void Array<T>::CheckCapacity( size_t count )
         size_t capacityGrow = 8;
 
         if( _capacity )
-            capacityGrow = _capacity < 1024u ? _capacity * 2 : 1024u;
+            capacityGrow = _capacity < 1024u ? _capacity : 1024u;
         
         size_t newCapacity = _capacity + capacityGrow;
         if( newCapacity < _capacity )

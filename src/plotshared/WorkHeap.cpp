@@ -21,8 +21,10 @@ WorkHeap::~WorkHeap()
 {
 }
 
-byte* WorkHeap::Alloc( size_t size )
+byte* WorkHeap::Alloc( size_t size, size_t alignment )
 {
+    size = alignment * CDivT( size, alignment );
+
     ASSERT( size <= _heapSize );
 
     // If we have such a buffer available, grab it, if not, we will
@@ -36,30 +38,54 @@ byte* WorkHeap::Alloc( size_t size )
 
         for( size_t i = 0; i < _heapTable.Length(); i++ )
         {
-            if( _heapTable[i].size >= size )
+            HeapEntry& entry = _heapTable[i];
+
+            if( entry.CanAllocate( size, alignment ) )
             {
                 // Found a big enough slice to use
+                byte* alignedAddress = (byte*)( alignment * CDivT( (uintptr_t)entry.address, (uintptr_t)alignment ) );
+
                 _usedHeapSize += size;
-                
-                buffer = _heapTable[i].address;
                 
                 // We need to track the size of our buffers for when they are released.
                 HeapEntry& allocation = _allocationTable.Push();
-                allocation.address = buffer;
-                allocation.size    = size;
+                allocation.address     = alignedAddress;
+                allocation.size        = size;
 
-                if( size < _heapTable[i].size )
+                const size_t addressOffset = (size_t)( alignedAddress - entry.address );
+                
+                if( addressOffset )
                 {
-                    // Split/fragment the current entry
-                    _heapTable[i].address += size;
-                    _heapTable[i].size    -= size;
+                    // Adjust the current entry's size to the space between the aligned address and the base address
+                    entry.size = addressOffset;
+
+                    // If we did not occupy all of the remaining size in the entry, 
+                    // we need to insert a new entry to the right of the current one.
+                    const size_t remainder = (size_t)( entry.EndAddress() - allocation.EndAddress() );
+
+                    if( remainder )
+                    {
+                        HeapEntry& rightEntry = _heapTable.Insert( i + 1 );
+                        rightEntry.address = allocation.EndAddress();
+                        rightEntry.size    = remainder;
+                    }
                 }
                 else
                 {
-                    // We took the whole entry, remove it from the table.
-                    _heapTable.Remove( i );
+                    if( size < _heapTable[i].size )
+                    {
+                        // Split/fragment the current entry
+                        entry.address += size;
+                        entry.size    -= size;
+                    }
+                    else
+                    {
+                        // We took the whole entry, remove it from the table.
+                        _heapTable.Remove( i );
+                    }
                 }
 
+                buffer = alignedAddress;
                 break;
             }
         }

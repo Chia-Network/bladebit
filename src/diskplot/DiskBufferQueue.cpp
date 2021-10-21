@@ -7,9 +7,11 @@
 //-----------------------------------------------------------
 DiskBufferQueue::DiskBufferQueue( 
     const char* workDir, byte* workBuffer, 
-    size_t workBufferSize, uint ioThreadCount )
-    : _workDir          ( workDir        )
+    size_t workBufferSize, uint ioThreadCount,
+    bool useDirectIO )
+    : _workDir          ( workDir     )
     , _workHeap         ( workBufferSize, workBuffer )
+    , _userDirectIO     ( useDirectIO )
     , _threadPool       ( ioThreadCount, ThreadPool::Mode::Fixed, true )
     , _dispatchThread()
 {
@@ -46,6 +48,10 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 {
     char* baseName = pathBuffer + workDirLength;
 
+    FileFlags flags = FileFlags::LargeFile;
+    if( _userDirectIO )
+        flags |= FileFlags::NoBuffering;
+
     FileSet& fileSet = _files[(uint)fileId];
     
     fileSet.name         = name;
@@ -57,7 +63,7 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
         FileStream& file = fileSet.files[i];
 
         sprintf( baseName, "%s_%u.tmp", name, i );
-        if( !file.Open( pathBuffer, FileMode::Create, FileAccess::ReadWrite, FileFlags::NoBuffering | FileFlags::LargeFile ) )
+        if( !file.Open( pathBuffer, FileMode::Create, FileAccess::ReadWrite, flags ) )
             Fatal( "Failed to open temp work file @ %s with error: %d.", pathBuffer, file.GetError() );
 
         if( !_blockBuffer )
@@ -100,7 +106,7 @@ void DiskBufferQueue::ReleaseBuffer( void* buffer )
 //-----------------------------------------------------------
 byte* DiskBufferQueue::GetBuffer( size_t size )
 {
-    return _workHeap.Alloc( size );
+    return _workHeap.Alloc( size, _blockSize );
 }
 
 
@@ -257,7 +263,10 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
         {
             ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
             if( sizeWritten < 1 )
-                Fatal( "Failed to write to '%s.%u' work file.", fileBuckets.name, i );
+            {
+                const int err = file.GetError();
+                Fatal( "Failed to write to '%s.%u' work file with error %d (0x%x).", fileBuckets.name, i, err, err );
+            }
 
             ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
             sizeToWrite -= (size_t)sizeWritten;

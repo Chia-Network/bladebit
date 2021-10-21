@@ -6,7 +6,7 @@
 // A simple heap to be used as our working buffer provider
 // for doing plotting work in memory and I/O operations.
 // It is meant to have a very small amount of allocations, therefore
-// allocations are tracked in a small table that is searched linerarly.
+// allocations are tracked in a small table that is searched linearly.
 class WorkHeap
 {
 private:
@@ -17,6 +17,15 @@ private:
         size_t size;
 
         inline byte* EndAddress() const { return address + size; }
+
+        inline bool CanAllocate( size_t allocationSize, size_t alignment )
+        {
+            ASSERT( allocationSize == RoundUpToNextBoundaryT( allocationSize, alignment ) );
+            ASSERT( RoundUpToNextBoundaryT( allocationSize, alignment ) <= 0x7FFFFFFFFFFFFFFF );
+            
+            const intptr_t alignedAddress = (intptr_t)alignment * CDivT( (intptr_t)address, (intptr_t)alignment );
+            return ( (intptr_t)EndAddress() - alignedAddress ) >= (intptr_t)allocationSize;
+        }
     };
 
 public:
@@ -26,7 +35,7 @@ public:
     // Allocate a buffer on the heap.
     // If no space is available it will block until
     // some space has become available again.
-    byte* Alloc( size_t size );
+    byte* Alloc( size_t size, size_t alignment = sizeof( intptr_t ) );
 
     // Add a to the pending release list.
     // The buffer won't actually be released until an allocation

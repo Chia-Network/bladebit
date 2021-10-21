@@ -130,7 +130,9 @@ void GenF1Job::Run()
 
     const size_t bufferSize = blockCount * kF1BlockSize;
 
-    DiskBufferQueue& queue  = *this->diskQueue;
+    DiskBufferQueue& queue         = *this->diskQueue;
+//     const size_t     fileBlockSize = queue.BlockSize();
+
     
     uint32 x = this->x;
 
@@ -245,8 +247,8 @@ void GenF1Job::Run()
         // Grab a buffer from the queue
         if( this->LockThreads() )
         {
-            sizes   = (uint32*)queue.GetBuffer( bufferSize + (sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-            buckets = sizes + BB_DP_BUCKET_COUNT;       // First portion of the buffer is saved for the sizes
+            sizes   = (uint32*)queue.GetBuffer( (sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
+            buckets = (uint32*)queue.GetBuffer( bufferSize );
             xBuffer = (uint32*)queue.GetBuffer( bufferSize );
 
             this->buckets = buckets;
@@ -372,6 +374,7 @@ void GenF1Job::Run()
             queue.WriteBuckets( FileId::Y, buckets, sizes );
             queue.WriteBuckets( FileId::X, xBuffer, sizes );
             queue.ReleaseBuffer( sizes   );
+            queue.ReleaseBuffer( buckets );
             queue.ReleaseBuffer( xBuffer );
             queue.CommitCommands();
 

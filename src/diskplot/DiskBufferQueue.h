@@ -91,7 +91,8 @@ class DiskBufferQueue
 public:
 
     DiskBufferQueue( const char* workDir, byte* workBuffer, 
-                     size_t workBufferSize, uint ioThreadCount );
+                     size_t workBufferSize, uint ioThreadCount,
+                     bool useDirectIO = true );
     ~DiskBufferQueue();
 
 
@@ -142,6 +143,7 @@ private:
 //     Command           _commands[BB_DISK_QUEUE_MAX_CMDS];
     SPCQueue<Command, BB_DISK_QUEUE_MAX_CMDS> _commands;
 
+    bool              _userDirectIO;
     ThreadPool        _threadPool;
 
     int               _cmdWritePos   = 0;

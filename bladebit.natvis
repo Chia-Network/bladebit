@@ -10,4 +10,36 @@
       </IndexListItems>
     </Expand>
   </Type>
+
+  <Type Name="Array&lt;*&gt;">
+    <DisplayString Condition="_length == 0">{{empty}} </DisplayString>
+    <DisplayString Condition="_length == 1">[{_length} / {_capacity}] {{ {_elements[0]} }}</DisplayString>
+    <DisplayString Condition="_length == 2">[{_length} / {_capacity}] {{ {_elements[0]}, {_elements[1]} }}</DisplayString>
+    <DisplayString Condition="_length == 3">[{_length} / {_capacity}] {{ {_elements[0]}, {_elements[1]}, {_elements[2]} }}</DisplayString>
+    <DisplayString Condition="_length == 4">[{_length} / {_capacity}] {{ {_elements[0]}, {_elements[1]}, {_elements[2]}, {_elements[3]} }}</DisplayString>
+    <DisplayString Condition="_length == 5">[{_length} / {_capacity}] {{ {_elements[0]}, {_elements[1]}, {_elements[2]}, {_elements[3]}, {_elements[4]} }}</DisplayString>
+    <DisplayString Condition="_length > 5"> [{_length} / {_capacity}] {{ {_elements[0]}, {_elements[1]}, {_elements[2]}, {_elements[3]}, {_elements[4]}, ... }}</DisplayString>
+
+    <Expand>
+      <IndexListItems>
+        <Size>_length</Size>
+        <ValueNode>_elements[$i]</ValueNode>
+      </IndexListItems>
+    </Expand>
+  </Type>
+
+  <Type Name="WorkHeap::HeapEntry">
+    <DisplayString>[Address: {(void*)address} Size: {size}]</DisplayString>
+    <Expand>
+      <Synthetic Name="Address">
+        <DisplayString>{(void*)address} ( {(uintptr_t)address} )</DisplayString>
+      </Synthetic>
+      <Synthetic Name="End Address">
+        <DisplayString>{(void*)(address + size)} ( {(uintptr_t)(address + size)} )</DisplayString>
+      </Synthetic>
+      <Item Name="Size">size</Item>
+    </Expand>
+    
+  </Type>
+
 </AutoVisualizer>
