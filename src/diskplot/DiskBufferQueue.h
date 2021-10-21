@@ -61,7 +61,8 @@ class DiskBufferQueue
             Void = 0,
             WriteFile,
             WriteBuckets,
-            ReleaseBuffer
+            ReleaseBuffer,
+            MemoryFence,
         };
 
         CommandType type;
@@ -85,6 +86,11 @@ class DiskBufferQueue
             {
                 byte* buffer;
             } releaseBuffer;
+
+            struct
+            {
+                AutoResetSignal* signal;    // #TODO: Should this be a manual reset signal?
+            } fence;
         };
     };
 
@@ -112,6 +118,12 @@ public:
     // This command is serialized and should be added after any writing/reading has finished
     // with said buffer
     void ReleaseBuffer( void* buffer );
+
+    // Add a memory fence into the command stream.
+    // The signal will be set once this command is reached.
+    // This ensures the caller that all commands before the 
+    // fence have been processed.
+    void AddFence( AutoResetSignal& signal );
 
     inline size_t BlockSize() const { return _blockSize; }
 

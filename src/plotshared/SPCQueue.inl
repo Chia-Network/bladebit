@@ -82,18 +82,19 @@ int SPCQueue<T, Capacity>::Dequeue( T* values, int capacity )
     if( count < 1 )
         return 0;
     
-    const int writePos = _writePosition;
+    const int readPos = _readPosition;
+    _readPosition = ( readPos + count ) % Capacity;
 
-    const int readPos = ( writePos - count + Capacity ) % Capacity;
-    ASSERT( readPos >= 0 && readPos < Capacity );
-
-    const int copyCount = std::min( Capacity, readPos + count );
+    const int copyCount = std::min( count, Capacity - readPos );
     bbmemcpy_t( values, _buffer + readPos, (size_t)count );
 
     // We might have to do 2 copies if we're wrapping around the end of the buffer
     const int remainder = count - copyCount;
     if( remainder > 0 )
+    {
+        Log::Debug( "[0x%p] Wrap", this );
         bbmemcpy_t( values + copyCount, _buffer, (size_t)remainder );
+    }
 
     // Publish to the producer thread that we've consumed entries
     while( !_committedCount.compare_exchange_weak( curCount, curCount - count,

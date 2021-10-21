@@ -1,5 +1,6 @@
 #include "WorkHeap.h"
 #include "Util.h"
+#include "util/Log.h"
 
 WorkHeap::WorkHeap( size_t size, byte* heapBuffer )
     : _heap             ( heapBuffer )
@@ -53,7 +54,8 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment )
                 allocation.size        = size;
 
                 const size_t addressOffset = (size_t)( alignedAddress - entry.address );
-                
+                Log::Debug( "+ Allocated @ 0x%p : %llu", alignedAddress, size );
+
                 if( addressOffset )
                 {
                     // Adjust the current entry's size to the space between the aligned address and the base address
@@ -94,7 +96,12 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment )
             return buffer;
 
         // No buffer found, we have to wait until buffers are released and then try again
+        Log::Debug( "No Buffers available waiting..." );
+        auto timer = TimerBegin();
+
         _releaseSignal.Wait();
+
+        Log::Debug( "Waited %.6lf seconds for a buffer.", TimerEnd( timer ) );
     }
 }
 
@@ -116,9 +123,12 @@ void WorkHeap::AddPendingReleases()
     int count;
     while( count = _pendingReleases.Dequeue( releases, BUFFER_SIZE ) )
     {
+        // Log::Debug( "Releasing %d buffers.", count );
+
         for( int i = 0; i < count; i++ )
         {
             byte* buffer = releases[i];
+            Log::Debug( "-? Need Free 0x%p", buffer );
 
             // Find the buffer in the allocation table
             #if _DEBUG
@@ -136,6 +146,8 @@ void WorkHeap::AddPendingReleases()
                     _allocationTable.UnorderedRemove( j );
 
                     _usedHeapSize -= allocation.size;
+                    
+                    Log::Debug( "- Free 0x%p : %llu", buffer, allocation.size );
 
                     size_t insertIndex = 0;
 
@@ -194,4 +206,5 @@ void WorkHeap::AddPendingReleases()
         }
     }
 }
+
 

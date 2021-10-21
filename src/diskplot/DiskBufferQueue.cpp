@@ -2,6 +2,9 @@
 #include "Util.h"
 #include "diskplot/DiskPlotConfig.h"
 #include "SysHost.h"
+
+#include "util/Log.h"
+
 #define NULL_BUFFER -1
 
 //-----------------------------------------------------------
@@ -104,6 +107,14 @@ void DiskBufferQueue::ReleaseBuffer( void* buffer )
 }
 
 //-----------------------------------------------------------
+void DiskBufferQueue::AddFence( AutoResetSignal& signal )
+{
+    Command* cmd = GetCommandObject();
+    cmd->type         = Command::MemoryFence;
+    cmd->fence.signal = &signal;
+}
+
+//-----------------------------------------------------------
 byte* DiskBufferQueue::GetBuffer( size_t size )
 {
     return _workHeap.Alloc( size, _blockSize );
@@ -116,9 +127,18 @@ DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject()
     Command* cmd;
     while( !_commands.Write( cmd ) )
     {
+        #if _DEBUG
+            Log::Debug( "[DiskBufferQueue] Command buffer full. Waiting for commands." );
+            auto waitTimer = TimerBegin();
+        #endif
+
         // Block and wait until we have commands free in the buffer
         // #TODO: We should track this and let the user know that he's running slow
         _cmdConsumedSignal.Wait();
+        
+        #if _DEBUG
+            Log::Debug( "[DiskBufferQueue] Waited %.6lf seconds for a Command to be available.", TimerEnd( waitTimer ) );
+        #endif
     }
 
     ZeroMem( cmd );
@@ -156,7 +176,7 @@ void DiskBufferQueue::CommitCommands()
 //                                              std::memory_order_release,
 //                                              std::memory_order_relaxed ) );
 //     _cmdsPending = 0;
-
+    Log::Debug( "Committing %d commands.", _commands._pendingCount );
     _commands.Commit();
     _cmdReadySignal.Signal();
 }
@@ -230,10 +250,17 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
         break;
 
         case Command::ReleaseBuffer:
+            Log::Debug( " _Release 0x%p", cmd.releaseBuffer.buffer );
             _workHeap.Release( cmd.releaseBuffer.buffer );
         break;
 
+        case Command::MemoryFence:
+            ASSERT( cmd.fence.signal );
+            cmd.fence.signal->Signal();
+        break;
+
         default:
+            ASSERT( 0 );
         break;
     }
 }
@@ -248,6 +275,8 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     FileSet&     fileBuckets = _files[(int)fileId];
 
     const uint   bucketCount = (uint)fileBuckets.files.length;
+
+    Log::Debug( "  >>> Write 0x%p", buffers );
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
     const byte* buffer = buffers;

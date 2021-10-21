@@ -42,3 +42,4 @@
 // Enable to test plotting times without writing to disk
 // #define BB_BENCHMARK_MODE 1
 
+// #define DBG_LOG_ENABLE 1

@@ -4,6 +4,9 @@
 //-----------------------------------------------------------
 void VFatal( const char* message, va_list args )
 {
+    Log::Flush();
+    Log::FlushError();
+
     Log::Error( "Fatal Error:" );
     Log::WriteError( "  " );
     Log::Error( message, args );

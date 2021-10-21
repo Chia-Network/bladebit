@@ -7,8 +7,9 @@ struct GenF1Job : MTJob<GenF1Job>
 {
     const byte* key;
     
-    uint32  chunkCount;
-    uint32  blockCount;
+    uint32  blocksPerChunk; // Total number of blocks for each chunk
+    uint32  chunkCount;     // 
+    uint32  blockCount;     // Block that this particular thread will process from the total blocks per chunk
     uint32  x;
 
     byte*   buffer;

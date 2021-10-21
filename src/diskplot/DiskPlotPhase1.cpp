@@ -80,19 +80,20 @@ void DiskPlotPhase1::GenF1()
     for( uint i = 0; i < threadCount; i++ )
     {
         GenF1Job& job = f1Job[i];
-        job.key          = key;
-        job.chunkCount   = chunkCount;
-        job.blockCount   = blocksPerThread;
-        job.x            = x;
+        job.key            = key;
+        job.blocksPerChunk = blocksPerChunk;
+        job.chunkCount     = chunkCount;
+        job.blockCount     = blocksPerThread;
+        job.x              = x;
 
-        job.buffer       = blocks;
-        job.xBuffer      = (uint32*)xBuffer;
+        job.buffer         = blocks;
+        job.xBuffer        = (uint32*)xBuffer;
 
-        job.counts       = nullptr;
-        job.bucketCounts = nullptr;
-        job.buckets      = nullptr;
+        job.counts         = nullptr;
+        job.bucketCounts   = nullptr;
+        job.buckets        = nullptr;
 
-        job.diskQueue    = _diskQueue;
+        job.diskQueue      = _diskQueue;
 
 
         if( trailingBlocks > 0 )
@@ -111,6 +112,12 @@ void DiskPlotPhase1::GenF1()
     Log::Line( "Generating f1..." );
     const double elapsed = f1Job.Run();
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
+
+    AutoResetSignal finishedFence;
+    _diskQueue->AddFence( finishedFence );
+    _diskQueue->CommitCommands();
+    finishedFence.Wait();
+    Log::Line( "OK" );
 }
 
 //-----------------------------------------------------------
@@ -128,9 +135,9 @@ void GenF1Job::Run()
     const uint32 chunkCount = this->chunkCount;
     const uint64 entryCount = blockCount * (uint64)entriesPerBlock;
 
-    const size_t bufferSize = blockCount * kF1BlockSize;
+    const size_t bufferSize = this->blocksPerChunk * kF1BlockSize;
 
-    DiskBufferQueue& queue         = *this->diskQueue;
+    DiskBufferQueue& queue  = *this->diskQueue;
 //     const size_t     fileBlockSize = queue.BlockSize();
 
     
@@ -220,10 +227,10 @@ void GenF1Job::Run()
         if( jobId == 0 )
         {
             memcpy( this->bucketCounts, pfxSum, sizeof( pfxSum ) );
+        }
 
             for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
                 totalCount += pfxSum[j];
-        }
 
         // Calculate the prefix sum for this thread
         for( uint j = 1; j < BB_DP_BUCKET_COUNT; j++ )
@@ -261,6 +268,8 @@ void GenF1Job::Run()
             buckets = GetJob( 0 ).buckets;
             xBuffer = GetJob( 0 ).xBuffer;
         }
+
+        ASSERT( pfxSum[63] <= totalCount );
 
         // Distribute values into buckets at each thread's given offset
         for( uint j = 0; j < blockCount; j++ )
