@@ -93,7 +93,12 @@ jobs:
           if-no-files-found: error
 
   build-ubuntu-arm64:
-    runs-on: [ ARM64 ]
+    runs-on: [ARM64]
+    container:
+      image: ubuntu:20.04
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
@@ -103,12 +108,15 @@ jobs:
       - name: Get Version Number
         id: version_number
         run: |
-          version=$(cat ${{ github.workspace }}/VERSION)
+          version=$(cat VERSION)
           echo "::set-output name=BB_VERSION::$version"
           echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-ubuntu-arm64.tar.gz"
 
       - name: Install Prerequisites
-        run: sudo apt install -y libgmp-dev libnuma-dev
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt update
+          apt install -y build-essential git cmake libgmp-dev libnuma-dev
 
       - name: Build
         env:
@@ -116,7 +124,7 @@ jobs:
         run: |
           mkdir build && cd build
           cmake ..
-          cmake --build . --target bladebit --config Release
+          cmake --build . --target bladebit --config Release -j $(nproc --all)
           chmod +x ./bladebit
           tar -czvf $BB_ARTIFACT_NAME bladebit
           mkdir ../bin
@@ -129,10 +137,6 @@ jobs:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           if-no-files-found: error
-
-      - name: Clean Up
-        run: |
-          rm -rf ${{ github.workspace }}/*
 
   build-centos-arm64:
     runs-on: [ARM64]
