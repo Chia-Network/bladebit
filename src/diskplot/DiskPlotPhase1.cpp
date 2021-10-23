@@ -69,9 +69,15 @@ void DiskPlotPhase1::GenF1()
     // #TODO: Ensure each thread has at least one block.
     ASSERT( blocksPerThread > 0 );
 
-    uint  x       = 0;
-    byte* blocks  = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
-    byte* xBuffer = blocks + blocksPerChunk * kF1BlockSize;
+    uint  x            = 0;
+    byte* blocks       = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
+    byte* xBuffer      = blocks + blocksPerChunk * kF1BlockSize;
+
+    // Allocate buffers to track the remainders that are not multiple of the block size of the drive.
+    // We do double-buffering here as we these buffers are tiny and we don't expect to get blocked by them.
+    const size_t driveBlockSize = _diskQueue->BlockSize();
+    const size_t remaindersSize = driveBlockSize * BB_DP_BUCKET_COUNT * 2;      // Double-buffered
+    byte*        remainders    = _diskQueue->GetBuffer( remaindersSize * 2 );   // Allocate 2, one for y one for x. They are used together.
 
     uint32 bucketCounts[BB_DP_BUCKET_COUNT];
 
@@ -92,9 +98,9 @@ void DiskPlotPhase1::GenF1()
         job.counts         = nullptr;
         job.bucketCounts   = nullptr;
         job.buckets        = nullptr;
-
-        job.diskQueue      = _diskQueue;
-
+        
+        job.diskQueue        = _diskQueue;
+        job.remaindersBuffer = nullptr;
 
         if( trailingBlocks > 0 )
         {
@@ -107,7 +113,8 @@ void DiskPlotPhase1::GenF1()
         xBuffer += job.blockCount * kF1BlockSize;
     }
 
-    f1Job[0].bucketCounts = bucketCounts;
+    f1Job[0].bucketCounts     = bucketCounts;
+    f1Job[0].remaindersBuffer = remainders;
 
     Log::Line( "Generating f1..." );
     const double elapsed = f1Job.Run();
@@ -137,17 +144,47 @@ void GenF1Job::Run()
 
     const size_t bufferSize = this->blocksPerChunk * kF1BlockSize;
 
-    DiskBufferQueue& queue  = *this->diskQueue;
-//     const size_t     fileBlockSize = queue.BlockSize();
-
+    DiskBufferQueue& queue               = *this->diskQueue;
+    const size_t     fileBlockSize       = queue.BlockSize();
+    const size_t     remainderBufferSize = fileBlockSize * BB_DP_BUCKET_COUNT;
+    const size_t     remDoubleBufOffset  = fileBlockSize * 2;
     
     uint32 x = this->x;
 
     chacha8_ctx chacha;
     chacha8_keysetup( &chacha, key, 256, NULL );
 
-    uint counts[BB_DP_BUCKET_COUNT];
-    uint pfxSum[BB_DP_BUCKET_COUNT];
+    uint counts         [BB_DP_BUCKET_COUNT];
+    uint pfxSum         [BB_DP_BUCKET_COUNT];
+
+    DoubleBuffer* remainders = nullptr;
+    uint remainderSizes[BB_DP_BUCKET_COUNT];
+
+    if( IsControlThread() )
+    {
+        remainders = (DoubleBuffer*)bballoca( sizeof( DoubleBuffer ) * BB_DP_BUCKET_COUNT );
+
+        byte* yFront = this->remaindersBuffer;
+        byte* xFront = yFront + remainderBufferSize;
+        byte* yBack  = xFront + remainderBufferSize;
+        byte* xBack  = yBack  + remainderBufferSize;
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        {
+            DoubleBuffer* dbuf = new ( (void*)&remainders[i] ) DoubleBuffer();
+
+            dbuf->front = yFront;
+            dbuf->back  = yBack;
+
+            yFront += fileBlockSize;
+            yBack  += fileBlockSize;
+
+            // Set the fence to signaled initially so that we don't wait on the first buffer flip.
+            dbuf->fence.Signal();
+        }
+
+        memset( remainderSizes, 0, sizeof( remainderSizes ) );
+    }
 
     for( uint i = 0; i < chunkCount; i++ )
     {
@@ -360,23 +397,78 @@ void GenF1Job::Run()
             for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
                 sizes[j] = bucketCounts[j] * sizeof( uint32 );
 
+
+            // #TODO: Only get block aligned size, don't submit buffers yet
+            //        so that we can submit the buckets before having a potential
+            //        blocking remainder buffer swap
+
             // If we're not at our last chunk, we need to shave-off
             // any entries that will not align to the file block size and
             // leave them in our buckets for the next run.
             if( i+1 < chunkCount )
             {
-                const size_t blockSize = queue.BlockSize();
+                byte* yPtr = (byte*)buckets;
+                byte* xPtr = (byte*)xBuffer;
 
                 for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
                 {
-                    const size_t blockAlignedSize = sizes[j] / blockSize * blockSize;
-                    const size_t remainderEntries = ( sizes[j] - blockAlignedSize ) / sizeof( uint32 );
-                    ASSERT( remainderEntries * sizeof( uint32 ) == sizes[j] - blockAlignedSize );
+                    const size_t bucketSize       = sizes[j];
+                    const size_t blockAlignedSize = bucketSize / fileBlockSize * fileBlockSize;
+                    
+                    size_t remainderSize = bucketSize - blockAlignedSize;
+                    ASSERT( remainderSize / 4 * 4 == remainderSize );
 
-                    if( remainderEntries )
+                    if( remainderSize )
                     {
-                        // Need to copy over the remainder as the beginning of the next buffers
+                        size_t curRemainderSize = remainderSizes[j];
+                        
+                        const size_t copySize = std::min( remainderSize, fileBlockSize - curRemainderSize );
+
+                        DoubleBuffer& buf = remainders[j];
+
+                        byte* yRemainder = buf.front;
+                        byte* xRemainder = yRemainder + remDoubleBufOffset;
+
+                        bbmemcpy_t( yRemainder + curRemainderSize, yPtr + blockAlignedSize, copySize );
+                        bbmemcpy_t( xRemainder + curRemainderSize, xPtr + blockAlignedSize, copySize );
+
+                        curRemainderSize += remainderSize;
+
+                        if( curRemainderSize >= fileBlockSize )
+                        {
+                            buf.Flip();
+
+                            // Overflow buffer is full, submit it for writing
+                            queue.WriteFile( FileId::Y, j, yRemainder, fileBlockSize );
+                            queue.WriteFile( FileId::X, j, xRemainder, fileBlockSize );
+                            queue.AddFence( buf.fence );
+                            queue.CommitCommands();
+
+                            // Update new remainder size, if we overflowed our buffer
+                            // and copy any overflow, if we have some.
+                            remainderSize = curRemainderSize - copySize;
+
+                            if( remainderSize )
+                            {
+                                yRemainder = buf.front;
+                                xRemainder = yRemainder + remDoubleBufOffset;
+
+                                bbmemcpy_t( yRemainder, yPtr + blockAlignedSize + copySize, remainderSize );
+                                bbmemcpy_t( xRemainder, xPtr + blockAlignedSize + copySize, remainderSize );
+                            }
+
+                            remainderSizes[j] = 0;
+                            remainderSize     = remainderSize;
+                        }
+
+                        // Update size
+                        sizes[j]          =  (uint)blockAlignedSize;
+                        remainderSizes[j] += (uint)remainderSize;
                     }
+
+
+                    yPtr += bucketSize;
+                    xPtr += bucketSize;
                 }
             }
 

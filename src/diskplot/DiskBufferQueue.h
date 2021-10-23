@@ -71,8 +71,10 @@ class DiskBufferQueue
         {
             struct
             {
+                const byte*  buffer;
                 size_t size;
-                byte*  buffer;
+                FileId fileId;
+                uint   bucket;
             } write;
 
             struct
@@ -104,7 +106,7 @@ public:
 
     void WriteBuckets( FileId id, const void* buckets, const uint* sizes );
     
-    //void WriteFile( uint id, uint bucket, const byte* buffer, size_t size );
+    void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
     void CommitCommands();
 

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string.h>
+#include "Platform.h"
 
 #ifdef _MSC_VER
     #define Swap16( x ) _byteswap_ushort( x )
@@ -91,6 +92,18 @@ template<typename T>
 inline void bbmemcpy_t( T* dst, T* src, size_t count )
 {
     memcpy( dst, src, sizeof( T ) * count );
+}
+
+//-----------------------------------------------------------
+inline void* bballoca( size_t size )
+{
+#if PLATFORM_IS_WINDOWS
+    return _malloca( size );
+#elif PLATFORM_IS_UNIX
+    return _alloca( size );
+#else
+    #error Unimplemented Platform
+#endif
 }
 
 

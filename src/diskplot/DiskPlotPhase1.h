@@ -2,7 +2,7 @@
 #include "DiskPlotContext.h"
 #include "plotshared/MTJob.h"
 #include "DiskBufferQueue.h"
-
+#include "util/Log.h"
 struct GenF1Job : MTJob<GenF1Job>
 {
     const byte* key;
@@ -19,10 +19,28 @@ struct GenF1Job : MTJob<GenF1Job>
     uint32* buckets;        // Set by the control thread when writing entries to buckets
     uint32* xBuffer;        // Buffer for sort key. Also set by the control thread
     
+    // To be used by the control thread:
+    byte*   remaindersBuffer;
+
     DiskBufferQueue* diskQueue;
 
-
     void Run() override;
+
+    struct DoubleBuffer
+    {
+        byte*           front;
+        byte*           back;
+        AutoResetSignal fence;
+
+        inline DoubleBuffer() {}
+        inline ~DoubleBuffer() {}
+
+        inline void Flip()
+        {
+            fence.Wait();
+            std::swap( front, back );
+        }
+    };
 };
 
 class DiskPlotPhase1

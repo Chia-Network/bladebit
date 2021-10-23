@@ -12,10 +12,10 @@ DiskBufferQueue::DiskBufferQueue(
     const char* workDir, byte* workBuffer, 
     size_t workBufferSize, uint ioThreadCount,
     bool useDirectIO )
-    : _workDir          ( workDir     )
-    , _workHeap         ( workBufferSize, workBuffer )
-    , _userDirectIO     ( useDirectIO )
-    , _threadPool       ( ioThreadCount, ThreadPool::Mode::Fixed, true )
+    : _workDir       ( workDir     )
+    , _workHeap      ( workBufferSize, workBuffer )
+    , _userDirectIO  ( useDirectIO )
+    , _threadPool    ( ioThreadCount, ThreadPool::Mode::Fixed, true )
     , _dispatchThread()
 {
     ASSERT( workDir );
@@ -96,10 +96,20 @@ void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* 
 }
 
 //-----------------------------------------------------------
+void DiskBufferQueue::WriteFile( FileId id, uint bucket, const void* buffer, size_t size )
+{
+    Command* cmd = GetCommandObject();
+    cmd->type         = Command::WriteFile;
+    cmd->write.buffer = (byte*)buffer;
+    cmd->write.size   = size;
+    cmd->write.fileId = id;
+    cmd->write.bucket = bucket;
+}
+
+//-----------------------------------------------------------
 void DiskBufferQueue::ReleaseBuffer( void* buffer )
 {
     ASSERT( buffer );
-    //ASSERT( buffer >= _workHeap && buffer < _workHeap + _workHeapSize );
 
     Command* cmd = GetCommandObject();
     cmd->type                 = Command::ReleaseBuffer;
@@ -143,39 +153,11 @@ DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject()
 
     ZeroMem( cmd );
     return cmd;
-
-//     int cmdCount = _cmdCount.load( std::memory_order_acquire );
-//     cmdCount += _cmdsPending;
-// 
-//     // Have to wait until there's new commands
-//     if( cmdCount == BB_DISK_QUEUE_MAX_CMDS )
-//     {
-//         _cmdConsumedSignal.Wait();
-//         cmdCount =_cmdCount.load( std::memory_order_acquire );
-//         ASSERT( cmdCount < BB_DISK_QUEUE_MAX_CMDS );
-//     }
-// 
-//     Command* cmd = &_commands[_cmdWritePos];
-//     ZeroMem( cmd );
-// 
-//     ++_cmdWritePos %= BB_DISK_QUEUE_MAX_CMDS;
-//     _cmdsPending++;
-// 
-//     return cmd;
 }
 
 //-----------------------------------------------------------
 void DiskBufferQueue::CommitCommands()
 {
-//     ASSERT( _cmdsPending );
-// 
-//     int cmdCount = _cmdCount.load( std::memory_order_acquire );
-//     ASSERT( cmdCount < BB_DISK_QUEUE_MAX_CMDS );
-// 
-//     while( !_cmdCount.compare_exchange_weak( cmdCount, cmdCount + _cmdsPending,
-//                                              std::memory_order_release,
-//                                              std::memory_order_relaxed ) );
-//     _cmdsPending = 0;
     Log::Debug( "Committing %d commands.", _commands._pendingCount );
     _commands.Commit();
     _cmdReadySignal.Signal();
@@ -249,6 +231,10 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             CmdWriteBuckets( cmd );
         break;
 
+        case Command::WriteFile:
+            // #TODO: This
+        break;
+
         case Command::ReleaseBuffer:
             Log::Debug( " _Release 0x%p", cmd.releaseBuffer.buffer );
             _workHeap.Release( cmd.releaseBuffer.buffer );
@@ -258,6 +244,7 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             ASSERT( cmd.fence.signal );
             cmd.fence.signal->Signal();
         break;
+
 
         default:
             ASSERT( 0 );

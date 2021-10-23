@@ -5,7 +5,7 @@
     #define NOMINMAX 1
     #define WIN32_LEAN_AND_MEAN 1
     #include <Windows.h>
-
+    #include <malloc.h>
     typedef HANDLE ThreadId;
     typedef HANDLE SemaphoreId;
 
@@ -26,6 +26,7 @@
     #include <unistd.h>
     #include <sys/mman.h>
     #include <time.h>
+    #include <alloca.h>
 
     #if __linux__
         #include <sys/sysinfo.h>
