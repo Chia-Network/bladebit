@@ -3,6 +3,8 @@
 #include "plotshared/MTJob.h"
 #include "DiskBufferQueue.h"
 
+#include "util/Log.h"
+
 struct GenF1Job : MTJob<GenF1Job>
 {
     const byte* key;
@@ -36,7 +38,10 @@ private:
         byte*           back;
         AutoResetSignal fence;
 
-        inline DoubleBuffer() {}
+        inline DoubleBuffer()
+        {
+//             Log::Line( "Initialized!;;" );
+        }
         inline ~DoubleBuffer() {}
 
         inline void Flip()

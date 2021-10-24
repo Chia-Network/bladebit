@@ -80,6 +80,7 @@ void DiskPlotPhase1::GenF1()
     byte*        remainders    = _diskQueue->GetBuffer( remaindersSize * 2 );   // Allocate 2, one for y one for x. They are used together.
 
     uint32 bucketCounts[BB_DP_BUCKET_COUNT];
+    memset( bucketCounts, 0, sizeof( bucketCounts ) );
 
     MTJobRunner<GenF1Job> f1Job( pool );
 
@@ -117,20 +118,20 @@ void DiskPlotPhase1::GenF1()
     f1Job[0].remaindersBuffer = remainders;
 
     Log::Line( "Generating f1..." );
-    const double elapsed = f1Job.Run();
+    double elapsed = f1Job.Run();
+    Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
 
-    // Release our buffers and wait for all our commands to finish
+    // Release our buffers
     {
+        AutoResetSignal fence;
+
         _diskQueue->ReleaseBuffer( blocks     );
         _diskQueue->ReleaseBuffer( remainders );
-
-        AutoResetSignal finishedFence;
-        _diskQueue->AddFence( finishedFence );
+        _diskQueue->AddFence( fence );
         _diskQueue->CommitCommands();
-        finishedFence.Wait();
-    }
 
-    Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
+        fence.Wait();
+    }
 }
 
 //-----------------------------------------------------------
@@ -159,15 +160,35 @@ void GenF1Job::Run()
     chacha8_ctx chacha;
     chacha8_keysetup( &chacha, key, 256, NULL );
 
-    uint counts         [BB_DP_BUCKET_COUNT];
-    uint pfxSum         [BB_DP_BUCKET_COUNT];
+    uint counts[BB_DP_BUCKET_COUNT];
+    uint pfxSum[BB_DP_BUCKET_COUNT];
 
-    DoubleBuffer* remainders = nullptr;
-    uint remainderSizes[BB_DP_BUCKET_COUNT];
+
+    // These are used only by the control thread
+    // 
+    // #NOTE: This is a lot of stuff allocated in the stack,
+    //  but are thread's stack space is large enough.
+    //  Consider allocating it int the heap however
+    DoubleBuffer* remainders        = nullptr;
+    uint*         remainderSizes    = nullptr;
+    uint*         bucketCounts      = nullptr;
+    uint*         totalBucketCounts = nullptr;
+
+//     DoubleBuffer remainders       [BB_DP_BUCKET_COUNT];
+//     uint         remainderSizes   [BB_DP_BUCKET_COUNT];
+//     uint         bucketCounts     [BB_DP_BUCKET_COUNT];
+//     uint         totalBucketCounts[BB_DP_BUCKET_COUNT];
 
     if( IsControlThread() )
     {
-        remainders = (DoubleBuffer*)bballoca( sizeof( DoubleBuffer ) * BB_DP_BUCKET_COUNT );
+        // #TODO: _malloca seems to be giving issues on windows, so we're heap-allocating...
+        remainders        = bbmalloc<DoubleBuffer>( sizeof( DoubleBuffer ) * BB_DP_BUCKET_COUNT );
+        remainderSizes    = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
+        bucketCounts      = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
+        totalBucketCounts = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
+
+        memset( remainderSizes   , 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+        memset( totalBucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
 
         // Layout for the buffers is:
         //
@@ -193,8 +214,6 @@ void GenF1Job::Run()
             // Set the fence to signaled initially so that we don't wait on the first buffer flip.
             dbuf->fence.Signal();
         }
-
-        memset( remainderSizes, 0, sizeof( remainderSizes ) );
     }
 
     for( uint i = 0; i < chunkCount; i++ )
@@ -270,15 +289,16 @@ void GenF1Job::Run()
                 pfxSum[k] += tCounts[k];
         }
 
+        // If we're the control thread, retain the total bucket count for this chunk
         uint32 totalCount = 0;
-        // If we're job 0, retain the total bucket count
-        if( jobId == 0 )
+        if( this->IsControlThread() )
         {
-            memcpy( this->bucketCounts, pfxSum, sizeof( pfxSum ) );
+            memcpy( bucketCounts, pfxSum, sizeof( pfxSum ) );
         }
-
-            for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
-                totalCount += pfxSum[j];
+        
+        // #TODO: Only do this for the control thread
+        for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
+            totalCount += pfxSum[j];
 
         // Calculate the prefix sum for this thread
         for( uint j = 1; j < BB_DP_BUCKET_COUNT; j++ )
@@ -403,10 +423,8 @@ void GenF1Job::Run()
         // After all the chunks have been written, we can read back from disk to sort each bucket
         if( this->LockThreads() )
         {
-            const uint32* bucketCounts = this->bucketCounts;
-
             // Calculate the disk block-aligned size
-            // #TODO: Don't do this if not using direct IO or at the last chunk (we want to write extra at the last chunk)
+            // #TODO: Don't do this if not using direct IO?
             for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
                 sizes[j] = (uint32)( ( bucketCounts[j] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
 
@@ -423,18 +441,40 @@ void GenF1Job::Run()
             queue.ReleaseBuffer( sizes   );
             queue.ReleaseBuffer( buckets );
             queue.ReleaseBuffer( xBuffer );
-
-            // If it's the last chunk, we need to write out
-            // any remainder as a whole block
-            if( i == chunkCount - 1 )
-                WriteFinalBlockRemainders( remainders, remainderSizes );
-
             queue.CommitCommands();
+
+            // Add total bucket counts
+            for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
+                totalBucketCounts[j] += bucketCounts[j];
 
             this->ReleaseThreads();
         }
         else
             this->WaitForRelease();
+    }
+
+    if( IsControlThread() )
+    {
+        // we need to write out any remainders as a whole block
+        WriteFinalBlockRemainders( remainders, remainderSizes );
+
+        // Copy final total bucket counts
+        memcpy( this->bucketCounts, totalBucketCounts, sizeof( uint32 )* BB_DP_BUCKET_COUNT );
+
+        // Wait for our commands to finish
+        AutoResetSignal fence;
+        queue.AddFence( fence );
+        queue.CommitCommands();
+        fence.Wait();
+
+        // Destruct & free our remainders
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            remainders[i].~DoubleBuffer();
+
+        free( remainders        );
+        free( remainderSizes    );
+        free( bucketCounts      );
+        free( totalBucketCounts );
     }
 }
 
