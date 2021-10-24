@@ -139,9 +139,11 @@ void DiskPlotPhase1::GenF1()
 //-----------------------------------------------------------
 void DiskPlotPhase1::ForwardPropagate()
 {
+    DiskBufferQueue& ioDispatch = *_diskQueue;
+
     size_t maxBucketSize = 0;
 
-    // Find the largest bucket
+    // Find the largest bucket so that we can reserve buffers of its size
     for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
         maxBucketSize = std::max( maxBucketSize, (size_t)_bucketCounts[i] );
 
@@ -150,14 +152,24 @@ void DiskPlotPhase1::ForwardPropagate()
     // Allocate 2 buffers for loading buckets
     DoubleBuffer bucketBuffers;
 
-    bucketBuffers.front = _diskQueue->GetBuffer( maxBucketSize * 2 );
-    bucketBuffers.back  = bucketBuffers.front + maxBucketSize;
+    bucketBuffers.front = ioDispatch.GetBuffer( maxBucketSize * 4 );
+    bucketBuffers.back  = bucketBuffers.front + maxBucketSize * 2;
 
     // Load initial bucket
+    ioDispatch.SeekBucket( FileId::Y, 0, SeekOrigin::Begin );
+    ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
+
+    ioDispatch.ReadFile( FileId::Y, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.ReadFile( FileId::X, 0, bucketBuffers.front + maxBucketSize, _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.AddFence( bucketBuffers.fence );
+    ioDispatch.CommitCommands();
+    bucketBuffers.fence.Wait();
 
     for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
     {
         const uint entryCount = _bucketCounts[bucketIdx];
+
+        // Read the next bucket in the background if we're not at the last bucket
     }
 }
 

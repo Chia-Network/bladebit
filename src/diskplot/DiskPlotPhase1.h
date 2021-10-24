@@ -27,6 +27,22 @@ struct DoubleBuffer
     }
 };
 
+
+struct Bucket
+{
+    uint32 index;
+    uint32 entryCount;
+
+    uint32* yInput;
+    uint32* metaInput;
+
+    uint32* yOutput;
+    uint32* metaOutput;
+
+    uint32* pairL;
+    uint16* pairR;
+};
+
 struct GenF1Job : MTJob<GenF1Job>
 {
     const byte* key;

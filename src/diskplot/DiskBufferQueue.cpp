@@ -105,10 +105,20 @@ void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* 
 void DiskBufferQueue::WriteFile( FileId id, uint bucket, const void* buffer, size_t size )
 {
     Command* cmd = GetCommandObject( Command::WriteFile );
-    cmd->write.buffer = (byte*)buffer;
-    cmd->write.size   = size;
-    cmd->write.fileId = id;
-    cmd->write.bucket = bucket;
+    cmd->file.buffer = (byte*)buffer;
+    cmd->file.size   = size;
+    cmd->file.fileId = id;
+    cmd->file.bucket = bucket;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::ReadFile( FileId id, uint bucket, void* dstBuffer, size_t readSize )
+{
+    Command* cmd = GetCommandObject( Command::ReadFile );
+    cmd->file.buffer = (byte*)dstBuffer;
+    cmd->file.size   = readSize;
+    cmd->file.fileId = id;
+    cmd->file.bucket = bucket;
 }
 
 //-----------------------------------------------------------
@@ -235,9 +245,16 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
 
         case Command::WriteFile:
             #if DBG_LOG_ENABLE
-                Log::Debug( "[DiskBufferQueue] ^ Cmd WriteFile: (%u) sz:%llu addr:0x%p", cmd.write.fileId, cmd.write.size, cmd.buckets.buffers );
+                Log::Debug( "[DiskBufferQueue] ^ Cmd WriteFile: (%u) bucket:%u sz:%llu addr:0x%p", cmd.file.fileId, cmd.file.bucket, cmd.file.size, cmd.file.buffer );
             #endif
             CndWriteFile( cmd );
+        break;
+
+        case Command::ReadFile:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd ReadFile: (%u) bucket:%u sz:%llu addr:0x%p", cmd.file.fileId, cmd.file.bucket, cmd.file.size, cmd.file.buffer );
+            #endif
+            CmdReadFile( cmd );
         break;
 
         case Command::SeekFile:
@@ -346,8 +363,15 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
 //-----------------------------------------------------------
 void DiskBufferQueue::CndWriteFile( const Command& cmd )
 {
-    FileSet& fileBuckets = _files[(int)cmd.write.fileId];
-    WriteToFile( fileBuckets.files[cmd.write.bucket], cmd.write.size, cmd.write.buffer, _blockBuffer, fileBuckets.name, cmd.write.bucket );
+    FileSet& fileBuckets = _files[(int)cmd.file.fileId];
+    WriteToFile( fileBuckets.files[cmd.file.bucket], cmd.file.size, cmd.file.buffer, _blockBuffer, fileBuckets.name, cmd.file.bucket );
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::CmdReadFile( const Command& cmd )
+{
+    FileSet& fileBuckets = _files[(int)cmd.file.fileId];
+    ReadFromFile( fileBuckets.files[cmd.file.bucket], cmd.file.size, cmd.file.buffer, _blockBuffer, fileBuckets.name, cmd.file.bucket );
 }
 
 //-----------------------------------------------------------
@@ -410,6 +434,12 @@ inline void DiskBufferQueue::WriteToFile( FileStream& file, size_t size, const b
 }
 
 //-----------------------------------------------------------
+void DiskBufferQueue::ReadFromFile( FileStream& file, size_t size, byte* buffer, byte* blockBuffer, const char* fileName, uint bucket )
+{
+
+}
+
+//-----------------------------------------------------------
 inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type )
 {
     switch( type )
@@ -420,8 +450,17 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
         case DiskBufferQueue::Command::WriteBuckets:
             return "WriteBuckets";
 
+        case DiskBufferQueue::Command::ReadFile:
+            return "ReadFile";
+
         case DiskBufferQueue::Command::ReleaseBuffer:
             return "ReleaseBuffer";
+
+        case DiskBufferQueue::Command::SeekFile:
+            return "SeekFile";
+
+        case DiskBufferQueue::Command::SeekBucket:
+            return "SeekBucket";
 
         case DiskBufferQueue::Command::MemoryFence:
             return "MemoryFence";

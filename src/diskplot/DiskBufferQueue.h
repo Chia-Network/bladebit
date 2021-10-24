@@ -61,6 +61,7 @@ class DiskBufferQueue
             Void = 0,
             WriteFile,
             WriteBuckets,
+            ReadFile,
             SeekFile,
             SeekBucket,
             ReleaseBuffer,
@@ -73,11 +74,11 @@ class DiskBufferQueue
         {
             struct
             {
-                const byte*  buffer;
+                byte*  buffer;
                 size_t size;
                 FileId fileId;
                 uint   bucket;
-            } write;
+            } file;
 
             struct
             {
@@ -120,6 +121,8 @@ public:
     
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
+    void ReadFile( FileId id, uint bucket, void* dstBuffer, size_t readSize );
+
     void SeekFile( FileId id, uint bucket, int64 offset, SeekOrigin origin );
     
     void SeekBucket( FileId id, int64 offset, SeekOrigin origin );
@@ -159,6 +162,7 @@ private:
 
     void CmdWriteBuckets( const Command& cmd );
     void CndWriteFile( const Command& cmd );
+    void CmdReadFile( const Command& cmd );
     void CmdSeekBucket( const Command& cmd );
 
     void WriteToFile( FileStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
