@@ -57,12 +57,15 @@ template<typename T, int Capacity>
 void SPCQueue<T, Capacity>::Commit()
 {
     ASSERT( _pendingCount );
+//     if( _pendingCount < 1 )
+//         return;
+
  
-    int count = _committedCount.load( std::memory_order_acquire );
-    ASSERT( count < Capacity );
+    int commited = _committedCount.load( std::memory_order_acquire );
+    ASSERT( commited < Capacity );
 
     // Publish entries to the consumer thread
-    while( !_committedCount.compare_exchange_weak( count, count + _pendingCount,
+    while( !_committedCount.compare_exchange_weak( commited, commited + _pendingCount,
                                                    std::memory_order_release,
                                                    std::memory_order_relaxed ) );
 

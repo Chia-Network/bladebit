@@ -140,6 +140,9 @@ private:
     void ExecuteCommand( Command& cmd );
 
     void CmdWriteBuckets( const Command& cmd );
+    void CndWriteFile( const Command& cmd );
+
+    void WriteToFile( FileStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
 
 private:
 

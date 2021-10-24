@@ -2,7 +2,7 @@
 #include "DiskPlotContext.h"
 #include "plotshared/MTJob.h"
 #include "DiskBufferQueue.h"
-#include "util/Log.h"
+
 struct GenF1Job : MTJob<GenF1Job>
 {
     const byte* key;
@@ -26,6 +26,10 @@ struct GenF1Job : MTJob<GenF1Job>
 
     void Run() override;
 
+private:
+
+    // Represents a double-buffered blob of data of the size of
+    // the block size of the device we're writing to * 2 (one for y one for x)
     struct DoubleBuffer
     {
         byte*           front;
@@ -41,6 +45,11 @@ struct GenF1Job : MTJob<GenF1Job>
             std::swap( front, back );
         }
     };
+
+    void SaveBlockRemainders( uint32* yBuffer, uint32* xBuffer, const uint32* bucketCounts, 
+                              DoubleBuffer* remainderBuffers, uint32* remainderSizes );
+
+    void WriteFinalBlockRemainders( DoubleBuffer* remainderBuffers, uint32* remainderSizes );
 };
 
 class DiskPlotPhase1
