@@ -33,7 +33,7 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment )
     for( ;; )
     {
         // First, add any pending released buffers back to the heap
-        AddPendingReleases();
+        CompletePendingReleases();
 
         byte* buffer = nullptr;
 
@@ -114,7 +114,7 @@ void WorkHeap::Release( byte* buffer )
     _releaseSignal.Signal();
 }
 
-void WorkHeap::AddPendingReleases()
+void WorkHeap::CompletePendingReleases()
 {
     const int BUFFER_SIZE = 128;
     byte* releases[BUFFER_SIZE];

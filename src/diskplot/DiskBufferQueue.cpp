@@ -7,6 +7,7 @@
 
 #define NULL_BUFFER -1
 
+
 //-----------------------------------------------------------
 DiskBufferQueue::DiskBufferQueue( 
     const char* workDir, byte* workBuffer, 
@@ -86,10 +87,15 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 }
 
 //-----------------------------------------------------------
+byte* DiskBufferQueue::GetBuffer( size_t size )
+{
+    return _workHeap.Alloc( size, _blockSize );
+}
+
+//-----------------------------------------------------------
 void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* sizes )
 {
-    Command* cmd = GetCommandObject();
-    cmd->type            = Command::WriteBuckets;
+    Command* cmd = GetCommandObject( Command::WriteBuckets );
     cmd->buckets.buffers = (byte*)buckets;
     cmd->buckets.sizes   = sizes;
     cmd->buckets.fileId  = id;
@@ -98,8 +104,7 @@ void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* 
 //-----------------------------------------------------------
 void DiskBufferQueue::WriteFile( FileId id, uint bucket, const void* buffer, size_t size )
 {
-    Command* cmd = GetCommandObject();
-    cmd->type         = Command::WriteFile;
+    Command* cmd = GetCommandObject( Command::WriteFile );
     cmd->write.buffer = (byte*)buffer;
     cmd->write.size   = size;
     cmd->write.fileId = id;
@@ -107,32 +112,48 @@ void DiskBufferQueue::WriteFile( FileId id, uint bucket, const void* buffer, siz
 }
 
 //-----------------------------------------------------------
+void DiskBufferQueue::SeekFile( FileId id, uint bucket, int64 offset, SeekOrigin origin )
+{
+    Command* cmd = GetCommandObject( Command::SeekFile );
+    cmd->seek.fileId = id;
+    cmd->seek.bucket = bucket;
+    cmd->seek.offset = offset;
+    cmd->seek.origin = origin;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::SeekBucket( FileId id, int64 offset, SeekOrigin origin )
+{
+    Command* cmd = GetCommandObject( Command::SeekBucket );
+    cmd->seek.fileId = id;
+    cmd->seek.offset = offset;
+    cmd->seek.origin = origin;
+}
+
+//-----------------------------------------------------------
 void DiskBufferQueue::ReleaseBuffer( void* buffer )
 {
     ASSERT( buffer );
 
-    Command* cmd = GetCommandObject();
-    cmd->type                 = Command::ReleaseBuffer;
+    Command* cmd = GetCommandObject( Command::ReleaseBuffer );
     cmd->releaseBuffer.buffer = (byte*)buffer;
 }
 
 //-----------------------------------------------------------
 void DiskBufferQueue::AddFence( AutoResetSignal& signal )
 {
-    Command* cmd = GetCommandObject();
-    cmd->type         = Command::MemoryFence;
+    Command* cmd = GetCommandObject( Command::MemoryFence );
     cmd->fence.signal = &signal;
 }
 
 //-----------------------------------------------------------
-byte* DiskBufferQueue::GetBuffer( size_t size )
+void DiskBufferQueue::CompletePendingReleases()
 {
-    return _workHeap.Alloc( size, _blockSize );
+    _workHeap.CompletePendingReleases();
 }
 
-
 //-----------------------------------------------------------
-DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject()
+inline DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject( Command::CommandType type )
 {
     Command* cmd;
     while( !_commands.Write( cmd ) )
@@ -152,13 +173,19 @@ DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject()
     }
 
     ZeroMem( cmd );
+    cmd->type = type;
+
+    #if DBG_LOG_ENABLE
+        Log::Debug( "[DiskBufferQueue] > Snd: %s (%d)", DbgGetCommandName( type ), type );
+    #endif
+
     return cmd;
 }
 
 //-----------------------------------------------------------
 void DiskBufferQueue::CommitCommands()
 {
-    Log::Debug( "Committing %d commands.", _commands._pendingCount );
+    //Log::Debug( "Committing %d commands.", _commands._pendingCount );
     _commands.Commit();
     _cmdReadySignal.Signal();
 }
@@ -187,60 +214,63 @@ void DiskBufferQueue::CommandMain()
             for( int i = 0; i < cmdCount; i++ )
                 ExecuteCommand( commands[i] );
         }
-        
-//         const int cmdCount = _cmdCount.load( std::memory_order_acquire );
-//         ASSERT( cmdCount );
-// 
-//         if( cmdCount < 1 )
-//             continue;
-// 
-//         const int cmdWritePos = _cmdWritePos;
-// 
-//         int readPos = ( cmdWritePos - cmdCount + BB_DISK_QUEUE_MAX_CMDS ) % BB_DISK_QUEUE_MAX_CMDS;
-//         
-//         int cmdEnd          = std::min( BB_DISK_QUEUE_MAX_CMDS, readPos + cmdCount );
-//         int secondPassCount = readPos + cmdCount - cmdEnd;
-// 
-//         int i = readPos;
-//         for( int pass = 0; pass < 2; pass++ )
-//         {
-//             for( ; i < cmdEnd; i++ )
-//             {
-//                 ExecuteCommand( _commands[i] );
-//             }
-// 
-//             i      = 0;
-//             cmdEnd = secondPassCount;
-//         }
-// 
-//         // Release commands
-//         int curCmdCount = cmdCount;
-//         while( !_cmdCount.compare_exchange_weak( curCmdCount, curCmdCount - cmdCount,
-//                                                  std::memory_order_release,
-//                                                  std::memory_order_relaxed ) );
-//         _cmdConsumedSignal.Signal();
     }
 }
 
 //-----------------------------------------------------------
 void DiskBufferQueue::ExecuteCommand( Command& cmd )
 {
+    //#if DBG_LOG_ENABLE
+    //    Log::Debug( "[DiskBufferQueue] ^ Cmd Execute: %s (%d)", DbgGetCommandName( cmd.type ), cmd.type );
+    //#endif
+
     switch( cmd.type )
     {
         case Command::WriteBuckets:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd WriteBuckets: (%u) addr:0x%p", cmd.buckets.fileId, cmd.buckets.buffers );
+            #endif
             CmdWriteBuckets( cmd );
         break;
 
         case Command::WriteFile:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd WriteFile: (%u) sz:%llu addr:0x%p", cmd.write.fileId, cmd.write.size, cmd.buckets.buffers );
+            #endif
             CndWriteFile( cmd );
         break;
 
+        case Command::SeekFile:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd SeekFile: (%u) bucket:%u offset:%lld origin:%ld", cmd.seek.fileId, cmd.seek.bucket, cmd.seek.offset, (int)cmd.seek.origin );
+            #endif
+                if( !_files[(uint)cmd.seek.fileId].files[cmd.seek.bucket].Seek( cmd.seek.offset, cmd.seek.origin ) )
+                {
+                    int err = _files[(uint)cmd.seek.fileId].files[cmd.seek.bucket].GetError();
+                    Fatal( "[DiskBufferQueue] Failed to seek file %s.%u with error %d (0x%x)", 
+                           _files[(uint)cmd.seek.fileId].name, cmd.seek.bucket, err, err );
+                }
+        break;
+
+        case Command::SeekBucket:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd SeekBucket: (%u) offset:%lld origin:%ld", cmd.seek.fileId, cmd.seek.offset, (int)cmd.seek.origin );
+            #endif
+
+            CmdSeekBucket( cmd );
+        break;
+
         case Command::ReleaseBuffer:
-            Log::Debug( " _Release 0x%p", cmd.releaseBuffer.buffer );
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd ReleaseBuffer: 0x%p", cmd.releaseBuffer.buffer );
+            #endif
             _workHeap.Release( cmd.releaseBuffer.buffer );
         break;
 
         case Command::MemoryFence:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd MemoryFence" );
+            #endif
             ASSERT( cmd.fence.signal );
             cmd.fence.signal->Signal();
         break;
@@ -321,6 +351,25 @@ void DiskBufferQueue::CndWriteFile( const Command& cmd )
 }
 
 //-----------------------------------------------------------
+void DiskBufferQueue::CmdSeekBucket( const Command& cmd )
+{
+    FileSet&     fileBuckets = _files[(int)cmd.seek.fileId];
+    const uint   bucketCount = (uint)fileBuckets.files.length;
+
+    const int64      seekOffset = cmd.seek.offset;
+    const SeekOrigin seekOrigin = cmd.seek.origin;
+
+    for( uint i = 0; i < bucketCount; i++ )
+    {
+        if( !fileBuckets.files[i].Seek( seekOffset, seekOrigin ) )
+        {
+            int err = fileBuckets.files[i].GetError();
+            Fatal( "[DiskBufferQueue] Failed to seek file %s.%u with error %d (0x%x)", fileBuckets.name, i, err, err );
+        }
+    }
+}
+
+//-----------------------------------------------------------
 inline void DiskBufferQueue::WriteToFile( FileStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket )
 {
     const size_t blockSize   = _blockSize;
@@ -357,6 +406,29 @@ inline void DiskBufferQueue::WriteToFile( FileStream& file, size_t size, const b
             const int err = file.GetError();
             Fatal( "Failed to write block to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
         }
+    }
+}
+
+//-----------------------------------------------------------
+inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type )
+{
+    switch( type )
+    {
+        case DiskBufferQueue::Command::WriteFile:
+            return "WriteFile";
+
+        case DiskBufferQueue::Command::WriteBuckets:
+            return "WriteBuckets";
+
+        case DiskBufferQueue::Command::ReleaseBuffer:
+            return "ReleaseBuffer";
+
+        case DiskBufferQueue::Command::MemoryFence:
+            return "MemoryFence";
+
+        default:
+            ASSERT( 0 );
+            return nullptr;
     }
 }
 

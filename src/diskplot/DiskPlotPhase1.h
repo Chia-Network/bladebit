@@ -5,6 +5,28 @@
 
 #include "util/Log.h"
 
+// Represents a double-buffered blob of data of the size of
+// the block size of the device we're writing to * 2 (one for y one for x)
+struct DoubleBuffer
+{
+    byte*           front;
+    byte*           back;
+    AutoResetSignal fence;
+
+    inline DoubleBuffer()
+    {
+        // Has to be initially signaled, since the first swap doesn't need to wait.
+        fence.Signal();
+    }
+    inline ~DoubleBuffer() {}
+
+    inline void Flip()
+    {
+        fence.Wait();
+        std::swap( front, back );
+    }
+};
+
 struct GenF1Job : MTJob<GenF1Job>
 {
     const byte* key;
@@ -30,26 +52,6 @@ struct GenF1Job : MTJob<GenF1Job>
 
 private:
 
-    // Represents a double-buffered blob of data of the size of
-    // the block size of the device we're writing to * 2 (one for y one for x)
-    struct DoubleBuffer
-    {
-        byte*           front;
-        byte*           back;
-        AutoResetSignal fence;
-
-        inline DoubleBuffer()
-        {
-//             Log::Line( "Initialized!;;" );
-        }
-        inline ~DoubleBuffer() {}
-
-        inline void Flip()
-        {
-            fence.Wait();
-            std::swap( front, back );
-        }
-    };
 
     void SaveBlockRemainders( uint32* yBuffer, uint32* xBuffer, const uint32* bucketCounts, 
                               DoubleBuffer* remainderBuffers, uint32* remainderSizes );
@@ -65,9 +67,13 @@ public:
 
 private:
     void GenF1();
+    void ForwardPropagate();
+
 
 private:
     DiskPlotContext& _cx;
     DiskBufferQueue* _diskQueue;
+
+    uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
 };
 

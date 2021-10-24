@@ -61,6 +61,8 @@ class DiskBufferQueue
             Void = 0,
             WriteFile,
             WriteBuckets,
+            SeekFile,
+            SeekBucket,
             ReleaseBuffer,
             MemoryFence,
         };
@@ -86,8 +88,18 @@ class DiskBufferQueue
 
             struct
             {
+                FileId     fileId;
+                uint       bucket;
+                int64      offset;
+                SeekOrigin origin;
+
+            } seek;
+
+            struct
+            {
                 byte* buffer;
             } releaseBuffer;
+
 
             struct
             {
@@ -108,6 +120,10 @@ public:
     
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
+    void SeekFile( FileId id, uint bucket, int64 offset, SeekOrigin origin );
+    
+    void SeekBucket( FileId id, int64 offset, SeekOrigin origin );
+
     void CommitCommands();
 
     // Obtain a buffer allocated from the work heap.
@@ -127,13 +143,15 @@ public:
     // fence have been processed.
     void AddFence( AutoResetSignal& signal );
 
+    void CompletePendingReleases();
+
     inline size_t BlockSize() const { return _blockSize; }
 
 private:
 
     void InitFileSet( FileId fileId, const char* name, uint bucketCount, char* pathBuffer, size_t workDirLength );
 
-    Command* GetCommandObject();
+    Command* GetCommandObject( Command::CommandType type );
 
     static void CommandThreadMain( DiskBufferQueue* self );
     void CommandMain();
@@ -141,8 +159,12 @@ private:
 
     void CmdWriteBuckets( const Command& cmd );
     void CndWriteFile( const Command& cmd );
+    void CmdSeekBucket( const Command& cmd );
 
     void WriteToFile( FileStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
+    void ReadFromFile( FileStream& file, size_t size, byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
+
+    static const char* DbgGetCommandName( Command::CommandType type );
 
 private:
 
@@ -162,10 +184,6 @@ private:
 
     bool              _userDirectIO;
     ThreadPool        _threadPool;
-
-    int               _cmdWritePos   = 0;
-    int               _cmdsPending   = 0;
-    std::atomic<int>  _cmdCount      = 0;
 
     AutoResetSignal   _cmdReadySignal;
     AutoResetSignal   _cmdConsumedSignal;

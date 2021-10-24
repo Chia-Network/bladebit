@@ -42,4 +42,6 @@
 // Enable to test plotting times without writing to disk
 // #define BB_BENCHMARK_MODE 1
 
+// Enable for verbose debug logging.
+// Good for tracking internal state changes and finding bugs.
 // #define DBG_LOG_ENABLE 1

@@ -31,5 +31,6 @@ bool AssertLog( int line, const char* file, const char* func );
 // Only include from C++ files
 #include "Globals.h"
 #include "Types.h"
+#include "Config.h"
 
 #endif // __cplusplus

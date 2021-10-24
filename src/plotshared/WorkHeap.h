@@ -44,7 +44,7 @@ public:
     void  Release( byte* buffer );
 
     // Makes pending released allocations available to the heap for allocation again.
-    void AddPendingReleases();
+    void CompletePendingReleases();
 
 private:
 

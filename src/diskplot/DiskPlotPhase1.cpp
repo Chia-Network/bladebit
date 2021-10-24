@@ -33,6 +33,7 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 void DiskPlotPhase1::Run()
 {
     GenF1();
+    ForwardPropagate();
 }
 
 //-----------------------------------------------------------
@@ -70,7 +71,8 @@ void DiskPlotPhase1::GenF1()
     ASSERT( blocksPerThread > 0 );
 
     uint  x            = 0;
-    byte* blocks       = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
+    byte* blocksRoot   = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
+    byte* blocks       = blocksRoot;
     byte* xBuffer      = blocks + blocksPerChunk * kF1BlockSize;
 
     // Allocate buffers to track the remainders that are not multiple of the block size of the drive.
@@ -79,8 +81,7 @@ void DiskPlotPhase1::GenF1()
     const size_t remaindersSize = driveBlockSize * BB_DP_BUCKET_COUNT * 2;      // Double-buffered
     byte*        remainders    = _diskQueue->GetBuffer( remaindersSize * 2 );   // Allocate 2, one for y one for x. They are used together.
 
-    uint32 bucketCounts[BB_DP_BUCKET_COUNT];
-    memset( bucketCounts, 0, sizeof( bucketCounts ) );
+    memset( _bucketCounts, 0, sizeof( _bucketCounts ) );
 
     MTJobRunner<GenF1Job> f1Job( pool );
 
@@ -114,7 +115,7 @@ void DiskPlotPhase1::GenF1()
         xBuffer += job.blockCount * kF1BlockSize;
     }
 
-    f1Job[0].bucketCounts     = bucketCounts;
+    f1Job[0].bucketCounts     = _bucketCounts;
     f1Job[0].remaindersBuffer = remainders;
 
     Log::Line( "Generating f1..." );
@@ -125,12 +126,38 @@ void DiskPlotPhase1::GenF1()
     {
         AutoResetSignal fence;
 
-        _diskQueue->ReleaseBuffer( blocks     );
+        _diskQueue->ReleaseBuffer( blocksRoot );
         _diskQueue->ReleaseBuffer( remainders );
         _diskQueue->AddFence( fence );
         _diskQueue->CommitCommands();
 
         fence.Wait();
+        _diskQueue->CompletePendingReleases();
+    }
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::ForwardPropagate()
+{
+    size_t maxBucketSize = 0;
+
+    // Find the largest bucket
+    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        maxBucketSize = std::max( maxBucketSize, (size_t)_bucketCounts[i] );
+
+    maxBucketSize *= sizeof( uint32 );
+
+    // Allocate 2 buffers for loading buckets
+    DoubleBuffer bucketBuffers;
+
+    bucketBuffers.front = _diskQueue->GetBuffer( maxBucketSize * 2 );
+    bucketBuffers.back  = bucketBuffers.front + maxBucketSize;
+
+    // Load initial bucket
+
+    for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
+    {
+        const uint entryCount = _bucketCounts[bucketIdx];
     }
 }
 
@@ -210,9 +237,6 @@ void GenF1Job::Run()
 
             front += fileBlockSize * 2;
             back  += fileBlockSize * 2;
-
-            // Set the fence to signaled initially so that we don't wait on the first buffer flip.
-            dbuf->fence.Signal();
         }
     }
 
