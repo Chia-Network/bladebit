@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string.h>
+#include "Platform.h"
 
 #ifdef _MSC_VER
     #define Swap16( x ) _byteswap_ushort( x )
@@ -51,8 +52,62 @@ inline void ZeroMem( T* ptr, size_t count )
     memset( ptr, 0, sizeof( T ) * count );
 }
 
-// Like ceil div, but tells you how man times to multiply
-// a in order to fit into b-sized chunks
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbmalloc( size_t size )
+{
+    void* ptr = malloc( size );
+    FatalIf( !ptr, "bbmalloc(): Out of memory." );
+    
+    return reinterpret_cast<T*>( ptr );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbrealloc( T* ptr, size_t newSize )
+{
+    ptr = reinterpret_cast<T*>( realloc( ptr, newSize ) );
+    FatalIf( !ptr, "bbrealloc(): Out of memory." );
+
+    return reinterpret_cast<T*>( ptr );
+}
+
+// #NOTE: Unlike calloc, this does not initialize memory to 0
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbcalloc( size_t count )
+{
+    return bbmalloc<T>( count * sizeof( T ) );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbcrealloc( T* ptr, size_t newCount )
+{
+    return bbrealloc( ptr, newCount * sizeof( T ) );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline void bbmemcpy_t( T* dst, T* src, size_t count )
+{
+    memcpy( dst, src, sizeof( T ) * count );
+}
+
+//-----------------------------------------------------------
+inline void* bballoca( size_t size )
+{
+#if PLATFORM_IS_WINDOWS
+    return _malloca( size );
+#elif PLATFORM_IS_UNIX
+    return _alloca( size );
+#else
+    #error Unimplemented Platform
+#endif
+}
+
+
+// Divide a by b and apply ceiling if needed.
 //-----------------------------------------------------------
 template <typename T>
 constexpr inline T CDiv( T a, int b )
@@ -60,24 +115,26 @@ constexpr inline T CDiv( T a, int b )
     return ( a + (T)b - 1 ) / (T)b;
 }
 
-/// Divides <deividend> by <divisor> and rounds
-/// it up to the next factor of <divisor>
 //-----------------------------------------------------------
-template<typename T>
-inline T CeildDiv( T dividend, T divisor )
+template <typename T>
+constexpr inline T CDivT( T a, T b )
 {
-    return dividend + ( divisor - ( dividend % divisor ) ) % divisor;
+    return ( a + b - (T)1 ) / b;
 }
 
 // Round up a number to the next upper boundary.
-// For example, if we want to round up some bytes to the
-// next 8-byte boundary.
-// This is the same as CeilDiv, but with a more intuitive name.
+// For example, if we want to round up some bytes to the next 8-byte boundary.
 //-----------------------------------------------------------
 template<typename T>
 inline T RoundUpToNextBoundary( T value, int boundary )
 {
-    return CeildDiv( value, (T)boundary );
+    return value + ( boundary - ( value % boundary ) ) % boundary;
+}
+
+template<typename T>
+inline T RoundUpToNextBoundaryT( T value, T boundary )
+{
+    return value + ( boundary - ( value % boundary ) ) % boundary;
 }
 
 const char HEX_TO_BIN[256] = {

@@ -148,8 +148,8 @@ ssize_t FileStream::Read( void* buffer, size_t size )
         _readPosition += (size_t)bytesRead;
     else
     {
-        _error    = (int)GetLastError();
-        bytesRead = -1;
+        _error = (int)GetLastError();
+        return (ssize_t)-1;
     }
 
     return (ssize_t)bytesRead;
@@ -195,11 +195,11 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
         _writePosition += (size_t)bytesWritten;
     else
     {
-        _error       = (int)GetLastError();
-        bytesWritten = -1;
+        _error = (int)GetLastError();
+        return (ssize_t)-1;
     }
 
-    return bytesWritten;
+    return (ssize_t)bytesWritten;
 }
 
 //----------------------------------------------------------

@@ -24,6 +24,13 @@ public:
 
     static void Flush();
     static void FlushError();
+
+#if DBG_LOG_ENABLE
+    static void Debug( const char* msg, ... );
+#else
+    static inline void Debug( const char* msg, ... ) {}
+#endif
+
 private:
 
     static FILE* GetOutStream();

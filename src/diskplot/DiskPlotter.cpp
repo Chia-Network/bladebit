@@ -16,7 +16,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
 {
     ZeroMem( &_cx );
 
-    _cx.bufferSizeBytes = 2ull GB + 512ull MB;
+    _cx.bufferSizeBytes = 4ull GB;// +512ull MB;
     
     Log::Line( "Allocating a working buffer of %.2lf MiB", (double)_cx.bufferSizeBytes BtoMB );
 
@@ -25,8 +25,9 @@ DiskPlotter::DiskPlotter( const Config cfg )
 
     
     // Test values
-    _cx.threadCount   = SysHost::GetLogicalCPUCount();
-    _cx.diskFlushSize = 128ull MB;
+    _cx.threadCount          = SysHost::GetLogicalCPUCount();
+    _cx.diskFlushSize        = 128ull MB;
+    _cx.diskQueueThreadCount = 1;
 
     _cx.threadPool    = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
     
@@ -49,11 +50,13 @@ DiskPlotter::DiskPlotter( const Config cfg )
 void DiskPlotter::Plot( const PlotRequest& req )
 {
     Log::Line( "Started plot." );
+    auto plotTimer = TimerBegin();
 
     {
         DiskPlotPhase1 phase1( _cx );
         phase1.Run();
     }
 
-    Log::Line( "Finished plotting in %.2lf seconds.", 0.0 );
+    double plotElapsed = TimerEnd( plotTimer );
+    Log::Line( "Finished plotting in %.2lf seconds ( %.2lf minutes ).", plotElapsed, plotElapsed / 60 );
 }

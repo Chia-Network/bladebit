@@ -35,6 +35,8 @@ struct MTJob
     inline uint JobId()    const { return _jobId; }
     inline uint JobCount() const { return _jobCount; }
 
+    inline bool IsControlThread() const { return _jobId == 0; }
+
     inline const TJob& GetJob( uint index )
     {
         ASSERT( index < _jobCount );
