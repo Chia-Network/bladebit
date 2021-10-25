@@ -121,7 +121,7 @@ void WorkHeap::CompletePendingReleases()
 
     // Grab pending releases
     int count;
-    while( count = _pendingReleases.Dequeue( releases, BUFFER_SIZE ) )
+    while( ( count = _pendingReleases.Dequeue( releases, BUFFER_SIZE ) ) )
     {
         // Log::Debug( "Releasing %d buffers.", count );
 

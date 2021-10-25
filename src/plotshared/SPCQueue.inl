@@ -1,4 +1,6 @@
 #pragma once
+#include "util/Log.h"
+#include "Util.h"
 
 //-----------------------------------------------------------
 template<typename T, int Capacity>
@@ -14,7 +16,7 @@ SPCQueue<T, Capacity>::~SPCQueue()
 template<typename T, int Capacity>
 int SPCQueue<T, Capacity>::Count() const
 {
-    return _count.load( std::memory_order_relaxed );
+    return _committedCount.load( std::memory_order_relaxed );
 }
 
 //-----------------------------------------------------------

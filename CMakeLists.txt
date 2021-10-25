@@ -133,7 +133,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 else()
 
     # *Nix
-    set(c_opts --include=pch.h -march=native -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
+    set(c_opts --include=pch.h -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
 
     set(release_c_opts 
         -O3 -flto
@@ -153,7 +153,7 @@ else()
     # GCC
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     
-        set(c_opts -fmax-errors=5 ${c_opts})
+        set(c_opts -march=native -fmax-errors=5 ${c_opts})
 
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")

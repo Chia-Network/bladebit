@@ -99,7 +99,9 @@ inline void* bballoca( size_t size )
 {
 #if PLATFORM_IS_WINDOWS
     return _malloca( size );
-#elif PLATFORM_IS_UNIX
+#elif PLATFORM_IS_MACOS
+    return alloca( size );
+#elif PLATFORM_IS_LINUX
     return _alloca( size );
 #else
     #error Unimplemented Platform

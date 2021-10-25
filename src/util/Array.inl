@@ -4,7 +4,7 @@
 
 
 template<typename T>
-inline Array<T>::Array() : this( size_t( 0 ) )
+inline Array<T>::Array() : Array( size_t( 0 ) )
 {
 }
 
@@ -52,7 +52,7 @@ inline void Array<T>::Pop()
 {
     ASSERT( _length );
     
-    T& value = _elements[--_length].~T();
+    _elements[--_length].~T();
 }
 
 template<typename T>

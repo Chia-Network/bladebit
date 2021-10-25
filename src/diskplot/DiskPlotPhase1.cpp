@@ -54,7 +54,7 @@ void DiskPlotPhase1::GenF1()
 
     // #TODO: Enforce a minimum chunk size, and ensure that a (chunk size - counts) / threadCount
     // /      is sufficient to bee larger that the cache line size
-    const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
+    // const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
 
     const size_t chunkBufferSize  = cx.diskFlushSize;
     const uint32 blocksPerChunk   = (uint32)( chunkBufferSize / ( kF1BlockSize * 2 ) );                 // * 2 because we also have to process/write the x values

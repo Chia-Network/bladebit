@@ -48,6 +48,18 @@ size_t SysHost::GetAvailableSystemMemory()
 }
 
 //-----------------------------------------------------------
+uint SysHost::GetLogicalCPUCount()
+{
+    host_basic_info info;
+    ZeroMem( &info );
+
+    mach_msg_type_number_t host_info_count = (mach_msg_type_number_t)sizeof( info );
+    host_info( mach_host_self(), HOST_BASIC_INFO, (host_info_t)&info, &host_info_count );
+
+    return (uint)info.avail_cpus;
+}
+
+//-----------------------------------------------------------
 void* SysHost::VirtualAlloc( size_t size, bool initialize )
 {
     // #TODO: Use vm_allocate
@@ -100,6 +112,7 @@ void SysHost::VirtualFree( void* ptr )
     // #TODO: Implement
 }
 
+/*
 //-----------------------------------------------------------
 uint64 SysHost::SetCurrentProcessAffinityMask( uint64 mask )
 {
@@ -125,4 +138,11 @@ uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
         return (uint64)(integer_t)mask;
 
     return 0;
+}
+*/
+
+//-----------------------------------------------------------
+bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
+{
+    
 }

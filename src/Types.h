@@ -10,7 +10,7 @@ typedef unsigned long long int  uint64;
     typedef uint32          uint;
 #endif
 
-#if !ssize_t
+#if _WIN32
     typedef int64_t         ssize_t;
 #endif
 
