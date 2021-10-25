@@ -50,11 +50,13 @@ DiskPlotter::DiskPlotter( const Config cfg )
 void DiskPlotter::Plot( const PlotRequest& req )
 {
     Log::Line( "Started plot." );
+    auto plotTimer = TimerBegin();
 
     {
         DiskPlotPhase1 phase1( _cx );
         phase1.Run();
     }
 
-    Log::Line( "Finished plotting in %.2lf seconds.", 0.0 );
+    double plotElapsed = TimerEnd( plotTimer );
+    Log::Line( "Finished plotting in %.2lf seconds ( %.2lf minutes ).", plotElapsed, plotElapsed / 60 );
 }
