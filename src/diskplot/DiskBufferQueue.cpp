@@ -412,7 +412,7 @@ inline void DiskBufferQueue::WriteToFile( FileStream& file, size_t size, const b
         ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
 
         sizeToWrite -= (size_t)sizeWritten;
-        buffer += sizeWritten;
+        buffer      += sizeWritten;
     }
     
     if( remainder )
@@ -436,7 +436,36 @@ inline void DiskBufferQueue::WriteToFile( FileStream& file, size_t size, const b
 //-----------------------------------------------------------
 void DiskBufferQueue::ReadFromFile( FileStream& file, size_t size, byte* buffer, byte* blockBuffer, const char* fileName, uint bucket )
 {
+    const size_t blockSize  = _blockSize;
+    
+    /// #NOTE: All our buffers should be block aligned so we should be able to freely read all blocks to them...
+    ///       Only implement remainder block reading if we really need to.
+//     size_t       sizeToRead = size / blockSize * blockSize;
+//     const size_t remainder  = size - sizeToRead;
 
+    size_t sizeToRead = CDivT( size, blockSize ) * blockSize;
+
+    while( sizeToRead )
+    {
+        ssize_t sizeRead = file.Read( buffer, sizeToRead );
+        if( sizeRead < 1 )
+        {
+            const int err = file.GetError();
+            Fatal( "Failed to read from '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+        }
+
+        ASSERT( sizeRead <= (ssize_t)sizeToRead );
+        
+        sizeToRead -= (size_t)sizeRead;
+        buffer     += sizeRead;
+    }
+
+//     if( remainder )
+//     {
+//         ASSERT( blockBuffer );
+// 
+//         file.read
+//     }
 }
 
 //-----------------------------------------------------------

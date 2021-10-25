@@ -2,7 +2,7 @@
 #include "pos/chacha8.h"
 #include "Util.h"
 #include "util/Log.h"
-
+#include "algorithm/RadixSort.h"
 
 // Test
 #include "io/FileStream.h"
@@ -110,7 +110,7 @@ void DiskPlotPhase1::GenF1()
             trailingBlocks--;
         }
 
-        x       += job.blockCount * entriesPerBlock;
+        x       += job.blockCount * entriesPerBlock * chunkCount;
         blocks  += job.blockCount * kF1BlockSize;
         xBuffer += job.blockCount * kF1BlockSize;
     }
@@ -140,6 +140,7 @@ void DiskPlotPhase1::GenF1()
 void DiskPlotPhase1::ForwardPropagate()
 {
     DiskBufferQueue& ioDispatch = *_diskQueue;
+    ThreadPool&      threadPool = *_cx.threadPool;
 
     size_t maxBucketSize = 0;
 
@@ -151,16 +152,27 @@ void DiskPlotPhase1::ForwardPropagate()
 
     // Allocate 2 buffers for loading buckets
     DoubleBuffer bucketBuffers;
-
     bucketBuffers.front = ioDispatch.GetBuffer( maxBucketSize * 4 );
     bucketBuffers.back  = bucketBuffers.front + maxBucketSize * 2;
 
-    // Load initial bucket
+    // Allocate temp buffers
+    uint32* yTemp    = (uint32*)ioDispatch.GetBuffer( maxBucketSize );
+    uint32* metaTemp = (uint32*)ioDispatch.GetBuffer( maxBucketSize * 4 );
+
+    // The sort key initially is set to the x buffer
+    uint32* sortKey     = (uint32*)( bucketBuffers.front + maxBucketSize );
+    uint32* realSortKey = nullptr;
+
+    // Reset the fence as we're about to use it
+    bucketBuffers.fence.Wait();
+
+    // Seek all buckets to the start
     ioDispatch.SeekBucket( FileId::Y, 0, SeekOrigin::Begin );
     ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
 
+    // Load initial bucket
     ioDispatch.ReadFile( FileId::Y, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
-    ioDispatch.ReadFile( FileId::X, 0, bucketBuffers.front + maxBucketSize, _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.ReadFile( FileId::X, 0, sortKey            , _bucketCounts[0] * sizeof( uint32 ) );
     ioDispatch.AddFence( bucketBuffers.fence );
     ioDispatch.CommitCommands();
     bucketBuffers.fence.Wait();
@@ -170,6 +182,34 @@ void DiskPlotPhase1::ForwardPropagate()
         const uint entryCount = _bucketCounts[bucketIdx];
 
         // Read the next bucket in the background if we're not at the last bucket
+        const uint nextBucketIdx = bucketIdx + 1;
+
+        if( nextBucketIdx < BB_DP_BUCKET_COUNT )
+        {
+            const size_t readSize = _bucketCounts[nextBucketIdx] * sizeof( uint32 );
+
+            ioDispatch.ReadFile( FileId::Y, nextBucketIdx, bucketBuffers.back, readSize );
+            ioDispatch.ReadFile( FileId::X, nextBucketIdx, bucketBuffers.back + maxBucketSize, readSize );
+            ioDispatch.AddFence( bucketBuffers.fence );
+            ioDispatch.CommitCommands();
+        }
+        else
+            bucketBuffers.fence.Signal();
+
+        // Sort our current bucket
+        uint32* yBuffer    = (uint32*)bucketBuffers.front;
+        uint32* metaBuffer = (uint32*)( bucketBuffers.front + maxBucketSize );
+
+        {
+            auto timer = TimerBegin();
+            RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, yBuffer, yTemp, metaBuffer, metaTemp, entryCount );
+            double elapsed = TimerEnd( timer );
+
+            Log::Line( "Finished sorting bucket %d in %.2lf seconds.", bucketIdx, elapsed );
+        }
+
+        // Ensure the next buffer has been read
+        bucketBuffers.Flip();
     }
 }
 
@@ -450,7 +490,7 @@ void GenF1Job::Run()
             xBuffer[idx13] = x + 13;
             xBuffer[idx14] = x + 14;
             xBuffer[idx15] = x + 15;
-            
+
             block += entriesPerBlock;
             x     += entriesPerBlock;
         }

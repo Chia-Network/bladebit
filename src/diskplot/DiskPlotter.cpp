@@ -16,7 +16,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
 {
     ZeroMem( &_cx );
 
-    _cx.bufferSizeBytes = 2ull GB + 512ull MB;
+    _cx.bufferSizeBytes = 4ull GB;// +512ull MB;
     
     Log::Line( "Allocating a working buffer of %.2lf MiB", (double)_cx.bufferSizeBytes BtoMB );
 

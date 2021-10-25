@@ -85,6 +85,7 @@ private:
     void GenF1();
     void ForwardPropagate();
 
+    void ForwardPropagateBucket( uint bucketIdx );
 
 private:
     DiskPlotContext& _cx;
