@@ -1,10 +1,7 @@
 #include "SysHost.h"
 #include "Platform.h"
 #include "Util.h"
-
-#if _DEBUG
-    #include "util/Log.h"
-#endif
+#include "util/Log.h"
 
 //-----------------------------------------------------------
 size_t SysHost::GetPageSize()
@@ -144,5 +141,22 @@ uint64 SysHost::SetCurrentThreadAffinityMask( uint64 mask )
 //-----------------------------------------------------------
 bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
 {
-    
+    ASSERT( cpuId < 32 );
+
+    thread_port_t thread = mach_thread_self();
+
+    // It seems macOS does not support 64 bit affinity masks
+    thread_affinity_policy_data_t policy = { (integer_t)(1 << cpuId) };
+
+    kern_return_t r =  thread_policy_set( thread, THREAD_AFFINITY_POLICY, 
+                                          (thread_policy_t)&policy,
+                                           THREAD_AFFINITY_POLICY_COUNT );
+
+    if( r != KERN_SUCCESS )
+    {
+        Log::Error( "thread_policy_set failed on cpu id %u", cpuId );
+        return false;
+    }
+
+    return true;
 }
