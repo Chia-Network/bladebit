@@ -10,6 +10,7 @@ public:
         size_t ramSizeBytes;
         uint   threadCount;
         uint   diskQueueThreadCount;
+        const char* tmpPath;
     };
 
     struct PlotRequest

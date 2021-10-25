@@ -94,3 +94,9 @@ private:
     uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
 };
 
+
+struct MatchJob : MTJob<MatchJob>
+{
+    void Run() override;
+};
+

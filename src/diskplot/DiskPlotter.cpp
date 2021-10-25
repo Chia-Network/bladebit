@@ -16,6 +16,9 @@ DiskPlotter::DiskPlotter( const Config cfg )
 {
     ZeroMem( &_cx );
 
+    ASSERT( cfg.tmpPath );
+    
+    _cx.tmpPath         = cfg.tmpPath;
     _cx.bufferSizeBytes = 4ull GB;// +512ull MB;
     
     Log::Line( "Allocating a working buffer of %.2lf MiB", (double)_cx.bufferSizeBytes BtoMB );
@@ -29,7 +32,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.diskFlushSize        = 128ull MB;
     _cx.diskQueueThreadCount = 1;
 
-    _cx.threadPool    = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
+    _cx.threadPool = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
     
     static const byte plotId[32] = {
         22, 24, 11, 3, 1, 15, 11, 6, 
