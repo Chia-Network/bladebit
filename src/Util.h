@@ -7,7 +7,7 @@
     #define Swap16( x ) _byteswap_ushort( x )
     #define Swap32( x ) _byteswap_ulong( x )
     #define Swap64( x ) _byteswap_uint64( x )
-#elif defined( __GNUC__ )
+#elif defined( __GNUC__ ) || defined( __clang__ )
     #define Swap16( x ) __builtin_bswap16( x )
     #define Swap32( x ) __builtin_bswap32( x )
     #define Swap64( x ) __builtin_bswap64( x )
