@@ -6,6 +6,8 @@
 
 struct DiskPlotContext
 {
+    const char*  tmpPath;             // Path in which to allocate temporary buffers
+
     size_t      bufferSizeBytes;      // Size in bytes of our work buffer
     byte*       workBuffer;           // Buffer allocated for in-memory work
 
