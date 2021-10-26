@@ -226,11 +226,18 @@ void DiskPlotPhase1::ForwardPropagateTable( TableId table )
 //-----------------------------------------------------------
 void DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32* groups, uint32 maxGroups )
 {
-    const uint threadCount = _cx.threadCount;
+    auto& cx = _cx;
 
+    ThreadPool& pool        = *cx.threadPool;
+    const uint  threadCount = _cx.threadCount;
+
+    MTJobRunner<ScanGroupJob> jobs( pool );
+    
     for( uint i = 1; i < threadCount; i++ )
     {
+        ScanGroupJob& job = jobs[i];
 
+        job.startIndex = 0;
     }
 }
 
