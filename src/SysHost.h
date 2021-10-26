@@ -14,9 +14,9 @@ ImplementFlagOps( VProtect );
 
 struct NumaInfo
 {
-    uint        nodeCount;  // How many NUMA nodes in the system
-    uint        cpuCount;   // Total cpu count used by nodes
-    Span<uint>* cpuIds;     // CPU ids of each node
+    uint        nodeCount;      // How many NUMA nodes in the system
+    uint        cpuCount;       // Total cpu count used by nodes
+    Span<uint>* cpuIds;         // CPU ids of each node
 
     #ifdef _WIN32
 //         Span<uint16> procGroup; // Processor group each cpu belongs to.
