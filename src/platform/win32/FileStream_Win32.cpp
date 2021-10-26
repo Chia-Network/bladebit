@@ -60,6 +60,9 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
 
     if( fd != INVALID_HANDLE_VALUE )
     {
+        // Clear error in case we're re-opening an existing file (it emits ERROR_ALREADY_EXISTS)
+        GetLastError();
+
         // Get the block (cluster) size
         size_t blockSize;
 

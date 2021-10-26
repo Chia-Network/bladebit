@@ -33,7 +33,10 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 //-----------------------------------------------------------
 void DiskPlotPhase1::Run()
 {
+#if !BB_DP_DBG_READ_EXISTING_F1
     GenF1();
+#endif
+
     ForwardPropagate();
 }
 
@@ -206,11 +209,28 @@ void DiskPlotPhase1::ForwardPropagate()
             RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, yBuffer, yTemp, metaBuffer, metaTemp, entryCount );
             double elapsed = TimerEnd( timer );
 
-            Log::Line( "Finished sorting bucket %d in %.2lf seconds.", bucketIdx, elapsed );
+            Log::Line( "Sorting bucket %d in %.2lf seconds.", bucketIdx, elapsed );
         }
 
         // Ensure the next buffer has been read
         bucketBuffers.Flip();
+    }
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::ForwardPropagateTable( TableId table )
+{
+
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32* groups, uint32 maxGroups )
+{
+    const uint threadCount = _cx.threadCount;
+
+    for( uint i = 1; i < threadCount; i++ )
+    {
+
     }
 }
 

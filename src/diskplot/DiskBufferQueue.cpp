@@ -66,8 +66,15 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     {
         FileStream& file = fileSet.files[i];
 
+        constexpr FileMode fileMode =
+        #if BB_DP_DBG_READ_EXISTING_F1
+            FileMode::Open;
+        #else
+            FileMode::Create;
+        #endif
+
         sprintf( baseName, "%s_%u.tmp", name, i );
-        if( !file.Open( pathBuffer, FileMode::Create, FileAccess::ReadWrite, flags ) )
+        if( !file.Open( pathBuffer, fileMode, FileAccess::ReadWrite, flags ) )
             Fatal( "Failed to open temp work file @ %s with error: %d.", pathBuffer, file.GetError() );
 
         if( !_blockBuffer )

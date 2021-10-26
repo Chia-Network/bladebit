@@ -2,8 +2,8 @@
 #include "DiskPlotContext.h"
 #include "plotshared/MTJob.h"
 #include "DiskBufferQueue.h"
-
 #include "util/Log.h"
+#include "ChiaConsts.h"
 
 // Represents a double-buffered blob of data of the size of
 // the block size of the device we're writing to * 2 (one for y one for x)
@@ -85,13 +85,24 @@ private:
     void GenF1();
     void ForwardPropagate();
 
-    void ForwardPropagateBucket( uint bucketIdx );
+    void ForwardPropagateTable( TableId table );
+    void ForwardPropagateBucket( TableId table, uint bucketIdx );
+
+    void ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32* groups, uint32 maxGroups );
+
+    void Match();
+    void GenFx();
 
 private:
     DiskPlotContext& _cx;
     DiskBufferQueue* _diskQueue;
 
     uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
+};
+
+struct ScanGroupJob : MTJob<ScanGroupJob>
+{
+    uint startIndex;
 };
 
 

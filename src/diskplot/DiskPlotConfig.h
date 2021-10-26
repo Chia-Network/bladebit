@@ -9,3 +9,6 @@
 
 #define BB_DP_BUCKET_TMP_SIZE     (65337 * 64ull)   // 4 MiB worth of ChaCha blocks + 1 block
 #define BB_DP_ALL_BUCKET_TMP_SIZE ( BB_DP_BUCKET_TMP_SIZE * BB_DP_BUCKET_COUNT )
+
+#define BB_DP_DBG_READ_EXISTING_F1 1
+
