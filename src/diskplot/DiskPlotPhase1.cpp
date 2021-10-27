@@ -689,7 +689,6 @@ void DiskPlotPhase1::ForwardPropagate()
             auto timer = TimerBegin();
             RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, yBuffer, yTemp, metaBuffer, metaTemp, entryCount );
             double elapsed = TimerEnd( timer );
-
             Log::Line( "  Sorted bucket in %.2lf seconds.", elapsed );
         }
 
