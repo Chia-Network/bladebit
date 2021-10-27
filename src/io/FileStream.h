@@ -12,9 +12,9 @@ ImplementFlagOps( FileAccess );
 
 enum class FileMode : uint16
 {
-    Open   = 0,
-    Create = 1,
-    Append = 2
+    Open          = 0     // Open existing (fails if it does not exist).
+    ,Create       = 1     // Create new, or if it is existing, open and truncate.
+    ,OpenOrCreate = 2     // Open existing or create new.
 };
 
 enum class FileFlags : uint32

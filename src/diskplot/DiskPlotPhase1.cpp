@@ -35,6 +35,33 @@ void DiskPlotPhase1::Run()
 {
 #if !BB_DP_DBG_READ_EXISTING_F1
     GenF1();
+#else
+    {
+        size_t pathLen = strlen( _cx.tmpPath );
+        pathLen += sizeof( BB_DP_DBG_READ_BUCKET_COUNT_FNAME );
+
+        std::string bucketsPath = _cx.tmpPath;
+        if( bucketsPath[bucketsPath.length() - 1] != '/' && bucketsPath[bucketsPath.length() - 1] != '\\' )
+            bucketsPath += "/";
+
+        bucketsPath += BB_DP_DBG_READ_BUCKET_COUNT_FNAME;
+
+        FileStream fBucketCounts;
+        if( fBucketCounts.Open( bucketsPath.c_str(), FileMode::Open, FileAccess::Read ) )
+        {
+            size_t sizeRead = fBucketCounts.Read( _bucketCounts, sizeof( _bucketCounts ) );
+            FatalIf( sizeRead != sizeof( _bucketCounts ), "Invalid bucket counts." );
+        }
+        else
+        {
+            GenF1();
+
+            fBucketCounts.Close();
+            FatalIf( !fBucketCounts.Open( bucketsPath.c_str(), FileMode::Create, FileAccess::Write ), "File to open bucket counts file" );
+            FatalIf( fBucketCounts.Write( _bucketCounts, sizeof( _bucketCounts ) ) != sizeof( _bucketCounts ), "Failed to write bucket counts.");
+        }
+
+    }
 #endif
 
     ForwardPropagate();
@@ -137,107 +164,6 @@ void DiskPlotPhase1::GenF1()
 
         fence.Wait();
         _diskQueue->CompletePendingReleases();
-    }
-}
-
-//-----------------------------------------------------------
-void DiskPlotPhase1::ForwardPropagate()
-{
-    DiskBufferQueue& ioDispatch = *_diskQueue;
-    ThreadPool&      threadPool = *_cx.threadPool;
-
-    size_t maxBucketSize = 0;
-
-    // Find the largest bucket so that we can reserve buffers of its size
-    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-        maxBucketSize = std::max( maxBucketSize, (size_t)_bucketCounts[i] );
-
-    maxBucketSize *= sizeof( uint32 );
-
-    // Allocate 2 buffers for loading buckets
-    DoubleBuffer bucketBuffers;
-    bucketBuffers.front = ioDispatch.GetBuffer( maxBucketSize * 4 );
-    bucketBuffers.back  = bucketBuffers.front + maxBucketSize * 2;
-
-    // Allocate temp buffers
-    uint32* yTemp    = (uint32*)ioDispatch.GetBuffer( maxBucketSize );
-    uint32* metaTemp = (uint32*)ioDispatch.GetBuffer( maxBucketSize * 4 );
-
-    // The sort key initially is set to the x buffer
-    uint32* sortKey     = (uint32*)( bucketBuffers.front + maxBucketSize );
-    uint32* realSortKey = nullptr;
-
-    // Reset the fence as we're about to use it
-    bucketBuffers.fence.Wait();
-
-    // Seek all buckets to the start
-    ioDispatch.SeekBucket( FileId::Y, 0, SeekOrigin::Begin );
-    ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
-
-    // Load initial bucket
-    ioDispatch.ReadFile( FileId::Y, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
-    ioDispatch.ReadFile( FileId::X, 0, sortKey            , _bucketCounts[0] * sizeof( uint32 ) );
-    ioDispatch.AddFence( bucketBuffers.fence );
-    ioDispatch.CommitCommands();
-    bucketBuffers.fence.Wait();
-
-    for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
-    {
-        const uint entryCount = _bucketCounts[bucketIdx];
-
-        // Read the next bucket in the background if we're not at the last bucket
-        const uint nextBucketIdx = bucketIdx + 1;
-
-        if( nextBucketIdx < BB_DP_BUCKET_COUNT )
-        {
-            const size_t readSize = _bucketCounts[nextBucketIdx] * sizeof( uint32 );
-
-            ioDispatch.ReadFile( FileId::Y, nextBucketIdx, bucketBuffers.back, readSize );
-            ioDispatch.ReadFile( FileId::X, nextBucketIdx, bucketBuffers.back + maxBucketSize, readSize );
-            ioDispatch.AddFence( bucketBuffers.fence );
-            ioDispatch.CommitCommands();
-        }
-        else
-            bucketBuffers.fence.Signal();
-
-        // Sort our current bucket
-        uint32* yBuffer    = (uint32*)bucketBuffers.front;
-        uint32* metaBuffer = (uint32*)( bucketBuffers.front + maxBucketSize );
-
-        {
-            auto timer = TimerBegin();
-            RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, yBuffer, yTemp, metaBuffer, metaTemp, entryCount );
-            double elapsed = TimerEnd( timer );
-
-            Log::Line( "Sorting bucket %d in %.2lf seconds.", bucketIdx, elapsed );
-        }
-
-        // Ensure the next buffer has been read
-        bucketBuffers.Flip();
-    }
-}
-
-//-----------------------------------------------------------
-void DiskPlotPhase1::ForwardPropagateTable( TableId table )
-{
-
-}
-
-//-----------------------------------------------------------
-void DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32* groups, uint32 maxGroups )
-{
-    auto& cx = _cx;
-
-    ThreadPool& pool        = *cx.threadPool;
-    const uint  threadCount = _cx.threadCount;
-
-    MTJobRunner<ScanGroupJob> jobs( pool );
-    
-    for( uint i = 1; i < threadCount; i++ )
-    {
-        ScanGroupJob& job = jobs[i];
-
-        job.startIndex = 0;
     }
 }
 
@@ -677,6 +603,427 @@ void GenF1Job::WriteFinalBlockRemainders( DoubleBuffer* remainderBuffers, uint32
         queue.WriteFile( FileId::X, i, xBuffer, size );
     }
 }
+
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::ForwardPropagate()
+{
+    DiskBufferQueue& ioDispatch  = *_diskQueue;
+    ThreadPool&      threadPool  = *_cx.threadPool;
+    const uint       threadCount = _cx.threadCount;
+
+    size_t maxBucketSize = 0;
+
+    // Find the largest bucket so that we can reserve buffers of its size
+    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        maxBucketSize = std::max( maxBucketSize, (size_t)_bucketCounts[i] );
+
+    maxBucketSize *= sizeof( uint32 );
+
+    // Allocate 2 buffers for loading buckets
+    DoubleBuffer bucketBuffers;
+    bucketBuffers.front = ioDispatch.GetBuffer( maxBucketSize * 4 );
+    bucketBuffers.back  = bucketBuffers.front + maxBucketSize * 2;
+
+
+    _maxBucketCount = maxBucketSize / sizeof( uint32 );
+    _bucketBuffers  = &bucketBuffers;
+
+    // Allocate temp buffers & BC group buffers
+    uint32* yTemp           = (uint32*)ioDispatch.GetBuffer( maxBucketSize );
+    uint32* metaTemp        = (uint32*)ioDispatch.GetBuffer( maxBucketSize * 4 );
+    uint32* groupBoundaries = (uint32*)ioDispatch.GetBuffer( BB_DP_MAX_BC_GROUP_PER_BUCKET * sizeof( uint32 ) );
+    
+    const size_t entriesPerBucket  = ( 1ull << _K ) / BB_DP_BUCKET_COUNT;
+    const uint32 maxPairsPerThread = (uint32)( entriesPerBucket / threadCount + BB_DP_XTRA_MATCHES_PER_THREAD );
+    const size_t maxPairsPerbucket = maxPairsPerThread * threadCount;
+
+    uint32* lGroups = (uint32*)ioDispatch.GetBuffer( maxPairsPerbucket * sizeof( uint32 ) );
+    uint16* rGroups = (uint16*)ioDispatch.GetBuffer( maxPairsPerbucket * sizeof( uint16 ) );
+
+    // The sort key initially is set to the x buffer
+    uint32* sortKey     = (uint32*)( bucketBuffers.front + maxBucketSize );
+    uint32* realSortKey = nullptr;
+
+    // Reset the fence as we're about to use it
+    bucketBuffers.fence.Wait();
+
+    // Seek all buckets to the start
+    ioDispatch.SeekBucket( FileId::Y, 0, SeekOrigin::Begin );
+    ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
+
+    // Load initial bucket
+    ioDispatch.ReadFile( FileId::Y, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.ReadFile( FileId::X, 0, sortKey            , _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.AddFence( bucketBuffers.fence );
+    ioDispatch.CommitCommands();
+    bucketBuffers.fence.Wait();
+
+    for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
+    {
+        Log::Line( "Forward Propagating bucket %-2u", bucketIdx );
+
+        const uint entryCount = _bucketCounts[bucketIdx];
+
+        // Read the next bucket in the background if we're not at the last bucket
+        const uint nextBucketIdx = bucketIdx + 1;
+
+        if( nextBucketIdx < BB_DP_BUCKET_COUNT )
+        {
+            const size_t readSize = _bucketCounts[nextBucketIdx] * sizeof( uint32 );
+
+            ioDispatch.ReadFile( FileId::Y, nextBucketIdx, bucketBuffers.back, readSize );
+            ioDispatch.ReadFile( FileId::X, nextBucketIdx, bucketBuffers.back + maxBucketSize, readSize );
+            ioDispatch.AddFence( bucketBuffers.fence );
+            ioDispatch.CommitCommands();
+        }
+        else
+            bucketBuffers.fence.Signal();
+
+        // Sort our current bucket
+        uint32* yBuffer    = (uint32*)bucketBuffers.front;
+        uint32* metaBuffer = (uint32*)( bucketBuffers.front + maxBucketSize );
+
+        {
+            Log::Line( "  Sorting bucket." );
+            auto timer = TimerBegin();
+            RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, yBuffer, yTemp, metaBuffer, metaTemp, entryCount );
+            double elapsed = TimerEnd( timer );
+
+            Log::Line( "  Sorted bucket in %.2lf seconds.", elapsed );
+        }
+
+        // Scan for BC groups
+        GroupInfo groupInfos[BB_MAX_JOBS];
+
+        const uint32 groupCount = ScanGroups( bucketIdx, yBuffer, entryCount, groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
+
+        // Match pairs
+        struct Pairs pairs[BB_MAX_JOBS];
+
+        for( uint i = 0; i < threadCount; i++ )
+        {
+            pairs[i].left  = lGroups + i * maxPairsPerThread;
+            pairs[i].right = rGroups + i * maxPairsPerThread;
+        }
+
+        Match( bucketIdx, maxPairsPerThread, yBuffer, groupInfos, pairs );
+
+        // Ensure the next buffer has been read
+        bucketBuffers.Flip();
+    }
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::ForwardPropagateTable( TableId table )
+{
+    
+}
+
+//-----------------------------------------------------------
+uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] )
+{
+    Log::Line( "  Scanning for groups." );
+
+    auto& cx = _cx;
+
+    ThreadPool& pool               = *cx.threadPool;
+    const uint  threadCount        = _cx.threadCount;
+    const uint  maxGroupsPerThread = maxGroups / threadCount - 1;   // -1 because we need to add an extra end index to check R group 
+                                                                    // without adding an extra 'if'
+    MTJobRunner<ScanGroupJob> jobs( pool );
+
+    jobs[0].yBuffer         = yBuffer;
+    jobs[0].groupBoundaries = groups;
+    jobs[0].bucketIdx       = bucketIdx;
+    jobs[0].startIndex      = 0;
+    jobs[0].endIndex        = entryCount;
+    jobs[0].maxGroups       = maxGroupsPerThread;
+    jobs[0].groupCount      = 0;
+    
+    for( uint i = 1; i < threadCount; i++ )
+    {
+        ScanGroupJob& job = jobs[i];
+
+        job.yBuffer         = yBuffer;
+        job.groupBoundaries = groups + maxGroupsPerThread * i;
+        job.bucketIdx       = bucketIdx;
+        job.maxGroups       = maxGroupsPerThread;
+        job.groupCount      = 0;
+
+        const uint32 idx           = entryCount / threadCount * i;
+        const uint32 y             = yBuffer[idx];
+        const uint32 curGroup      = y / kBC;
+        const uint32 groupLocalIdx = y - curGroup * kBC;
+
+        uint32 targetGroup;
+
+        // If we are already at the start of a group, just use this index
+        if( groupLocalIdx == 0 )
+        {
+            job.startIndex = idx;
+        }
+        else
+        {
+            // Choose if we should find the upper boundary or the lower boundary
+            const uint32 remainder = kBC - groupLocalIdx;
+            
+            #if _DEBUG
+                bool foundBoundary = false;
+            #endif
+            if( remainder <= kBC / 2 )
+            {
+                // Look for the upper boundary
+                for( uint32 j = idx+1; j < entryCount; j++ )
+                {
+                    targetGroup = yBuffer[j] / kBC;
+                    if( targetGroup != curGroup )
+                    {
+                        #if _DEBUG
+                            foundBoundary = true;
+                        #endif
+                        job.startIndex = j; break;
+                    }   
+                }
+            }
+            else
+            {
+                // Look for the lower boundary
+                for( uint32 j = idx-1; j >= 0; j-- )
+                {
+                    targetGroup = yBuffer[j] / kBC;
+                    if( targetGroup != curGroup )
+                    {
+                        #if _DEBUG
+                            foundBoundary = true;
+                        #endif
+                        job.startIndex = j+1; break;
+                    }  
+                }
+            }
+
+            ASSERT( foundBoundary );
+        }
+
+        auto& lastJob = jobs[i-1];
+        ASSERT( job.startIndex > lastJob.startIndex );  // #TODO: This should not happen but there should
+                                                        //        be a pre-check in the off chance that the thread count is really high.
+                                                        //        Again, should not happen with the hard-coded thread limit,
+                                                        //        but we can check if entryCount / threadCount <= kBC 
+
+
+        // We add +1 so that the next group boundary is added to the list, and we can tell where the R group ends.
+        lastJob.endIndex = job.startIndex + 1;
+
+        ASSERT( yBuffer[job.startIndex-1] / kBC != yBuffer[job.startIndex] / kBC );
+
+        job.groupBoundaries = groups + maxGroupsPerThread * i;
+    }
+
+    // Fill in missing data for the last job
+    jobs[threadCount-1].endIndex = entryCount;
+
+    // Run the scan job
+    const double elapsed = jobs.Run();
+    Log::Line( "  Finished group scan in %.2lf seconds." );
+
+    // Get the total group count
+    uint groupCount = 0;
+
+    for( uint i = 0; i < threadCount-1; i++ )
+    {
+        auto& job = jobs[i];
+
+        // Add a trailing end index (but don't count it) so that we can test against it
+        job.groupBoundaries[job.groupCount] = jobs[i+1].groupBoundaries[0];
+
+        groupInfos[i].groupBoundaries = job.groupBoundaries;
+        groupInfos[i].groupCount      = job.groupCount;
+        groupInfos[i].startIndex      = job.startIndex;
+
+        groupCount += job.groupCount;
+    }
+    
+    // Let the last job know where its R group is
+    auto& lastJob = jobs[threadCount-1];
+    lastJob.groupBoundaries[lastJob.groupCount] = entryCount;
+
+    groupInfos[threadCount-1].groupBoundaries = lastJob.groupBoundaries;
+    groupInfos[threadCount-1].groupCount      = lastJob.groupCount;
+    groupInfos[threadCount-1].startIndex      = lastJob.startIndex;
+
+    Log::Line( "  Found %u groups.", groupCount );
+
+    return groupCount;
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], Pairs pairs[BB_MAX_JOBS] )
+{
+    Log::Line( "  Matching groups." );
+
+    auto&      cx          = _cx;
+    const uint threadCount = cx.threadCount;
+
+    MTJobRunner<MatchJob> jobs( *cx.threadPool );
+
+    for( uint i = 0; i < threadCount; i++ )
+    {
+        auto& job = jobs[i];
+
+        job.yBuffer         = yBuffer;
+        job.pairs           = &pairs[i];
+        job.bucketIdx       = bucketIdx;
+        job.maxPairCount    = maxPairsPerThread;
+        job.pairCount       = 0;
+        job.groupInfo       = &groupInfos[i];
+        job.copyLDst        = nullptr;
+        job.copyRDst        = nullptr;
+    }
+
+    const double elapsed = jobs.Run();
+
+    Log::Line( "  Finished matching groups in %.2lf seconds.", elapsed );
+}
+
+//-----------------------------------------------------------
+void ScanGroupJob::Run()
+{
+    const uint32 maxGroups = this->maxGroups;
+    
+    uint32* groupBoundaries = this->groupBoundaries;
+    uint32  grouipCount     = 0;
+
+    const uint32* yBuffer = this->yBuffer;
+    const uint32  start   = this->startIndex;
+    const uint32  end     = this->endIndex;
+
+    const uint64 bucket = ( (uint64)this->bucketIdx ) << 32;
+
+    uint64 lastGroup = ( bucket | yBuffer[start] ) / kBC;
+
+    for( uint32 i = start+1; i < end; i++ )
+    {
+        uint64 group = ( bucket | yBuffer[i] ) / kBC;
+
+        if( group != lastGroup )
+        {
+            ASSERT( group > lastGroup );
+
+            groupBoundaries[groupCount++] = i;
+            lastGroup = group;
+
+            if( groupCount == maxGroups )
+            {
+                ASSERT( 0 );    // We ought to always have enough space
+                                // So this should be an error
+                break;
+            }
+        }
+    }
+
+    this->groupCount = groupCount;
+}
+
+//-----------------------------------------------------------
+void MatchJob::Run()
+{
+    const uint32* yBuffer         = this->yBuffer;
+    const uint32* groupBoundaries = this->groupInfo->groupBoundaries;
+    const uint32  groupCount      = this->groupInfo->groupCount;
+    const uint32  maxPairs        = this->maxPairCount;
+    const uint64  bucket          = ((uint64)this->bucketIdx) << 32;
+
+    Pairs  pairs     = *this->pairs;
+    uint32 pairCount = 0;
+
+    uint8  rMapCounts [kBC];
+    uint16 rMapIndices[kBC];
+
+    uint64 groupLStart = this->groupInfo->startIndex;
+    uint64 groupL      = ( bucket | yBuffer[groupLStart] ) / kBC;
+
+    for( uint32 i = 0; i < groupCount; i++ )
+    {
+        const uint64 groupRStart = groupBoundaries[i];
+        const uint64 groupR      = ( bucket | yBuffer[groupRStart] ) / kBC;
+
+        if( groupR - groupL == 1 )
+        {
+            // Groups are adjacent, calculate matches
+            const uint16 parity           = groupL & 1;
+            const uint64 groupREnd        = groupBoundaries[i+1];
+
+            const uint64 groupLRangeStart = groupL * kBC;
+            const uint64 groupRRangeStart = groupR * kBC;
+            
+            ASSERT( groupREnd - groupRStart <= 350 );
+            ASSERT( groupLRangeStart == groupRRangeStart - kBC );
+
+            // Prepare a map of range kBC to store which indices from groupR are used
+            // For now just iterate our bGroup to find the pairs
+           
+            // #NOTE: memset(0) works faster on average than keeping a separate a clearing buffer
+            memset( rMapCounts, 0, sizeof( rMapCounts ) );
+
+            for( uint64 iR = groupRStart; iR < groupREnd; iR++ )
+            {
+                uint64 localRY = ( bucket | yBuffer[iR] ) - groupRRangeStart;
+                ASSERT( ( bucket | yBuffer[iR] ) / kBC == groupR );
+
+                if( rMapCounts[localRY] == 0 )
+                    rMapIndices[localRY] = (uint16)( iR - groupRStart );
+
+                rMapCounts[localRY] ++;
+            }
+
+            // For each group L entry
+            for( uint64 iL = groupLStart; iL < groupRStart; iL++ )
+            {
+                const uint64 yL     = bucket | yBuffer[iL];
+                const uint64 localL = yL - groupLRangeStart;
+
+                // Iterate kExtraBitsPow = 1 << kExtraBits = 1 << 6 == 64
+                // So iterate 64 times for each L entry.
+                for( int iK = 0; iK < kExtraBitsPow; iK++ )
+                {
+                    const uint64 targetR = L_targets[parity][localL][iK];
+
+                    for( uint j = 0; j < rMapCounts[targetR]; j++ )
+                    {
+                        const uint64 iR = groupRStart + rMapIndices[targetR] + j;
+
+                        ASSERT( iL < iR );
+
+                        // Add a new pair
+                        ASSERT( ( iR - iL ) <= 0xFFFF );
+
+                        pairs.left [pairCount] = (uint32)iL;
+                        pairs.right[pairCount] = (uint16)(iR - iL);
+                        pairCount++;
+
+                        // #TODO: Write to disk if there's a buffer available and we have enough entries to write
+                        
+                        ASSERT( pairCount <= maxPairs );
+                        if( pairCount == maxPairs )
+                            goto RETURN;
+                    }
+                }
+            }
+        }
+        // Else: Not an adjacent group, skip to next one.
+
+        // Go to next group
+        groupL      = groupR;
+        groupLStart = groupRStart;
+    }
+
+RETURN:
+    this->pairCount = pairCount;
+}
+
+
+
 
 //-----------------------------------------------------------
 void WriteFileJob::Run( WriteFileJob* job )

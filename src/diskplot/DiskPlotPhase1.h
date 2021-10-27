@@ -5,6 +5,19 @@
 #include "util/Log.h"
 #include "ChiaConsts.h"
 
+struct Pairs
+{
+    uint32* left ;
+    uint16* right;
+};
+
+struct GroupInfo
+{
+    uint32* groupBoundaries;
+    uint32  groupCount;
+    uint32  startIndex;
+};
+
 // Represents a double-buffered blob of data of the size of
 // the block size of the device we're writing to * 2 (one for y one for x)
 struct DoubleBuffer
@@ -88,9 +101,10 @@ private:
     void ForwardPropagateTable( TableId table );
     void ForwardPropagateBucket( TableId table, uint bucketIdx );
 
-    void ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32* groups, uint32 maxGroups );
+    uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
 
-    void Match();
+    void Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], struct Pairs pairs[BB_MAX_JOBS] );
+
     void GenFx();
 
 private:
@@ -98,16 +112,38 @@ private:
     DiskBufferQueue* _diskQueue;
 
     uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
+    size_t _maxBucketCount;
+
+    DoubleBuffer* _bucketBuffers;
 };
 
 struct ScanGroupJob : MTJob<ScanGroupJob>
 {
-    uint startIndex;
+    const uint* yBuffer;
+    uint*       groupBoundaries;
+    uint        bucketIdx;
+    uint        startIndex;
+    uint        endIndex;
+    uint        maxGroups;
+    uint        groupCount;
+
+    void Run() override;
 };
 
 
 struct MatchJob : MTJob<MatchJob>
 {
+    const uint32* yBuffer;
+    Pairs*        pairs;          // Pair working buffer
+    GroupInfo*    groupInfo;
+    uint          bucketIdx;
+    uint          maxPairCount;
+    uint          pairCount;
+
+    uint32* copyLDst;             // Final contiguous pair buffer
+    uint16* copyRDst;
+
     void Run() override;
 };
+
 

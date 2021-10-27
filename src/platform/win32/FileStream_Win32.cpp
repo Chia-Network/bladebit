@@ -40,9 +40,9 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
         access = FileAccess::Read;
 
     const DWORD dwShareMode           = 0;
-    const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS : 
-                                        mode == FileMode::Open   ? OPEN_ALWAYS   :
-                                                                   OPEN_EXISTING;
+    const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS :
+                                        mode == FileMode::Open   ? OPEN_EXISTING : OPEN_ALWAYS;
+
     DWORD dwFlags  = FILE_ATTRIBUTE_NORMAL;
     DWORD dwAccess = 0;
 

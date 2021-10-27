@@ -68,7 +68,7 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 
         constexpr FileMode fileMode =
         #if BB_DP_DBG_READ_EXISTING_F1
-            FileMode::Open;
+            FileMode::OpenOrCreate;
         #else
             FileMode::Create;
         #endif
