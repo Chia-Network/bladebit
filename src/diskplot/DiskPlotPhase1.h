@@ -105,7 +105,10 @@ private:
 
     void Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], struct Pairs pairs[BB_MAX_JOBS] );
 
-    void GenFx();
+    void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
+    
+    template<TableId tableId, typename TMetaIn, typename TMetaOut>
+    void GenFxForTable();
 
 private:
     DiskPlotContext& _cx;
@@ -146,4 +149,7 @@ struct MatchJob : MTJob<MatchJob>
     void Run() override;
 };
 
-
+struct FxJob : MTJob<FxJob>
+{
+    void Run() override;
+};

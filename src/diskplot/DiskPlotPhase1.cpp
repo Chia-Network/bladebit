@@ -1021,6 +1021,11 @@ RETURN:
     this->pairCount = pairCount;
 }
 
+//-----------------------------------------------------------
+void DiskPlotPhase1::GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount )
+{
+
+}
 
 
 

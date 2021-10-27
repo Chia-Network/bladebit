@@ -1,22 +1,10 @@
 #pragma once
 #include "Util.h"
+#include "plotshared/Tables.h"
 
 // Hard-coded k to 32
 #define _K 32
 #define ENTRIES_PER_TABLE ( 1ull << _K )
-
-enum class TableId
-{
-    Table1 = 0,
-    Table2 = 1,
-    Table3 = 2,
-    Table4 = 3,
-    Table5 = 4,
-    Table6 = 5,
-    Table7 = 6
-
-    ,_Count
-};
 
 ///
 /// These are extracted from chiapos.
