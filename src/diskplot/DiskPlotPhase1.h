@@ -41,19 +41,51 @@ struct DoubleBuffer
 };
 
 
-struct Bucket
+class DiskPlotPhase1
 {
-    uint32 index;
-    uint32 entryCount;
+public:
+    DiskPlotPhase1( DiskPlotContext& cx );
+    void Run();
 
-    uint32* yInput;
-    uint32* metaInput;
+private:
+    void GenF1();
+    void ForwardPropagate();
 
-    uint32* yOutput;
-    uint32* metaOutput;
+    void ForwardPropagateTable( TableId table );
+    void ForwardPropagateBucket( TableId table, uint bucketIdx );
 
-    uint32* pairL;
-    uint16* pairR;
+    uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
+
+    void Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], struct Pairs pairs[BB_MAX_JOBS] );
+
+    void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
+    
+    template<TableId tableId>
+    void GenFxForTable( uint bucketIdx, uint entryCount, const Pairs pairs, 
+                        const uint32* yIn, uint32* yOut,
+                        const uint64* metaInA, const uint64* metaInB,
+                        uint64* metaOutA, uint64* metaOutB );
+
+private:
+    DiskPlotContext& _cx;
+    DiskBufferQueue* _diskQueue;
+
+    uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
+    size_t _maxBucketCount;
+
+    DoubleBuffer* _bucketBuffers;
+};
+
+template<typename TJob>
+struct BucketJob : MTJob<TJob>
+{
+    uint32*          counts;         // Each thread's entry count per bucket
+    uint32*          bucketCounts;   // Total counts per for all buckets. Used by the control thread
+    
+    DiskBufferQueue* diskQueue;
+    uint32           chunkCount;
+    
+    void CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT], uint32 pfxSum[BB_DP_BUCKET_COUNT] );
 };
 
 struct GenF1Job : MTJob<GenF1Job>
@@ -88,38 +120,6 @@ private:
     void WriteFinalBlockRemainders( DoubleBuffer* remainderBuffers, uint32* remainderSizes );
 };
 
-class DiskPlotPhase1
-{
-public:
-    DiskPlotPhase1( DiskPlotContext& cx );
-    void Run();
-
-private:
-    void GenF1();
-    void ForwardPropagate();
-
-    void ForwardPropagateTable( TableId table );
-    void ForwardPropagateBucket( TableId table, uint bucketIdx );
-
-    uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
-
-    void Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], struct Pairs pairs[BB_MAX_JOBS] );
-
-    void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
-    
-    template<TableId tableId, typename TMetaIn, typename TMetaOut>
-    void GenFxForTable();
-
-private:
-    DiskPlotContext& _cx;
-    DiskBufferQueue* _diskQueue;
-
-    uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
-    size_t _maxBucketCount;
-
-    DoubleBuffer* _bucketBuffers;
-};
-
 struct ScanGroupJob : MTJob<ScanGroupJob>
 {
     const uint* yBuffer;
@@ -132,7 +132,6 @@ struct ScanGroupJob : MTJob<ScanGroupJob>
 
     void Run() override;
 };
-
 
 struct MatchJob : MTJob<MatchJob>
 {
@@ -149,7 +148,35 @@ struct MatchJob : MTJob<MatchJob>
     void Run() override;
 };
 
-struct FxJob : MTJob<FxJob>
+
+struct FxJob : BucketJob<FxJob>
 {
+    TableId         tableId;
+    uint32          bucketIdx;
+    uint32          entryCount;
+    uint32          chunkCount;
+    uint32          entriesPerChunk;
+
+//     uint32          offset;
+    const Pairs     pairs;
+    const uint32*   yIn;
+    uint32*         yOut;
+    byte*           bucketIdOut;
+    const uint64*   metaInA;
+    const uint64*   metaInB;
+    uint64*         metaOutA;
+    uint64*         metaOutB;
+
+    void* bucketY    ;
+    void* bucketMetaA;
+    void* bucketMetaB;
+
     void Run() override;
+
+    template<TableId tableId>
+    void RunForTable();
+
+    template<typename TMetaA, typename TMetaB>
+    void SortToBucket( uint entryCount, const byte* bucketIndices,
+                       const uint32* inY, const TMetaA* metaInA, const TMetaB* metaInB );
 };

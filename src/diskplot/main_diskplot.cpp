@@ -2,6 +2,23 @@
 #include "DiskPlotter.h"
 #include "SysHost.h"
 
+struct GlobalConfig
+{
+
+};
+
+struct DiskPlotConfig
+{
+    const char* tmpPath                 = nullptr;
+    uint        workThreadCount         = 0;
+    uint        ioThreadCount           = 1;
+    uint        ioCommandQueueSize      = 512;
+    size_t      workHeapSize            = 3   GB;
+    size_t      f1WriteIntervalSize     = 128 MB;
+    size_t      groupWriteIntervalSize  = 32  MB;
+    size_t      fxWriteIntervalSize     = 32  MB;
+};
+
 //-----------------------------------------------------------
 int main( int argc, const char* argv[] )
 {

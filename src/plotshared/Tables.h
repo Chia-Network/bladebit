@@ -44,3 +44,63 @@ template<> struct TableMetaType<TableId::Table7> { using MetaIn = uint64; using 
 /// Helper for obtaining the correct fx (y) output type per table
 template<TableId table> struct YOut                  { using Type = uint64; };
 template<>              struct YOut<TableId::Table7> { using Type = uint32; };
+
+
+///
+/// For Disk Plotter
+/// 
+
+// Metadata input
+template<TableId Table>
+struct TableMetaIn;
+
+template<> struct TableMetaIn<TableId::Table2>
+{
+    using MetaA = uint32; using MetaB = NoMeta; 
+    static constexpr size_t SizeA = sizeof( uint32 ); static constexpr size_t SizeB = 0;
+};
+template<> struct TableMetaIn<TableId::Table3>
+{
+    using MetaA = uint64; using MetaB = NoMeta;
+    static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = 0;
+};
+template<> struct TableMetaIn<TableId::Table4>
+{
+    using MetaA = uint64; using MetaB = uint64;
+    static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = sizeof( uint64 );
+};
+template<> struct TableMetaIn<TableId::Table5>
+{
+    using MetaA = uint64; using MetaB = uint64;
+    static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = sizeof( uint64 );
+};
+template<> struct TableMetaIn<TableId::Table6>
+{
+    using MetaA = uint64; using MetaB = uint32;
+    static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = sizeof( uint32 );
+};
+template<> struct TableMetaIn<TableId::Table7>
+{
+    using MetaA = uint64; using MetaB = NoMeta;
+    static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = 0;
+};
+
+
+// Metadata output
+template<TableId Table>
+struct TableMetaOut
+{
+    static constexpr TableId NextTable = static_cast<TableId>( static_cast<uint>( Table ) + 1 );
+
+    using MetaA = TableMetaIn<NextTable>::MetaA;
+    using MetaB = TableMetaIn<NextTable>::MetaB;
+
+    static constexpr size_t SizeA = TableMetaIn<NextTable>::SizeA;
+    static constexpr size_t SizeB = TableMetaIn<NextTable>::SizeB;
+};
+
+template<> struct TableMetaOut<TableId::Table7>
+{
+    using MetaA = NoMeta; using MetaB = NoMeta;
+    static constexpr size_t SizeA = 0; static constexpr size_t SizeB = 0;
+};
