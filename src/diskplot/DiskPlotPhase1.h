@@ -79,7 +79,7 @@ private:
 template<typename TJob>
 struct BucketJob : MTJob<TJob>
 {
-    uint32*          counts;         // Each thread's entry count per bucket
+    const uint32*    counts;         // Each thread's entry count per bucket
     uint32*          bucketCounts;   // Total counts per for all buckets. Used by the control thread
     
     DiskBufferQueue* diskQueue;

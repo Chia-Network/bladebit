@@ -1,8 +1,9 @@
 #include "DiskPlotPhase1.h"
-#include "pos/chacha8.h"
 #include "Util.h"
 #include "util/Log.h"
 #include "algorithm/RadixSort.h"
+#include "pos/chacha8.h"
+#include "b3/blake3.h"
 
 // Test
 #include "io/FileStream.h"
@@ -1112,6 +1113,9 @@ void FxJob::Run()
 template<TableId tableId>
 void FxJob::RunForTable()
 {
+    using TMetaA = TableMetaOut<tableId>::MetaA;
+    using TMetaB = TableMetaOut<tableId>::MetaB;
+
     const uint32   entryCount       = this->entryCount;
     const uint32   chunkCount       = this->chunkCount;
     const uint32   entriesPerChunk  = this->entriesPerChunk;
@@ -1127,33 +1131,14 @@ void FxJob::RunForTable()
     uint64*        outMetaA         = this->metaOutA;
     uint64*        outMetaB         = this->metaOutB;
 
-    for( uint chunk = 0; i < chunkCount; chunk++ )
+    for( uint chunk = 0; chunk < chunkCount; chunk++ )
     {
         ComputeFxForTable<tableId>( bucket, entriesPerChunk, lrPairs, inY, inMetaA, inMetaB, 
                                     outY, outBucketId, outMetaA, outMetaB );
 
-        SortToBucket<tableId,
-                     TableMetaOut<tableId>::MetaA,
-                     TableMetaOut<tableId>::MetaB>(
-            entryCount, outBucketId, outY, outMetaA, outMetaB
+        SortToBucket<tableId, TMetaA, TMetaB>(
+            entryCount, outBucketId, outY, (TMetaA*)outMetaA, (TMetaB*)outMetaB
         );
-
-        // Grab an IO write buffer for our bucket
-        if( IsControlThread() )
-        {
-            // Submit buffer for writing and get next buffer
-
-            ReleaseThreads();
-        }
-        else
-        {
-            // #TODO: We need to wait for release and sleep/block when
-            //        if the control thread starts blocking because it
-            //        was not able to secure a buffer for writing
-            WaitForRelease();
-        }
-
-        
     }
 }
 
@@ -1165,11 +1150,11 @@ template<TableId tableId, typename TMetaA, typename TMetaB>
 inline
 void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint32* inY, const TMetaA* inMetaA, const TMetaB* inMetaB )
 {
-    constexpr FileId yFileId     = static_cast<uint>( tableId ) & 1 == 0 ? FileId::Y1       : FileId::Y0;
-    constexpr FileId metaAFileId = static_cast<uint>( tableId ) & 1 == 0 ? FileId::META_A_0 : FileId::META_A_1;
-    constexpr FileId metaBFileId = static_cast<uint>( tableId ) & 1 == 0 ? FileId::META_B_0 : FileId::META_B_1;
+    const FileId yFileId     = ( static_cast<uint>( tableId ) & 1 ) == 0 ? FileId::Y1       : FileId::Y0;
+    const FileId metaAFileId = ( static_cast<uint>( tableId ) & 1 ) == 0 ? FileId::META_A_0 : FileId::META_A_1;
+    const FileId metaBFileId = ( static_cast<uint>( tableId ) & 1 ) == 0 ? FileId::META_B_0 : FileId::META_B_1;
 
-    DiskBufferQueue& queue = this->diskQueue;
+    DiskBufferQueue& queue = *this->diskQueue;
 
     const size_t fileBlockSize = queue.BlockSize();
 
@@ -1200,13 +1185,13 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
         ySizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
         yBuckets = (uint32*)queue.GetBuffer( sizeof( uint32 ) * entryCount );
 
-        if( constexpr sizeof( TMetaA ) > 0 )
+        if constexpr ( sizeof( TMetaA ) > 0 )
         {
             metaASizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
             metaABuckets = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * entryCount );
         }
 
-        if( constexpr sizeof( TMetaB ) > 0 )
+        if constexpr ( sizeof( TMetaB ) > 0 )
         {
             metaBSizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
             metaBBuckets = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * entryCount );
@@ -1219,6 +1204,9 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
     }
     else
     {
+        // #TODO: We need to wait for release and sleep/block when
+        //        if the control thread starts blocking because it
+        //        was not able to secure a buffer for writing
         this->WaitForRelease();
 
         yBuckets     = (uint32*)GetJob( 0 )._bucketY;
@@ -1236,12 +1224,12 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
 
         if constexpr ( sizeof( TMetaA ) > 0 )
         {
-            metaABuckets[dstIdx] = inMetaA;
+            metaABuckets[dstIdx] = inMetaA[i];
         }
 
         if constexpr ( sizeof( TMetaB ) > 0 )
         {
-            metaBBuckets[dstIdx] = inMetaB;
+            metaBBuckets[dstIdx] = inMetaB[i];
         }
     }
 
@@ -1273,7 +1261,7 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
             queue.WriteBuckets( metaBFileId, metaBBuckets, metaBSizes );
         }
 
-        SaveBlockRemainders( ySizes, yOut, ySizes, _yRemainderSizes, _yRemainders );
+        SaveBlockRemainders( yFileId, yOut, ySizes, _yRemainderSizes, _yRemainders );
 
         if constexpr( sizeof( TMetaA ) > 0 )
             SaveBlockRemainders( metaAFileId, metaASizes, metaOutA, _metaARemainderSizes, _metaARemainders );
@@ -1303,17 +1291,18 @@ uint64 ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pa
                           const uint32* yIn, const uint64* metaInA, const uint64* metaInB, 
                           uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB )
 {
-    const size_t metaKMultiplierIn  = SizeForMeta<TMetaIn >::Value;
-    const size_t metaKMultiplierOut = SizeForMeta<TMetaOut>::Value;
+    constexpr size_t metaKMultiplierIn  = TableMetaIn <tableId>::Multiplier;
+    constexpr size_t metaKMultiplierOut = TableMetaOut<tableId>::Multiplier;
 
     // Helper consts
     // Table 7 (identified by 0 metadata output) we don't have k + kExtraBits sized y's.
     // so we need to shift by 32 bits, instead of 26.
     constexpr uint extraBitsShift = tableId == TableId::Table7 ? 0 : kExtraBits;
 
+    constexpr uint   shiftBits   = metaKMultiplierOut == 0 ? 0 : kExtraBits;
     constexpr uint   k           = _K;
     constexpr uint32 ySize       = k + kExtraBits;         // = 38
-    constexpr uint32 yShift      = 64u - (k + ShiftBits);  // = 26 or 32
+    constexpr uint32 yShift      = 64u - (k + shiftBits);  // = 26 or 32
     constexpr size_t metaSize    = k * metaKMultiplierIn;
     constexpr size_t metaSizeLR  = metaSize * 2;
     constexpr size_t bufferSize  = CDiv( ySize + metaSizeLR, 8u );
@@ -1330,18 +1319,18 @@ uint64 ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pa
 
     blake3_hasher hasher;
 
-    for( uint i = 0;; i < entryCount; i++ )
+    for( uint i = 0; i < entryCount; i++ )
     {
-        const uint32 left  = lrPairs.left;
-        const uint32 right = left + lrPairs.right;
+        const uint32 left  = pairs.left[i];
+        const uint32 right = left + pairs.right[i];
 
         const uint64 y     = bucket | yIn[left];
 
         // Extract metadata
         if constexpr( metaKMultiplierIn == 1 )
         {
-            l0 = reinterpret_cast<uint32*>( metaInA )[left ];
-            r0 = reinterpret_cast<uint32*>( metaInA )[right];
+            l0 = reinterpret_cast<const uint32*>( metaInA )[left ];
+            r0 = reinterpret_cast<const uint32*>( metaInA )[right];
 
             input[0] = Swap64( y  << 26 | l0 >> 6  );
             input[1] = Swap64( l0 << 58 | r0 << 26 );
@@ -1358,9 +1347,9 @@ uint64 ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pa
         else if constexpr( metaKMultiplierIn == 3 )
         {
             l0 = metaInA[left];
-            l1 = reinterpret_cast<uint32*>( metaInB )[left ];
+            l1 = reinterpret_cast<const uint32*>( metaInB )[left ];
             r0 = metaInA[right];
-            r1 = reinterpret_cast<uint32*>( metaInB )[right];
+            r1 = reinterpret_cast<const uint32*>( metaInB )[right];
         
             input[0] = Swap64( y  << 26 | l0 >> 38 );
             input[1] = Swap64( l0 << 26 | l1 >> 6  );
@@ -1417,7 +1406,7 @@ uint64 ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pa
             metaOutA[i] = h0 << ySize | h1 >> 26;
             reinterpret_cast<uint32*>( metaOutB )[i] = (uint32)( ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58 );
         }
-        else if constexpr( metaKMultiplierOut == 4 & metaKMultiplierIn == 2 )
+        else if constexpr( metaKMultiplierOut == 4 && metaKMultiplierIn == 2 )
         {
             metaOutA[i] = l0;
             metaOutB[i] = r0;
@@ -1439,6 +1428,7 @@ template<typename TJob>
 void BucketJob<TJob>::CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT], uint32 pfxSum[BB_DP_BUCKET_COUNT] )
 {
     const size_t copySize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
+    const uint   jobId    = this->JobId();
 
     this->counts = counts;
     SyncThreads();

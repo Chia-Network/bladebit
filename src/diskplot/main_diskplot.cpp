@@ -13,10 +13,10 @@ struct DiskPlotConfig
     uint        workThreadCount         = 0;
     uint        ioThreadCount           = 1;
     uint        ioCommandQueueSize      = 512;
-    size_t      workHeapSize            = 3   GB;
-    size_t      f1WriteIntervalSize     = 128 MB;
-    size_t      groupWriteIntervalSize  = 32  MB;
-    size_t      fxWriteIntervalSize     = 32  MB;
+    size_t      workHeapSize            = 3ull   GB;
+    size_t      f1WriteIntervalSize     = 128ull MB;
+    size_t      groupWriteIntervalSize  = 32ull  MB;
+    size_t      fxWriteIntervalSize     = 32ull  MB;
 };
 
 //-----------------------------------------------------------

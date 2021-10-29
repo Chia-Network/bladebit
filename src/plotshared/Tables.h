@@ -54,53 +54,119 @@ template<>              struct YOut<TableId::Table7> { using Type = uint32; };
 template<TableId Table>
 struct TableMetaIn;
 
+template<> struct TableMetaIn<TableId::Table1>
+{
+    using MetaA = NoMeta; using MetaB = NoMeta;
+    static constexpr size_t SizeA = 0; static constexpr size_t SizeB = 0;
+    static constexpr size_t Multiplier = 0;
+};
+
 template<> struct TableMetaIn<TableId::Table2>
 {
     using MetaA = uint32; using MetaB = NoMeta; 
     static constexpr size_t SizeA = sizeof( uint32 ); static constexpr size_t SizeB = 0;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
 };
 template<> struct TableMetaIn<TableId::Table3>
 {
     using MetaA = uint64; using MetaB = NoMeta;
     static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = 0;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
 };
 template<> struct TableMetaIn<TableId::Table4>
 {
     using MetaA = uint64; using MetaB = uint64;
     static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = sizeof( uint64 );
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
 };
 template<> struct TableMetaIn<TableId::Table5>
 {
     using MetaA = uint64; using MetaB = uint64;
     static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = sizeof( uint64 );
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
 };
 template<> struct TableMetaIn<TableId::Table6>
 {
     using MetaA = uint64; using MetaB = uint32;
     static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = sizeof( uint32 );
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
 };
 template<> struct TableMetaIn<TableId::Table7>
 {
     using MetaA = uint64; using MetaB = NoMeta;
     static constexpr size_t SizeA = sizeof( uint64 ); static constexpr size_t SizeB = 0;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
 };
 
 
 // Metadata output
 template<TableId Table>
-struct TableMetaOut
+struct TableMetaOut;
+
+template<> struct TableMetaOut<TableId::Table1>
 {
-    static constexpr TableId NextTable = static_cast<TableId>( static_cast<uint>( Table ) + 1 );
+    static constexpr TableId NextTable = TableId::Table2;
 
-    using MetaA = TableMetaIn<NextTable>::MetaA;
-    using MetaB = TableMetaIn<NextTable>::MetaB;
-
+    using MetaA = TableMetaIn<NextTable>::MetaA; using MetaB = TableMetaIn<NextTable>::MetaB;
     static constexpr size_t SizeA = TableMetaIn<NextTable>::SizeA;
     static constexpr size_t SizeB = TableMetaIn<NextTable>::SizeB;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
 };
+
+template<> struct TableMetaOut<TableId::Table2>
+{
+    static constexpr TableId NextTable = TableId::Table3;
+
+    using MetaA = TableMetaIn<NextTable>::MetaA; using MetaB = TableMetaIn<NextTable>::MetaB;
+    static constexpr size_t SizeA = TableMetaIn<NextTable>::SizeA; 
+    static constexpr size_t SizeB = TableMetaIn<NextTable>::SizeB;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
+};
+
+template<> struct TableMetaOut<TableId::Table3>
+{
+    static constexpr TableId NextTable = TableId::Table4;
+
+    using MetaA = TableMetaIn<NextTable>::MetaA; using MetaB = TableMetaIn<NextTable>::MetaB;
+    static constexpr size_t SizeA = TableMetaIn<NextTable>::SizeA;
+    static constexpr size_t SizeB = TableMetaIn<NextTable>::SizeB;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
+};
+
+template<> struct TableMetaOut<TableId::Table4>
+{
+    static constexpr TableId NextTable = TableId::Table5;
+
+    using MetaA = TableMetaIn<NextTable>::MetaA; using MetaB = TableMetaIn<NextTable>::MetaB;
+    static constexpr size_t SizeA = TableMetaIn<NextTable>::SizeA;
+    static constexpr size_t SizeB = TableMetaIn<NextTable>::SizeB;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
+};
+
+template<> struct TableMetaOut<TableId::Table5>
+{
+    static constexpr TableId NextTable = TableId::Table6;
+
+    using MetaA = TableMetaIn<NextTable>::MetaA; using MetaB = TableMetaIn<NextTable>::MetaB;
+    static constexpr size_t SizeA = TableMetaIn<NextTable>::SizeA;
+    static constexpr size_t SizeB = TableMetaIn<NextTable>::SizeB;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
+};
+
+template<> struct TableMetaOut<TableId::Table6>
+{
+    static constexpr TableId NextTable = TableId::Table7;
+
+    using MetaA = TableMetaIn<NextTable>::MetaA; using MetaB = TableMetaIn<NextTable>::MetaB;
+    static constexpr size_t SizeA = TableMetaIn<NextTable>::SizeA;
+    static constexpr size_t SizeB = TableMetaIn<NextTable>::SizeB;
+    static constexpr size_t Multiplier = ( SizeA + SizeB ) / 4;
+};
+
 
 template<> struct TableMetaOut<TableId::Table7>
 {
     using MetaA = NoMeta; using MetaB = NoMeta;
-    static constexpr size_t SizeA = 0; static constexpr size_t SizeB = 0;
+    static constexpr size_t SizeA      = 0; static constexpr size_t SizeB = 0;
+    static constexpr size_t Multiplier = 0;
 };
