@@ -88,6 +88,31 @@ inline FlagType operator ~ ( FlagType lhs )                                     
     return lhs;                                                                                         \
 }
 
+#define ImplementArithmeticOps( EnumType ) \
+inline EnumType& operator++( EnumType& self )                       \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    (*reinterpret_cast<BaseT*>( &self ))++; return self;            \
+}                                                                   \
+                                                                    \
+inline EnumType& operator--( EnumType& self )                       \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    (*reinterpret_cast<BaseT*>( &self ))--; return self;            \
+}                                                                   \
+inline EnumType operator+( EnumType lhs, EnumType rhs )             \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    return static_cast<EnumType>( static_cast<BaseT>( lhs ) +       \
+                                  static_cast<BaseT>( rhs ) );      \
+}                                                                   \
+                                                                    \
+inline EnumType operator-( EnumType lhs, EnumType rhs )             \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    return static_cast<EnumType>( static_cast<BaseT>( lhs ) -       \
+                                  static_cast<BaseT>( rhs ) );      \
+}                                                                   
 
 
 template< typename T>

@@ -24,9 +24,9 @@ struct WriteFileJob
 
 
 template<TableId tableId>
-static uint64 ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs,
-                                 const uint32* yIn, const uint64* metaInA, const uint64* metaInB,
-                                 uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB );\
+static void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs,
+                               const uint32* yIn, const uint64* metaInA, const uint64* metaInB,
+                               uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB );
 
 //-----------------------------------------------------------
 DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
@@ -624,52 +624,101 @@ void DiskPlotPhase1::ForwardPropagate()
     ThreadPool&      threadPool  = *_cx.threadPool;
     const uint       threadCount = _cx.threadCount;
 
-    size_t maxBucketSize = 0;
+    uint   maxBucketCount = 0;
+    size_t maxBucketSize  = 0;
 
     // Find the largest bucket so that we can reserve buffers of its size
     for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-        maxBucketSize = std::max( maxBucketSize, (size_t)_bucketCounts[i] );
+        maxBucketCount = std::max( maxBucketSize, (size_t)_bucketCounts[i] );
 
-    maxBucketSize *= sizeof( uint32 );
+    maxBucketSize = maxBucketCount * sizeof( uint32 );
+    _maxBucketCount = maxBucketCount;
 
-    // Allocate 2 buffers for loading buckets
+    // #TODO: We need to have a maximum size here, and just allocate that.
+    //        we don't want to allocate per-table as we might not be able to do
+    //        so due to fragmentation and the other buffers allocated after this big chunk.
+    //        Therefore, it's better to have a set size
+    // Allocate buffers we need for forward propagation
     DoubleBuffer bucketBuffers;
-    bucketBuffers.front = ioDispatch.GetBuffer( maxBucketSize * 4 );
-    bucketBuffers.back  = bucketBuffers.front + maxBucketSize * 2;
 
+    byte*   fpBuffer = nullptr; // Root allocation
+    uint32* y0       = nullptr; // We do double-buffering here to load the next bucket in the B/G
+    uint32* y1       = nullptr;
+    uint32* sortKey  = nullptr;
+    uint64* meta0    = nullptr;
+    uint64* meta1    = nullptr;
+    Pairs   pairs;
+    pairs.left       = nullptr;
+    pairs.right      = nullptr;
 
-    _maxBucketCount = maxBucketSize / sizeof( uint32 );
+    {
+        const size_t fileBlockSize = ioDispatch.BlockSize();
+
+        const size_t ySize       = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 ) * 2, (int)fileBlockSize );
+        const size_t sortKeySize = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
+        const size_t metaSize    = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 ) * 4, (int)fileBlockSize );
+        const size_t pairsLSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
+        const size_t pairsRSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint16 )    , (int)fileBlockSize );
+
+        const size_t totalSize = ySize + sortKeySize + metaSize + pairsLSize + pairsRSize;
+
+        Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoGB );
+
+        fpBuffer = _diskQueue->GetBuffer( totalSize );
+
+        byte* ptr = fpBuffer;
+
+        y0 = (uint32*)ptr; 
+        y1 = y0 + maxBucketCount;
+        ptr += ySize;
+
+        sortKey = (uint32*)ptr;
+        ptr += sortKeySize;
+
+        meta0 = (uint64*)ptr;
+        meta1 = meta0 + maxBucketCount;
+        ptr += metaSize;
+
+        pairs.left = (uint32*)ptr;
+        ptr += pairsLSize;
+
+        pairs.right = (uint16*)ptr;
+
+        // The remainder for the work heap is used to write as fx disk write buffers 
+    }
+
+    bucketBuffers.front = (byte*)y0;
+    bucketBuffers.back = (byte*)y1;
+
     _bucketBuffers  = &bucketBuffers;
-
-    // Allocate temp buffers & BC group buffers
-    uint32* yTemp           = (uint32*)ioDispatch.GetBuffer( maxBucketSize );
-    uint32* metaTemp        = (uint32*)ioDispatch.GetBuffer( maxBucketSize * 4 );
-    uint32* groupBoundaries = (uint32*)ioDispatch.GetBuffer( BB_DP_MAX_BC_GROUP_PER_BUCKET * sizeof( uint32 ) );
-    
-    const size_t entriesPerBucket  = ( 1ull << _K ) / BB_DP_BUCKET_COUNT;
-    const uint32 maxPairsPerThread = (uint32)( entriesPerBucket / threadCount + BB_DP_XTRA_MATCHES_PER_THREAD );
-    const size_t maxPairsPerbucket = maxPairsPerThread * threadCount;
-
-    uint32* lGroups = (uint32*)ioDispatch.GetBuffer( maxPairsPerbucket * sizeof( uint32 ) );
-    uint16* rGroups = (uint16*)ioDispatch.GetBuffer( maxPairsPerbucket * sizeof( uint16 ) );
-
-    // The sort key initially is set to the x buffer
-    uint32* sortKey     = (uint32*)( bucketBuffers.front + maxBucketSize );
-    uint32* realSortKey = nullptr;
 
     // Reset the fence as we're about to use it
     bucketBuffers.fence.Wait();
 
-    // Seek all buckets to the start
-    ioDispatch.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
-    ioDispatch.SeekBucket( FileId::X , 0, SeekOrigin::Begin );
+    ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
+    ioDispatch.ReadFile( FileId::X , 0, sortKey, _bucketCounts[0] * sizeof( uint32 ) );
 
-    // Load initial bucket
-    ioDispatch.ReadFile( FileId::Y0, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
-    ioDispatch.ReadFile( FileId::X , 0, sortKey            , _bucketCounts[0] * sizeof( uint32 ) );
-    ioDispatch.AddFence( bucketBuffers.fence );
-    ioDispatch.CommitCommands();
-    bucketBuffers.fence.Wait();
+    /// Propagate to each table
+    for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
+    {
+        // Seek all buckets to the start
+        ioDispatch.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
+
+        // Load initial bucket
+        ioDispatch.ReadFile( FileId::Y0, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
+         
+        ioDispatch.AddFence( bucketBuffers.fence );
+        ioDispatch.CommitCommands();
+        bucketBuffers.fence.Wait();
+
+        if( table > TableId::Table1 )
+        {
+            // Load 
+
+        }
+
+       
+    }
 
     for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
     {
@@ -726,9 +775,16 @@ void DiskPlotPhase1::ForwardPropagate()
 }
 
 //-----------------------------------------------------------
-void DiskPlotPhase1::ForwardPropagateTable( TableId table )
+template<TableId tableId>
+void DiskPlotPhase1::ForwardPropagateTable()
 {
-    
+    Log::Line( "Forward propagating to table %d...", (int)tableId + 1 );
+    const auto tableTimer = TimerBegin();
+
+
+
+    const double tableElapsed = TimerEnd( tableTimer );
+    Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)tableId + 1, tableElapsed );
 }
 
 ///
@@ -1287,7 +1343,7 @@ void FxJob::SaveBlockRemainders( FileId fileId, const uint32* sizes, const T* bu
 //-----------------------------------------------------------
 template<TableId tableId>
 inline 
-uint64 ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs, 
+void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs, 
                           const uint32* yIn, const uint64* metaInA, const uint64* metaInB, 
                           uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB )
 {

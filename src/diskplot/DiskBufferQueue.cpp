@@ -34,13 +34,13 @@ DiskBufferQueue::DiskBufferQueue(
         pathBuffer[++workDirLen] = '\0';
     }
 
-    InitFileSet( FileId::Y0, "y0", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::Y1, "y1", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
+    InitFileSet( FileId::Y0      , "y0"     , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
+    InitFileSet( FileId::Y1      , "y1"     , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::META_A_0, "meta_a0", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::META_A_1, "meta_a1", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::META_B_0, "meta_b0", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::META_B_1, "meta_b1", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::X , "x" , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
+    InitFileSet( FileId::X       , "x"      , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     free( pathBuffer );
 
     // Initialize I/O thread

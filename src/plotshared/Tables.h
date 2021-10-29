@@ -11,8 +11,7 @@ enum class TableId
     Table7 = 6
 
     ,_Count
-};
-
+}; ImplementArithmeticOps( TableId );
 
 ///
 /// Helpers for working with metadata
