@@ -167,16 +167,29 @@ struct FxJob : BucketJob<FxJob>
     uint64*         metaOutA;
     uint64*         metaOutB;
 
-    void* bucketY    ;
-    void* bucketMetaA;
-    void* bucketMetaB;
+private:
+    void* _bucketY    ;
+    void* _bucketMetaA;
+    void* _bucketMetaB;
 
+    DoubleBuffer* _yRemainders;
+    DoubleBuffer* _metaARemainders;
+    DoubleBuffer* _metaBRemainders;
+    uint32*       _yRemainderSizes;
+    uint32*       _metaARemainderSizes;
+    uint32*       _metaBRemainderSizes;
+
+public:
     void Run() override;
 
     template<TableId tableId>
     void RunForTable();
 
-    template<typename TMetaA, typename TMetaB>
+    template<TableId tableId, typename TMetaA, typename TMetaB>
     void SortToBucket( uint entryCount, const byte* bucketIndices,
                        const uint32* inY, const TMetaA* metaInA, const TMetaB* metaInB );
+
+    template<typename T>
+    void SaveBlockRemainders( FileId fileId, const uint32* sizes, const T* buffer, uint32* remainderSizes, DoubleBuffer* remainderBuffers );
 };
+

@@ -25,7 +25,8 @@ struct WriteFileJob
 template<TableId tableId>
 static uint64 ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs,
                                  const uint32* yIn, const uint64* metaInA, const uint64* metaInB,
-                                 uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB );
+                                 uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB );\
+
 //-----------------------------------------------------------
 DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     : _cx( cx )
@@ -466,8 +467,8 @@ void GenF1Job::Run()
             for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
                 sizes[j] = (uint32)( ( bucketCounts[j] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
 
-            queue.WriteBuckets( FileId::Y, buckets, sizes );
-            queue.WriteBuckets( FileId::X, xBuffer, sizes );
+            queue.WriteBuckets( FileId::Y0, buckets, sizes );
+            queue.WriteBuckets( FileId::X , xBuffer, sizes );
             queue.CommitCommands();
 
 
@@ -560,8 +561,8 @@ inline void GenF1Job::SaveBlockRemainders( uint32* yBuffer, uint32* xBuffer, con
                 buf.Flip();
 
                 // Overflow buffer is full, submit it for writing
-                queue.WriteFile( FileId::Y, i, yRemainder, fileBlockSize );
-                queue.WriteFile( FileId::X, i, xRemainder, fileBlockSize );
+                queue.WriteFile( FileId::Y0, i, yRemainder, fileBlockSize );
+                queue.WriteFile( FileId::X , i, xRemainder, fileBlockSize );
                 queue.AddFence( buf.fence );
                 queue.CommitCommands();
 
@@ -610,11 +611,10 @@ void GenF1Job::WriteFinalBlockRemainders( DoubleBuffer* remainderBuffers, uint32
         byte* yBuffer = buf.front;
         byte* xBuffer = yBuffer + fileBlockSize;
 
-        queue.WriteFile( FileId::Y, i, yBuffer, size );
-        queue.WriteFile( FileId::X, i, xBuffer, size );
+        queue.WriteFile( FileId::Y0, i, yBuffer, size );
+        queue.WriteFile( FileId::X , i, xBuffer, size );
     }
 }
-
 
 //-----------------------------------------------------------
 void DiskPlotPhase1::ForwardPropagate()
@@ -660,12 +660,12 @@ void DiskPlotPhase1::ForwardPropagate()
     bucketBuffers.fence.Wait();
 
     // Seek all buckets to the start
-    ioDispatch.SeekBucket( FileId::Y, 0, SeekOrigin::Begin );
-    ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
+    ioDispatch.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
+    ioDispatch.SeekBucket( FileId::X , 0, SeekOrigin::Begin );
 
     // Load initial bucket
-    ioDispatch.ReadFile( FileId::Y, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
-    ioDispatch.ReadFile( FileId::X, 0, sortKey            , _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.ReadFile( FileId::Y0, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.ReadFile( FileId::X , 0, sortKey            , _bucketCounts[0] * sizeof( uint32 ) );
     ioDispatch.AddFence( bucketBuffers.fence );
     ioDispatch.CommitCommands();
     bucketBuffers.fence.Wait();
@@ -683,8 +683,8 @@ void DiskPlotPhase1::ForwardPropagate()
         {
             const size_t readSize = _bucketCounts[nextBucketIdx] * sizeof( uint32 );
 
-            ioDispatch.ReadFile( FileId::Y, nextBucketIdx, bucketBuffers.back, readSize );
-            ioDispatch.ReadFile( FileId::X, nextBucketIdx, bucketBuffers.back + maxBucketSize, readSize );
+            ioDispatch.ReadFile( FileId::Y0, nextBucketIdx, bucketBuffers.back, readSize );
+            ioDispatch.ReadFile( FileId::X , nextBucketIdx, bucketBuffers.back + maxBucketSize, readSize );
             ioDispatch.AddFence( bucketBuffers.fence );
             ioDispatch.CommitCommands();
         }
@@ -1132,7 +1132,8 @@ void FxJob::RunForTable()
         ComputeFxForTable<tableId>( bucket, entriesPerChunk, lrPairs, inY, inMetaA, inMetaB, 
                                     outY, outBucketId, outMetaA, outMetaB );
 
-        SortToBucket<TableMetaOut<tableId>::MetaA,
+        SortToBucket<tableId,
+                     TableMetaOut<tableId>::MetaA,
                      TableMetaOut<tableId>::MetaB>(
             entryCount, outBucketId, outY, outMetaA, outMetaB
         );
@@ -1160,20 +1161,24 @@ void FxJob::RunForTable()
 #pragma GCC diagnostic ignored "-Wattributes"
 
 //-----------------------------------------------------------
-template<typename TMetaA, typename TMetaB>
+template<TableId tableId, typename TMetaA, typename TMetaB>
 inline
 void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint32* inY, const TMetaA* inMetaA, const TMetaB* inMetaB )
 {
+    constexpr FileId yFileId     = static_cast<uint>( tableId ) & 1 == 0 ? FileId::Y1       : FileId::Y0;
+    constexpr FileId metaAFileId = static_cast<uint>( tableId ) & 1 == 0 ? FileId::META_A_0 : FileId::META_A_1;
+    constexpr FileId metaBFileId = static_cast<uint>( tableId ) & 1 == 0 ? FileId::META_B_0 : FileId::META_B_1;
+
     DiskBufferQueue& queue = this->diskQueue;
 
     const size_t fileBlockSize = queue.BlockSize();
 
-    uint32* ySizes     = nullptr;
-    uint32* metaASizes = nullptr;
-    uint32* metaBSizes = nullptr;
-    uint32* dstY       = nullptr;
-    TMetaA* dstMetaA   = nullptr;
-    TMetaB* dstMetaB   = nullptr;
+    uint32* ySizes       = nullptr;
+    uint32* metaASizes   = nullptr;
+    uint32* metaBSizes   = nullptr;
+    uint32* yBuckets     = nullptr;
+    TMetaA* metaABuckets = nullptr;
+    TMetaB* metaBBuckets = nullptr;
 
     uint counts[BB_DP_BUCKET_COUNT];
     uint pfxSum[BB_DP_BUCKET_COUNT];
@@ -1192,33 +1197,33 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
     // Grab a buffer from the queue
     if( this->LockThreads() )
     {
-        ySizes = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-        dstY   = (uint32*)queue.GetBuffer( sizeof( uint32 ) * entryCount );
+        ySizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
+        yBuckets = (uint32*)queue.GetBuffer( sizeof( uint32 ) * entryCount );
 
         if( constexpr sizeof( TMetaA ) > 0 )
         {
-            metaASizes = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-            dstMetaA   = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * entryCount );
+            metaASizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
+            metaABuckets = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * entryCount );
         }
 
         if( constexpr sizeof( TMetaB ) > 0 )
         {
-            metaBSizes = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-            dstMetaB   = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * entryCount );
+            metaBSizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
+            metaBBuckets = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * entryCount );
         }
 
-        bucketY     = dstY;
-        bucketMetaA = dstMetaA;
-        bucketMetaB = dstMetaB;
+        _bucketY     = yBuckets;
+        _bucketMetaA = metaABuckets;
+        _bucketMetaB = metaBBuckets;
         this->ReleaseThreads();
     }
     else
     {
         this->WaitForRelease();
 
-        dstY     = (uint32*)GetJob( 0 ).bucketY;
-        dstMetaA = (TMetaA*)GetJob( 0 ).dstMetaA;
-        dstMetaB = (TMetaB*)GetJob( 0 ).dstMetaB;
+        yBuckets     = (uint32*)GetJob( 0 )._bucketY;
+        metaABuckets = (TMetaA*)GetJob( 0 )._bucketMetaA;
+        metaBBuckets = (TMetaB*)GetJob( 0 )._bucketMetaB;
     }
 
     // #TODO: Unroll this a bit?
@@ -1227,16 +1232,16 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
     {
         const uint32 dstIdx = --pfxSum[bucketIndices[i]];
 
-        bucketY[dstIdx] = yIn[i];
+        yBuckets[dstIdx] = yIn[i];
 
         if constexpr ( sizeof( TMetaA ) > 0 )
         {
-            bucketMetaA[dstIdx] = inMetaA;
+            metaABuckets[dstIdx] = inMetaA;
         }
 
         if constexpr ( sizeof( TMetaB ) > 0 )
         {
-            bucketMetaB[dstIdx] = inMetaB;
+            metaBBuckets[dstIdx] = inMetaB;
         }
     }
 
@@ -1250,28 +1255,46 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
             ySizes[i] = (uint32)( ( bucketCounts[i] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
 
-        // #TODO: Need to write Y0/Y1 and swap between tables.
-        queue.WriteBuckets( FileId::Y, yOut, ySizes );
+        queue.WriteBuckets( yFileId, yBuckets, ySizes );
 
         if constexpr ( sizeof( TMetaA ) > 0 )
         {
             for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                metaASizes[i] = (uint32)( ( bucketCounts[i] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
+                metaASizes[i] = (uint32)( ( bucketCounts[i] * sizeof( TMetaA ) ) / fileBlockSize * fileBlockSize );
 
-            // queue.WriteBuckets( FileId::Y, yOut, ySizes );
+            queue.WriteBuckets( metaAFileId, metaABuckets, metaASizes );
         }
 
         if constexpr ( sizeof( TMetaB ) > 0 )
         {
             for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                metaBSizes[i] = (uint32)( ( bucketCounts[i] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
+                metaBSizes[i] = (uint32)( ( bucketCounts[i] * sizeof( TMetaB ) ) / fileBlockSize * fileBlockSize );
+
+            queue.WriteBuckets( metaBFileId, metaBBuckets, metaBSizes );
         }
+
+        SaveBlockRemainders( ySizes, yOut, ySizes, _yRemainderSizes, _yRemainders );
+
+        if constexpr( sizeof( TMetaA ) > 0 )
+            SaveBlockRemainders( metaAFileId, metaASizes, metaOutA, _metaARemainderSizes, _metaARemainders );
+
+        if constexpr( sizeof( TMetaB ) > 0 )
+            SaveBlockRemainders( metaBFileId, metaBSizes, metaOutB, _metaBRemainderSizes, _metaBRemainders );
 
         this->ReleaseThreads();
     }
     else
         this->WaitForRelease();
 }
+
+//-----------------------------------------------------------
+template<typename T>
+FORCE_INLINE
+void FxJob::SaveBlockRemainders( FileId fileId, const uint32* sizes, const T* buffer, uint32* remainderSizes, DoubleBuffer* remainderBuffers )
+{
+
+}
+
 
 //-----------------------------------------------------------
 template<TableId tableId>

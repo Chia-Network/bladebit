@@ -12,7 +12,7 @@ class Thread;
 enum class FileId
 {
     None = 0,
-    Y,
+    Y0, Y1,
     META_A_0, META_B_0,
     META_A_1, META_B_1,
     X,
