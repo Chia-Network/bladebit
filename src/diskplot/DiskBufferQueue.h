@@ -13,7 +13,8 @@ enum class FileId
 {
     None = 0,
     Y,
-    META_LO, META_HI,
+    META_A_0, META_B_0,
+    META_A_1, META_B_1,
     X,
     T2_L, T2_R,
     T3_L, T3_R,

@@ -1162,14 +1162,18 @@ void FxJob::RunForTable()
 //-----------------------------------------------------------
 template<typename TMetaA, typename TMetaB>
 inline
-void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint32* inY, const TMetaA* metaInA, const TMetaB* metaInB )
+void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint32* inY, const TMetaA* inMetaA, const TMetaB* inMetaB )
 {
     DiskBufferQueue& queue = this->diskQueue;
 
-    uint32* sizes    = nullptr;
-    uint32* dstY     = nullptr;
-    TMetaA* dstMetaA = nullptr;
-    TMetaB* dstMetaB = nullptr;
+    const size_t fileBlockSize = queue.BlockSize();
+
+    uint32* ySizes     = nullptr;
+    uint32* metaASizes = nullptr;
+    uint32* metaBSizes = nullptr;
+    uint32* dstY       = nullptr;
+    TMetaA* dstMetaA   = nullptr;
+    TMetaB* dstMetaB   = nullptr;
 
     uint counts[BB_DP_BUCKET_COUNT];
     uint pfxSum[BB_DP_BUCKET_COUNT];
@@ -1188,35 +1192,85 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
     // Grab a buffer from the queue
     if( this->LockThreads() )
     {
-        sizes = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-        dstY  = (uint32*)queue.GetBuffer( sizeof( uint32 ) * entryCount );
+        ySizes = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
+        dstY   = (uint32*)queue.GetBuffer( sizeof( uint32 ) * entryCount );
 
-        if( sizeof( TMetaA ) > 0 )
-            dstMetaA = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * entryCount );
+        if( constexpr sizeof( TMetaA ) > 0 )
+        {
+            metaASizes = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
+            dstMetaA   = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * entryCount );
+        }
 
-        if( sizeof( TMetaB ) > 0 )
-            dstMetaB = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * entryCount );
+        if( constexpr sizeof( TMetaB ) > 0 )
+        {
+            metaBSizes = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
+            dstMetaB   = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * entryCount );
+        }
 
         bucketY     = dstY;
         bucketMetaA = dstMetaA;
         bucketMetaB = dstMetaB;
-        ReleaseThreads();
+        this->ReleaseThreads();
     }
     else
     {
-        WaitForRelease();
+        this->WaitForRelease();
 
-        dstY     = (uint32*)bucketY;
-        dstMetaA = (TMetaA*)dstMetaA;
-        dstMetaB = (TMetaB*)dstMetaB;
+        dstY     = (uint32*)GetJob( 0 ).bucketY;
+        dstMetaA = (TMetaA*)GetJob( 0 ).dstMetaA;
+        dstMetaB = (TMetaB*)GetJob( 0 ).dstMetaB;
     }
 
-
-    // Sort entries into buckets
+    // #TODO: Unroll this a bit?
+    // Distribute values into buckets at each thread's given offset
     for( uint i = 0; i < entriesPerChunk; i++ )
     {
+        const uint32 dstIdx = --pfxSum[bucketIndices[i]];
 
+        bucketY[dstIdx] = yIn[i];
+
+        if constexpr ( sizeof( TMetaA ) > 0 )
+        {
+            bucketMetaA[dstIdx] = inMetaA;
+        }
+
+        if constexpr ( sizeof( TMetaB ) > 0 )
+        {
+            bucketMetaB[dstIdx] = inMetaB;
+        }
     }
+
+    // Write buckets to disk
+    if( this->LockThreads() )
+    {
+        // Calculate the disk block-aligned size
+        // #TODO: Don't do this if not using direct IO?
+        const uint32* bucketCounts = this->bucketCounts;
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            ySizes[i] = (uint32)( ( bucketCounts[i] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
+
+        // #TODO: Need to write Y0/Y1 and swap between tables.
+        queue.WriteBuckets( FileId::Y, yOut, ySizes );
+
+        if constexpr ( sizeof( TMetaA ) > 0 )
+        {
+            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                metaASizes[i] = (uint32)( ( bucketCounts[i] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
+
+            // queue.WriteBuckets( FileId::Y, yOut, ySizes );
+        }
+
+        if constexpr ( sizeof( TMetaB ) > 0 )
+        {
+            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                metaBSizes[i] = (uint32)( ( bucketCounts[i] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
+        }
+
+        this->ReleaseThreads();
+    }
+    else
+        this->WaitForRelease();
 }
 
 //-----------------------------------------------------------
