@@ -60,6 +60,8 @@ class DiskPlotPhase1
         FileId  metaAFileId;
         FileId  metaBFileId;
 
+        uint32* groupBoundaries;
+
         AutoResetSignal frontFence;
         AutoResetSignal backFence;
     };

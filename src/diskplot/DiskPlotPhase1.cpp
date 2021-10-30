@@ -629,7 +629,7 @@ void DiskPlotPhase1::ForwardPropagate()
 
     // Find the largest bucket so that we can reserve buffers of its size
     for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-        maxBucketCount = std::max( maxBucketSize, (size_t)_bucketCounts[i] );
+        maxBucketCount = std::max( maxBucketCount, _bucketCounts[i] );
 
     maxBucketSize = maxBucketCount * sizeof( uint32 );
     _maxBucketCount = maxBucketCount;
@@ -660,7 +660,7 @@ void DiskPlotPhase1::ForwardPropagate()
 
         const size_t totalSize = ySize + sortKeySize + metaSize + pairsLSize + pairsRSize;
 
-        Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoGB );
+        Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
 
         bucket.fpBuffer = _diskQueue->GetBuffer( totalSize );
 
@@ -688,22 +688,6 @@ void DiskPlotPhase1::ForwardPropagate()
 
         // The remainder for the work heap is used to write as fx disk write buffers 
     }
-
-    
-
-//     bucketBuffers.front = (byte*)y0;
-//     bucketBuffers.back = (byte*)y1;
-
-//     _bucketBuffers  = &bucketBuffers;
-
-    // Reset the fence as we're about to use it
-    bucket.frontFence.Wait();
-
-//     bucketBuffers.fence.Wait();
-
-    // Seek x buckets to the start and load the first bucket
-    ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
-    ioDispatch.ReadFile  ( FileId::X, 0, bucket.metaA0, _bucketCounts[0] * sizeof( uint32 ) );
 
     /// Propagate to each table
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
@@ -739,7 +723,10 @@ void DiskPlotPhase1::ForwardPropagate()
 template<TableId tableId>
 void DiskPlotPhase1::ForwardPropagateTable()
 {
-    Bucket& bucket = _bucket;
+    DiskPlotContext& cx          = _cx;
+    DiskBufferQueue& ioDispatch  = *_diskQueue;
+    Bucket&          bucket      = *_bucket;
+    const uint       threadCount = _cx.threadCount;
 
     constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
     constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
@@ -791,15 +778,21 @@ void DiskPlotPhase1::ForwardPropagateTable()
             const size_t nextBufferCount = _bucketCounts[nextBucketIdx];
 
             ioDispatch.ReadFile( bucket.yFileId    , nextBucketIdx, bucket.y1    , nextBufferCount * sizeof( uint32 ) );
+
+            // #TODO: Maybe we should just allocate .5 GiB more for the temp buffers?
+            //        for now, try it this way.
+            // Don't load the metadata yet, we will use the metadata back buffer as our temporary buffer for sorting
+            ioDispatch.CommitCommands();
+
             ioDispatch.ReadFile( bucket.metaAFileId, nextBucketIdx, bucket.metaA1, nextBufferCount * MetaInASize );
 
             if constexpr ( MetaInBSize > 0 )
             {
-                ioDispatch.ReadFile( bucket.metaBFileId, nextBucketIdx, bucket.metaB1, nextBufferCount *  MetaInBSize );
+                ioDispatch.ReadFile( bucket.metaBFileId, nextBucketIdx, bucket.metaB1, nextBufferCount * MetaInBSize );
             }
 
             ioDispatch.AddFence( bucket.backFence );
-            ioDispatch.CommitCommands();
+//             ioDispatch.CommitCommands();
         }
         else
         {
@@ -812,8 +805,25 @@ void DiskPlotPhase1::ForwardPropagateTable()
         {
             Log::Line( "  Sorting bucket." );
             auto timer = TimerBegin();
-            RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, bucket.y0, yTemp, metaBuffer, metaTemp, entryCount );
+
+            uint32* sortKey = bucket.sortKey;
+
+            if constexpr( tableId == TableId::Table1 )
+            {
+                // No sort key needed for table 1, just sort x along with y
+                sortKey = bucket.metaA0;
+            }
+
+            uint32* yTemp       = (uint32*)bucket.metaA0;
+            uint32* sortKeyTemp = yTemp + entryCount;
+
+            RadixSort256::SortWithKey<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
+
             double elapsed = TimerEnd( timer );
+
+            // OK to load next metadata buffer now (see comment above)
+            ioDispatch.CommitCommands();
+
             Log::Line( "  Sorted bucket in %.2lf seconds.", elapsed );
         }
 
@@ -823,25 +833,28 @@ void DiskPlotPhase1::ForwardPropagateTable()
         // Sort metadata with the key
         if constexpr( tableId > TableId::Table2 )
         {
-
+            // #TODO: This
         }
 
         // Scan for BC groups
         {
-            GroupInfo groupInfos[BB_MAX_JOBS];
-
-            const uint32 groupCount = ScanGroups( bucketIdx, yBuffer, entryCount, groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
+//             GroupInfo groupInfos[BB_MAX_JOBS];
+// 
+//             const uint32 groupCount = ScanGroups( bucketIdx, bucket.y0, entryCount, bucket.groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
+// 
+//             uint32* lPairs = bucket.pairs.left;
+//             uint16* rPairs = bucket.pairs.right;
 
             // Match pairs
-            struct Pairs pairs[BB_MAX_JOBS];
+//             struct Pairs pairs[BB_MAX_JOBS];
+// 
+//             for( uint i = 0; i < threadCount; i++ )
+//             {
+//                 pairs[i].left  = lPairs + i * maxPairsPerThread;
+//                 pairs[i].right = rPairs + i * maxPairsPerThread;
+//             }
 
-            for( uint i = 0; i < threadCount; i++ )
-            {
-                pairs[i].left  = lGroups + i * maxPairsPerThread;
-                pairs[i].right = rGroups + i * maxPairsPerThread;
-            }
-
-            Match( bucketIdx, maxPairsPerThread, yBuffer, groupInfos, pairs );
+            //Match( bucketIdx, maxPairsPerThread, yBuffer, groupInfos, pairs );
         }
 
         // Generate fx values
@@ -849,8 +862,13 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
         }
 
-        // Ensure the next buffer has been read
-        bucketBuffers.Flip();
+        // Ensure the next bucket has finished loading
+        bucket.backFence.Wait();
+
+        // Swap are front/back buffers
+        std::swap( bucket.y0    , bucket.y1     );
+        std::swap( bucket.metaA0, bucket.metaA1 );
+        std::swap( bucket.metaB0, bucket.metaB1 );
     }
 }
 

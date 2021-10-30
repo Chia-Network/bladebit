@@ -89,10 +89,19 @@ inline FlagType operator ~ ( FlagType lhs )                                     
 }
 
 #define ImplementArithmeticOps( EnumType ) \
+/* Prefix ++*/                                                      \
 inline EnumType& operator++( EnumType& self )                       \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     (*reinterpret_cast<BaseT*>( &self ))++; return self;            \
+}                                                                   \
+/* Postfix ++*/                                                     \
+inline EnumType operator++( EnumType& self, int )                   \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    EnumType tmp = self;                                            \
+    ( *reinterpret_cast<BaseT*>( &self ) )++;                       \
+    return tmp;                                                     \
 }                                                                   \
                                                                     \
 inline EnumType& operator--( EnumType& self )                       \
