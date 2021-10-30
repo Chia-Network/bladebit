@@ -638,18 +638,16 @@ void DiskPlotPhase1::ForwardPropagate()
     //        we don't want to allocate per-table as we might not be able to do
     //        so due to fragmentation and the other buffers allocated after this big chunk.
     //        Therefore, it's better to have a set size
+    // 
+    // #TODO: Create a separate heap... Grab the section out of the working heap we need, and then create
+    //        a new heap strictly with the space that will go to IO. No need to have these show up in the 
+    //        heap as it will slow down deallocation.
+    // 
     // Allocate buffers we need for forward propagation
-    DoubleBuffer bucketBuffers;
+//     DoubleBuffer bucketBuffers;
 
-    byte*   fpBuffer = nullptr; // Root allocation
-    uint32* y0       = nullptr; // We do double-buffering here to load the next bucket in the B/G
-    uint32* y1       = nullptr;
-    uint32* sortKey  = nullptr;
-    uint64* meta0    = nullptr;
-    uint64* meta1    = nullptr;
-    Pairs   pairs;
-    pairs.left       = nullptr;
-    pairs.right      = nullptr;
+    Bucket bucket;
+    _bucket = &bucket;
 
     {
         const size_t fileBlockSize = ioDispatch.BlockSize();
@@ -664,113 +662,76 @@ void DiskPlotPhase1::ForwardPropagate()
 
         Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoGB );
 
-        fpBuffer = _diskQueue->GetBuffer( totalSize );
+        bucket.fpBuffer = _diskQueue->GetBuffer( totalSize );
 
-        byte* ptr = fpBuffer;
+        byte* ptr = bucket.fpBuffer;
 
-        y0 = (uint32*)ptr; 
-        y1 = y0 + maxBucketCount;
+        bucket.y0 = (uint32*)ptr; 
+        bucket.y1 = bucket.y0 + maxBucketCount;
         ptr += ySize;
 
-        sortKey = (uint32*)ptr;
+        bucket.sortKey = (uint32*)ptr;
         ptr += sortKeySize;
 
-        meta0 = (uint64*)ptr;
-        meta1 = meta0 + maxBucketCount;
+        bucket.metaA0 = (uint64*)ptr;
+        bucket.metaA1 = bucket.metaA0 + maxBucketCount;
+        bucket.metaB0 = bucket.metaA1 + maxBucketCount;
+        bucket.metaB1 = bucket.metaB0 + maxBucketCount;
         ptr += metaSize;
+        ASSERT( ptr == (byte*)( bucket.metaB1 + maxBucketCount ) );
 
-        pairs.left = (uint32*)ptr;
+
+        bucket.pairs.left = (uint32*)ptr;
         ptr += pairsLSize;
 
-        pairs.right = (uint16*)ptr;
+        bucket.pairs.right = (uint16*)ptr;
 
         // The remainder for the work heap is used to write as fx disk write buffers 
     }
 
-    bucketBuffers.front = (byte*)y0;
-    bucketBuffers.back = (byte*)y1;
+    
 
-    _bucketBuffers  = &bucketBuffers;
+//     bucketBuffers.front = (byte*)y0;
+//     bucketBuffers.back = (byte*)y1;
+
+//     _bucketBuffers  = &bucketBuffers;
 
     // Reset the fence as we're about to use it
-    bucketBuffers.fence.Wait();
+    bucket.frontFence.Wait();
 
+//     bucketBuffers.fence.Wait();
+
+    // Seek x buckets to the start and load the first bucket
     ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
-    ioDispatch.ReadFile( FileId::X , 0, sortKey, _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.ReadFile  ( FileId::X, 0, bucket.metaA0, _bucketCounts[0] * sizeof( uint32 ) );
 
     /// Propagate to each table
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
     {
-        // Seek all buckets to the start
-        ioDispatch.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
+        const bool isEven = ( (uint)table ) & 1;
 
-        // Load initial bucket
-        ioDispatch.ReadFile( FileId::Y0, 0, bucketBuffers.front, _bucketCounts[0] * sizeof( uint32 ) );
-         
-        ioDispatch.AddFence( bucketBuffers.fence );
-        ioDispatch.CommitCommands();
-        bucketBuffers.fence.Wait();
+        bucket.yFileId     = isEven ? FileId::Y0       : FileId::Y1;
+        bucket.metaAFileId = isEven ? FileId::META_A_1 : FileId::META_A_0;
+        bucket.metaBFileId = isEven ? FileId::META_B_1 : FileId::META_B_0;
 
-        if( table > TableId::Table1 )
-        {
-            // Load 
-
-        }
-
+        // Seek buckets to the start and load the first y bucket
        
-    }
+       
+        Log::Line( "Forward propagating to table %d...", (int)table + 1 );
+        const auto tableTimer = TimerBegin();
 
-    for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
-    {
-        Log::Line( "Forward Propagating bucket %-2u", bucketIdx );
-
-        const uint entryCount = _bucketCounts[bucketIdx];
-
-        // Read the next bucket in the background if we're not at the last bucket
-        const uint nextBucketIdx = bucketIdx + 1;
-
-        if( nextBucketIdx < BB_DP_BUCKET_COUNT )
+        switch( table )
         {
-            const size_t readSize = _bucketCounts[nextBucketIdx] * sizeof( uint32 );
-
-            ioDispatch.ReadFile( FileId::Y0, nextBucketIdx, bucketBuffers.back, readSize );
-            ioDispatch.ReadFile( FileId::X , nextBucketIdx, bucketBuffers.back + maxBucketSize, readSize );
-            ioDispatch.AddFence( bucketBuffers.fence );
-            ioDispatch.CommitCommands();
-        }
-        else
-            bucketBuffers.fence.Signal();
-
-        // Sort our current bucket
-        uint32* yBuffer    = (uint32*)bucketBuffers.front;
-        uint32* metaBuffer = (uint32*)( bucketBuffers.front + maxBucketSize );
-
-        {
-            Log::Line( "  Sorting bucket." );
-            auto timer = TimerBegin();
-            RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, yBuffer, yTemp, metaBuffer, metaTemp, entryCount );
-            double elapsed = TimerEnd( timer );
-            Log::Line( "  Sorted bucket in %.2lf seconds.", elapsed );
+            case TableId::Table2: ForwardPropagateTable<TableId::Table2>(); break;
+            case TableId::Table3: ForwardPropagateTable<TableId::Table3>(); break;
+            case TableId::Table4: ForwardPropagateTable<TableId::Table4>(); break;
+            case TableId::Table5: ForwardPropagateTable<TableId::Table5>(); break;
+            case TableId::Table6: ForwardPropagateTable<TableId::Table6>(); break;
+            case TableId::Table7: ForwardPropagateTable<TableId::Table7>(); break;
         }
 
-        // Scan for BC groups
-        GroupInfo groupInfos[BB_MAX_JOBS];
-
-        const uint32 groupCount = ScanGroups( bucketIdx, yBuffer, entryCount, groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
-
-        // Match pairs
-        struct Pairs pairs[BB_MAX_JOBS];
-
-        for( uint i = 0; i < threadCount; i++ )
-        {
-            pairs[i].left  = lGroups + i * maxPairsPerThread;
-            pairs[i].right = rGroups + i * maxPairsPerThread;
-        }
-
-        Match( bucketIdx, maxPairsPerThread, yBuffer, groupInfos, pairs );
-
-        // Ensure the next buffer has been read
-        bucketBuffers.Flip();
+        const double tableElapsed = TimerEnd( tableTimer );
+        Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
     }
 }
 
@@ -778,13 +739,119 @@ void DiskPlotPhase1::ForwardPropagate()
 template<TableId tableId>
 void DiskPlotPhase1::ForwardPropagateTable()
 {
-    Log::Line( "Forward propagating to table %d...", (int)tableId + 1 );
-    const auto tableTimer = TimerBegin();
+    Bucket& bucket = _bucket;
 
+    constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
+    constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
 
+    // Set the correct file id, given the table (we swap between them for each table)
+    {
+        const bool isEven = ( (uint)tableId ) & 1;
 
-    const double tableElapsed = TimerEnd( tableTimer );
-    Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)tableId + 1, tableElapsed );
+        bucket.yFileId     = isEven ? FileId::Y0       : FileId::Y1;
+        bucket.metaAFileId = isEven ? FileId::META_A_1 : FileId::META_A_0;
+        bucket.metaBFileId = isEven ? FileId::META_B_1 : FileId::META_B_0;
+
+        if constexpr( tableId == TableId::Table2 )
+        {
+            bucket.metaAFileId = FileId::X;
+        }
+    }
+
+    // Load first bucket
+    ioDispatch.SeekBucket( bucket.yFileId, 0, SeekOrigin::Begin );
+    ioDispatch.ReadFile  ( bucket.yFileId, 0, bucket.y0, _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.AddFence( bucket.frontFence );
+
+    ioDispatch.SeekBucket( bucket.metaAFileId, 0, SeekOrigin::Begin );
+    ioDispatch.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, _bucketCounts[0] * MetaInASize );
+    ioDispatch.AddFence( bucket.frontFence );
+
+    if constexpr ( MetaInBSize > 0 )
+    {
+        ioDispatch.SeekBucket( bucket.metaBFileId, 0, SeekOrigin::Begin );
+        ioDispatch.ReadFile  ( bucket.metaBFileId, 0, bucket.metaB0, _bucketCounts[0] * MetaInBSize );
+    }
+
+    ioDispatch.CommitCommands();
+    bucket.frontFence.Wait();
+
+    for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
+    {
+        Log::Line( " Processing bucket %-2u", bucketIdx );
+
+        const uint entryCount = _bucketCounts[bucketIdx];
+        ASSERT( entryCount < _maxBucketCount );
+
+        // Read the next bucket in the background if we're not at the last bucket
+        const uint nextBucketIdx = bucketIdx + 1;
+
+        if( nextBucketIdx < BB_DP_BUCKET_COUNT )
+        {
+            const size_t nextBufferCount = _bucketCounts[nextBucketIdx];
+
+            ioDispatch.ReadFile( bucket.yFileId    , nextBucketIdx, bucket.y1    , nextBufferCount * sizeof( uint32 ) );
+            ioDispatch.ReadFile( bucket.metaAFileId, nextBucketIdx, bucket.metaA1, nextBufferCount * MetaInASize );
+
+            if constexpr ( MetaInBSize > 0 )
+            {
+                ioDispatch.ReadFile( bucket.metaBFileId, nextBucketIdx, bucket.metaB1, nextBufferCount *  MetaInBSize );
+            }
+
+            ioDispatch.AddFence( bucket.backFence );
+            ioDispatch.CommitCommands();
+        }
+        else
+        {
+            // Make sure we don't wait at the end of the loop since we don't 
+            // have any background bucket loading.
+            bucket.backFence.Signal();
+        }
+
+        // Sort our current bucket
+        {
+            Log::Line( "  Sorting bucket." );
+            auto timer = TimerBegin();
+            RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, bucket.y0, yTemp, metaBuffer, metaTemp, entryCount );
+            double elapsed = TimerEnd( timer );
+            Log::Line( "  Sorted bucket in %.2lf seconds.", elapsed );
+        }
+
+        // Ensure metadata has been loaded
+        bucket.frontFence.Wait();
+
+        // Sort metadata with the key
+        if constexpr( tableId > TableId::Table2 )
+        {
+
+        }
+
+        // Scan for BC groups
+        {
+            GroupInfo groupInfos[BB_MAX_JOBS];
+
+            const uint32 groupCount = ScanGroups( bucketIdx, yBuffer, entryCount, groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
+
+            // Match pairs
+            struct Pairs pairs[BB_MAX_JOBS];
+
+            for( uint i = 0; i < threadCount; i++ )
+            {
+                pairs[i].left  = lGroups + i * maxPairsPerThread;
+                pairs[i].right = rGroups + i * maxPairsPerThread;
+            }
+
+            Match( bucketIdx, maxPairsPerThread, yBuffer, groupInfos, pairs );
+        }
+
+        // Generate fx values
+        {
+
+        }
+
+        // Ensure the next buffer has been read
+        bucketBuffers.Flip();
+    }
 }
 
 ///

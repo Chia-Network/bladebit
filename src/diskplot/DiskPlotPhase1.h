@@ -45,16 +45,23 @@ class DiskPlotPhase1
 {
     struct Bucket
     {
-        uint32* y0;
-        byte*   fpBuffer = nullptr; // Root allocation
-        uint32* y0       = nullptr; // We do double-buffering here to load the next bucket in the B/G
-        uint32* y1       = nullptr;
-        uint32* sortKey  = nullptr;
-        uint64* meta0    = nullptr;
-        uint64* meta1    = nullptr;
+        byte*   fpBuffer; // Root allocation
+
+        uint32* y0      ;
+        uint32* y1      ;
+        uint32* sortKey ;
+        uint64* metaA0  ; 
+        uint64* metaA1  ;
+        uint64* metaB0  ;
+        uint64* metaB1  ;
         Pairs   pairs;
-        pairs.left       = nullptr;
-        pairs.right      = nullptr;
+
+        FileId  yFileId;
+        FileId  metaAFileId;
+        FileId  metaBFileId;
+
+        AutoResetSignal frontFence;
+        AutoResetSignal backFence;
     };
 
 public:
@@ -67,7 +74,11 @@ private:
 
     template<TableId tableId>
     void ForwardPropagateTable();
+
     void ForwardPropagateBucket( TableId table, uint bucketIdx );
+
+    template<TableId TableId>
+    void SortBucket( uint32* y, uint32* yTmp, uint64* meta, uint64* metaTmp );
 
     uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
 
@@ -86,8 +97,9 @@ private:
     DiskBufferQueue* _diskQueue;
 
     uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
-    size_t _maxBucketCount;
+    uint32 _maxBucketCount;
 
+    Bucket*       _bucket;
     DoubleBuffer* _bucketBuffers;
 };
 
