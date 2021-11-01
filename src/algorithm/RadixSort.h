@@ -186,7 +186,7 @@ void RadixSort256::RadixSortThread( SortJob<T1, T2>* job )
         for( uint64 i = 0; i < length; i++ )
             counts[(src[i] >> shift) & 0xFF]++;
         
-        // Synchronize with other threads to comput the correct prefix sum
+        // Synchronize with other threads to compute the correct prefix sum
         if( id == 0 )
         {
             // This is the control thread, it is in charge of computing the shared prefix sums.

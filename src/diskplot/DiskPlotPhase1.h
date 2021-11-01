@@ -13,9 +13,14 @@ struct Pairs
 
 struct GroupInfo
 {
+    // When scanning groups
     uint32* groupBoundaries;
     uint32  groupCount;
     uint32  startIndex;
+
+    // When matching
+    uint32  entryCount;
+    Pairs   pairs;
 };
 
 // Represents a double-buffered blob of data of the size of
@@ -55,12 +60,12 @@ class DiskPlotPhase1
         uint64* metaB0  ;
         uint64* metaB1  ;
         Pairs   pairs;
+        uint32* groupBoundaries;
 
         FileId  yFileId;
         FileId  metaAFileId;
         FileId  metaBFileId;
 
-        uint32* groupBoundaries;
 
         AutoResetSignal frontFence;
         AutoResetSignal backFence;
@@ -84,7 +89,7 @@ private:
 
     uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
 
-    void Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], struct Pairs pairs[BB_MAX_JOBS] );
+    uint32 Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS] );
 
     void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
     
@@ -165,7 +170,6 @@ struct ScanGroupJob : MTJob<ScanGroupJob>
 struct MatchJob : MTJob<MatchJob>
 {
     const uint32* yBuffer;
-    Pairs*        pairs;          // Pair working buffer
     GroupInfo*    groupInfo;
     uint          bucketIdx;
     uint          maxPairCount;

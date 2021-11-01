@@ -9,6 +9,10 @@
 #include "io/FileStream.h"
 #include "SysHost.h"
 
+#if _DEBUG
+    #include "../memplot/DbgHelper.h"
+#endif
+
 struct WriteFileJob
 {
     const char* filePath;
@@ -518,9 +522,6 @@ void GenF1Job::Run()
     }
 }
 
-///
-/// Forward Propagate Tables
-///
 //-----------------------------------------------------------
 inline void GenF1Job::SaveBlockRemainders( uint32* yBuffer, uint32* xBuffer, const uint32* bucketCounts, 
                                            DoubleBuffer* remainderBuffers, uint32* remainderSizes )
@@ -617,6 +618,10 @@ void GenF1Job::WriteFinalBlockRemainders( DoubleBuffer* remainderBuffers, uint32
     }
 }
 
+
+///
+/// Forward Propagate Tables
+///
 //-----------------------------------------------------------
 void DiskPlotPhase1::ForwardPropagate()
 {
@@ -631,8 +636,13 @@ void DiskPlotPhase1::ForwardPropagate()
     for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
         maxBucketCount = std::max( maxBucketCount, _bucketCounts[i] );
 
+    ASSERT( maxBucketCount <= BB_DP_MAX_ENTRIES_PER_BUCKET );
+
+    maxBucketCount = BB_DP_MAX_ENTRIES_PER_BUCKET;
     maxBucketSize = maxBucketCount * sizeof( uint32 );
-    _maxBucketCount = maxBucketCount;
+    _maxBucketCount =  maxBucketCount;
+
+
 
     // #TODO: We need to have a maximum size here, and just allocate that.
     //        we don't want to allocate per-table as we might not be able to do
@@ -657,8 +667,9 @@ void DiskPlotPhase1::ForwardPropagate()
         const size_t metaSize    = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 ) * 4, (int)fileBlockSize );
         const size_t pairsLSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
         const size_t pairsRSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint16 )    , (int)fileBlockSize );
+        const size_t groupsSize  = RoundUpToNextBoundary( ( maxBucketCount + threadCount * 2 ) * sizeof( uint32), (int)fileBlockSize );
 
-        const size_t totalSize = ySize + sortKeySize + metaSize + pairsLSize + pairsRSize;
+        const size_t totalSize = ySize + sortKeySize + metaSize + pairsLSize + pairsRSize + groupsSize;
 
         Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
 
@@ -685,6 +696,9 @@ void DiskPlotPhase1::ForwardPropagate()
         ptr += pairsLSize;
 
         bucket.pairs.right = (uint16*)ptr;
+        ptr += pairsRSize;
+
+        bucket.groupBoundaries = (uint32*)ptr;
 
         // The remainder for the work heap is used to write as fx disk write buffers 
     }
@@ -808,27 +822,34 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
             uint32* sortKey = bucket.sortKey;
 
-            if constexpr( tableId == TableId::Table1 )
+            if constexpr( tableId == TableId::Table2 )
             {
                 // No sort key needed for table 1, just sort x along with y
-                sortKey = bucket.metaA0;
+                sortKey = (uint32*)bucket.metaA0;
             }
 
-            uint32* yTemp       = (uint32*)bucket.metaA0;
+            uint32* yTemp       = (uint32*)bucket.metaA1;
             uint32* sortKeyTemp = yTemp + entryCount;
 
-            RadixSort256::SortWithKey<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
+//             RadixSort256::SortWithKey<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
+            RadixSort256::Sort<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, entryCount );
 
             double elapsed = TimerEnd( timer );
 
-            // OK to load next metadata buffer now (see comment above)
-            ioDispatch.CommitCommands();
+            // OK to load next (back) metadata buffer now (see comment above)
+            if( nextBucketIdx < BB_DP_BUCKET_COUNT )
+                ioDispatch.CommitCommands();
+
+            #if _DEBUG
+                ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
+            #endif
 
             Log::Line( "  Sorted bucket in %.2lf seconds.", elapsed );
         }
 
-        // Ensure metadata has been loaded
-        bucket.frontFence.Wait();
+        // Ensure metadata has been loaded on the first bucket
+        if( bucketIdx == 0 )
+            bucket.frontFence.Wait();
 
         // Sort metadata with the key
         if constexpr( tableId > TableId::Table2 )
@@ -836,30 +857,39 @@ void DiskPlotPhase1::ForwardPropagateTable()
             // #TODO: This
         }
 
-        // Scan for BC groups
+        // Scan for BC groups & match
+        GroupInfo groupInfos[BB_MAX_JOBS];
+        uint32 totalMatches;
+//         Pairs pairs[BB_MAX_JOBS];
+
         {
-//             GroupInfo groupInfos[BB_MAX_JOBS];
-// 
-//             const uint32 groupCount = ScanGroups( bucketIdx, bucket.y0, entryCount, bucket.groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
-// 
-//             uint32* lPairs = bucket.pairs.left;
-//             uint16* rPairs = bucket.pairs.right;
+            // Scan for group boundaries
+            const uint32 groupCount = ScanGroups( bucketIdx, bucket.y0, entryCount, bucket.groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
+
+            uint32* lPairs = bucket.pairs.left;
+            uint16* rPairs = bucket.pairs.right;
 
             // Match pairs
-//             struct Pairs pairs[BB_MAX_JOBS];
-// 
-//             for( uint i = 0; i < threadCount; i++ )
-//             {
-//                 pairs[i].left  = lPairs + i * maxPairsPerThread;
-//                 pairs[i].right = rPairs + i * maxPairsPerThread;
-//             }
+            const uint32 entriesPerBucket  = (uint32)BB_DP_MAX_ENTRIES_PER_BUCKET;
+            const uint32 maxPairsPerThread = entriesPerBucket / threadCount;    // (uint32)( entriesPerBucket / threadCount + BB_DP_XTRA_MATCHES_PER_THREAD );
 
-            //Match( bucketIdx, maxPairsPerThread, yBuffer, groupInfos, pairs );
+            for( uint i = 0; i < threadCount; i++ )
+            {
+                groupInfos[i].pairs.left  = lPairs + i * maxPairsPerThread;
+                groupInfos[i].pairs.right = rPairs + i * maxPairsPerThread;
+            }
+
+            totalMatches = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos );
         }
 
         // Generate fx values
+        for( uint threadIdx = 0; threadIdx < threadCount; threadIdx++ )
         {
+            GroupInfo& group = groupInfos[threadIdx];
 
+
+
+//             GenFxForTable( bucketIdx, group.entryCount, group.pairs, bucket.)
         }
 
         // Ensure the next bucket has finished loading
@@ -1013,7 +1043,7 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
 }
 
 //-----------------------------------------------------------
-void DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], Pairs pairs[BB_MAX_JOBS] )
+uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS] )
 {
     Log::Line( "  Matching groups." );
 
@@ -1027,7 +1057,6 @@ void DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint32
         auto& job = jobs[i];
 
         job.yBuffer         = yBuffer;
-        job.pairs           = &pairs[i];
         job.bucketIdx       = bucketIdx;
         job.maxPairCount    = maxPairsPerThread;
         job.pairCount       = 0;
@@ -1038,7 +1067,12 @@ void DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint32
 
     const double elapsed = jobs.Run();
 
-    Log::Line( "  Finished matching groups in %.2lf seconds.", elapsed );
+    uint32 matches = jobs[0].pairCount;
+    for( uint i = 1; i < threadCount; i++ )
+        matches += jobs[i].pairCount;
+
+    Log::Line( "  Found %u matches in %.2lf seconds.", matches, elapsed );
+    return matches;
 }
 
 //-----------------------------------------------------------
@@ -1089,7 +1123,7 @@ void MatchJob::Run()
     const uint32  maxPairs        = this->maxPairCount;
     const uint64  bucket          = ((uint64)this->bucketIdx) << 32;
 
-    Pairs  pairs     = *this->pairs;
+    Pairs  pairs     = groupInfo->pairs;
     uint32 pairCount = 0;
 
     uint8  rMapCounts [kBC];
@@ -1174,7 +1208,8 @@ void MatchJob::Run()
     }
 
 RETURN:
-    this->pairCount = pairCount;
+    this->pairCount             = pairCount;
+    this->groupInfo->entryCount = pairCount;
 }
 
 ///
@@ -1194,7 +1229,7 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
 
     const uint   threadCount      = cx.threadCount;
     const uint32 entriesPerThread = entryCount / threadCount;
-    const uint32 trailingEntries  = entryCount - ( entriesPerThred * threadCount );
+    const uint32 trailingEntries  = entryCount - ( entriesPerThread * threadCount );
 
     using Job = FxJob<tableId>;
 
@@ -1285,6 +1320,145 @@ void FxJob::RunForTable()
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
+
+//-----------------------------------------------------------
+template<TableId tableId>
+inline 
+void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs, 
+                        const uint32* yIn, const uint64* metaInA, const uint64* metaInB, 
+                        uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB )
+{
+    constexpr size_t metaKMultiplierIn  = TableMetaIn <tableId>::Multiplier;
+    constexpr size_t metaKMultiplierOut = TableMetaOut<tableId>::Multiplier;
+
+    // Helper consts
+    // Table 7 (identified by 0 metadata output) we don't have k + kExtraBits sized y's.
+    // so we need to shift by 32 bits, instead of 26.
+    constexpr uint extraBitsShift = tableId == TableId::Table7 ? 0 : kExtraBits;
+
+    constexpr uint   shiftBits   = metaKMultiplierOut == 0 ? 0 : kExtraBits;
+    constexpr uint   k           = _K;
+    constexpr uint32 ySize       = k + kExtraBits;         // = 38
+    constexpr uint32 yShift      = 64u - (k + shiftBits);  // = 26 or 32
+    constexpr size_t metaSize    = k * metaKMultiplierIn;
+    constexpr size_t metaSizeLR  = metaSize * 2;
+    constexpr size_t bufferSize  = CDiv( ySize + metaSizeLR, 8u );
+
+    // Bucket for extending y
+//     const uint64 bucket = ( (uint64)bucketIdx ) << 32;
+
+    // Meta extraction
+    uint64 l0, l1, r0, r1;
+
+    // Hashing
+    uint64 input [5];       // y + L + R
+    uint64 output[4];       // blake3 hashed output
+
+    blake3_hasher hasher;
+
+    for( uint i = 0; i < entryCount; i++ )
+    {
+        const uint32 left  = pairs.left[i];
+        const uint32 right = left + pairs.right[i];
+
+        const uint64 y     = bucket | yIn[left];
+
+        // Extract metadata
+        if constexpr( metaKMultiplierIn == 1 )
+        {
+            l0 = reinterpret_cast<const uint32*>( metaInA )[left ];
+            r0 = reinterpret_cast<const uint32*>( metaInA )[right];
+
+            input[0] = Swap64( y  << 26 | l0 >> 6  );
+            input[1] = Swap64( l0 << 58 | r0 << 26 );
+        }
+        else if constexpr( metaKMultiplierIn == 2 )
+        {
+            l0 = metaInA[left ];
+            r0 = metaInA[right];
+
+            input[0] = Swap64( y  << 26 | l0 >> 38 );
+            input[1] = Swap64( l0 << 26 | r0 >> 38 );
+            input[2] = Swap64( r0 << 26 );
+        }
+        else if constexpr( metaKMultiplierIn == 3 )
+        {
+            l0 = metaInA[left];
+            l1 = reinterpret_cast<const uint32*>( metaInB )[left ];
+            r0 = metaInA[right];
+            r1 = reinterpret_cast<const uint32*>( metaInB )[right];
+        
+            input[0] = Swap64( y  << 26 | l0 >> 38 );
+            input[1] = Swap64( l0 << 26 | l1 >> 6  );
+            input[2] = Swap64( l1 << 58 | r0 >> 6  );
+            input[3] = Swap64( r0 << 58 | r1 << 26 );
+        }
+        else if constexpr( metaKMultiplierIn == 4 )
+        {
+            l0 = metaInA[left ];
+            l1 = metaInB[left ];
+            r0 = metaInA[right];
+            r1 = metaInB[right];
+
+            input[0] = Swap64( y  << 26 | l0 >> 38 );
+            input[1] = Swap64( l0 << 26 | l1 >> 38 );
+            input[2] = Swap64( l1 << 26 | r0 >> 38 );
+            input[3] = Swap64( r0 << 26 | r1 >> 38 );
+            input[4] = Swap64( r1 << 26 );
+        }
+
+        // Hash input
+        blake3_hasher_init( &hasher );
+        blake3_hasher_update( &hasher, input, bufferSize );
+        blake3_hasher_finalize( &hasher, (uint8_t*)output, sizeof( output ) );
+
+        uint64 fx = Swap64( *output ) >> yShift;
+
+        yOut[i] = (uint32)fx;
+
+        if constexpr( tableId != TableId::Table7 )
+        {
+            // Store the bucket id for this y value
+            bucketOut[i] = (byte)( fx >> 32 );
+        }
+
+        // Calculate output metadata
+        if constexpr( metaKMultiplierOut == 2 && metaKMultiplierIn == 1 )
+        {
+            metaOutA[i] = l0 << 32 | r0;
+        }
+        else if constexpr ( metaKMultiplierOut == 2 && metaKMultiplierIn == 3 )
+        {
+            const uint64 h0 = Swap64( output[0] );
+            const uint64 h1 = Swap64( output[1] );
+
+            metaOutA[0] = h0 << ySize | h1 >> 26;
+        }
+        else if constexpr ( metaKMultiplierOut == 3 )
+        {
+            const uint64 h0 = Swap64( output[0] );
+            const uint64 h1 = Swap64( output[1] );
+            const uint64 h2 = Swap64( output[2] );
+
+            metaOutA[i] = h0 << ySize | h1 >> 26;
+            reinterpret_cast<uint32*>( metaOutB )[i] = (uint32)( ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58 );
+        }
+        else if constexpr( metaKMultiplierOut == 4 && metaKMultiplierIn == 2 )
+        {
+            metaOutA[i] = l0;
+            metaOutB[i] = r0;
+        }
+        else if constexpr ( metaKMultiplierOut == 4 && metaKMultiplierIn != 2 )
+        {
+            const uint64 h0 = Swap64( output[0] );
+            const uint64 h1 = Swap64( output[1] );
+            const uint64 h2 = Swap64( output[2] );
+
+            metaOutA[i] = h0 << ySize | h1 >> 26;
+            metaOutB[i] = h1 << 38    | h2 >> 26;
+        }
+    }
+}
 
 //-----------------------------------------------------------
 template<TableId tableId, typename TMetaA, typename TMetaB>
@@ -1424,145 +1598,6 @@ void FxJob::SaveBlockRemainders( FileId fileId, const uint32* sizes, const T* bu
 
 }
 
-
-//-----------------------------------------------------------
-template<TableId tableId>
-inline 
-void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs, 
-                          const uint32* yIn, const uint64* metaInA, const uint64* metaInB, 
-                          uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB )
-{
-    constexpr size_t metaKMultiplierIn  = TableMetaIn <tableId>::Multiplier;
-    constexpr size_t metaKMultiplierOut = TableMetaOut<tableId>::Multiplier;
-
-    // Helper consts
-    // Table 7 (identified by 0 metadata output) we don't have k + kExtraBits sized y's.
-    // so we need to shift by 32 bits, instead of 26.
-    constexpr uint extraBitsShift = tableId == TableId::Table7 ? 0 : kExtraBits;
-
-    constexpr uint   shiftBits   = metaKMultiplierOut == 0 ? 0 : kExtraBits;
-    constexpr uint   k           = _K;
-    constexpr uint32 ySize       = k + kExtraBits;         // = 38
-    constexpr uint32 yShift      = 64u - (k + shiftBits);  // = 26 or 32
-    constexpr size_t metaSize    = k * metaKMultiplierIn;
-    constexpr size_t metaSizeLR  = metaSize * 2;
-    constexpr size_t bufferSize  = CDiv( ySize + metaSizeLR, 8u );
-
-    // Bucket for extending y
-//     const uint64 bucket = ( (uint64)bucketIdx ) << 32;
-
-    // Meta extraction
-    uint64 l0, l1, r0, r1;
-
-    // Hashing
-    uint64 input [5];       // y + L + R
-    uint64 output[4];       // blake3 hashed output
-
-    blake3_hasher hasher;
-
-    for( uint i = 0; i < entryCount; i++ )
-    {
-        const uint32 left  = pairs.left[i];
-        const uint32 right = left + pairs.right[i];
-
-        const uint64 y     = bucket | yIn[left];
-
-        // Extract metadata
-        if constexpr( metaKMultiplierIn == 1 )
-        {
-            l0 = reinterpret_cast<const uint32*>( metaInA )[left ];
-            r0 = reinterpret_cast<const uint32*>( metaInA )[right];
-
-            input[0] = Swap64( y  << 26 | l0 >> 6  );
-            input[1] = Swap64( l0 << 58 | r0 << 26 );
-        }
-        else if constexpr( metaKMultiplierIn == 2 )
-        {
-            l0 = metaInA[left ];
-            r0 = metaInA[right];
-
-            input[0] = Swap64( y  << 26 | l0 >> 38 );
-            input[1] = Swap64( l0 << 26 | r0 >> 38 );
-            input[2] = Swap64( r0 << 26 );
-        }
-        else if constexpr( metaKMultiplierIn == 3 )
-        {
-            l0 = metaInA[left];
-            l1 = reinterpret_cast<const uint32*>( metaInB )[left ];
-            r0 = metaInA[right];
-            r1 = reinterpret_cast<const uint32*>( metaInB )[right];
-        
-            input[0] = Swap64( y  << 26 | l0 >> 38 );
-            input[1] = Swap64( l0 << 26 | l1 >> 6  );
-            input[2] = Swap64( l1 << 58 | r0 >> 6  );
-            input[3] = Swap64( r0 << 58 | r1 << 26 );
-        }
-        else if constexpr( metaKMultiplierIn == 4 )
-        {
-            l0 = metaInA[left ];
-            l1 = metaInB[left ];
-            r0 = metaInA[right];
-            r1 = metaInB[right];
-
-            input[0] = Swap64( y  << 26 | l0 >> 38 );
-            input[1] = Swap64( l0 << 26 | l1 >> 38 );
-            input[2] = Swap64( l1 << 26 | r0 >> 38 );
-            input[3] = Swap64( r0 << 26 | r1 >> 38 );
-            input[4] = Swap64( r1 << 26 );
-        }
-
-        // Hash input
-        blake3_hasher_init( &hasher );
-        blake3_hasher_update( &hasher, input, bufferSize );
-        blake3_hasher_finalize( &hasher, (uint8_t*)output, sizeof( output ) );
-
-        uint64 fx = Swap64( *output ) >> yShift;
-
-        yOut[i] = (uint32)fx;
-
-        if constexpr( tableId != TableId::Table7 )
-        {
-            // Store the bucket id for this y value
-            bucketOut[i] = (byte)( fx >> 32 );
-        }
-
-        // Calculate output metadata
-        if constexpr( metaKMultiplierOut == 2 && metaKMultiplierIn == 1 )
-        {
-            metaOutA[i] = l0 << 32 | r0;
-        }
-        else if constexpr ( metaKMultiplierOut == 2 && metaKMultiplierIn == 3 )
-        {
-            const uint64 h0 = Swap64( output[0] );
-            const uint64 h1 = Swap64( output[1] );
-
-            metaOutA[0] = h0 << ySize | h1 >> 26;
-        }
-        else if constexpr ( metaKMultiplierOut == 3 )
-        {
-            const uint64 h0 = Swap64( output[0] );
-            const uint64 h1 = Swap64( output[1] );
-            const uint64 h2 = Swap64( output[2] );
-
-            metaOutA[i] = h0 << ySize | h1 >> 26;
-            reinterpret_cast<uint32*>( metaOutB )[i] = (uint32)( ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58 );
-        }
-        else if constexpr( metaKMultiplierOut == 4 && metaKMultiplierIn == 2 )
-        {
-            metaOutA[i] = l0;
-            metaOutB[i] = r0;
-        }
-        else if constexpr ( metaKMultiplierOut == 4 && metaKMultiplierIn != 2 )
-        {
-            const uint64 h0 = Swap64( output[0] );
-            const uint64 h1 = Swap64( output[1] );
-            const uint64 h2 = Swap64( output[2] );
-
-            metaOutA[i] = h0 << ySize | h1 >> 26;
-            metaOutB[i] = h1 << 38    | h2 >> 26;
-        }
-    }
-}
 
 //-----------------------------------------------------------
 template<typename TJob>

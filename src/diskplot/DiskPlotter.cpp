@@ -19,7 +19,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     ASSERT( cfg.tmpPath );
     
     _cx.tmpPath         = cfg.tmpPath;
-    _cx.bufferSizeBytes = 4ull GB;// +512ull MB;
+    _cx.bufferSizeBytes = 5ull GB;// +512ull MB;
     
     Log::Line( "Allocating a working buffer of %.2lf MiB", (double)_cx.bufferSizeBytes BtoMB );
 

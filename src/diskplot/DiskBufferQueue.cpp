@@ -24,7 +24,6 @@ DiskBufferQueue::DiskBufferQueue(
     // Initialize Files
     size_t workDirLen = strlen( workDir );
     char*  pathBuffer = bbmalloc<char>( workDirLen + 64 );
-    FatalIf( !pathBuffer, "Out of memory." );
 
     memcpy( pathBuffer, workDir, workDirLen + 1 );
 

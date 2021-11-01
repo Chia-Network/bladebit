@@ -455,3 +455,25 @@ inline bool DbgVerifySorted( const uint64 entryCount, const T* entries )
 }
 
 
+//-----------------------------------------------------------
+template<typename T>
+inline bool DbgVerifyGreater( const uint64 entryCount, const T* entries )
+{
+    ASSERT( entryCount );
+    
+    T last = entries[0];
+    for( uint64 i = 1; i < entryCount; i++ )
+    {
+        const T e = entries[i];
+        
+        if( last > e )
+        {
+            ASSERT(0);
+            return false;
+        }
+        last = e;
+    }
+
+    return true;
+}
+
