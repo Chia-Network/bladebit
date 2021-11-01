@@ -673,6 +673,11 @@ void DiskPlotPhase1::ForwardPropagate()
 
         Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
 
+        // Temp test:
+        bucket.yTmp     = bbvirtalloc<uint32>( ySize );
+        bucket.metaATmp = bbvirtalloc<uint64>( metaSize );
+        bucket.metaBTmp = bucket.metaATmp + maxBucketCount;
+
         bucket.fpBuffer = _diskQueue->GetBuffer( totalSize );
 
         byte* ptr = bucket.fpBuffer;
@@ -860,6 +865,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
         // Scan for BC groups & match
         GroupInfo groupInfos[BB_MAX_JOBS];
         uint32 totalMatches;
+        Pairs pairs;
 //         Pairs pairs[BB_MAX_JOBS];
 
         {
@@ -880,17 +886,39 @@ void DiskPlotPhase1::ForwardPropagateTable()
             }
 
             totalMatches = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos );
+
+            // #TODO: Make this multi-threaded... Testing for now
+            // Copy matches to a contiguous buffer
+            pairs.left  = bbcvirtalloc<uint32>( totalMatches );
+            pairs.right = bbcvirtalloc<uint16>( totalMatches );
+
+            uint32* lPtr = pairs.left;
+            uint16* rPtr = pairs.right;
+
+            for( uint i = 0; i < threadCount; i++ )
+            {
+                GroupInfo& group = groupInfos[i];
+                bbmemcpy_t( lPtr, group.left, group.entryCount );
+                lPtr += group.entryCount;
+            }
+
+            for( uint i = 0; i < threadCount; i++ )
+            {
+                GroupInfo& group = groupInfos[i];
+                bbmemcpy_t( rPtr, group.left, group.entryCount );
+                rPtr += group.entryCount;
+            }
         }
 
         // Generate fx values
-        for( uint threadIdx = 0; threadIdx < threadCount; threadIdx++ )
-        {
-            GroupInfo& group = groupInfos[threadIdx];
-
-
-
-//             GenFxForTable( bucketIdx, group.entryCount, group.pairs, bucket.)
-        }
+        GenFxForTable( bucketIdx, totalMatches, pairs,
+                       bucket.y0, bucket.yYmp,
+                       bucket.metaA0, bucket.metaB0,
+                       bucket.metaATmp, bucket.metaBTmp );
+        //for( uint threadIdx = 0; threadIdx < threadCount; threadIdx++ )
+        //{
+        //    GroupInfo& group = groupInfos[threadIdx];
+        //}
 
         // Ensure the next bucket has finished loading
         bucket.backFence.Wait();

@@ -62,6 +62,10 @@ class DiskPlotPhase1
         Pairs   pairs;
         uint32* groupBoundaries;
 
+        uint32* yTmp;
+        uint64* metaATmp;
+        uint64* metaBTmp;
+
         FileId  yFileId;
         FileId  metaAFileId;
         FileId  metaBFileId;

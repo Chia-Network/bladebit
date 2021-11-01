@@ -3,6 +3,7 @@
 #include <string>
 #include <string.h>
 #include "Platform.h"
+#include "SysHost.h"
 
 #ifdef _MSC_VER
     #define Swap16( x ) _byteswap_ushort( x )
@@ -108,6 +109,20 @@ inline void* bballoca( size_t size )
 #endif
 }
 
+//-----------------------------------------------------------
+template<typename T>
+inline T* bbvirtalloc( size_t size )
+{
+    void* ptr = SysHost::VirtualAlloc( size, false );
+    FatalIf( !ptr, "VirtualAlloc failed." );
+    return reinterpret_cast<T*>( ptr );
+}
+
+template<typename T>
+inline T* bbcvirtalloc( size_t count )
+{
+    return bbvirtalloc( sizeof( T ) * count );
+}
 
 // Divide a by b and apply ceiling if needed.
 //-----------------------------------------------------------
