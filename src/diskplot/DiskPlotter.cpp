@@ -18,19 +18,36 @@ DiskPlotter::DiskPlotter( const Config cfg )
 
     ASSERT( cfg.tmpPath );
     
-    _cx.tmpPath         = cfg.tmpPath;
-    _cx.bufferSizeBytes = 5ull GB;// +512ull MB;
-    
-    Log::Line( "Allocating a working buffer of %.2lf MiB", (double)_cx.bufferSizeBytes BtoMB );
+    const size_t bucketsCountsSize = RoundUpToNextBoundaryT( BB_DP_BUCKET_COUNT * sizeof( uint32 ), cfg.expectedTmpDirBlockSize );
+    const uint32 ioBufferCount     = 3;    // Test with triple-buffering for now
+    const size_t ioHeapFullSize    = ( cfg.ioBufferSize + bucketsCountsSize ) * ioBufferCount;
 
-    _cx.workBuffer = (byte*)SysHost::VirtualAlloc( _cx.bufferSizeBytes );
-    FatalIf( !_cx.workBuffer, "Failed to allocated work buffer. Make sure you have enough free memory." );
-
+    _cx.tmpPath       = cfg.tmpPath;
     
-    // Test values
-    _cx.threadCount          = SysHost::GetLogicalCPUCount();
-    _cx.diskFlushSize        = 128ull MB;
-    _cx.diskQueueThreadCount = 1;
+    _cx.heapSize      = GetHeapRequiredSize( cfg.expectedTmpDirBlockSize, cfg.workThreadCount );
+    _cx.ioBufferSize  = cfg.ioBufferSize;
+    _cx.ioHeapSize    = ioHeapFullSize;
+    _cx.ioBufferCount = ioBufferCount;
+
+    _cx.threadCount   = cfg.workThreadCount;
+    _cx.ioThreadCount = cfg.ioThreadCount;
+
+    static_assert( sizeof( DiskPlotContext::writeIntervals ) == sizeof( Config::writeIntervals ), "Write interval array sizes do not match." );
+    memcpy( _cx.writeIntervals, cfg.writeIntervals, sizeof( _cx.writeIntervals ) );
+
+//     Log::Line( "Heap size   : %.2lf MiB", (double)_cx.heapSize BtoMB );
+    Log::Line( "Work threads   : %u"      , _cx.threadCount   );
+    Log::Line( "IO buffer size : %llu MiB (%llu MiB total)", _cx.ioBufferSize BtoMB, _cx.ioBufferSize * _cx.ioBufferCount BtoMB );
+    Log::Line( "IO threads     : %u"      , _cx.ioThreadCount );
+    Log::Line( "IO buffer count: %u"      , _cx.ioBufferCount );
+
+    Log::Line( "Allocating heap of %llu MiB.", _cx.heapSize BtoMB );
+    _cx.heapBuffer = (byte*)SysHost::VirtualAlloc( _cx.heapSize );
+    FatalIf( !_cx.heapBuffer, "Failed to allocated work buffer. Make sure you have enough free memory." );
+
+    Log::Line( "Allocating IO buffers." );
+    _cx.ioHeap = (byte*)SysHost::VirtualAlloc( ioHeapFullSize );
+    FatalIf( !_cx.ioHeap, "Failed to allocated work buffer. Make sure you have enough free memory." );
 
     _cx.threadPool = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
     
@@ -62,4 +79,25 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
     double plotElapsed = TimerEnd( plotTimer );
     Log::Line( "Finished plotting in %.2lf seconds ( %.2lf minutes ).", plotElapsed, plotElapsed / 60 );
+}
+
+//-----------------------------------------------------------
+size_t DiskPlotter::GetHeapRequiredSize( const size_t fileBlockSize, const uint threadCount )
+{
+    const uint maxBucketEntries = BB_DP_MAX_ENTRIES_PER_BUCKET;
+
+    const size_t ySize       = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ) * 2, fileBlockSize );
+    const size_t sortKeySize = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 )    , fileBlockSize );
+    const size_t metaSize    = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint64 ) * 4, fileBlockSize );
+
+    // #TODO: These need to be excluded and actually allocated whenever we are actually going to
+    //        do matches so that we over commit but only use whatever pages are actually used when matching.
+    //        Otherwise our requirements will increase substantially.
+    const size_t pairsLSize  = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 )    , fileBlockSize );
+    const size_t pairsRSize  = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint16 )    , fileBlockSize );
+    const size_t groupsSize  = RoundUpToNextBoundaryT( ( maxBucketEntries + threadCount * 2 ) * sizeof( uint32), fileBlockSize );
+
+    const size_t totalSize   = ySize + sortKeySize + metaSize + pairsLSize + pairsRSize + groupsSize;
+
+    return totalSize;
 }

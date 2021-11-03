@@ -435,7 +435,7 @@ inline void WriteC3Park( const uint64 length, uint32* f7Entries, byte* parkBuffe
     // Store size in the first 2 bytes
     *((uint16*)parkBuffer) = Swap16( (uint16)compressedSize );
 
-    // Zero-out remainder (not necessarry, though...)
+    // Zero-out remainder (not necessary, though...)
     const size_t remainder = c3Size - (compressedSize + 2);
     if( remainder )
         memset( deltaWriter + compressedSize + 2, 0, remainder );

@@ -195,7 +195,7 @@ struct FxJob : BucketJob<FxJob>
     uint32          entriesPerChunk;
 
 //     uint32          offset;
-    const Pairs     pairs;
+    Pairs           pairs;
     const uint32*   yIn;
     uint32*         yOut;
     byte*           bucketIdOut;

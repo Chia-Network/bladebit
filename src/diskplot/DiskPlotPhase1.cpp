@@ -38,7 +38,7 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     //, _diskQueue( cx.workBuffer, cx.diskFlushSize, (uint)(cx.bufferSizeBytes / cx.diskFlushSize) - 1 )
 {
     ASSERT( cx.tmpPath );
-    _diskQueue = new DiskBufferQueue( cx.tmpPath, cx.workBuffer, cx.bufferSizeBytes, cx.diskQueueThreadCount );
+    _diskQueue = new DiskBufferQueue( cx.tmpPath, cx.ioHeap, cx.ioHeapSize, cx.ioThreadCount );
 }
 
 //-----------------------------------------------------------
@@ -101,7 +101,7 @@ void DiskPlotPhase1::GenF1()
     // /      is sufficient to bee larger that the cache line size
     // const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
 
-    const size_t chunkBufferSize  = cx.diskFlushSize;
+    const size_t chunkBufferSize  = cx.writeIntervals[(int)TableId::Table1].fxGen;
     const uint32 blocksPerChunk   = (uint32)( chunkBufferSize / ( kF1BlockSize * 2 ) );                 // * 2 because we also have to process/write the x values
     const uint32 chunkCount       = CDivT( blockCount, blocksPerChunk );                                // How many chunks we need to process
     const uint32 lastChunkBlocks  = blocksPerChunk - ( ( chunkCount * blocksPerChunk ) - blockCount );  // Last chunk might not need to process all blocks
@@ -674,11 +674,11 @@ void DiskPlotPhase1::ForwardPropagate()
         Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
 
         // Temp test:
-        bucket.yTmp     = bbvirtalloc<uint32>( ySize );
+        bucket.yTmp     = bbvirtalloc<uint32>( ySize    );
         bucket.metaATmp = bbvirtalloc<uint64>( metaSize );
         bucket.metaBTmp = bucket.metaATmp + maxBucketCount;
 
-        bucket.fpBuffer = _diskQueue->GetBuffer( totalSize );
+        bucket.fpBuffer = _cx.heapBuffer;
 
         byte* ptr = bucket.fpBuffer;
 
@@ -898,23 +898,24 @@ void DiskPlotPhase1::ForwardPropagateTable()
             for( uint i = 0; i < threadCount; i++ )
             {
                 GroupInfo& group = groupInfos[i];
-                bbmemcpy_t( lPtr, group.left, group.entryCount );
+                bbmemcpy_t( lPtr, group.pairs.left, group.entryCount );
                 lPtr += group.entryCount;
             }
 
             for( uint i = 0; i < threadCount; i++ )
             {
                 GroupInfo& group = groupInfos[i];
-                bbmemcpy_t( rPtr, group.left, group.entryCount );
+                bbmemcpy_t( rPtr, group.pairs.right, group.entryCount );
                 rPtr += group.entryCount;
             }
         }
 
         // Generate fx values
-        GenFxForTable( bucketIdx, totalMatches, pairs,
-                       bucket.y0, bucket.yYmp,
-                       bucket.metaA0, bucket.metaB0,
-                       bucket.metaATmp, bucket.metaBTmp );
+        GenFxForTable<tableId>( 
+            bucketIdx, totalMatches, pairs,
+            bucket.y0, bucket.yTmp,
+            bucket.metaA0, bucket.metaB0,
+            bucket.metaATmp, bucket.metaBTmp );
         //for( uint threadIdx = 0; threadIdx < threadCount; threadIdx++ )
         //{
         //    GroupInfo& group = groupInfos[threadIdx];
@@ -1255,11 +1256,36 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
 
     auto& cx = _cx;
 
-    const uint   threadCount      = cx.threadCount;
-    const uint32 entriesPerThread = entryCount / threadCount;
-    const uint32 trailingEntries  = entryCount - ( entriesPerThread * threadCount );
+    const size_t outMetaSizeA     = TableMetaOut<tableId>::SizeA;
+    const size_t outMetaSizeB     = TableMetaOut<tableId>::SizeB;
 
-    using Job = FxJob<tableId>;
+    const size_t fileBlockSize    = _diskQueue->BlockSize();
+    const size_t sizePerEntry     = sizeof( uint32 ) + outMetaSizeA + outMetaSizeB;
+
+    const size_t writeInterval    = cx.writeIntervals[(uint)tableId].fxGen;
+
+    const size_t entriesTotalSize = entryCount * sizePerEntry;
+    ASSERT( writeInterval <= entriesTotalSize );
+
+    const uint32 entriesPerChunk  = (uint32)( writeInterval / sizePerEntry );
+    uint32 chunkCount             = (uint32)( entriesTotalSize / writeInterval );
+
+//     uint32 lastChunkEntries       = entryCount - ( chunkCount * entriesPerChunk );
+
+    const uint32 threadCount      = cx.threadCount;
+    const uint32 entriesPerThread = entriesPerChunk / threadCount;
+    uint32       trailingEntries  = entryCount - ( entriesPerThread * threadCount * chunkCount );
+
+    while( trailingEntries >= entriesPerChunk )
+    {
+        chunkCount++;
+        trailingEntries -= entriesPerChunk;
+    }
+
+    // #TODO: Each thread must at least have 1 entry for the last chunk.
+    //        Check that here.
+
+    using Job = FxJob;
 
     MTJobRunner<Job> jobs( *cx.threadPool );
 
@@ -1267,21 +1293,23 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
     {
         Job& job = jobs[i];
 
+        job.tableId         = tableId;
+        job.bucketIdx       = bucketIdx;
+        job.entryCount      = entriesPerThread;
+        job.chunkCount      = chunkCount;
+        job.entriesPerChunk = entriesPerChunk;
+        
         const size_t offset = entriesPerThread * i;
+        job.pairs      = pairs;
+        job.pairs.left  += offset;
+        job.pairs.right += offset;
 
-        Pairs jobPairs = pairs;
-        jobPairs.left  += offset;
-        jobPairs.right += offset;
-
-        job.entryCount    = entriesPerThread;
-        job.bucketIdx     = bucketIdx;
-        job.pairs         = jobPairs;
-        job.yIn           = yIn;
-        job.yOut          = yOut;
-        job.metaInA       = metaInA;
-        job.metaInB       = metaInB;
-        job.metaInA       = metaOutA;
-        job.metaInB       = metaOutB;
+        job.yIn        = yIn;
+        job.yOut       = yOut;
+        job.metaInA    = metaInA;
+        job.metaInB    = metaInB;
+        job.metaInA    = metaOutA;
+        job.metaInB    = metaOutB;
     }
 
     // Add trailing entries to the last job

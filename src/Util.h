@@ -121,7 +121,7 @@ inline T* bbvirtalloc( size_t size )
 template<typename T>
 inline T* bbcvirtalloc( size_t count )
 {
-    return bbvirtalloc( sizeof( T ) * count );
+    return bbvirtalloc<T>( sizeof( T ) * count );
 }
 
 // Divide a by b and apply ceiling if needed.
