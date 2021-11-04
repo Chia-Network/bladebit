@@ -169,23 +169,37 @@ void Log::Debug( const char* msg, ... )
     va_list args;
     va_start( args, msg );
 
+    DebugV( msg, args );
+
+    va_end( args );
+}
+
+
+//-----------------------------------------------------------
+void Log::DebugV( const char* msg, va_list args )
+{
     const size_t BUF_SIZE = 1024;
     char buffer[BUF_SIZE];
 
     int count = vsnprintf( buffer, BUF_SIZE, msg, args );
-    va_end( args );
 
     ASSERT( count >= 0 );
     count = std::min( count, (int)BUF_SIZE-1 );
 
-    buffer[count] = '\n';
+    buffer[count] = '\n'; 
 
+    DebugWrite( buffer, (size_t)count + 1 );
+}
+
+//-----------------------------------------------------------
+void Log::DebugWrite( const char* msg, size_t size )
+{
     // Lock
     int lock = 0;
     while( !_dbglock.compare_exchange_weak( lock, 1 ) )
         lock = 0;
     
-    fwrite( buffer, 1, (size_t)count+1, stderr );
+    fwrite( msg, 1, size, stderr );
     fflush( stderr );
 
     // Unlock

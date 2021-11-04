@@ -90,6 +90,8 @@ size_t DiskPlotter::GetHeapRequiredSize( const size_t fileBlockSize, const uint 
     const size_t sortKeySize = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 )    , fileBlockSize );
     const size_t metaSize    = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint64 ) * 4, fileBlockSize );
 
+    // Add tmp y and meta buffers for now too
+    // 
     // #TODO: These need to be excluded and actually allocated whenever we are actually going to
     //        do matches so that we over commit but only use whatever pages are actually used when matching.
     //        Otherwise our requirements will increase substantially.
@@ -98,6 +100,7 @@ size_t DiskPlotter::GetHeapRequiredSize( const size_t fileBlockSize, const uint 
     const size_t groupsSize  = RoundUpToNextBoundaryT( ( maxBucketEntries + threadCount * 2 ) * sizeof( uint32), fileBlockSize );
 
     const size_t totalSize   = ySize + sortKeySize + metaSize + pairsLSize + pairsRSize + groupsSize;
+
 
     return totalSize;
 }

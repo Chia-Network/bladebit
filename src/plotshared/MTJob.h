@@ -3,6 +3,10 @@
 #include "Config.h"
 #include "threading/ThreadPool.h"
 
+#if _DEBUG
+    #include "util/Log.h"
+#endif
+
 template<typename TJob, uint MaxJobs>
 struct MTJobRunner;
 
@@ -42,6 +46,13 @@ struct MTJob
         ASSERT( index < _jobCount );
         return _jobs[index];
     };
+
+    // For debugging
+    #if _DEBUG
+        inline void Trace( const char* msg, ... );
+    #else
+        inline void Trace( const char* msg, ... ) {}
+    #endif
 
 protected:
     std::atomic<uint>* _finishedCount;
@@ -175,3 +186,27 @@ inline void MTJob<TJob>::WaitForRelease()
     while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
     while( releaseLock.load( std::memory_order_relaxed ) != threadThreshold );
 }
+
+#if _DEBUG
+//-----------------------------------------------------------
+template<typename TJob>
+inline void MTJob<TJob>::Trace( const char* msg, ... )
+{
+    const size_t BUF_SIZE = 512;
+    char buf1[BUF_SIZE];
+    char buf2[BUF_SIZE];
+    
+    va_list args;
+    va_start( args, msg );
+    int r = vsnprintf( buf1, BUF_SIZE, msg, args );
+    va_end( args );
+    ASSERT( r > 0 );
+
+    r = snprintf( buf2, BUF_SIZE, "[%2u]: %s\n", _jobId, buf1 );
+    ASSERT( r > 0 );
+
+    const size_t size = std::min( BUF_SIZE, (size_t)r );
+    Log::DebugWrite( buf2, size );
+}
+
+#endif

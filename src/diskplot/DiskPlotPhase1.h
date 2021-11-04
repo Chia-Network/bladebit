@@ -62,6 +62,8 @@ class DiskPlotPhase1
         Pairs   pairs;
         uint32* groupBoundaries;
 
+        byte*   bucketId;   // Used during fx gen
+
         uint32* yTmp;
         uint64* metaATmp;
         uint64* metaBTmp;
@@ -99,7 +101,7 @@ private:
     
     template<TableId tableId>
     void GenFxForTable( uint bucketIdx, uint entryCount, const Pairs pairs, 
-                        const uint32* yIn, uint32* yOut,
+                        const uint32* yIn, uint32* yOut, byte* bucketIdOut,
                         const uint64* metaInA, const uint64* metaInB,
                         uint64* metaOutA, uint64* metaOutB );
 
@@ -190,9 +192,12 @@ struct FxJob : BucketJob<FxJob>
 {
     TableId         tableId;
     uint32          bucketIdx;
-    uint32          entryCount;
+    uint32          entriesPerChunk;        // Entries per chunk accross all threads
+    uint32          entryCount;             // Entry count for each individual job
     uint32          chunkCount;
-    uint32          entriesPerChunk;
+    uint32          trailingChunkEntries;   // If greater than 0,
+                                            // then we have an extra last chunk
+                                            // with less entries than entryCount
 
 //     uint32          offset;
     Pairs           pairs;

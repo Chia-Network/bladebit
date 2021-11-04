@@ -37,6 +37,8 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     : _cx( cx )
     //, _diskQueue( cx.workBuffer, cx.diskFlushSize, (uint)(cx.bufferSizeBytes / cx.diskFlushSize) - 1 )
 {
+    LoadLTargets();
+
     ASSERT( cx.tmpPath );
     _diskQueue = new DiskBufferQueue( cx.tmpPath, cx.ioHeap, cx.ioHeapSize, cx.ioThreadCount );
 }
@@ -865,15 +867,17 @@ void DiskPlotPhase1::ForwardPropagateTable()
         // Scan for BC groups & match
         GroupInfo groupInfos[BB_MAX_JOBS];
         uint32 totalMatches;
-        Pairs pairs;
+        
 //         Pairs pairs[BB_MAX_JOBS];
 
         {
             // Scan for group boundaries
             const uint32 groupCount = ScanGroups( bucketIdx, bucket.y0, entryCount, bucket.groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
-
-            uint32* lPairs = bucket.pairs.left;
-            uint16* rPairs = bucket.pairs.right;
+            
+            // Produce per-thread matches in meta tmp. It has enough space to hold them.
+            // Then move them over to a contiguous buffer.
+            uint32* lPairs = (uint32*)bucket.metaATmp;
+            uint16* rPairs = (uint16*)( lPairs + BB_DP_MAX_ENTRIES_PER_BUCKET );
 
             // Match pairs
             const uint32 entriesPerBucket  = (uint32)BB_DP_MAX_ENTRIES_PER_BUCKET;
@@ -884,13 +888,14 @@ void DiskPlotPhase1::ForwardPropagateTable()
                 groupInfos[i].pairs.left  = lPairs + i * maxPairsPerThread;
                 groupInfos[i].pairs.right = rPairs + i * maxPairsPerThread;
             }
-
+            
             totalMatches = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos );
 
             // #TODO: Make this multi-threaded... Testing for now
             // Copy matches to a contiguous buffer
-            pairs.left  = bbcvirtalloc<uint32>( totalMatches );
-            pairs.right = bbcvirtalloc<uint16>( totalMatches );
+            Pairs& pairs = bucket.pairs;
+//             pairs.left  = //bbcvirtalloc<uint32>( totalMatches );
+//             pairs.right = //bbcvirtalloc<uint16>( totalMatches );
 
             uint32* lPtr = pairs.left;
             uint16* rPtr = pairs.right;
@@ -912,8 +917,8 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
         // Generate fx values
         GenFxForTable<tableId>( 
-            bucketIdx, totalMatches, pairs,
-            bucket.y0, bucket.yTmp,
+            bucketIdx, totalMatches, bucket.pairs,
+            bucket.y0, bucket.yTmp, (byte*)bucket.sortKey,    // #TODO: Change this, for now use sort key buffer
             bucket.metaA0, bucket.metaB0,
             bucket.metaATmp, bucket.metaBTmp );
         //for( uint threadIdx = 0; threadIdx < threadCount; threadIdx++ )
@@ -1183,7 +1188,7 @@ void MatchJob::Run()
            
             // #NOTE: memset(0) works faster on average than keeping a separate a clearing buffer
             memset( rMapCounts, 0, sizeof( rMapCounts ) );
-
+            
             for( uint64 iR = groupRStart; iR < groupREnd; iR++ )
             {
                 uint64 localRY = ( bucket | yBuffer[iR] ) - groupRRangeStart;
@@ -1194,7 +1199,7 @@ void MatchJob::Run()
 
                 rMapCounts[localRY] ++;
             }
-
+            
             // For each group L entry
             for( uint64 iL = groupLStart; iL < groupRStart; iL++ )
             {
@@ -1247,7 +1252,7 @@ RETURN:
 //-----------------------------------------------------------
 template<TableId tableId>
 void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs pairs,
-                                    const uint32* yIn, uint32* yOut, 
+                                    const uint32* yIn, uint32* yOut, byte* bucketIdOut,
                                     const uint64* metaInA, const uint64* metaInB,
                                     uint64* metaOutA, uint64* metaOutB )
 {
@@ -1267,14 +1272,14 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
     const size_t entriesTotalSize = entryCount * sizePerEntry;
     ASSERT( writeInterval <= entriesTotalSize );
 
-    const uint32 entriesPerChunk  = (uint32)( writeInterval / sizePerEntry );
+    uint32 entriesPerChunk        = (uint32)( writeInterval / sizePerEntry );
     uint32 chunkCount             = (uint32)( entriesTotalSize / writeInterval );
-
-//     uint32 lastChunkEntries       = entryCount - ( chunkCount * entriesPerChunk );
 
     const uint32 threadCount      = cx.threadCount;
     const uint32 entriesPerThread = entriesPerChunk / threadCount;
-    uint32       trailingEntries  = entryCount - ( entriesPerThread * threadCount * chunkCount );
+
+    entriesPerChunk = entriesPerThread * threadCount;
+    uint32       trailingEntries  = entryCount - ( entriesPerChunk * chunkCount );
 
     while( trailingEntries >= entriesPerChunk )
     {
@@ -1282,41 +1287,49 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
         trailingEntries -= entriesPerChunk;
     }
 
-    // #TODO: Each thread must at least have 1 entry for the last chunk.
-    //        Check that here.
+    // Add trailing entries as a trailing chunk
+    const uint32 lastChunkEntries = trailingEntries / threadCount;
 
-    using Job = FxJob;
+    // Remove that from the trailing entries.
+    // This guarantees that any trailing entries will be <= threadCount
+    trailingEntries -= lastChunkEntries * threadCount;
 
-    MTJobRunner<Job> jobs( *cx.threadPool );
+    MTJobRunner<FxJob> jobs( *cx.threadPool );
 
     for( uint i = 0; i < threadCount; i++ )
     {
-        Job& job = jobs[i];
+        FxJob& job = jobs[i];
 
-        job.tableId         = tableId;
-        job.bucketIdx       = bucketIdx;
-        job.entryCount      = entriesPerThread;
-        job.chunkCount      = chunkCount;
-        job.entriesPerChunk = entriesPerChunk;
+        job.tableId              = tableId;
+        job.bucketIdx            = bucketIdx;
+        job.entryCount           = entriesPerThread;
+        job.chunkCount           = chunkCount;
+        job.entriesPerChunk      = entriesPerChunk;
+        job.trailingChunkEntries = lastChunkEntries;
         
         const size_t offset = entriesPerThread * i;
         job.pairs      = pairs;
         job.pairs.left  += offset;
         job.pairs.right += offset;
 
-        job.yIn        = yIn;
-        job.yOut       = yOut;
-        job.metaInA    = metaInA;
-        job.metaInB    = metaInB;
-        job.metaInA    = metaOutA;
-        job.metaInB    = metaOutB;
+        job.yIn         = yIn;
+        job.metaInA     = metaInA;
+        job.metaInB     = metaInB;
+        job.yOut        = yOut        + offset;
+        job.metaOutA    = metaOutA    + offset;
+        job.metaOutB    = metaOutB    + offset;
+        job.bucketIdOut = bucketIdOut + offset;
     }
-
-    // Add trailing entries to the last job
-    jobs[threadCount-1].entryCount += trailingEntries;
 
     // Calculate Fx
     jobs.Run();
+
+    // #TODO: Calculate trailing entries here (they are less than the thread count)
+    //        if we have any.
+    if( trailingEntries )
+    {
+        // Call ComputeFxForTable
+    }
 
     auto elapsed = TimerEnd( timer );
     Log::Line( "  Finished computing Fx in %.4lf seconds.", elapsed );
@@ -1325,6 +1338,7 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
 //-----------------------------------------------------------
 void FxJob::Run()
 {
+    ASSERT( this->entriesPerChunk == this->entryCount * this->_jobCount );
     switch( tableId )
     {
         case TableId::Table1: RunForTable<TableId::Table1>(); return;
@@ -1350,10 +1364,10 @@ void FxJob::RunForTable()
 
     const uint32   entryCount       = this->entryCount;
     const uint32   chunkCount       = this->chunkCount;
-    const uint32   entriesPerChunk  = this->entriesPerChunk;
+//     const uint32   entriesPerChunk  = this->entriesPerChunk;
     const uint64   bucket           = ( (uint64)this->bucketIdx ) << 32;
 
-    const Pairs    lrPairs          = this->pairs;
+    Pairs          lrPairs          = this->pairs;
     const uint64*  inMetaA          = this->metaInA;
     const uint64*  inMetaB          = this->metaInB;
     const uint32*  inY              = this->yIn;
@@ -1365,12 +1379,30 @@ void FxJob::RunForTable()
 
     for( uint chunk = 0; chunk < chunkCount; chunk++ )
     {
-        ComputeFxForTable<tableId>( bucket, entriesPerChunk, lrPairs, inY, inMetaA, inMetaB, 
+//         auto timer = TimerBegin();
+
+        ComputeFxForTable<tableId>( bucket, entryCount, lrPairs, inY, inMetaA, inMetaB,
                                     outY, outBucketId, outMetaA, outMetaB );
 
+//         double elapsed = TimerEnd( timer );
+//         Trace( "Finished chunk %-2u in %.2lf seconds", chunk, elapsed );
+//         this->SyncThreads();
+        
         SortToBucket<tableId, TMetaA, TMetaB>(
             entryCount, outBucketId, outY, (TMetaA*)outMetaA, (TMetaB*)outMetaB
         );
+
+        lrPairs.left  += entryCount;
+        lrPairs.right += entryCount;
+    }
+
+    const uint32 trailingChunkEntries = this->trailingChunkEntries;
+    if( trailingChunkEntries )
+    {
+        ComputeFxForTable<tableId>( bucket, trailingChunkEntries, lrPairs, inY, inMetaA, inMetaB,
+                                    outY, outBucketId, outMetaA, outMetaB );
+
+        this->SyncThreads();
     }
 }
 
@@ -1410,7 +1442,13 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
     uint64 input [5];       // y + L + R
     uint64 output[4];       // blake3 hashed output
 
+    static_assert( bufferSize <= sizeof( input ), "Invalid fx input buffer size." );
+
     blake3_hasher hasher;
+
+    #if _DEBUG
+        uint64 prevY = bucket | yIn[pairs.left[0]];
+    #endif
 
     for( uint i = 0; i < entryCount; i++ )
     {
@@ -1418,6 +1456,11 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         const uint32 right = left + pairs.right[i];
 
         const uint64 y     = bucket | yIn[left];
+
+        #if _DEBUG
+            ASSERT( y >= prevY );
+            prevY = y;
+        #endif
 
         // Extract metadata
         if constexpr( metaKMultiplierIn == 1 )
@@ -1536,36 +1579,44 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
     TMetaA* metaABuckets = nullptr;
     TMetaB* metaBBuckets = nullptr;
 
-    uint counts[BB_DP_BUCKET_COUNT];
-    uint pfxSum[BB_DP_BUCKET_COUNT];
+    uint counts      [BB_DP_BUCKET_COUNT];
+    uint pfxSum      [BB_DP_BUCKET_COUNT];
+    uint bucketCounts[BB_DP_BUCKET_COUNT];
 
     // Count our buckets
     memset( counts, 0, sizeof( counts ) );
     for( uint i = 0; i < entryCount; i++ )
     {
-        
         ASSERT( bucketIndices[i] <= ( 0b111111u ) );
         counts[bucketIndices[i]] ++;
     }
+
+    this->bucketCounts = bucketCounts;
 
     CalculatePrefixSum( counts, pfxSum );
 
     // Grab a buffer from the queue
     if( this->LockThreads() )
     {
-        ySizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-        yBuckets = (uint32*)queue.GetBuffer( sizeof( uint32 ) * entryCount );
+        uint totalCount = 0;
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            totalCount += bucketCounts[i];
+
+        ASSERT( totalCount == this->entriesPerChunk );
+
+        ySizes   = (uint32*)queue.GetBuffer( BB_DP_BUCKET_COUNT * sizeof( uint32 ) );
+        yBuckets = (uint32*)queue.GetBuffer( sizeof( uint32 ) * totalCount );
 
         if constexpr ( sizeof( TMetaA ) > 0 )
         {
             metaASizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-            metaABuckets = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * entryCount );
+            metaABuckets = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * totalCount );
         }
 
         if constexpr ( sizeof( TMetaB ) > 0 )
         {
             metaBSizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-            metaBBuckets = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * entryCount );
+            metaBBuckets = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * totalCount );
         }
 
         _bucketY     = yBuckets;
@@ -1587,7 +1638,7 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
 
     // #TODO: Unroll this a bit?
     // Distribute values into buckets at each thread's given offset
-    for( uint i = 0; i < entriesPerChunk; i++ )
+    for( uint i = 0; i < entryCount; i++ )
     {
         const uint32 dstIdx = --pfxSum[bucketIndices[i]];
 
