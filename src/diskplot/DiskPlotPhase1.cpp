@@ -73,7 +73,6 @@ void DiskPlotPhase1::Run()
             FatalIf( !fBucketCounts.Open( bucketsPath.c_str(), FileMode::Create, FileAccess::Write ), "File to open bucket counts file" );
             FatalIf( fBucketCounts.Write( _bucketCounts, sizeof( _bucketCounts ) ) != sizeof( _bucketCounts ), "Failed to write bucket counts.");
         }
-
     }
 #endif
 
@@ -760,27 +759,49 @@ void DiskPlotPhase1::ForwardPropagateTable()
         bucket.metaAFileId = isEven ? FileId::META_A_1 : FileId::META_A_0;
         bucket.metaBFileId = isEven ? FileId::META_B_1 : FileId::META_B_0;
 
-        if constexpr( tableId == TableId::Table2 )
+        if constexpr ( tableId == TableId::Table2 )
         {
             bucket.metaAFileId = FileId::X;
         }
     }
 
     // Load first bucket
-    ioDispatch.SeekBucket( bucket.yFileId, 0, SeekOrigin::Begin );
-    ioDispatch.ReadFile  ( bucket.yFileId, 0, bucket.y0, _bucketCounts[0] * sizeof( uint32 ) );
+    ioDispatch.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
+    ioDispatch.SeekBucket( FileId::Y1, 0, SeekOrigin::Begin );
+
+    if constexpr( tableId == TableId::Table2 )
+    {
+        ioDispatch.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
+    }
+    else
+    {
+        ioDispatch.SeekBucket( FileId::META_A_0, 0, SeekOrigin::Begin );
+        ioDispatch.SeekBucket( FileId::META_A_1, 0, SeekOrigin::Begin );
+        ioDispatch.SeekBucket( FileId::META_B_0, 0, SeekOrigin::Begin );
+        ioDispatch.SeekBucket( FileId::META_B_1, 0, SeekOrigin::Begin );
+    }
+    ioDispatch.CommitCommands();
+
+    ioDispatch.ReadFile( bucket.yFileId, 0, bucket.y0, _bucketCounts[0] * sizeof( uint32 ) );
     ioDispatch.AddFence( bucket.frontFence );
 
-    ioDispatch.SeekBucket( bucket.metaAFileId, 0, SeekOrigin::Begin );
     ioDispatch.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, _bucketCounts[0] * MetaInASize );
-    ioDispatch.AddFence( bucket.frontFence );
 
     if constexpr ( MetaInBSize > 0 )
     {
-        ioDispatch.SeekBucket( bucket.metaBFileId, 0, SeekOrigin::Begin );
-        ioDispatch.ReadFile  ( bucket.metaBFileId, 0, bucket.metaB0, _bucketCounts[0] * MetaInBSize );
+        ioDispatch.ReadFile( bucket.metaBFileId, 0, bucket.metaB0, _bucketCounts[0] * MetaInBSize );
     }
+    
+    // Fence for metadata
+    ioDispatch.AddFence( bucket.frontFence );
 
+    // #TODO: That using a single fence twice can actually cause a race condition.
+    // //     Although extremely unlikely, it could be the case that the 2 read commands happen
+    //        before this first wait Wait(). Meaning we will be waiting forever on the second one.
+    //        Therefore we need to switch to Semaphores for waits. Or whatever other special mechanism
+    //        we will use to ensure we can notify the other threads that they should wait on IO as well
+    //        whilst the control threads looks waits on a buffer.
+    // Dispatch read commands and wait for y to be loaded
     ioDispatch.CommitCommands();
     bucket.frontFence.Wait();
 
@@ -1300,6 +1321,7 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
     {
         FxJob& job = jobs[i];
 
+        job.diskQueue            = _diskQueue;
         job.tableId              = tableId;
         job.bucketIdx            = bucketIdx;
         job.entryCount           = entriesPerThread;
@@ -1402,7 +1424,14 @@ void FxJob::RunForTable()
         ComputeFxForTable<tableId>( bucket, trailingChunkEntries, lrPairs, inY, inMetaA, inMetaB,
                                     outY, outBucketId, outMetaA, outMetaB );
 
-        this->SyncThreads();
+        SortToBucket<tableId, TMetaA, TMetaB>(
+            trailingChunkEntries, outBucketId, outY, (TMetaA*)outMetaA, (TMetaB*)outMetaB
+        );
+
+        if( this->IsControlThread() )
+        {
+
+        }
     }
 }
 
@@ -1564,9 +1593,14 @@ template<TableId tableId, typename TMetaA, typename TMetaB>
 inline
 void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint32* inY, const TMetaA* inMetaA, const TMetaB* inMetaB )
 {
-    const FileId yFileId     = ( static_cast<uint>( tableId ) & 1 ) == 0 ? FileId::Y1       : FileId::Y0;
-    const FileId metaAFileId = ( static_cast<uint>( tableId ) & 1 ) == 0 ? FileId::META_A_0 : FileId::META_A_1;
-    const FileId metaBFileId = ( static_cast<uint>( tableId ) & 1 ) == 0 ? FileId::META_B_0 : FileId::META_B_1;
+    const bool isEven = static_cast<uint>( tableId ) & 1;
+
+    const FileId yFileId     = isEven ? FileId::Y1       : FileId::Y0;
+    const FileId metaAFileId = isEven ? FileId::META_A_0 : FileId::META_A_1;
+    const FileId metaBFileId = isEven ? FileId::META_B_0 : FileId::META_B_1;
+
+    const size_t metaSizeA = TableMetaOut<tableId>::SizeA;
+    const size_t metaSizeB = TableMetaOut<tableId>::SizeB;
 
     DiskBufferQueue& queue = *this->diskQueue;
 
@@ -1607,13 +1641,13 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
         ySizes   = (uint32*)queue.GetBuffer( BB_DP_BUCKET_COUNT * sizeof( uint32 ) );
         yBuckets = (uint32*)queue.GetBuffer( sizeof( uint32 ) * totalCount );
 
-        if constexpr ( sizeof( TMetaA ) > 0 )
+        if constexpr ( metaSizeA > 0 )
         {
             metaASizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
             metaABuckets = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * totalCount );
         }
 
-        if constexpr ( sizeof( TMetaB ) > 0 )
+        if constexpr ( metaSizeB > 0 )
         {
             metaBSizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
             metaBBuckets = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * totalCount );
@@ -1644,12 +1678,12 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
 
         yBuckets[dstIdx] = yIn[i];
 
-        if constexpr ( sizeof( TMetaA ) > 0 )
+        if constexpr ( metaSizeA > 0 )
         {
             metaABuckets[dstIdx] = inMetaA[i];
         }
 
-        if constexpr ( sizeof( TMetaB ) > 0 )
+        if constexpr ( metaSizeB > 0 )
         {
             metaBBuckets[dstIdx] = inMetaB[i];
         }
@@ -1667,7 +1701,7 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
 
         queue.WriteBuckets( yFileId, yBuckets, ySizes );
 
-        if constexpr ( sizeof( TMetaA ) > 0 )
+        if constexpr ( metaSizeA > 0 )
         {
             for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
                 metaASizes[i] = (uint32)( ( bucketCounts[i] * sizeof( TMetaA ) ) / fileBlockSize * fileBlockSize );
@@ -1675,7 +1709,7 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
             queue.WriteBuckets( metaAFileId, metaABuckets, metaASizes );
         }
 
-        if constexpr ( sizeof( TMetaB ) > 0 )
+        if constexpr ( metaSizeB > 0 )
         {
             for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
                 metaBSizes[i] = (uint32)( ( bucketCounts[i] * sizeof( TMetaB ) ) / fileBlockSize * fileBlockSize );
@@ -1683,13 +1717,30 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
             queue.WriteBuckets( metaBFileId, metaBBuckets, metaBSizes );
         }
 
+        queue.CommitCommands();
+
+        // #TODO: I don't think we need to wait for SaveBlockRemainders to release our
+        //        buffers anymore.. We shouldn't be using them. But check the reasoning in f1gen to be sure.
         SaveBlockRemainders( yFileId, yOut, ySizes, _yRemainderSizes, _yRemainders );
+        queue.ReleaseBuffer( ySizes   );
+        queue.ReleaseBuffer( yBuckets );
+        queue.CommitCommands();
 
-        if constexpr( sizeof( TMetaA ) > 0 )
+        if constexpr( metaSizeA > 0 )
+        {
             SaveBlockRemainders( metaAFileId, metaASizes, metaOutA, _metaARemainderSizes, _metaARemainders );
+            queue.ReleaseBuffer( metaASizes   );
+            queue.ReleaseBuffer( metaABuckets );
+            queue.CommitCommands();
+        }
 
-        if constexpr( sizeof( TMetaB ) > 0 )
+        if constexpr( metaSizeB > 0 )
+        {
             SaveBlockRemainders( metaBFileId, metaBSizes, metaOutB, _metaBRemainderSizes, _metaBRemainders );
+            queue.ReleaseBuffer( metaBSizes   );
+            queue.ReleaseBuffer( metaBBuckets );
+            queue.CommitCommands();
+        }
 
         this->ReleaseThreads();
     }

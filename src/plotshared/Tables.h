@@ -169,3 +169,5 @@ template<> struct TableMetaOut<TableId::Table7>
     static constexpr size_t SizeA      = 0; static constexpr size_t SizeB = 0;
     static constexpr size_t Multiplier = 0;
 };
+
+// static_assert( sizeof( NoMeta ) == 0, "Invalid NoMeta" );
