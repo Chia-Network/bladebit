@@ -58,9 +58,9 @@ bool SPCQueue<T, Capacity>::Write( T*& outValue )
 template<typename T, int Capacity>
 void SPCQueue<T, Capacity>::Commit()
 {
-    ASSERT( _pendingCount );
-//     if( _pendingCount < 1 )
-//         return;
+    //ASSERT( _pendingCount );
+    if( _pendingCount < 1 )
+        return;
 
  
     int commited = _committedCount.load( std::memory_order_acquire );

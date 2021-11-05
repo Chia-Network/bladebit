@@ -45,10 +45,11 @@ struct DoubleBuffer
     }
 };
 
-struct OverflowBuckets
+struct OverflowBuffer
 {
-    OverflowBuckets( byte* buffer, size_t fileBlockSize );
+    void Init( void* bucketBuffers, const size_t fileBlockSize );
 
+    uint32       sizes  [BB_DP_BUCKET_COUNT];
     DoubleBuffer buffers[BB_DP_BUCKET_COUNT];
 };
 
@@ -78,9 +79,13 @@ class DiskPlotPhase1
         FileId  metaAFileId;
         FileId  metaBFileId;
 
-
         AutoResetSignal frontFence;
         AutoResetSignal backFence;
+
+        // Used for overflows
+        OverflowBuffer yOverflow;
+        OverflowBuffer metaAOverflow;
+        OverflowBuffer metaBOverflow;
     };
 
 public:
@@ -195,7 +200,6 @@ struct MatchJob : MTJob<MatchJob>
     void Run() override;
 };
 
-
 struct FxJob : BucketJob<FxJob>
 {
     TableId         tableId;
@@ -217,17 +221,14 @@ struct FxJob : BucketJob<FxJob>
     uint64*         metaOutA;
     uint64*         metaOutB;
 
-private:
-    void* _bucketY    ;
-    void* _bucketMetaA;
-    void* _bucketMetaB;
+    OverflowBuffer* yOverflows;
+    OverflowBuffer* metaAOverflows;
+    OverflowBuffer* metaBOverflows;
 
-    DoubleBuffer* _yRemainders;
-    DoubleBuffer* _metaARemainders;
-    DoubleBuffer* _metaBRemainders;
-    uint32*       _yRemainderSizes;
-    uint32*       _metaARemainderSizes;
-    uint32*       _metaBRemainderSizes;
+private:
+    void* _bucketY    ;     // Buffer that will be used to write buckets to disk.
+    void* _bucketMetaA;     // These buffers are assigned by the control thread.
+    void* _bucketMetaB;
 
 public:
     void Run() override;

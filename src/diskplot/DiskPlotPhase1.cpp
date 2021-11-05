@@ -662,6 +662,7 @@ void DiskPlotPhase1::ForwardPropagate()
     Bucket bucket;
     _bucket = &bucket;
 
+
     {
         const size_t fileBlockSize = ioDispatch.BlockSize();
 
@@ -676,10 +677,16 @@ void DiskPlotPhase1::ForwardPropagate()
 
         Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
 
+        // #TODO: Remove this. Allocating here temporarily for teting.
         // Temp test:
         bucket.yTmp     = bbvirtalloc<uint32>( ySize    );
         bucket.metaATmp = bbvirtalloc<uint64>( metaSize );
         bucket.metaBTmp = bucket.metaATmp + maxBucketCount;
+
+        // #TODO: Remove this as well. Testing allocating here for now. It should be allocated as part of the IO heap.
+        bucket.yOverflow    .Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
+        bucket.metaAOverflow.Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
+        bucket.metaBOverflow.Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
 
         bucket.fpBuffer = _cx.heapBuffer;
 
@@ -1346,9 +1353,18 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
         job.metaOutA    = metaOutA    + offset;
         job.metaOutB    = metaOutB    + offset;
         job.bucketIdOut = bucketIdOut + offset;
+
+        job.yOverflows     = &_bucket->yOverflow;
+        job.metaAOverflows = &_bucket->metaAOverflow;
+        job.metaBOverflows = &_bucket->metaBOverflow;
     }
 
     jobs[0].totalBucketCounts = bucketCounts;
+
+    // Zero-out overflow buffers
+    memset( _bucket->yOverflow.sizes    , 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+    memset( _bucket->metaAOverflow.sizes, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+    memset( _bucket->metaBOverflow.sizes, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
 
     // Calculate Fx
     jobs.Run();
@@ -1443,6 +1459,46 @@ void FxJob::RunForTable()
 //             // Save final buckets
 //             bbmemcpy_t( this->totalBucketCounts, bucketCounts, BB_DP_BUCKET_COUNT );
 //         }
+    }
+
+    // Write any remaining overflow buffers
+    if( this->IsControlThread() )
+    {
+        const bool isEven = static_cast<uint>( tableId ) & 1;
+
+        const FileId yFileId     = isEven ? FileId::Y1       : FileId::Y0;
+        const FileId metaAFileId = isEven ? FileId::META_A_0 : FileId::META_A_1;
+        const FileId metaBFileId = isEven ? FileId::META_B_0 : FileId::META_B_1;
+
+        DiskBufferQueue& queue         = *this->diskQueue;
+        const size_t     fileBlockSize = queue.BlockSize();
+
+        DoubleBuffer* yOverflow     = this->yOverflows    ->buffers;
+        DoubleBuffer* metaAOverflow = this->metaAOverflows->buffers;
+        DoubleBuffer* metaBOverflow = this->metaBOverflows->buffers;
+
+        for( int i = 0; i < (int)BB_DP_BUCKET_COUNT; i++ )
+            queue.WriteFile( yFileId, i, yOverflow[i].front, fileBlockSize );
+
+        if constexpr ( TableMetaOut<tableId>::SizeA > 0 )
+        {
+            for( int i = 0; i < (int)BB_DP_BUCKET_COUNT; i++ )
+                queue.WriteFile( metaAFileId, i, metaAOverflow[i].front, fileBlockSize );
+        }
+
+        if constexpr ( TableMetaOut<tableId>::SizeB > 0 )
+        {
+            for( int i = 0; i < (int)BB_DP_BUCKET_COUNT; i++ )
+                queue.WriteFile( metaBFileId, i, metaBOverflow[i].front, fileBlockSize );
+        }
+
+        queue.CommitCommands();
+
+        // Wait for all buffers to finish writing
+        AutoResetSignal fence;
+        queue.AddFence( fence );
+        queue.CommitCommands();
+        fence.Wait();
     }
 }
 
@@ -1562,7 +1618,7 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
         if constexpr ( metaSizeA > 0 )
         {
             for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                metaASizes[i] = (uint32)( ( bucketCounts[i] * sizeof( TMetaA ) ) / fileBlockSize * fileBlockSize );
+                metaASizes[i] = (uint32)( ( bucketCounts[i] * metaSizeA ) / fileBlockSize * fileBlockSize );
 
             queue.WriteBuckets( metaAFileId, metaABuckets, metaASizes );
         }
@@ -1570,23 +1626,23 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
         if constexpr ( metaSizeB > 0 )
         {
             for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                metaBSizes[i] = (uint32)( ( bucketCounts[i] * sizeof( TMetaB ) ) / fileBlockSize * fileBlockSize );
+                metaBSizes[i] = (uint32)( ( bucketCounts[i] * metaSizeB ) / fileBlockSize * fileBlockSize );
 
             queue.WriteBuckets( metaBFileId, metaBBuckets, metaBSizes );
         }
 
         queue.CommitCommands();
 
-        // #TODO: I don't think we need to wait for SaveBlockRemainders to release our
-        //        buffers anymore.. We shouldn't be using them. But check the reasoning in f1gen to be sure.
-        SaveBlockRemainders( yFileId, yOut, ySizes, _yRemainderSizes, _yRemainders );
+        // #NOTE: Don't commit release buckets buffer command until we calculate 
+        // remainders/overflows as we will read from those buffers.
+        SaveBlockRemainders( yFileId, bucketCounts, yBuckets, yOverflows->sizes, yOverflows->buffers );
         queue.ReleaseBuffer( ySizes   );
         queue.ReleaseBuffer( yBuckets );
         queue.CommitCommands();
 
         if constexpr( metaSizeA > 0 )
         {
-            SaveBlockRemainders( metaAFileId, metaASizes, metaOutA, _metaARemainderSizes, _metaARemainders );
+            SaveBlockRemainders( metaAFileId, bucketCounts, metaABuckets, metaAOverflows->sizes, metaAOverflows->buffers );
             queue.ReleaseBuffer( metaASizes   );
             queue.ReleaseBuffer( metaABuckets );
             queue.CommitCommands();
@@ -1594,7 +1650,7 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
 
         if constexpr( metaSizeB > 0 )
         {
-            SaveBlockRemainders( metaBFileId, metaBSizes, metaOutB, _metaBRemainderSizes, _metaBRemainders );
+            SaveBlockRemainders( metaBFileId, bucketCounts, metaBBuckets, metaBOverflows->sizes, metaBOverflows->buffers );
             queue.ReleaseBuffer( metaBSizes   );
             queue.ReleaseBuffer( metaBBuckets );
             queue.CommitCommands();
@@ -1635,7 +1691,7 @@ void FxJob::SaveBlockRemainders( FileId fileId, const uint32* bucketCounts, cons
 
         if( remainderSize )
         {
-            const size_t curRemainderSize = remainderSizes[i];
+            size_t curRemainderSize = remainderSizes[i];
                         
             const size_t copySize = std::min( remainderSize, fileBlockSize - curRemainderSize );
 
@@ -1674,7 +1730,7 @@ void FxJob::SaveBlockRemainders( FileId fileId, const uint32* bucketCounts, cons
             remainderSizes[i] += (uint)remainderSize;
         }
 
-        // #TODO: Shouldn't this be fileBlockSize (check on f1 gen too)
+        // Go to the next input bucket
         ptr += bucketSize;
     }
 }
@@ -1877,7 +1933,6 @@ void BucketJob<TJob>::CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT
     }
 }
 
-
 #pragma GCC diagnostic pop
 
 //-----------------------------------------------------------
@@ -2034,4 +2089,23 @@ void TestWrites()
     }
 }
 
+//-----------------------------------------------------------
+void OverflowBuffer::Init( void* bucketBuffers, const size_t fileBlockSize )
+{
+    ASSERT( bucketBuffers );
+    ASSERT( fileBlockSize );
+
+    const size_t fileBlockSizeX2 = fileBlockSize * 2;
+
+    byte* ptr = (byte*)bucketBuffers;
+
+    for( int i = 0; i < (int)BB_DP_BUCKET_COUNT; i++ )
+    {
+        buffers[i].front = ptr;
+        buffers[i].back  = ptr + fileBlockSize;
+        ptr += fileBlockSizeX2;
+    }
+
+    memset( sizes, 0, sizeof( sizes ) );
+}
 
