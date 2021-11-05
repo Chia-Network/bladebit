@@ -45,6 +45,12 @@ struct DoubleBuffer
     }
 };
 
+struct OverflowBuckets
+{
+    OverflowBuckets( byte* buffer, size_t fileBlockSize );
+
+    DoubleBuffer buffers[BB_DP_BUCKET_COUNT];
+};
 
 class DiskPlotPhase1
 {
@@ -52,14 +58,14 @@ class DiskPlotPhase1
     {
         byte*   fpBuffer; // Root allocation
 
-        uint32* y0      ;
-        uint32* y1      ;
-        uint32* sortKey ;
-        uint64* metaA0  ; 
-        uint64* metaA1  ;
-        uint64* metaB0  ;
-        uint64* metaB1  ;
-        Pairs   pairs;
+        uint32* y0     ;
+        uint32* y1     ;
+        uint32* sortKey;
+        uint64* metaA0 ; 
+        uint64* metaA1 ;
+        uint64* metaB0 ;
+        uint64* metaB1 ;
+        Pairs   pairs  ;
         uint32* groupBoundaries;
 
         byte*   bucketId;   // Used during fx gen
@@ -109,7 +115,7 @@ private:
     DiskPlotContext& _cx;
     DiskBufferQueue* _diskQueue;
 
-    uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
+//     uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
     uint32 _maxBucketCount;
 
     Bucket*       _bucket;
@@ -119,13 +125,15 @@ private:
 template<typename TJob>
 struct BucketJob : MTJob<TJob>
 {
-    const uint32*    counts;         // Each thread's entry count per bucket
-    uint32*          bucketCounts;   // Total counts per for all buckets. Used by the control thread
+    const uint32*    counts;            // Each thread's entry count per bucket
+    uint32*          totalBucketCounts; // Total counts per for all buckets. Used by the control thread
     
     DiskBufferQueue* diskQueue;
     uint32           chunkCount;
     
-    void CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT], uint32 pfxSum[BB_DP_BUCKET_COUNT] );
+    void CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT], 
+                             uint32 pfxSum[BB_DP_BUCKET_COUNT],
+                             uint32 bucketCounts[BB_DP_BUCKET_COUNT] );
 };
 
 struct GenF1Job : MTJob<GenF1Job>
@@ -192,7 +200,7 @@ struct FxJob : BucketJob<FxJob>
 {
     TableId         tableId;
     uint32          bucketIdx;
-    uint32          entriesPerChunk;        // Entries per chunk accross all threads
+    uint32          entriesPerChunk;        // Entries per chunk across all threads
     uint32          entryCount;             // Entry count for each individual job
     uint32          chunkCount;
     uint32          trailingChunkEntries;   // If greater than 0,
@@ -229,9 +237,11 @@ public:
 
     template<TableId tableId, typename TMetaA, typename TMetaB>
     void SortToBucket( uint entryCount, const byte* bucketIndices,
-                       const uint32* inY, const TMetaA* metaInA, const TMetaB* metaInB );
+                       const uint32* inY, const TMetaA* metaInA, const TMetaB* metaInB,
+                       uint bucketCounts[BB_DP_BUCKET_COUNT] );
 
     template<typename T>
-    void SaveBlockRemainders( FileId fileId, const uint32* sizes, const T* buffer, uint32* remainderSizes, DoubleBuffer* remainderBuffers );
+    void SaveBlockRemainders( FileId fileId, const uint32* bucketCounts, const T* buffer, 
+                              uint32* remainderSizes, DoubleBuffer* remainderBuffers );
 };
 
