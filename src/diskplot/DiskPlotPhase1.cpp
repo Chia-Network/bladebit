@@ -4,6 +4,7 @@
 #include "algorithm/RadixSort.h"
 #include "pos/chacha8.h"
 #include "b3/blake3.h"
+#include "plotshared/GenSortKey.h"
 
 // Test
 #include "io/FileStream.h"
@@ -644,7 +645,7 @@ void DiskPlotPhase1::ForwardPropagate()
     ASSERT( maxBucketCount <= BB_DP_MAX_ENTRIES_PER_BUCKET );
 
     maxBucketCount = BB_DP_MAX_ENTRIES_PER_BUCKET;
-    maxBucketSize = maxBucketCount * sizeof( uint32 );
+    maxBucketSize   = maxBucketCount * sizeof( uint32 );
     _maxBucketCount =  maxBucketCount;
 
     // #TODO: We need to have a maximum size here, and just allocate that.
@@ -677,7 +678,7 @@ void DiskPlotPhase1::ForwardPropagate()
 
         Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
 
-        // #TODO: Remove this. Allocating here temporarily for teting.
+        // #TODO: Remove this. Allocating here temporarily for testing.
         // Temp test:
         bucket.yTmp     = bbvirtalloc<uint32>( ySize    );
         bucket.metaATmp = bbvirtalloc<uint64>( metaSize );
@@ -793,25 +794,22 @@ void DiskPlotPhase1::ForwardPropagateTable()
     ioDispatch.ReadFile( bucket.yFileId, 0, bucket.y0, inputBucketCounts[0] * sizeof( uint32 ) );
     ioDispatch.AddFence( bucket.frontFence );
 
-    ioDispatch.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, inputBucketCounts[0] * MetaInASize );
-
-    if constexpr ( MetaInBSize > 0 )
-    {
-        ioDispatch.ReadFile( bucket.metaBFileId, 0, bucket.metaB0, inputBucketCounts[0] * MetaInBSize );
-    }
+    // Read to tmp (when > table 2) so we can sort it with a key back to bucket.metaA
+    ioDispatch.ReadFile( bucket.metaAFileId, 0, TableId == TableId::Table2 ? bucket.metaA0 : bucket.metaATmp, inputBucketCounts[0] * MetaInASize );
+    
+    // Start reading files
+    ioDispatch.CommitCommands();
     
     // Fence for metadata
     ioDispatch.AddFence( bucket.frontFence );
 
-    // #TODO: That using a single fence twice can actually cause a race condition.
-    // //     Although extremely unlikely, it could be the case that the 2 read commands happen
-    //        before this first wait Wait(). Meaning we will be waiting forever on the second one.
-    //        Therefore we need to switch to Semaphores for waits. Or whatever other special mechanism
-    //        we will use to ensure we can notify the other threads that they should wait on IO as well
-    //        whilst the control threads looks waits on a buffer.
-    // Dispatch read commands and wait for y to be loaded
-    ioDispatch.CommitCommands();
+    if constexpr ( MetaInBSize > 0 )
+    {
+        ioDispatch.ReadFile( bucket.metaBFileId, 0, bucket.metaBTmp, inputBucketCounts[0] * MetaInBSize );
+    }
+    
     bucket.frontFence.Wait();
+    ioDispatch.CommitCommands();    // Commit metadata fence. Must commit after the first Wait() to avoid a race condition
 
     for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
     {
@@ -852,23 +850,31 @@ void DiskPlotPhase1::ForwardPropagateTable()
         }
 
         // Sort our current bucket
+        uint32* sortKey = bucket.sortKey;
+
         {
             Log::Line( "  Sorting bucket." );
             auto timer = TimerBegin();
 
-            uint32* sortKey = bucket.sortKey;
-
-            if constexpr( tableId == TableId::Table2 )
+            if constexpr ( tableId == TableId::Table2 )
             {
                 // No sort key needed for table 1, just sort x along with y
                 sortKey = (uint32*)bucket.metaA0;
+            }
+            else
+            {
+                // Generate a sort index
+                GenSortKey::Generate<BB_MAX_JOBS>( *cx.threadPool, entryCount, sortKey );
             }
 
             uint32* yTemp       = (uint32*)bucket.metaA1;
             uint32* sortKeyTemp = yTemp + entryCount;
 
-//             RadixSort256::SortWithKey<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
-            RadixSort256::Sort<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, entryCount );
+            RadixSort256::SortWithKey<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
+//             RadixSort256::Sort<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, entryCount );
+
+            // #TODO: Write sort key to disk as the previous table's sort key, 
+            //        so that we can do a quick sort of L/R later.
 
             double elapsed = TimerEnd( timer );
 
@@ -887,18 +893,33 @@ void DiskPlotPhase1::ForwardPropagateTable()
         if( bucketIdx == 0 )
             bucket.frontFence.Wait();
 
+
+        // To avoid confusion as we sort into metaTmp, and then use bucket.meta0 as tmp for fx
+        // we explicitly set them to appropriately-named variables here
+        uint64* fxMetaInA  = bucket.metaATmp;
+        uint64* fxMetaInB  = bucket.metaBTmp;
+        uint64* fxMetaOutA = bucket.metaA0;
+        uint64* fxMetaOutB = bucket.metaB0;
+        
         // Sort metadata with the key
         if constexpr( tableId > TableId::Table2 )
         {
-            // #TODO: This
+            using TMetaA = TableMetaIn<tableId>::TMetaA;
+            using TMetaB = TableMetaIn<tableId>::TMetaB;
+
+            GenSortKey::Sort<BB_MAX_JOBS, TMetaA>( *cx.threadPool, (int64)entryCount, sortKey, bucket.metaA0, fxMetaInA );
+            
+
+            if constexpr ( MetaInBSize > 0 )
+            {
+                GenSortKey::Sort<BB_MAX_JOBS, TMetaB>( *cx.threadPool, (int64)entryCount, sortKey, bucket.metaB0, fxMetaInB );
+            }
         }
 
         // Scan for BC groups & match
         GroupInfo groupInfos[BB_MAX_JOBS];
         uint32 totalMatches;
         
-//         Pairs pairs[BB_MAX_JOBS];
-
         {
             // Scan for group boundaries
             const uint32 groupCount = ScanGroups( bucketIdx, bucket.y0, entryCount, bucket.groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
@@ -1302,7 +1323,8 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
     ASSERT( writeInterval <= entriesTotalSize );
 
     uint32 entriesPerChunk        = (uint32)( writeInterval / sizePerEntry );
-    uint32 chunkCount             = (uint32)( entriesTotalSize / writeInterval );
+    uint32 sizePerChunk           = (uint32)( entriesPerChunk * sizePerEntry ); ASSERT( sizePerChunk <= writeInterval );
+    uint32 chunkCount             = (uint32)( entriesTotalSize / sizePerChunk );
 
     const uint32 threadCount      = cx.threadCount;
     const uint32 entriesPerThread = entriesPerChunk / threadCount;
@@ -1322,6 +1344,8 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
     // Remove that from the trailing entries.
     // This guarantees that any trailing entries will be <= threadCount
     trailingEntries -= lastChunkEntries * threadCount;
+
+    ASSERT( entriesPerThread * threadCount * chunkCount + lastChunkEntries * threadCount + trailingEntries == entryCount );
 
     uint32* bucketCounts = _cx.bucketCounts[(uint)tableId];
 //     memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );    // Already zeroed
@@ -1360,6 +1384,10 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
     }
 
     jobs[0].totalBucketCounts = bucketCounts;
+
+    // #TODO We need to grab the trailing entries...
+    //       This isn't working for some reason. Not sure why yet.
+    jobs[threadCount - 1].trailingChunkEntries += trailingEntries;
 
     // Zero-out overflow buffers
     memset( _bucket->yOverflow.sizes    , 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
@@ -1409,7 +1437,7 @@ void FxJob::RunForTable()
 
     const uint32   entryCount       = this->entryCount;
     const uint32   chunkCount       = this->chunkCount;
-//     const uint32   entriesPerChunk  = this->entriesPerChunk;
+    const uint32   entriesPerChunk  = this->entriesPerChunk;
     const uint64   bucket           = ( (uint64)this->bucketIdx ) << 32;
 
     Pairs          lrPairs          = this->pairs;
@@ -1428,6 +1456,7 @@ void FxJob::RunForTable()
     {
 //         auto timer = TimerBegin();
 
+//         if( _jobId == 23 ) __debugbreak();
         ComputeFxForTable<tableId>( bucket, entryCount, lrPairs, inY, inMetaA, inMetaB,
                                     outY, outBucketId, outMetaA, outMetaB );
 
@@ -1439,13 +1468,26 @@ void FxJob::RunForTable()
             entryCount, outBucketId, outY, 
             (TMetaA*)outMetaA, (TMetaB*)outMetaB, bucketCounts );
 
-        lrPairs.left  += entryCount;
-        lrPairs.right += entryCount;
+        // Offset to our start position on the next chunk
+        lrPairs.left  += entriesPerChunk;
+        lrPairs.right += entriesPerChunk;
     }
 
     const uint32 trailingChunkEntries = this->trailingChunkEntries;
     if( trailingChunkEntries )
     {
+//         if( _jobId == 23 ) __debugbreak();
+
+        // Set correct pair starting point, as the offset will be different here
+        // #NOTE: Since the last thread may have more entries than the rest of the threads,
+        // we account for that here by using thread 0's trailingChunkEntries.
+        lrPairs = _jobs[0].pairs;
+        
+        const size_t offset = entriesPerChunk * chunkCount + _jobs[0].trailingChunkEntries * _jobId;
+
+        lrPairs.left  += offset;
+        lrPairs.right += offset;
+
         ComputeFxForTable<tableId>( bucket, trailingChunkEntries, lrPairs, inY, inMetaA, inMetaB,
                                     outY, outBucketId, outMetaA, outMetaB );
 
@@ -1464,6 +1506,12 @@ void FxJob::RunForTable()
     // Write any remaining overflow buffers
     if( this->IsControlThread() )
     {
+        // #NOTE: Sync threads here anyway (even though SortToBucket syncs) because
+        //        the last thread may have had trailingChunkEntries whilst the
+        //        rest of the threads didn't. This amount is < thread count, so it won't be much of a wait.
+        this->LockThreads();
+        this->ReleaseThreads();
+
         const bool isEven = static_cast<uint>( tableId ) & 1;
 
         const FileId yFileId     = isEven ? FileId::Y1       : FileId::Y0;
@@ -1500,16 +1548,20 @@ void FxJob::RunForTable()
         queue.CommitCommands();
         fence.Wait();
     }
+    else
+        this->WaitForRelease();
 }
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
 
+bool _found295 = false;
+
 //-----------------------------------------------------------
 template<TableId tableId, typename TMetaA, typename TMetaB>
 inline
-void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint32* inY, 
-                          const TMetaA* inMetaA, const TMetaB* inMetaB,
+void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint32* yBuffer, 
+                          const TMetaA* metaABuffer, const TMetaB* metaBBuffer,
                           uint bucketCounts[BB_DP_BUCKET_COUNT] )
 {
     const bool isEven = static_cast<uint>( tableId ) & 1;
@@ -1537,10 +1589,10 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
 
     // Count our buckets
     memset( counts, 0, sizeof( counts ) );
-    for( uint i = 0; i < entryCount; i++ )
+    for( const byte* ptr = bucketIndices, *end = ptr + entryCount; ptr < end; ptr++ )
     {
-        ASSERT( bucketIndices[i] <= ( 0b111111u ) );
-        counts[bucketIndices[i]] ++;
+        ASSERT( *ptr <= ( 0b111111u ) );
+        counts[*ptr] ++;
     }
 
     CalculatePrefixSum( counts, pfxSum, bucketCounts );
@@ -1585,26 +1637,29 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
         metaABuckets = (TMetaA*)GetJob( 0 )._bucketMetaA;
         metaBBuckets = (TMetaB*)GetJob( 0 )._bucketMetaB;
     }
-
+    
+    // if( _jobId == 23 && _found295 ) __debugbreak();
     // #TODO: Unroll this a bit?
     // Distribute values into buckets at each thread's given offset
     for( uint i = 0; i < entryCount; i++ )
     {
+//         if( _jobId == 23 && _found295 && i == 184320 ) __debugbreak();
         const uint32 dstIdx = --pfxSum[bucketIndices[i]];
 
-        yBuckets[dstIdx] = yIn[i];
+        yBuckets[dstIdx] = yBuffer[i];
 
         if constexpr ( metaSizeA > 0 )
         {
-            metaABuckets[dstIdx] = inMetaA[i];
+            metaABuckets[dstIdx] = metaABuffer[i];
         }
 
         if constexpr ( metaSizeB > 0 )
         {
-            metaBBuckets[dstIdx] = inMetaB[i];
+            metaBBuckets[dstIdx] = metaBBuffer[i];
         }
     }
-
+//     if( _jobId == 23 && _found295 ) __debugbreak();
+// 
     // Write buckets to disk
     if( this->LockThreads() )
     {
@@ -1840,6 +1895,10 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         uint64 fx = Swap64( *output ) >> yShift;
 
         yOut[i] = (uint32)fx;
+
+//         if( (uint)fx < 720 && ( fx >> 32 ) == 0 ) __debugbreak();
+//         if( (uint)fx < 400 ) __debugbreak();
+//         if( (uint)fx == 295 && !_found295 ) { _found295 = true; /*__debugbreak();*/ }
 
         if constexpr( tableId != TableId::Table7 )
         {

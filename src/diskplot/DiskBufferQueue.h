@@ -7,7 +7,7 @@
 #include "plotshared/WorkHeap.h"
 
 class Thread;
-#define BB_DISK_QUEUE_MAX_CMDS 256
+#define BB_DISK_QUEUE_MAX_CMDS 1024
 
 enum class FileId
 {

@@ -238,7 +238,7 @@ public:
 
     template<TableId tableId, typename TMetaA, typename TMetaB>
     void SortToBucket( uint entryCount, const byte* bucketIndices,
-                       const uint32* inY, const TMetaA* metaInA, const TMetaB* metaInB,
+                       const uint32* yBuffer, const TMetaA* metaABuffer, const TMetaB* metaBBuffer,
                        uint bucketCounts[BB_DP_BUCKET_COUNT] );
 
     template<typename T>
