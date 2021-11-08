@@ -52,7 +52,7 @@ inline void SortKeyGen::Generate( ThreadPool& pool, uint64 length, uint32* keyBu
 
     for( uint64 i = 0; i < threadCount; i++ )
     {
-        Job& job = jobs[i];
+        GenJob& job = jobs[i];
 
         job.length    = entriesPerThread;
         job.offset    = i * entriesPerThread;

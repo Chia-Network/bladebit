@@ -90,7 +90,7 @@ inline T* bbcrealloc( T* ptr, size_t newCount )
 
 //-----------------------------------------------------------
 template<typename T>
-inline void bbmemcpy_t( T* dst, T* src, size_t count )
+inline void bbmemcpy_t( T* dst, const T* src, size_t count )
 {
     memcpy( dst, src, sizeof( T ) * count );
 }

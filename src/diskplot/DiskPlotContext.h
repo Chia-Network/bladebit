@@ -19,7 +19,11 @@ struct DiskPlotContext
     size_t       heapSize;          // Size in bytes of our working heap. Some parts are preallocated.
     byte*        heapBuffer;        // Buffer allocated for in-memory work
 
+    // Write intervals are expressed in bytes
+    size_t       f1WriteInterval;
+    size_t       matchWriteInterval;
     DiskWriteInterval writeIntervals[(uint)TableId::_Count];
+
     size_t       ioBufferSize;      // Largest write interval out of all the specified. 
     size_t       ioHeapSize;        // Allocation size for the IO heap
     byte*        ioHeap;            // Full allocation of the IO heap

@@ -101,12 +101,15 @@ private:
 
     void ForwardPropagateBucket( TableId table, uint bucketIdx );
 
-    template<TableId TableId>
+    template<TableId tableId>
     void SortBucket( uint32* y, uint32* yTmp, uint64* meta, uint64* metaTmp );
 
     uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
 
     uint32 Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS] );
+
+    uint32 MatchAdjoiningBucketGroups( const uint32* prevY, uint32* curY, const GroupInfo* prevGroupInfos, Pairs pairs,
+                                       uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
 
     void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
     

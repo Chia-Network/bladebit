@@ -28,10 +28,18 @@ struct WriteFileJob
 
 
 
+// #TODO: Move there outside of here into a header
+//        so that we can perform tests to determine best IO intervals
 template<TableId tableId>
 static void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs,
                                const uint32* yIn, const uint64* metaInA, const uint64* metaInB,
                                uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB );
+
+template<bool WriteToDisk>
+uint32 MatchEntries( const uint32* yBuffer, const uint32* groupBoundaries, Pairs pairs,
+                     const uint32  groupCount, const uint32 startIndex, const uint32 maxPairs,
+                     const uint64  bucketL, const uint64 bucketR,
+                     DiskBufferQueue* diskQueue = nullptr, const uint32 writeInterval = 0 );
 
 //-----------------------------------------------------------
 DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
@@ -667,6 +675,9 @@ void DiskPlotPhase1::ForwardPropagate()
     {
         const size_t fileBlockSize = ioDispatch.BlockSize();
 
+        // Extra space used to store the last 2 groups of y entries.
+        const size_t yGroupExtra = RoundUpToNextBoundaryT( kBC * sizeof( uint32 ) * 2, fileBlockSize );
+
         const size_t ySize       = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 ) * 2, (int)fileBlockSize );
         const size_t sortKeySize = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
         const size_t metaSize    = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 ) * 4, (int)fileBlockSize );
@@ -677,6 +688,7 @@ void DiskPlotPhase1::ForwardPropagate()
         const size_t totalSize = ySize + sortKeySize + metaSize + pairsLSize + pairsRSize + groupsSize;
 
         Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
+
 
         // #TODO: Remove this. Allocating here temporarily for testing.
         // Temp test:
@@ -693,9 +705,12 @@ void DiskPlotPhase1::ForwardPropagate()
 
         byte* ptr = bucket.fpBuffer;
 
-        bucket.y0 = (uint32*)ptr; 
+        // Offset by yGroupExtra so that we're aligned to file block size for reading,
+        // but can store the previous bucket's 2 groups worth of y values just before that.
+
+        bucket.y0 = (uint32*)( ptr + yGroupExtra ); 
         bucket.y1 = bucket.y0 + maxBucketCount;
-        ptr += ySize;
+        ptr += ySize + yGroupExtra;
 
         bucket.sortKey = (uint32*)ptr;
         ptr += sortKeySize;
@@ -774,6 +789,10 @@ void DiskPlotPhase1::ForwardPropagateTable()
         }
     }
 
+    // For tracking the previous bucket's last KB groups
+    uint32 prevGroupIndices[2];
+    uint32 prevGroupLengths[2];
+
     // Load first bucket
     ioDispatch.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
     ioDispatch.SeekBucket( FileId::Y1, 0, SeekOrigin::Begin );
@@ -795,12 +814,12 @@ void DiskPlotPhase1::ForwardPropagateTable()
     ioDispatch.AddFence( bucket.frontFence );
 
     // Read to tmp (when > table 2) so we can sort it with a key back to bucket.metaA
-    ioDispatch.ReadFile( bucket.metaAFileId, 0, TableId == TableId::Table2 ? bucket.metaA0 : bucket.metaATmp, inputBucketCounts[0] * MetaInASize );
+    ioDispatch.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, inputBucketCounts[0] * MetaInASize );
     
     // Start reading files
     ioDispatch.CommitCommands();
     
-    // Fence for metadata
+    // Fence for metadata A
     ioDispatch.AddFence( bucket.frontFence );
 
     if constexpr ( MetaInBSize > 0 )
@@ -864,7 +883,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
             else
             {
                 // Generate a sort index
-                GenSortKey::Generate<BB_MAX_JOBS>( *cx.threadPool, entryCount, sortKey );
+                SortKeyGen::Generate<BB_MAX_JOBS>( *cx.threadPool, entryCount, sortKey );
             }
 
             uint32* yTemp       = (uint32*)bucket.metaA1;
@@ -896,25 +915,24 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
         // To avoid confusion as we sort into metaTmp, and then use bucket.meta0 as tmp for fx
         // we explicitly set them to appropriately-named variables here
-        uint64* fxMetaInA  = bucket.metaATmp;
-        uint64* fxMetaInB  = bucket.metaBTmp;
-        uint64* fxMetaOutA = bucket.metaA0;
-        uint64* fxMetaOutB = bucket.metaB0;
-        
-        // Sort metadata with the key
-        if constexpr( tableId > TableId::Table2 )
-        {
-            using TMetaA = TableMetaIn<tableId>::TMetaA;
-            using TMetaB = TableMetaIn<tableId>::TMetaB;
-
-            GenSortKey::Sort<BB_MAX_JOBS, TMetaA>( *cx.threadPool, (int64)entryCount, sortKey, bucket.metaA0, fxMetaInA );
-            
-
-            if constexpr ( MetaInBSize > 0 )
-            {
-                GenSortKey::Sort<BB_MAX_JOBS, TMetaB>( *cx.threadPool, (int64)entryCount, sortKey, bucket.metaB0, fxMetaInB );
-            }
-        }
+//         uint64* fxMetaInA  = bucket.metaATmp;
+//         uint64* fxMetaInB  = bucket.metaBTmp;
+//         uint64* fxMetaOutA = bucket.metaA0;
+//         uint64* fxMetaOutB = bucket.metaB0;
+//         
+//         // Sort metadata with the key
+//         if constexpr( tableId > TableId::Table2 )
+//         {
+//             using TMetaA = TableMetaIn<tableId>::TMetaA;
+//             using TMetaB = TableMetaIn<tableId>::TMetaB;
+// 
+//             GenSortKey::Sort<BB_MAX_JOBS, TMetaA>( *cx.threadPool, (int64)entryCount, sortKey, bucket.metaA0, fxMetaInA );
+//             
+//             if constexpr ( MetaInBSize > 0 )
+//             {
+//                 GenSortKey::Sort<BB_MAX_JOBS, TMetaB>( *cx.threadPool, (int64)entryCount, sortKey, bucket.metaB0, fxMetaInB );
+//             }
+//         }
 
         // Scan for BC groups & match
         GroupInfo groupInfos[BB_MAX_JOBS];
@@ -983,6 +1001,27 @@ void DiskPlotPhase1::ForwardPropagateTable()
         std::swap( bucket.y0    , bucket.y1     );
         std::swap( bucket.metaA0, bucket.metaA1 );
         std::swap( bucket.metaB0, bucket.metaB1 );
+        
+        // If not the last group, copy over the last 2 group's worth of y values
+        // into the area before the start of the current y buffer, and do matching there
+        if( bucketIdx + 1 < BB_DP_BUCKET_COUNT )
+        {
+            // The last 2 groups should always be in the last thread 
+            // unless we have an exceeding amount of threads (around 2048+), which we don't support.
+            const GroupInfo& lastGroup = groupInfos[threadCount-1];  ASSERT( lastGroup.entryCount <= kBC * 2 );
+
+            prevGroupIndices[0] = lastGroup.groupBoundaries[lastGroup.groupCount-2];
+            prevGroupIndices[1] = lastGroup.groupBoundaries[lastGroup.groupCount-1];
+            
+            prevGroupLengths[0] = prevGroupIndices[0] - prevGroupIndices[1];
+            prevGroupLengths[1] = lastGroup.entryCount - prevGroupIndices[1];
+
+            const uint32 last2GroupLengths = prevGroupLengths[0] + prevGroupLengths[1];
+            ASSERT( last2GroupLengths <= kBC * 2 );
+
+            // Copy over the last 2 group's y's
+            bbmemcpy_t( bucket.y0 - last2GroupLengths,)
+        }
     }
 }
 
@@ -1160,6 +1199,110 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
 }
 
 //-----------------------------------------------------------
+uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* curY, const GroupInfo* prevGroupInfos, Pairs pairs,
+                                                   uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket )
+{
+    const uint threadCount = _cx.threadCount;
+
+    // Find the last 2 groups, which should always be in the last thread,
+    // unless we have an exceeding amount of threads (around 2048+), which we don't support.
+    const GroupInfo& lastThreadGroups = prevGroupInfos[threadCount-1];
+    ASSERT( lastThreadGroups.entryCount <= kBC * 2 );
+
+    const uint32 penultimateGrpStart = lastThreadGroups.groupBoundaries[lastThreadGroups.groupCount - 2];
+    const uint32 lastGrpStart        = lastThreadGroups.groupBoundaries[lastThreadGroups.groupCount - 1];
+
+    const uint32 penultimateGrpCount = lastGrpStart - penultimateGrpStart;
+    const uint32 lastGrpCount        = lastThreadGroups.entryCount - penultimateGrpCount;
+    ASSERT( penultimateGrpCount + lastGrpCount < kBC * 2 );
+
+    // Find the first 2 groups of the new bucket
+    ASSERT( curBucketLength > kBC * 2 );
+
+    const uint64 lBucket = ((uint64)prevBucket) << 32;
+    const uint64 rBucket = ((uint64)curBucket ) << 32;
+
+    const uint64 prevBucketGrp1 = lBucket | prevY[penultimateGrpCount];
+    const uint64 prevBucketGrp2 = lBucket | prevY[lastGrpStart];
+
+    uint64 newBucketGrp1      = rBucket | *curY / kBC;
+    uint64 newBucketGrp2      = 0;
+    uint32 newBucketGrp1Count = 0; 
+    uint32 newBucketGrp2Count = 0;
+
+    for( uint32 i = 1; i < curBucketLength; i++ )
+    {
+        uint64 grp = rBucket | curY[i];
+        if( grp != newBucketGrp1 )
+        {
+            // Found second group, now try to find the end
+            newBucketGrp2 = grp;
+
+            for( uint32 j = i+1; j < curBucketLength; j++ )
+            {
+                grp = rBucket | curY[j];
+                if( grp != newBucketGrp2 )
+                {
+                    newBucketGrp1Count = i;
+                    newBucketGrp2Count = j - i;
+                    break;
+                }
+            }
+
+            break;  // New group found
+        }
+    }
+
+    uint32 matches = 0;
+
+    ASSERT( newBucketGrp2 && newBucketGrp1Count && newBucketGrp2Count );
+
+    const size_t entrySize            = sizeof( uint32 ) + sizeof( uint16 );
+    const uint32 writeIntervalEntries = _cx.matchWriteInterval / entrySize;
+
+    // If the new bucket starts at an adjacent group from the penultimate group from the last bucket,
+    // then let's perform matches on it.
+    if( newBucketGrp1 - prevBucketGrp1 == 1 )
+    {
+        uint32* yBuffer = curY - penultimateGrpCount;
+
+        // Copy the last group over to the portion before curY (we ought to have space there to store it)
+        bbmemcpy_t( yBuffer, prevY + penultimateGrpStart, penultimateGrpCount );
+
+        uint32 boundaries[2] = { penultimateGrpCount, penultimateGrpCount + newBucketGrp1Count };
+
+        matches += MatchEntries<true>( yBuffer, boundaries, pairs, 1, 0,
+                                       maxPairs, lBucket, rBucket,
+                                       _diskQueue, writeIntervalEntries );
+
+        maxPairs -= matches;
+    }
+
+    // If the last group from the prev bucket is in the same group
+    // as the first group from the new bucket, then match against the
+    // second group from the new bucket
+    if( prevBucketGrp2 == newBucketGrp1 && newBucketGrp2 - prevBucketGrp2 == 1 )
+    {
+        uint32* yBuffer = curY - lastGrpCount;
+
+        // Copy the last group from the last bucket into the prefix space of
+        // the new bucket's y buffer
+        bbmemcpy_t( curY - lastGrpCount, prevY + lastGrpStart, lastGrpCount );
+
+        uint32 boundaries[2] = { lastGrpCount + newBucketGrp1Count, 
+                                 lastGrpCount + newBucketGrp1Count + newBucketGrp2Count };
+
+         matches += MatchEntries<true>( yBuffer, boundaries, pairs, 1, 0,
+                                        maxPairs, lBucket, rBucket, 
+                                        _diskQueue, writeIntervalEntries );
+    }
+
+
+    // Return the number of matches found
+    return matches;
+}
+
+//-----------------------------------------------------------
 void ScanGroupJob::Run()
 {
     const uint32 maxGroups = this->maxGroups;
@@ -1199,6 +1342,119 @@ void ScanGroupJob::Run()
 }
 
 //-----------------------------------------------------------
+template<bool WriteToDisk>
+uint32 MatchEntries( const uint32* yBuffer, const uint32* groupBoundaries, Pairs pairs,
+                     const uint32  groupCount, const uint32 startIndex, const uint32 maxPairs,
+                     const uint64  bucketL, const uint64 bucketR,
+                     DiskBufferQueue* diskQueue, const uint32 writeInterval )
+{
+
+    if constexpr( WriteToDisk )
+    {
+        ASSERT( diskQueue && writeInterval );
+    }
+
+    uint32 pairCount = 0;
+
+    uint8  rMapCounts [kBC];
+    uint16 rMapIndices[kBC];
+
+    uint64 groupLStart = startIndex;
+    uint64 groupL      = ( bucketL | yBuffer[groupLStart] ) / kBC;
+
+    #if _DEBUG
+        uint32 groupPairs = 0;
+    #endif
+
+    for( uint32 i = 0; i < groupCount; i++ )
+    {
+        const uint64 groupRStart = groupBoundaries[i];
+        const uint64 groupR      = ( bucketR | yBuffer[groupRStart] ) / kBC;
+
+        if( groupR - groupL == 1 )
+        {
+            // Groups are adjacent, calculate matches
+            const uint16 parity           = groupL & 1;
+            const uint64 groupREnd        = groupBoundaries[i+1];
+
+            const uint64 groupLRangeStart = groupL * kBC;
+            const uint64 groupRRangeStart = groupR * kBC;
+            
+            ASSERT( groupREnd - groupRStart <= 350 );
+            ASSERT( groupLRangeStart == groupRRangeStart - kBC );
+
+            // Prepare a map of range kBC to store which indices from groupR are used
+            // For now just iterate our bGroup to find the pairs
+           
+            // #NOTE: memset(0) works faster on average than keeping a separate a clearing buffer
+            memset( rMapCounts, 0, sizeof( rMapCounts ) );
+            
+            for( uint64 iR = groupRStart; iR < groupREnd; iR++ )
+            {
+                uint64 localRY = ( bucketR | yBuffer[iR] ) - groupRRangeStart;
+                ASSERT( ( bucketR | yBuffer[iR] ) / kBC == groupR );
+
+                if( rMapCounts[localRY] == 0 )
+                    rMapIndices[localRY] = (uint16)( iR - groupRStart );
+
+                rMapCounts[localRY] ++;
+            }
+            
+            // For each group L entry
+            for( uint64 iL = groupLStart; iL < groupRStart; iL++ )
+            {
+                const uint64 yL     = bucketL | yBuffer[iL];
+                const uint64 localL = yL - groupLRangeStart;
+
+                // Iterate kExtraBitsPow = 1 << kExtraBits = 1 << 6 == 64
+                // So iterate 64 times for each L entry.
+                for( int iK = 0; iK < kExtraBitsPow; iK++ )
+                {
+                    const uint64 targetR = L_targets[parity][localL][iK];
+
+                    for( uint j = 0; j < rMapCounts[targetR]; j++ )
+                    {
+                        const uint64 iR = groupRStart + rMapIndices[targetR] + j;
+
+                        ASSERT( iL < iR );
+
+                        // Add a new pair
+                        ASSERT( ( iR - iL ) <= 0xFFFF );
+
+                        pairs.left [pairCount] = (uint32)iL;
+                        pairs.right[pairCount] = (uint16)(iR - iL);
+                        pairCount++;
+
+                        #if _DEBUG
+                            groupPairs++;
+                        #endif
+
+                        if constexpr ( WriteToDisk )
+                        {
+                            // #TODO: Write to disk if there's a buffer available and we have enough entries to write
+                        }
+                        
+                        ASSERT( pairCount <= maxPairs );
+                        if( pairCount == maxPairs )
+                            return pairCount;
+                    }
+                }
+            }
+        }
+        // Else: Not an adjacent group, skip to next one.
+
+        // Go to next group
+        groupL      = groupR;
+        groupLStart = groupRStart;
+
+        #if _DEBUG
+            groupPairs = 0;
+        #endif
+    }
+
+    return pairCount;
+}
+//-----------------------------------------------------------
 void MatchJob::Run()
 {
     const uint32* yBuffer         = this->yBuffer;
@@ -1215,6 +1471,10 @@ void MatchJob::Run()
 
     uint64 groupLStart = this->groupInfo->startIndex;
     uint64 groupL      = ( bucket | yBuffer[groupLStart] ) / kBC;
+
+    #if _DEBUG
+        uint32 groupPairs = 0;
+    #endif
 
     for( uint32 i = 0; i < groupCount; i++ )
     {
@@ -1275,6 +1535,9 @@ void MatchJob::Run()
                         pairs.right[pairCount] = (uint16)(iR - iL);
                         pairCount++;
 
+                        #if _DEBUG
+                            groupPairs++;
+                        #endif
                         // #TODO: Write to disk if there's a buffer available and we have enough entries to write
                         
                         ASSERT( pairCount <= maxPairs );
@@ -1289,6 +1552,10 @@ void MatchJob::Run()
         // Go to next group
         groupL      = groupR;
         groupLStart = groupRStart;
+
+        #if _DEBUG
+            groupPairs = 0;
+        #endif
     }
 
 RETURN:
