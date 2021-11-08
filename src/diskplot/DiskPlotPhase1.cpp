@@ -671,7 +671,6 @@ void DiskPlotPhase1::ForwardPropagate()
     Bucket bucket;
     _bucket = &bucket;
 
-
     {
         const size_t fileBlockSize = ioDispatch.BlockSize();
 
@@ -788,10 +787,6 @@ void DiskPlotPhase1::ForwardPropagateTable()
             bucket.metaAFileId = FileId::X;
         }
     }
-
-    // For tracking the previous bucket's last KB groups
-    uint32 prevGroupIndices[2];
-    uint32 prevGroupLengths[2];
 
     // Load first bucket
     ioDispatch.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
@@ -997,31 +992,27 @@ void DiskPlotPhase1::ForwardPropagateTable()
         // Ensure the next bucket has finished loading
         bucket.backFence.Wait();
 
-        // Swap are front/back buffers
-        std::swap( bucket.y0    , bucket.y1     );
-        std::swap( bucket.metaA0, bucket.metaA1 );
-        std::swap( bucket.metaB0, bucket.metaB1 );
-        
         // If not the last group, copy over the last 2 group's worth of y values
         // into the area before the start of the current y buffer, and do matching there
         if( bucketIdx + 1 < BB_DP_BUCKET_COUNT )
         {
-            // The last 2 groups should always be in the last thread 
-            // unless we have an exceeding amount of threads (around 2048+), which we don't support.
-            const GroupInfo& lastGroup = groupInfos[threadCount-1];  ASSERT( lastGroup.entryCount <= kBC * 2 );
+            const uint32 maxPairs = (uint32)BB_DP_MAX_ENTRIES_PER_BUCKET - totalMatches;
+            ASSERT( maxPairs > 0 );
 
-            prevGroupIndices[0] = lastGroup.groupBoundaries[lastGroup.groupCount-2];
-            prevGroupIndices[1] = lastGroup.groupBoundaries[lastGroup.groupCount-1];
-            
-            prevGroupLengths[0] = prevGroupIndices[0] - prevGroupIndices[1];
-            prevGroupLengths[1] = lastGroup.entryCount - prevGroupIndices[1];
+            const uint32 nextBucket = bucketIdx + 1;
 
-            const uint32 last2GroupLengths = prevGroupLengths[0] + prevGroupLengths[1];
-            ASSERT( last2GroupLengths <= kBC * 2 );
+            Pairs joinPairs = bucket.pairs;
+            joinPairs.left  += totalMatches;
+            joinPairs.right += totalMatches;
 
-            // Copy over the last 2 group's y's
-            bbmemcpy_t( bucket.y0 - last2GroupLengths,)
+            const uint32 matches = MatchAdjoiningBucketGroups( bucket.y0, bucket.y1, groupInfos[threadCount-1], joinPairs, 
+                                                               inputBucketCounts[nextBucket], maxPairs, bucketIdx, nextBucket );
         }
+
+        // Swap are front/back buffers
+        std::swap( bucket.y0    , bucket.y1     );
+        std::swap( bucket.metaA0, bucket.metaA1 );
+        std::swap( bucket.metaB0, bucket.metaB1 );
     }
 }
 
@@ -1199,14 +1190,14 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
 }
 
 //-----------------------------------------------------------
-uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* curY, const GroupInfo* prevGroupInfos, Pairs pairs,
+uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* curY, const GroupInfo& lastThreadGroups, Pairs pairs,
                                                    uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket )
 {
     const uint threadCount = _cx.threadCount;
 
     // Find the last 2 groups, which should always be in the last thread,
     // unless we have an exceeding amount of threads (around 2048+), which we don't support.
-    const GroupInfo& lastThreadGroups = prevGroupInfos[threadCount-1];
+//     const GroupInfo& lastThreadGroups = prevGroupInfos[threadCount-1];
     ASSERT( lastThreadGroups.entryCount <= kBC * 2 );
 
     const uint32 penultimateGrpStart = lastThreadGroups.groupBoundaries[lastThreadGroups.groupCount - 2];
@@ -1258,7 +1249,7 @@ uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* 
     ASSERT( newBucketGrp2 && newBucketGrp1Count && newBucketGrp2Count );
 
     const size_t entrySize            = sizeof( uint32 ) + sizeof( uint16 );
-    const uint32 writeIntervalEntries = _cx.matchWriteInterval / entrySize;
+    const uint32 writeIntervalEntries = (uint32)( _cx.matchWriteInterval / entrySize );
 
     // If the new bucket starts at an adjacent group from the penultimate group from the last bucket,
     // then let's perform matches on it.
