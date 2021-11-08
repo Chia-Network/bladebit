@@ -887,6 +887,8 @@ void DiskPlotPhase1::ForwardPropagateTable()
             RadixSort256::SortWithKey<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
 //             RadixSort256::Sort<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, entryCount );
 
+            // #TODO: We need to do the merge of matches here from w/ the previous bucket.
+
             // #TODO: Write sort key to disk as the previous table's sort key, 
             //        so that we can do a quick sort of L/R later.
 
@@ -994,6 +996,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
         // If not the last group, copy over the last 2 group's worth of y values
         // into the area before the start of the current y buffer, and do matching there
+        // #TODO: Move this out of here, we forgot we haven't sorted the new bucket yet.
         if( bucketIdx + 1 < BB_DP_BUCKET_COUNT )
         {
             const uint32 maxPairs = (uint32)BB_DP_MAX_ENTRIES_PER_BUCKET - totalMatches;
@@ -1006,7 +1009,8 @@ void DiskPlotPhase1::ForwardPropagateTable()
             joinPairs.right += totalMatches;
 
             const uint32 matches = MatchAdjoiningBucketGroups( bucket.y0, bucket.y1, groupInfos[threadCount-1], joinPairs, 
-                                                               inputBucketCounts[nextBucket], maxPairs, bucketIdx, nextBucket );
+                                                               entryCount, inputBucketCounts[nextBucket], 
+                                                               maxPairs, bucketIdx, nextBucket );
         }
 
         // Swap are front/back buffers
@@ -1191,20 +1195,20 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
 
 //-----------------------------------------------------------
 uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* curY, const GroupInfo& lastThreadGroups, Pairs pairs,
-                                                   uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket )
+                                                   uint32 prevBucketLength, uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket )
 {
     const uint threadCount = _cx.threadCount;
 
     // Find the last 2 groups, which should always be in the last thread,
     // unless we have an exceeding amount of threads (around 2048+), which we don't support.
 //     const GroupInfo& lastThreadGroups = prevGroupInfos[threadCount-1];
-    ASSERT( lastThreadGroups.entryCount <= kBC * 2 );
+    ASSERT( lastThreadGroups.entryCount >= kBC * 2 );
 
     const uint32 penultimateGrpStart = lastThreadGroups.groupBoundaries[lastThreadGroups.groupCount - 2];
     const uint32 lastGrpStart        = lastThreadGroups.groupBoundaries[lastThreadGroups.groupCount - 1];
 
     const uint32 penultimateGrpCount = lastGrpStart - penultimateGrpStart;
-    const uint32 lastGrpCount        = lastThreadGroups.entryCount - penultimateGrpCount;
+    const uint32 lastGrpCount        = prevBucketLength - lastGrpStart;
     ASSERT( penultimateGrpCount + lastGrpCount < kBC * 2 );
 
     // Find the first 2 groups of the new bucket
@@ -1213,17 +1217,19 @@ uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* 
     const uint64 lBucket = ((uint64)prevBucket) << 32;
     const uint64 rBucket = ((uint64)curBucket ) << 32;
 
-    const uint64 prevBucketGrp1 = lBucket | prevY[penultimateGrpCount];
-    const uint64 prevBucketGrp2 = lBucket | prevY[lastGrpStart];
+    const uint64 prevBucketGrp1 = ( lBucket | prevY[penultimateGrpStart] ) / kBC;
+    const uint64 prevBucketGrp2 = ( lBucket | prevY[lastGrpStart]        ) / kBC;
+    ASSERT( prevBucketGrp2 > prevBucketGrp1 );
 
-    uint64 newBucketGrp1      = rBucket | *curY / kBC;
+    uint64 newBucketGrp1      = ( rBucket | curY[0] ) / kBC;
     uint64 newBucketGrp2      = 0;
     uint32 newBucketGrp1Count = 0; 
     uint32 newBucketGrp2Count = 0;
+    ASSERT( newBucketGrp1 > prevBucketGrp2 );
 
     for( uint32 i = 1; i < curBucketLength; i++ )
     {
-        uint64 grp = rBucket | curY[i];
+        uint64 grp = ( rBucket | curY[i] ) / kBC;
         if( grp != newBucketGrp1 )
         {
             // Found second group, now try to find the end
@@ -1231,7 +1237,7 @@ uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* 
 
             for( uint32 j = i+1; j < curBucketLength; j++ )
             {
-                grp = rBucket | curY[j];
+                grp = ( rBucket | curY[j] ) / kBC;
                 if( grp != newBucketGrp2 )
                 {
                     newBucketGrp1Count = i;
@@ -1445,6 +1451,7 @@ uint32 MatchEntries( const uint32* yBuffer, const uint32* groupBoundaries, Pairs
 
     return pairCount;
 }
+
 //-----------------------------------------------------------
 void MatchJob::Run()
 {

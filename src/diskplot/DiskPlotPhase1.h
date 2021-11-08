@@ -109,7 +109,7 @@ private:
     uint32 Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS] );
 
     uint32 MatchAdjoiningBucketGroups( const uint32* prevY, uint32* curY, const GroupInfo& lastThreadGroups, Pairs pairs,
-                                       uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
+                                       uint32 prevBucketLength, uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
 
     void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
     
