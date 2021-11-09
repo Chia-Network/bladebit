@@ -767,12 +767,16 @@ void DiskPlotPhase1::ForwardPropagateTable()
 {
     constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
     constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
-
+                                               
     DiskPlotContext& cx                = _cx;
     DiskBufferQueue& ioDispatch        = *_diskQueue;
     Bucket&          bucket            = *_bucket;
     const uint       threadCount       = _cx.threadCount;
     const uint32*    inputBucketCounts = cx.bucketCounts[(uint)tableId - 1];
+
+    // For matching entries in groups that cross bucket boundaries
+    uint32           prevBucketGroupCounts[2];
+    uint32           prevBucketMatches = 0;
 
     // Set the correct file id, given the table (we swap between them for each table)
     {
@@ -887,7 +891,21 @@ void DiskPlotPhase1::ForwardPropagateTable()
             RadixSort256::SortWithKey<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
 //             RadixSort256::Sort<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, entryCount );
 
-            // #TODO: We need to do the merge of matches here from w/ the previous bucket.
+            // Merge of matches here from w/ the previous bucket.
+            if( bucketIdx > 0 )
+            {
+                // # TODO: Ensure the last write has completed on the pairs so that we can reset the pairs buffer to
+                //         the beginning. We then need to track how many pairs have already been written to the pairs
+                //         buffer so that we can copy to it at the right offset when we do this table's matching.
+
+                // Point the y buffer to the right location
+                const uint32 prevGrouCounts = prevBucketGroupCounts[0] + prevBucketGroupCounts[1];
+
+                const uint32 matches = MatchAdjoiningBucketGroups( 
+                                        bucket.yTmp, bucket.y0, bucket.pairs,
+                                        prevBucketGroupCounts, entryCount,
+                                        BB_DP_MAX_ENTRIES_PER_BUCKET, bucketIdx-1, bucketIdx );
+            }
 
             // #TODO: Write sort key to disk as the previous table's sort key, 
             //        so that we can do a quick sort of L/R later.
@@ -986,6 +1004,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
             bucket.y0, bucket.yTmp, (byte*)bucket.sortKey,    // #TODO: Change this, for now use sort key buffer
             bucket.metaA0, bucket.metaB0,
             bucket.metaATmp, bucket.metaBTmp );
+
         //for( uint threadIdx = 0; threadIdx < threadCount; threadIdx++ )
         //{
         //    GroupInfo& group = groupInfos[threadIdx];
@@ -994,23 +1013,26 @@ void DiskPlotPhase1::ForwardPropagateTable()
         // Ensure the next bucket has finished loading
         bucket.backFence.Wait();
 
-        // If not the last group, copy over the last 2 group's worth of y values
-        // into the area before the start of the current y buffer, and do matching there
-        // #TODO: Move this out of here, we forgot we haven't sorted the new bucket yet.
+        // If not the last group, save info to match adjacent bucket groups
         if( bucketIdx + 1 < BB_DP_BUCKET_COUNT )
         {
-            const uint32 maxPairs = (uint32)BB_DP_MAX_ENTRIES_PER_BUCKET - totalMatches;
-            ASSERT( maxPairs > 0 );
+            // Copy over the last 2 groups worth of y values to 
+            // our new bucket's y buffer. There's space reserved before the start
+            // of our y buffers that allow for it.
+            const GroupInfo& lastThreadGrp = groupInfos[threadCount-1];
 
-            const uint32 nextBucket = bucketIdx + 1;
+            const uint32 penultimateGroupIdx = lastThreadGrp.groupBoundaries[lastThreadGrp.groupCount-2];
+            const uint32 lastGroupIdx        = lastThreadGrp.groupBoundaries[lastThreadGrp.groupCount-1];
 
-            Pairs joinPairs = bucket.pairs;
-            joinPairs.left  += totalMatches;
-            joinPairs.right += totalMatches;
+            prevBucketGroupCounts[0]   = lastGroupIdx - penultimateGroupIdx;
+            prevBucketGroupCounts[1]   = entryCount - lastGroupIdx;
+            prevBucketMatches          = totalMatches;
 
-            const uint32 matches = MatchAdjoiningBucketGroups( bucket.y0, bucket.y1, groupInfos[threadCount-1], joinPairs, 
-                                                               entryCount, inputBucketCounts[nextBucket], 
-                                                               maxPairs, bucketIdx, nextBucket );
+            // Copy over the last 2 groups worth of entries to the reserved area of our current bucket
+            const uint32 last2GroupEntryCount = prevBucketGroupCounts[0] + prevBucketGroupCounts[1];
+
+            ASSERT( last2GroupEntryCount <= kBC * 2 );
+            bbmemcpy_t( bucket.yTmp, bucket.y0 + penultimateGroupIdx, last2GroupEntryCount );
         }
 
         // Swap are front/back buffers
@@ -1194,21 +1216,26 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
 }
 
 //-----------------------------------------------------------
-uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* curY, const GroupInfo& lastThreadGroups, Pairs pairs,
-                                                   uint32 prevBucketLength, uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket )
+uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
+                                                   uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket )
 {
+    // We expect yBuffer to be pointing to an area before the start of bucket.y0,
+    // which has the y entries from the last bucket's last 2 groups added to it.
+
     const uint threadCount = _cx.threadCount;
 
-    // Find the last 2 groups, which should always be in the last thread,
-    // unless we have an exceeding amount of threads (around 2048+), which we don't support.
-//     const GroupInfo& lastThreadGroups = prevGroupInfos[threadCount-1];
-    ASSERT( lastThreadGroups.entryCount >= kBC * 2 );
+    const uint32 penultimateGrpCount = prevGroupsCounts[0];
+    const uint32 lastGrpCount        = prevGroupsCounts[1];
 
-    const uint32 penultimateGrpStart = lastThreadGroups.groupBoundaries[lastThreadGroups.groupCount - 2];
-    const uint32 lastGrpStart        = lastThreadGroups.groupBoundaries[lastThreadGroups.groupCount - 1];
+    const uint32 penultimateGrpStart = 0;
+    const uint32 lastGrpStart        = penultimateGrpCount;
+    
+    const uint32 prevGroupsCount     = penultimateGrpCount + lastGrpCount;
 
-    const uint32 penultimateGrpCount = lastGrpStart - penultimateGrpStart;
-    const uint32 lastGrpCount        = prevBucketLength - lastGrpStart;
+    // Let's use the section starting after where are previous' bucket's groups are 
+    // stored as the location where we will copy our groups for matching.
+    uint32* yBuffer = yTmp + prevGroupsCount;
+
     ASSERT( penultimateGrpCount + lastGrpCount < kBC * 2 );
 
     // Find the first 2 groups of the new bucket
@@ -1217,15 +1244,16 @@ uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* 
     const uint64 lBucket = ((uint64)prevBucket) << 32;
     const uint64 rBucket = ((uint64)curBucket ) << 32;
 
-    const uint64 prevBucketGrp1 = ( lBucket | prevY[penultimateGrpStart] ) / kBC;
-    const uint64 prevBucketGrp2 = ( lBucket | prevY[lastGrpStart]        ) / kBC;
+    const uint64 prevBucketGrp1 = ( lBucket | yTmp[penultimateGrpStart] ) / kBC;
+    const uint64 prevBucketGrp2 = ( lBucket | yTmp[penultimateGrpCount] ) / kBC;
     ASSERT( prevBucketGrp2 > prevBucketGrp1 );
+
 
     uint64 newBucketGrp1      = ( rBucket | curY[0] ) / kBC;
     uint64 newBucketGrp2      = 0;
-    uint32 newBucketGrp1Count = 0; 
+    uint32 newBucketGrp1Count = 0;
     uint32 newBucketGrp2Count = 0;
-    ASSERT( newBucketGrp1 > prevBucketGrp2 );
+    ASSERT( newBucketGrp1 >= prevBucketGrp2 );
 
     for( uint32 i = 1; i < curBucketLength; i++ )
     {
@@ -1257,14 +1285,14 @@ uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* 
     const size_t entrySize            = sizeof( uint32 ) + sizeof( uint16 );
     const uint32 writeIntervalEntries = (uint32)( _cx.matchWriteInterval / entrySize );
 
-    // If the new bucket starts at an adjacent group from the penultimate group from the last bucket,
-    // then let's perform matches on it.
+    // If the new bucket starts at an adjacent group from the penultimate group 
+    // from the last bucket, then let's perform matches on it.
     if( newBucketGrp1 - prevBucketGrp1 == 1 )
     {
-        uint32* yBuffer = curY - penultimateGrpCount;
-
-        // Copy the last group over to the portion before curY (we ought to have space there to store it)
-        bbmemcpy_t( yBuffer, prevY + penultimateGrpStart, penultimateGrpCount );
+        // Copy the penultimate group from the last bucket and the
+        // first group of the current bucket into yBuffer contiguously
+        bbmemcpy_t( yBuffer, yTmp , penultimateGrpCount );
+        bbmemcpy_t( yBuffer + penultimateGrpCount, curY, newBucketGrp1Count );
 
         uint32 boundaries[2] = { penultimateGrpCount, penultimateGrpCount + newBucketGrp1Count };
 
@@ -1280,14 +1308,12 @@ uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( const uint32* prevY, uint32* 
     // second group from the new bucket
     if( prevBucketGrp2 == newBucketGrp1 && newBucketGrp2 - prevBucketGrp2 == 1 )
     {
-        uint32* yBuffer = curY - lastGrpCount;
+        // Copy our last group from the last bucket and our second group
+        // from our current bucket into yBuffer contiguously
+        bbmemcpy_t( yBuffer, yTmp + penultimateGrpCount, lastGrpCount );
+        bbmemcpy_t( yBuffer + lastGrpCount, curY + newBucketGrp1Count, newBucketGrp2Count );
 
-        // Copy the last group from the last bucket into the prefix space of
-        // the new bucket's y buffer
-        bbmemcpy_t( curY - lastGrpCount, prevY + lastGrpStart, lastGrpCount );
-
-        uint32 boundaries[2] = { lastGrpCount + newBucketGrp1Count, 
-                                 lastGrpCount + newBucketGrp1Count + newBucketGrp2Count };
+        uint32 boundaries[2] = { lastGrpCount, lastGrpCount + newBucketGrp2Count };
 
          matches += MatchEntries<true>( yBuffer, boundaries, pairs, 1, 0,
                                         maxPairs, lBucket, rBucket, 
@@ -1348,7 +1374,7 @@ uint32 MatchEntries( const uint32* yBuffer, const uint32* groupBoundaries, Pairs
 
     if constexpr( WriteToDisk )
     {
-        ASSERT( diskQueue && writeInterval );
+//         ASSERT( diskQueue && writeInterval );
     }
 
     uint32 pairCount = 0;

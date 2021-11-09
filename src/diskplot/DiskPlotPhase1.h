@@ -79,6 +79,10 @@ class DiskPlotPhase1
         FileId  metaAFileId;
         FileId  metaBFileId;
 
+        uint32* yPrevBucket;  // Used storing the last 2 group's worth of y
+                              // to perform matching between groups that straddle 2 buckets.
+                              // There is enough space here to store 4 * kBC
+
         AutoResetSignal frontFence;
         AutoResetSignal backFence;
 
@@ -108,8 +112,8 @@ private:
 
     uint32 Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS] );
 
-    uint32 MatchAdjoiningBucketGroups( const uint32* prevY, uint32* curY, const GroupInfo& lastThreadGroups, Pairs pairs,
-                                       uint32 prevBucketLength, uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
+    uint32 MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
+                                       uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
 
     void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
     
