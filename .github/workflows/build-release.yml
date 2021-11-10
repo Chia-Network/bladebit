@@ -30,7 +30,7 @@ jobs:
           
           # TODO: Use specific GCC version
           gcc --version
-          echo "CI is: $CI"
+          
           mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release -j $(nproc --all)
@@ -205,6 +205,9 @@ jobs:
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
         run: |
+          # Force CI env variable (doesn't seem to be present in bash windows)
+          export CI=true
+          
           mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release
