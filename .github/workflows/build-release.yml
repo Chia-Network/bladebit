@@ -10,8 +10,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         id: version_number
@@ -54,8 +54,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         id: version_number
@@ -102,8 +102,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         id: version_number
@@ -145,8 +145,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         id: version_number
@@ -188,8 +188,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         shell: bash
