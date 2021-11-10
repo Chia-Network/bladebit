@@ -201,19 +201,18 @@ jobs:
           echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-windows-x86-64.zip"
 
       - name: Build
+        shell: bash
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
         run: |
-          mkdir build
-          cd build
-          echo "CI IS: $CI"
+          mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release
           
           mkdir ../bin
           cd Release
-          7z.exe a -tzip ../../bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }} bladebit.exe
-          ls ../../bin
+          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
+          ls -la ../../bin
 
       - name: Upload Artifact Windows x86-64
         uses: actions/upload-artifact@v2
