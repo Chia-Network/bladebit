@@ -30,7 +30,7 @@ jobs:
           
           # TODO: Use specific GCC version
           gcc --version
-
+          echo "CI is: $CI"
           mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release -j $(nproc --all)
