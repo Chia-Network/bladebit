@@ -1,7 +1,7 @@
 name: Build Release Assets
 on:
   push:
-    branches: [master]
+    branches: [master, develop, march-fix]
   workflow_dispatch:
 
 jobs:

@@ -728,8 +728,10 @@ inline std::vector<uint8_t> BytesConcat( std::vector<uint8_t> a, std::vector<uin
 //-----------------------------------------------------------
 void PrintUsage()
 {
-    fputs( USAGE, stderr );
-    fflush( stderr );
+    Log::Line( "bladebit v%s-%s", BLADEBIT_VERSION_STR, BLADEBIT_GIT_COMMIT );
+    Log::Line( "Usage:" );
+    fputs( USAGE, stdout );
+    fflush( stdout );
 }
 
 #if _DEBUG
