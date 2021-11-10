@@ -40,19 +40,19 @@ DiskBufferQueue::DiskBufferQueue(
     InitFileSet( FileId::META_B_0, "meta_b0" , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::META_B_1, "meta_b1" , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::X       , "x"       , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::T2_L    , "table_2l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T2_R    , "table_2r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T3_L    , "table_3l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T3_R    , "table_3r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T4_L    , "table_4l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T4_R    , "table_4r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T5_L    , "table_5l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T5_R    , "table_5r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T6_L    , "table_6l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T6_R    , "table_6r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T7_L    , "table_7l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T7_R    , "table_7r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::F7      , "f7"      , 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T2_L    , "table_2l", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T2_R    , "table_2r", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T3_L    , "table_3l", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T3_R    , "table_3r", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T4_L    , "table_4l", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T4_R    , "table_4r", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T5_L    , "table_5l", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T5_R    , "table_5r", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T6_L    , "table_6l", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T6_R    , "table_6r", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T7_L    , "table_7l", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::T7_R    , "table_7r", 1,                  pathBuffer, workDirLen );
+//     InitFileSet( FileId::F7      , "f7"      , 1,                  pathBuffer, workDirLen );
     free( pathBuffer );
 
     // Initialize I/O thread

@@ -778,9 +778,6 @@ void DiskPlotPhase1::ForwardPropagateTable()
     uint32           prevBucketGroupCounts[2];
     uint32           prevBucketMatches = 0;
 
-    if( tableId == TableId::Table7 )
-        __debugbreak();
-
     // Set the correct file id, given the table (we swap between them for each table)
     {
         const bool isEven = ( (uint)tableId ) & 1;
