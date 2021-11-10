@@ -212,7 +212,7 @@ jobs:
           mkdir ../bin
           cd Release
           7z.exe a -tzip ../../bin/%BB_ARTIFACT_NAME% bladebit.exe
-          ls -la ../../bin
+          ls ../../bin
 
       - name: Upload Artifact Windows x86-64
         uses: actions/upload-artifact@v2
