@@ -75,11 +75,11 @@ inline void SortKeyGen::Sort( ThreadPool& pool, int64 length, const uint32* keys
     const int64 entriesPerThread = length / threadCount;
     const int64 tailingEntries   = length - ( entriesPerThread * threadCount );
 
-    SortJob jobs[MAX_JOBS];
+    SortJob<T> jobs[MAX_JOBS];
 
     for( int64 i = 0; i < threadCount; i++ )
     {
-        SortJob& job = jobs[i];
+        auto& job = jobs[i];
 
         job.length = entriesPerThread;
         job.offset = i * entriesPerThread;
@@ -90,7 +90,7 @@ inline void SortKeyGen::Sort( ThreadPool& pool, int64 length, const uint32* keys
 
     jobs[threadCount-1].length += tailingEntries;
 
-    pool.RunJob( SortThread, jobs, threadCount );
+    pool.RunJob( SortThread, jobs, (uint)threadCount );
 }
 
 // //-----------------------------------------------------------

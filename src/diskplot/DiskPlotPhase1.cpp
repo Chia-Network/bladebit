@@ -778,6 +778,9 @@ void DiskPlotPhase1::ForwardPropagateTable()
     uint32           prevBucketGroupCounts[2];
     uint32           prevBucketMatches = 0;
 
+    if( tableId == TableId::Table7 )
+        __debugbreak();
+
     // Set the correct file id, given the table (we swap between them for each table)
     {
         const bool isEven = ( (uint)tableId ) & 1;
@@ -870,6 +873,13 @@ void DiskPlotPhase1::ForwardPropagateTable()
         // Sort our current bucket
         uint32* sortKey = bucket.sortKey;
 
+        // To avoid confusion as we sort into metaTmp, and then use bucket.meta0 as tmp for fx
+        // we explicitly set them to appropriately-named variables here
+        uint64* fxMetaInA  = bucket.metaATmp;
+        uint64* fxMetaInB  = bucket.metaBTmp;
+        uint64* fxMetaOutA = bucket.metaA0;
+        uint64* fxMetaOutB = bucket.metaB0;
+
         {
             Log::Line( "  Sorting bucket." );
             auto timer = TimerBegin();
@@ -910,44 +920,37 @@ void DiskPlotPhase1::ForwardPropagateTable()
             // #TODO: Write sort key to disk as the previous table's sort key, 
             //        so that we can do a quick sort of L/R later.
 
-            double elapsed = TimerEnd( timer );
+            
 
             // OK to load next (back) metadata buffer now (see comment above)
             if( nextBucketIdx < BB_DP_BUCKET_COUNT )
                 ioDispatch.CommitCommands();
 
             #if _DEBUG
-                ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
+//                 ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
             #endif
 
+            // Ensure metadata has been loaded on the first bucket
+            if( bucketIdx == 0 )
+                bucket.frontFence.Wait();
+        
+            // Sort metadata with the key
+            if constexpr( tableId > TableId::Table2 )
+            {
+                using TMetaA = TableMetaIn<tableId>::MetaA;
+
+                SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( *cx.threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
+            
+                if constexpr ( MetaInBSize > 0 )
+                {
+                    using TMetaB = TableMetaIn<tableId>::MetaB;
+                    SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( *cx.threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
+                }
+            }
+
+            double elapsed = TimerEnd( timer );
             Log::Line( "  Sorted bucket in %.2lf seconds.", elapsed );
         }
-
-        // Ensure metadata has been loaded on the first bucket
-        if( bucketIdx == 0 )
-            bucket.frontFence.Wait();
-
-
-        // To avoid confusion as we sort into metaTmp, and then use bucket.meta0 as tmp for fx
-        // we explicitly set them to appropriately-named variables here
-//         uint64* fxMetaInA  = bucket.metaATmp;
-//         uint64* fxMetaInB  = bucket.metaBTmp;
-//         uint64* fxMetaOutA = bucket.metaA0;
-//         uint64* fxMetaOutB = bucket.metaB0;
-//         
-//         // Sort metadata with the key
-//         if constexpr( tableId > TableId::Table2 )
-//         {
-//             using TMetaA = TableMetaIn<tableId>::TMetaA;
-//             using TMetaB = TableMetaIn<tableId>::TMetaB;
-// 
-//             GenSortKey::Sort<BB_MAX_JOBS, TMetaA>( *cx.threadPool, (int64)entryCount, sortKey, bucket.metaA0, fxMetaInA );
-//             
-//             if constexpr ( MetaInBSize > 0 )
-//             {
-//                 GenSortKey::Sort<BB_MAX_JOBS, TMetaB>( *cx.threadPool, (int64)entryCount, sortKey, bucket.metaB0, fxMetaInB );
-//             }
-//         }
 
         // Scan for BC groups & match
         GroupInfo groupInfos[BB_MAX_JOBS];
@@ -1002,13 +1005,9 @@ void DiskPlotPhase1::ForwardPropagateTable()
         GenFxForTable<tableId>( 
             bucketIdx, totalMatches, bucket.pairs,
             bucket.y0, bucket.yTmp, (byte*)bucket.sortKey,    // #TODO: Change this, for now use sort key buffer
-            bucket.metaA0, bucket.metaB0,
-            bucket.metaATmp, bucket.metaBTmp );
+            fxMetaInA, fxMetaInB,
+            fxMetaOutA, fxMetaOutB );
 
-        //for( uint threadIdx = 0; threadIdx < threadCount; threadIdx++ )
-        //{
-        //    GroupInfo& group = groupInfos[threadIdx];
-        //}
 
         // Ensure the next bucket has finished loading
         bucket.backFence.Wait();
@@ -2195,6 +2194,14 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         {
             // Store the bucket id for this y value
             bucketOut[i] = (byte)( fx >> 32 );
+        }
+        else
+        {
+            // For table 7 we don't have extra bits,
+            // but we do want to be able to store per bucket,
+            // in order to sort. So let's just use the high 
+            // bits of the 32 bit values itself
+            bucketOut[i] = (byte)( ( fx >> 26 ) & 0b111111 );
         }
 
         // Calculate output metadata
