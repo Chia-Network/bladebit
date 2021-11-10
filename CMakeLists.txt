@@ -17,8 +17,8 @@ project(bladebit)
 
 # On CI, update Version.h from our VERSION file
 if(DEFINED ENV{CI})
+    message("Updating Version.h")
     if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-        message("Generating version on windows")
         execute_process(COMMAND bash.exe extract-version.sh WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     else()
         execute_process(COMMAND bash extract-version.sh WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
