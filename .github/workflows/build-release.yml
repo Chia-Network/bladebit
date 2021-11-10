@@ -206,6 +206,7 @@ jobs:
         run: |
           mkdir build
           cd build
+          echo "CI IS: %CI%"
           cmake ..
           cmake --build . --target bladebit --config Release
           
