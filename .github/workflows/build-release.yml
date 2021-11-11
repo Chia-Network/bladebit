@@ -1,7 +1,7 @@
 name: Build Release Assets
 on:
   push:
-    branches: [master, develop]
+    branches: ['*']
   workflow_dispatch:
 
 jobs:
@@ -10,15 +10,10 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        # with:
-        #   ref: master
 
       - name: Get Version Number
         id: version_number
-        run: |
-          version=$(cat VERSION)
-          echo "::set-output name=BB_VERSION::$version"
-          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-ubuntu-x86-64.tar.gz"
+        run: .github/actions/get-version.sh ubuntu x86-64
 
       - name: Install Prerequisites
         run: sudo apt install -y libgmp-dev libnuma-dev
@@ -26,20 +21,9 @@ jobs:
       - name: Build
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-        run: |
-          
-          # TODO: Use specific GCC version
-          gcc --version
-          
-          mkdir build && cd build
-          cmake ..
-          cmake --build . --target bladebit --config Release -j $(nproc --all)
-          chmod +x ./bladebit
-          tar -czvf $BB_ARTIFACT_NAME bladebit
-          mkdir ../bin
-          mv $BB_ARTIFACT_NAME ../bin/
-          ls -la ../bin
-      
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+        run: .github/actions/build-asset-linux.sh
+
       - name: Upload Artifact Ubuntu x86-64
         uses: actions/upload-artifact@v2
         with:
@@ -54,36 +38,23 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        # with:
-        #   ref: master
 
       - name: Get Version Number
         id: version_number
+        run: .github/actions/get-version.sh centos x86-64
+
+      - name: Install Prerequisites
         run: |
-          version=$(cat VERSION)
-          echo "::set-output name=BB_VERSION::$version"
-          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-centos-x86-64.tar.gz"
+          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+                         cmake gmp-devel numactl-devel make git
 
       - name: Build
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
         run: |
-          
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git
-
           source /opt/rh/gcc-toolset-9/enable
-
-          gcc --version
-
-          mkdir build && cd build
-          cmake ..
-          cmake --build . --target bladebit --config Release -j $(nproc --all)
-          chmod +x ./bladebit
-          tar -czvf $BB_ARTIFACT_NAME bladebit
-          mkdir ../bin
-          mv $BB_ARTIFACT_NAME ../bin/
-          ls -la ../bin
+          .github/actions/build-asset-linux.sh
       
       - name: Upload Artifact CentOS x86-64
         uses: actions/upload-artifact@v2
@@ -102,15 +73,10 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        # with:
-        #   ref: master
 
       - name: Get Version Number
         id: version_number
-        run: |
-          version=$(cat VERSION)
-          echo "::set-output name=BB_VERSION::$version"
-          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-ubuntu-arm64.tar.gz"
+        run: .github/actions/get-version.sh ubuntu arm64
 
       - name: Install Prerequisites
         run: |
@@ -121,16 +87,9 @@ jobs:
       - name: Build
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-        run: |
-          mkdir build && cd build
-          cmake ..
-          cmake --build . --target bladebit --config Release -j $(nproc --all)
-          chmod +x ./bladebit
-          tar -czvf $BB_ARTIFACT_NAME bladebit
-          mkdir ../bin
-          mv $BB_ARTIFACT_NAME ../bin/
-          ls -la ../bin
-      
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+        run: .github/actions/build-asset-linux.sh
+
       - name: Upload Artifact Ubuntu ARM64
         uses: actions/upload-artifact@v2
         with:
@@ -145,37 +104,24 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        # with:
-        #   ref: master
 
       - name: Get Version Number
         id: version_number
+        run: .github/actions/get-version.sh centos arm64
+
+      - name: Install Prerequisites
         run: |
-          version=$(cat VERSION)
-          echo "::set-output name=BB_VERSION::$version"
-          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-centos-arm64.tar.gz"
+          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+                         cmake gmp-devel numactl-devel make git
 
       - name: Build
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
         run: |
-          
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git
-
           source /opt/rh/gcc-toolset-9/enable
+          .github/actions/build-asset-linux.sh
 
-          gcc --version
-
-          mkdir build && cd build
-          cmake ..
-          cmake --build . --target bladebit --config Release -j $(nproc --all)
-          chmod +x ./bladebit
-          tar -czvf $BB_ARTIFACT_NAME bladebit
-          mkdir ../bin
-          mv $BB_ARTIFACT_NAME ../bin/
-          ls -la ../bin
-      
       - name: Upload Artifact CentOS ARM64
         uses: actions/upload-artifact@v2
         with:
@@ -188,33 +134,32 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        # with:
-        #   ref: master
 
       - name: Get Version Number
         shell: bash
         id: version_number
-        run: |
-          ls -la
-          version=$(cat VERSION)
-          echo "::set-output name=BB_VERSION::$version"
-          echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-windows-x86-64.zip"
+        run: .github/actions/get-version.sh windows x86-64
 
       - name: Build
         shell: bash
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
         run: |
           
           mkdir build && cd build
           cmake ..
-
-          # We're having problems in windows with Version.h generation,
-          # so lets just call it manually
-          bash -e ../extract-version.sh
+          bash -e -o pipefail ../extract-version.sh
           cat ../src/Version.h
-
           cmake --build . --target bladebit --config Release
+
+          # Ensure bladebit version matches expected version
+          bb_version="$(./Release/bladebit.exe --version | xargs)"
+
+          if [[ "$bb_version" != "$BB_VERSION" ]]; then
+              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
+              exit 1
+          fi
           
           mkdir ../bin
           cd Release
@@ -227,3 +172,4 @@ jobs:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           if-no-files-found: error
+
