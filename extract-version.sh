@@ -1,5 +1,5 @@
 #! /usr/bin/env bash
-set -ex
+set -e
 set -o pipefail
 _dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)"
 cd $_dir
