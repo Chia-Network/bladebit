@@ -11,6 +11,7 @@ set -o pipefail
 
 # TODO: Use specific GCC version
 gcc --version
+pwd
 ls -la
 echo "System: $(uname -s)"
 git status
