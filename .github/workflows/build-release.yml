@@ -205,10 +205,13 @@ jobs:
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
         run: |
+          # export CI=true
           mkdir build && cd build
-          cmake ..
 
           cat ../src/Version.h
+          cmake ..
+          cat ../src/Version.h
+
           cmake --build . --target bladebit --config Release
           
           mkdir ../bin
