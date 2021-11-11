@@ -109,15 +109,16 @@ jobs:
         id: version_number
         run: .github/actions/get-version.sh centos arm64
 
+      - name: Install Prerequisites
+        run: |
+          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+                         cmake gmp-devel numactl-devel make git
+
       - name: Build
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
         run: |
-          
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git
-
           source /opt/rh/gcc-toolset-9/enable
           .github/actions/build-asset-linux.sh
 
