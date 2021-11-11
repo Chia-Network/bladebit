@@ -207,14 +207,11 @@ jobs:
         run: |
           
           mkdir build && cd build
-          
-          cat ../src/Version.h
           cmake ..
 
           # We're having problems in windows with Version.h generation,
           # so lets just call it manually
           bash -e ../extract-version.sh
-
           cat ../src/Version.h
 
           cmake --build . --target bladebit --config Release
