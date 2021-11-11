@@ -209,7 +209,7 @@ jobs:
           mkdir build && cd build
           cmake ..
 
-          cat src/Version.h
+          cat ../src/Version.h
           cmake --build . --target bladebit --config Release
           
           mkdir ../bin
