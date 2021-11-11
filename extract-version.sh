@@ -1,5 +1,5 @@
 #! /usr/bin/env bash
-set -e
+set -ex
 set -o pipefail
 _dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)"
 cd $_dir
@@ -14,7 +14,7 @@ ver_min=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' |
 ver_rev=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
 
 git_commit=$(git rev-parse HEAD)
-# echo "Version: $ver_maj.$ver_min.$ver_rev-$git_commit"
+echo "Version: $ver_maj.$ver_min.$ver_rev-$git_commit"
 
 sed -i -E -r "s/(#define BLADEBIT_VERSION_MAJ )([0-9]+)/\1$ver_maj/g" $version_header
 sed -i -E -r "s/(#define BLADEBIT_VERSION_MIN )([0-9]+)/\1$ver_min/g" $version_header
