@@ -1,6 +1,6 @@
 #! /usr/bin/env bash
-#
 # NOTE: This is meant to be run from the repo root dir
+#
 #  Expects env variables:
 #   - BB_ARTIFACT_NAME
 #   - BB_VERSION
