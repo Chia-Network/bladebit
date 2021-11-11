@@ -39,10 +39,11 @@ jobs:
           
           mkdir build && cd build
           cmake ..
-          bash -e ../extract-version.sh
+          bash -e -o pipefail ../extract-version.sh
           cmake --build . --target bladebit --config Release -j $(nproc --all)
           chmod +x ./bladebit
-
+          
+          set -x
           # Ensure bladebit version matches expected version
           bb_version=$(./bladebit --version | xargs)
           if [[ "$bb_version" != "${{steps.version_number.outputs.BB_VERSION}}" ]]; then
