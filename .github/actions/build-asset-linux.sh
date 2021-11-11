@@ -11,8 +11,9 @@ set -o pipefail
 
 # TODO: Use specific GCC version
 gcc --version
-git status
+ls -la
 echo "System: $(uname -s)"
+git status
 
 mkdir build && cd build
 cmake ..
