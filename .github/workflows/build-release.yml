@@ -5,31 +5,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-ubuntu-x86-64:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v2
+  # build-ubuntu-x86-64:
+  #   runs-on: ubuntu-20.04
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v2
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh ubuntu x86-64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh ubuntu x86-64
 
-      - name: Install Prerequisites
-        run: sudo apt install -y libgmp-dev libnuma-dev
+  #     - name: Install Prerequisites
+  #       run: sudo apt install -y libgmp-dev libnuma-dev
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-linux.sh
+  #     - name: Build
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: .github/actions/build-asset-linux.sh
 
-      - name: Upload Artifact Ubuntu x86-64
-        uses: actions/upload-artifact@v2
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact Ubuntu x86-64
+  #       uses: actions/upload-artifact@v2
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
   build-centos-x86-64:
     runs-on: ubuntu-20.04
@@ -62,112 +62,112 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
-  build-ubuntu-arm64:
-    runs-on: [ARM64]
-    container:
-      image: ubuntu:20.04
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v2
+  # build-ubuntu-arm64:
+  #   runs-on: [ARM64]
+  #   container:
+  #     image: ubuntu:20.04
+  #   defaults:
+  #     run:
+  #       shell: bash
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v2
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh ubuntu arm64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh ubuntu arm64
 
-      - name: Install Prerequisites
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          apt update
-          apt install -y build-essential git cmake libgmp-dev libnuma-dev
+  #     - name: Install Prerequisites
+  #       run: |
+  #         export DEBIAN_FRONTEND=noninteractive
+  #         apt update
+  #         apt install -y build-essential git cmake libgmp-dev libnuma-dev
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-linux.sh
+  #     - name: Build
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: .github/actions/build-asset-linux.sh
 
-      - name: Upload Artifact Ubuntu ARM64
-        uses: actions/upload-artifact@v2
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact Ubuntu ARM64
+  #       uses: actions/upload-artifact@v2
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
-  build-centos-arm64:
-    runs-on: [ARM64]
-    container:
-      image: centos:8
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v2
+  # build-centos-arm64:
+  #   runs-on: [ARM64]
+  #   container:
+  #     image: centos:8
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v2
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh centos arm64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh centos arm64
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: |
+  #     - name: Build
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: |
           
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git
+  #         dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+  #                        cmake gmp-devel numactl-devel make git
 
-          source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-linux.sh
+  #         source /opt/rh/gcc-toolset-9/enable
+  #         .github/actions/build-asset-linux.sh
 
-      - name: Upload Artifact CentOS ARM64
-        uses: actions/upload-artifact@v2
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact CentOS ARM64
+  #       uses: actions/upload-artifact@v2
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
-  build-windows-x86-64:
-    runs-on: windows-2019
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v2
+  # build-windows-x86-64:
+  #   runs-on: windows-2019
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v2
 
-      - name: Get Version Number
-        shell: bash
-        id: version_number
-        run: .github/actions/get-version.sh windows x86-64
+  #     - name: Get Version Number
+  #       shell: bash
+  #       id: version_number
+  #       run: .github/actions/get-version.sh windows x86-64
 
-      - name: Build
-        shell: bash
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: |
+  #     - name: Build
+  #       shell: bash
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: |
           
-          mkdir build && cd build
-          cmake ..
-          bash -e -o pipefail ../extract-version.sh
-          cat ../src/Version.h
-          cmake --build . --target bladebit --config Release
+  #         mkdir build && cd build
+  #         cmake ..
+  #         bash -e -o pipefail ../extract-version.sh
+  #         cat ../src/Version.h
+  #         cmake --build . --target bladebit --config Release
 
-          # Ensure bladebit version matches expected version
-          bb_version="$(./Release/bladebit.exe --version | xargs)"
+  #         # Ensure bladebit version matches expected version
+  #         bb_version="$(./Release/bladebit.exe --version | xargs)"
 
-          if [[ "$bb_version" != "$BB_VERSION" ]]; then
-              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
-              exit 1
-          fi
+  #         if [[ "$bb_version" != "$BB_VERSION" ]]; then
+  #             >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
+  #             exit 1
+  #         fi
           
-          mkdir ../bin
-          cd Release
-          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
-          ls -la ../../bin
+  #         mkdir ../bin
+  #         cd Release
+  #         7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
+  #         ls -la ../../bin
 
-      - name: Upload Artifact Windows x86-64
-        uses: actions/upload-artifact@v2
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact Windows x86-64
+  #       uses: actions/upload-artifact@v2
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
