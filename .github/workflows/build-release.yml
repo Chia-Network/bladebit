@@ -1,7 +1,7 @@
 name: Build Release Assets
 on:
   push:
-    branches: [master]
+    branches: [master, develop]
   workflow_dispatch:
 
 jobs:
@@ -10,8 +10,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         id: version_number
@@ -30,7 +30,7 @@ jobs:
           
           # TODO: Use specific GCC version
           gcc --version
-
+          
           mkdir build && cd build
           cmake ..
           cmake --build . --target bladebit --config Release -j $(nproc --all)
@@ -54,8 +54,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         id: version_number
@@ -102,8 +102,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         id: version_number
@@ -145,8 +145,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         id: version_number
@@ -188,8 +188,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ref: master
+        # with:
+        #   ref: master
 
       - name: Get Version Number
         shell: bash
@@ -205,8 +205,15 @@ jobs:
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
         run: |
+          
           mkdir build && cd build
           cmake ..
+
+          # We're having problems in windows with Version.h generation,
+          # so lets just call it manually
+          bash -e ../extract-version.sh
+          cat ../src/Version.h
+
           cmake --build . --target bladebit --config Release
           
           mkdir ../bin
