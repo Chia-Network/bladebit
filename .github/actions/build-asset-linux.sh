@@ -11,6 +11,7 @@ set -o pipefail
 
 # TODO: Use specific GCC version
 gcc --version
+echo "System: $(uname -s)"
 
 mkdir build && cd build
 cmake ..
