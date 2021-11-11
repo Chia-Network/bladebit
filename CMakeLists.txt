@@ -16,14 +16,14 @@ message("Config: ${CMAKE_BUILD_TYPE}")
 project(bladebit)
 
 # On CI, update Version.h from our VERSION file
-if(DEFINED ENV{CI})
-    message("Updating Version.h")
-    if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-        execute_process(COMMAND bash.exe extract-version.sh WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-    else()
-        execute_process(COMMAND bash extract-version.sh WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-    endif()
-endif()
+# if(DEFINED ENV{CI})
+#     message("Updating Version.h")
+#     if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+#         execute_process(COMMAND bash.exe extract-version.sh WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+#     else()
+#         execute_process(COMMAND bash extract-version.sh WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+#     endif()
+# endif()
 
 
 
