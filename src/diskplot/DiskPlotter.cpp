@@ -89,7 +89,7 @@ size_t DiskPlotter::GetHeapRequiredSize( const size_t fileBlockSize, const uint 
     // We need to add extra space to retain 2 groups worth of y value as we need to retain the 
     // last 2 groups between bucket processing. This is because we may have to match the previous'
     // groups buckets against the new bucket.
-    const size_t yGroupExtra = RoundUpToNextBoundaryT( kBC * sizeof( uint32 ) * 2, fileBlockSize );
+    const size_t yGroupExtra = RoundUpToNextBoundaryT( (size_t)kBC * sizeof( uint32 ) * 2, fileBlockSize );
 
     const size_t ySize       = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ) * 2, fileBlockSize ) + yGroupExtra * 2;  // x  2 because we need the extra space in both buffers
     const size_t sortKeySize = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 )    , fileBlockSize );

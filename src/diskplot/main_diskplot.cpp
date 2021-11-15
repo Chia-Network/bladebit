@@ -2,7 +2,7 @@
 #include "DiskPlotter.h"
 #include "SysHost.h"
 #include "io/FileStream.h"
-#include "Util/Log.h"
+#include "util/Log.h"
 
 struct GlobalConfig
 {
@@ -251,7 +251,7 @@ size_t ParseSize( const char* arg, const char* sizeText )
 #ifdef _WIN32
     #define StriCmp _stricmp
 #else
-    #define StriCmp stricmp
+    #define StriCmp strcasecmp
 #endif
 
     // Try to find a suffix:
@@ -317,8 +317,8 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
     if( cfg.tmpPath[pathLen - 1] != '/'
     #ifdef _WIN32
         && cfg.tmpPath[pathLen - 1] != '\\'
-        )
     #endif
+        )
     {
         tmpPath[pathLen++] = '/';
     }

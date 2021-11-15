@@ -675,7 +675,7 @@ void DiskPlotPhase1::ForwardPropagate()
         const size_t fileBlockSize = ioDispatch.BlockSize();
 
         // Extra space used to store the last 2 groups of y entries.
-        const size_t yGroupExtra = RoundUpToNextBoundaryT( kBC * sizeof( uint32 ) * 2, fileBlockSize );
+        const size_t yGroupExtra = RoundUpToNextBoundary( kBC * sizeof( uint32 ) * 2ull, (int)fileBlockSize );
 
         const size_t ySize       = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 ) * 2, (int)fileBlockSize );
         const size_t sortKeySize = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
@@ -934,13 +934,13 @@ void DiskPlotPhase1::ForwardPropagateTable()
             // Sort metadata with the key
             if constexpr( tableId > TableId::Table2 )
             {
-                using TMetaA = TableMetaIn<tableId>::MetaA;
+                using TMetaA = typename TableMetaIn<tableId>::MetaA;
 
                 SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( *cx.threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
             
                 if constexpr ( MetaInBSize > 0 )
                 {
-                    using TMetaB = TableMetaIn<tableId>::MetaB;
+                    using TMetaB = typename TableMetaIn<tableId>::MetaB;
                     SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( *cx.threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
                 }
             }
@@ -1719,8 +1719,8 @@ void FxJob::Run()
 template<TableId tableId>
 void FxJob::RunForTable()
 {
-    using TMetaA = TableMetaOut<tableId>::MetaA;
-    using TMetaB = TableMetaOut<tableId>::MetaB;
+    using TMetaA = typename TableMetaOut<tableId>::MetaA;
+    using TMetaB = typename TableMetaOut<tableId>::MetaB;
 
     const uint32   entryCount       = this->entryCount;
     const uint32   chunkCount       = this->chunkCount;
@@ -2247,16 +2247,16 @@ void BucketJob<TJob>::CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT
     const uint   jobId    = this->JobId();
 
     this->counts = counts;
-    SyncThreads();
+    this->SyncThreads();
 
     const uint jobCount = this->JobCount();
 
     // Add up all of the jobs counts
-    memcpy( pfxSum, GetJob( 0 ).counts, copySize );
+    memcpy( pfxSum, this->GetJob( 0 ).counts, copySize );
 
     for( uint t = 1; t < jobCount; t++ )
     {
-        const uint* tCounts = GetJob( t ).counts;
+        const uint* tCounts = this->GetJob( t ).counts;
 
         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
             pfxSum[i] += tCounts[i];
@@ -2280,7 +2280,7 @@ void BucketJob<TJob>::CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT
     // Subtract the count from all threads after ours
     for( uint t = jobId+1; t < jobCount; t++ )
     {
-        const uint* tCounts = GetJob( t ).counts;
+        const uint* tCounts = this->GetJob( t ).counts;
 
         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
             pfxSum[i] -= tCounts[i];

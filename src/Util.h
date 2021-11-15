@@ -103,7 +103,7 @@ inline void* bballoca( size_t size )
 #elif PLATFORM_IS_MACOS
     return alloca( size );
 #elif PLATFORM_IS_LINUX
-    return _alloca( size );
+    return alloca( size );
 #else
     #error Unimplemented Platform
 #endif
