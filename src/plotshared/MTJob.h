@@ -182,6 +182,7 @@ inline void MTJob<TJob>::WaitForRelease()
     // Signal the control thread that we're ready to sync
     // uint count = finishedCount.load( std::memory_order_acquire );
     finishedCount++;
+    ASSERT( finishedCount <= threadThreshold );
     // while( !finishedCount.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
     // Trace( "- locked: %d", count );
     
@@ -191,9 +192,11 @@ inline void MTJob<TJob>::WaitForRelease()
     // Ensure all threads have been released (prevent re-locking before another thread has been released)
     // count = releaseLock.load( std::memory_order_acquire );
     // while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+    ASSERT( releaseLock <= threadThreshold );
     releaseLock++;
     while( releaseLock.load( std::memory_order_relaxed ) != threadThreshold );
     // Trace( " released: %d", count );
+
 }
 
 #if _DEBUG
