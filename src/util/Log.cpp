@@ -202,7 +202,7 @@ void Log::DebugWrite( const char* msg, size_t size )
 //-----------------------------------------------------------
 void Log::SafeWrite( const char* msg, size_t size )
 {
-    // #TODO: Just use futex
+    // #TODO: Just use a futex
     // Lock
     int lock = 0;
     while( !_dbglock.compare_exchange_weak( lock, 1 ) )

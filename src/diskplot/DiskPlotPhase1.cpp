@@ -1771,8 +1771,6 @@ void FxJob::RunForTable()
     const uint32 trailingChunkEntries = this->trailingChunkEntries;
     if( trailingChunkEntries )
     {
-//         if( _jobId == 23 ) __debugbreak();
-
         // Set correct pair starting point, as the offset will be different here
         // #NOTE: Since the last thread may have more entries than the rest of the threads,
         // we account for that here by using thread 0's trailingChunkEntries.
@@ -1789,13 +1787,20 @@ void FxJob::RunForTable()
         SortToBucket<tableId, TMetaA, TMetaB>(
             trailingChunkEntries, outBucketId, outY, 
             (TMetaA*)outMetaA, (TMetaB*)outMetaB, bucketCounts );
+    }
+    else if( _jobs[_jobCount-1].trailingChunkEntries > 0 )
+    {
+        // If the last thread did have some trailing entries, but
+        // the rest didn't, we need to sync here.
 
-        // Already added them to the final buffer, no need.
-//         if( this->IsControlThread() )
-//         {
-//             // Save final buckets
-//             bbmemcpy_t( this->totalBucketCounts, bucketCounts, BB_DP_BUCKET_COUNT );
-//         }
+        // Set our counts to zero
+        memset( bucketCounts, 0, sizeof( bucketCounts ) );
+
+        // Dummy sort to bucket so that we don't lock the last thread.
+        // Not ideal, but simple solution for now, and the time spent is little.
+        SortToBucket<tableId, TMetaA, TMetaB>(
+            0, outBucketId, outY, 
+            (TMetaA*)outMetaA, (TMetaB*)outMetaB, bucketCounts );
     }
 
     // Write any remaining overflow buffers
@@ -1849,8 +1854,6 @@ void FxJob::RunForTable()
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
-
-bool _found295 = false;
 
 //-----------------------------------------------------------
 template<TableId tableId, typename TMetaA, typename TMetaB>
@@ -1933,12 +1936,10 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
         metaBBuckets = (TMetaB*)GetJob( 0 )._bucketMetaB;
     }
     
-    // if( _jobId == 23 && _found295 ) __debugbreak();
     // #TODO: Unroll this a bit?
     // Distribute values into buckets at each thread's given offset
     for( uint i = 0; i < entryCount; i++ )
     {
-//         if( _jobId == 23 && _found295 && i == 184320 ) __debugbreak();
         const uint32 dstIdx = --pfxSum[bucketIndices[i]];
 
         yBuckets[dstIdx] = yBuffer[i];
@@ -1953,8 +1954,7 @@ void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint
             metaBBuckets[dstIdx] = metaBBuffer[i];
         }
     }
-//     if( _jobId == 23 && _found295 ) __debugbreak();
-// 
+
     // Write buckets to disk
     if( this->LockThreads() )
     {
@@ -2191,10 +2191,6 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
 
         yOut[i] = (uint32)fx;
 
-//         if( (uint)fx < 720 && ( fx >> 32 ) == 0 ) __debugbreak();
-//         if( (uint)fx < 400 ) __debugbreak();
-//         if( (uint)fx == 295 && !_found295 ) { _found295 = true; /*__debugbreak();*/ }
-
         if constexpr( tableId != TableId::Table7 )
         {
             // Store the bucket id for this y value
@@ -2249,7 +2245,9 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
 
 //-----------------------------------------------------------
 template<typename TJob>
-void BucketJob<TJob>::CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT], uint32 pfxSum[BB_DP_BUCKET_COUNT], uint32 bucketCounts[BB_DP_BUCKET_COUNT] )
+void BucketJob<TJob>::CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT], 
+                                          uint32 pfxSum[BB_DP_BUCKET_COUNT], 
+                                          uint32 bucketCounts[BB_DP_BUCKET_COUNT] )
 {
     const size_t copySize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
     const uint   jobId    = this->JobId();
