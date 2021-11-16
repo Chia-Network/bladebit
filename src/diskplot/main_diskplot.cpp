@@ -4,6 +4,10 @@
 #include "io/FileStream.h"
 #include "util/Log.h"
 
+// TEST
+#include "diskplot/jobs/IOJob.h"
+#include "threading/ThreadPool.h"
+
 struct GlobalConfig
 {
 
@@ -16,12 +20,73 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
 size_t ParseSize( const char* arg, const char* sizeText );
 size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg );
 
+//-----------------------------------------------------------
+int WriteTest( int argc, const char* argv[] )
+{
+    uint         threadCount  = 1;
+    const size_t bufferSize   = 64ull GB;
+    // const uint   bufferCount  = 4;
+    const char*  filePath     = "/mnt/p5510a/test.tmp";
+
+    // if( argc > 0 )
+    // {
+    //     int r = sscanf( argv[0], "%lu", &threadCount );
+    //     FatalIf( r != 1, "Invalid value for threadCount" );
+    // }
+
+    Log::Line( "Threads    : %u", threadCount );
+    Log::Line( "Buffer Size: %llu GiB", bufferSize BtoGB );
+    
+    ThreadPool pool( threadCount );
+    FileStream* files        = new FileStream[threadCount];
+    byte**      blockBuffers = new byte*[threadCount];
+
+    for( uint i = 0; i < threadCount; i++ )
+    {
+        FatalIf( !files[i].Open( filePath, FileMode::OpenOrCreate, FileAccess::ReadWrite, 
+                  FileFlags::LargeFile | FileFlags::NoBuffering ), "Failed to open file." );
+
+        blockBuffers[i] = (byte*)SysHost::VirtualAlloc( files[i].BlockSize() );
+    }
+    Log::Line( "Allocating buffer..." );
+    byte* buffer = (byte*)SysHost::VirtualAlloc( bufferSize, true ); 
+
+    Log::Line( "Writing..." );
+    int error = 0;
+    double elapsed = IOWriteJob::WriteWithThreads( 
+        threadCount, pool, files, buffer, bufferSize, blockBuffers, files[0].BlockSize(), error );
+
+    if( error )
+        Fatal( "Error when writing: %d (0x%x)", error, error );
+
+    const double writeRate = bufferSize / elapsed;
+
+    Log::Line( "Wrote %.2lf GiB in %.4lf seconds: %.2lf MiB/s (%.2lf MB/s)", 
+               (double)bufferSize BtoGB, elapsed, writeRate BtoMB, writeRate / 1000 / 1000 );
+
+    FatalIf( !files[0].Seek( 0, SeekOrigin::Begin ), 
+            "Failed to seek file with error %d.", files[0].GetError() );
+    
+    Log::Line( "Reading..." );
+    auto readTimer = TimerBegin();
+    IOWriteJob::ReadFromFile( files[0], buffer, bufferSize, blockBuffers[0], files[0].BlockSize(), error );
+    elapsed = TimerEnd( readTimer );
+
+    FatalIf( error, "Error reading: %d, (0x%x)", error, error );
+
+    const double readRate = bufferSize / elapsed;
+    Log::Line( "Read %.2lf GiB in %.4lf seconds: %.2lf MiB/s (%.2lf MB/s)", 
+               (double)bufferSize BtoGB, elapsed, readRate BtoMB, readRate / 1000 / 1000 );
+
+    return 0;
+}
 
 //-----------------------------------------------------------
 int main( int argc, const char* argv[] )
 {
     argc--;
     argv++;
+    // return WriteTest( argc, argv );
 
     DiskPlotter::Config plotCfg;
     GlobalConfig gCfg;
@@ -154,13 +219,13 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
 
         if( check( "--f1" ) )
         {
-            cfg.writeIntervals[0].fxGen = uvalue();
+            cfg.writeIntervals[0].fxGen = ParseSize( arg, value() );
         }
         else if( checkFx( arg ) || checkMatch( arg ) )
         {
             continue;
         }
-        else if( check( "-t" ), check( "--threads" ) )
+        else if( check( "-t" ) || check( "--threads" ) )
         {
             cfg.workThreadCount = (uint)uvalue();
         }
@@ -267,14 +332,14 @@ size_t ParseSize( const char* arg, const char* sizeText )
     // Apply multiplier depending on the suffix
     size_t multiplier = 1;
 
-    const size_t suffixLength = suffix - end;
+    const size_t suffixLength = end - suffix;
     if( suffixLength > 0 )
     {
-        if( StriCmp( "GB", suffix ) == 0 || StriCmp( "G", suffix ) )
+        if( StriCmp( "GB", suffix ) == 0 || StriCmp( "G", suffix ) == 0 )
             multiplier = 1ull GB;
-        else if( StriCmp( "MB", suffix ) == 0 || StriCmp( "M", suffix ) )
+        else if( StriCmp( "MB", suffix ) == 0 || StriCmp( "M", suffix ) == 0 )
             multiplier = 1ull MB;
-        else if( StriCmp( "KB", suffix ) == 0 || StriCmp( "K", suffix ) )
+        else if( StriCmp( "KB", suffix ) == 0 || StriCmp( "K", suffix ) == 0 )
             multiplier = 1ull KB;
         else
             Fatal( "Invalid suffix '%s' for argument '%s'", suffix, arg );
@@ -332,13 +397,16 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
 
     char* randFileName = bbmalloc<char>( pathLen + 32 );
     
-    int r = sprintf_s( randFileName, pathLen + 32, "%s.%llx.blk", tmpPath, randNum );
+    int r = snprintf( randFileName, pathLen + 32, "%s.%llx.blk", tmpPath, randNum );
     FatalIf( r < 1, "Unexpected error validating temp directory." );
 
     FileStream tmpFile;
 
-    if( !tmpFile.Open( randFileName, FileMode::Create, FileAccess::Read ) )
-        Fatal( "Failed to open a file in the temp directory with error %d.", tmpFile.GetError() );
+    if( !tmpFile.Open( randFileName, FileMode::Create, FileAccess::ReadWrite ) )
+    {
+        int err = tmpFile.GetError();
+        Fatal( "Failed to open a file in the temp directory with error %d (0x%x).", err, err );
+    }
 
     cfg.expectedTmpDirBlockSize = tmpFile.BlockSize();
 

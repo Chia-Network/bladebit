@@ -3,7 +3,9 @@
 #include "diskplot/DiskPlotConfig.h"
 #include "SysHost.h"
 
+#include "jobs/IOJob.h"
 #include "util/Log.h"
+
 
 #define NULL_BUFFER -1
 
@@ -62,6 +64,12 @@ DiskBufferQueue::DiskBufferQueue(
 //-----------------------------------------------------------
 DiskBufferQueue::~DiskBufferQueue()
 {
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::ResetHeap( const size_t heapSize, void* heapBuffer )
+{
+    _workHeap.ResetHeap( heapSize, heapBuffer );
 }
 
 //-----------------------------------------------------------
@@ -192,18 +200,13 @@ inline DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject( Command::Com
     Command* cmd;
     while( !_commands.Write( cmd ) )
     {
-        #if _DEBUG
-            Log::Debug( "[DiskBufferQueue] Command buffer full. Waiting for commands." );
-            auto waitTimer = TimerBegin();
-        #endif
+        Log::Line( "[DiskBufferQueue] Command buffer full. Waiting for commands." );
+        auto waitTimer = TimerBegin();
 
         // Block and wait until we have commands free in the buffer
-        // #TODO: We should track this and let the user know that he's running slow
         _cmdConsumedSignal.Wait();
         
-        #if _DEBUG
-            Log::Debug( "[DiskBufferQueue] Waited %.6lf seconds for a Command to be available.", TimerEnd( waitTimer ) );
-        #endif
+        Log::Line( "[DiskBufferQueue] Waited %.6lf seconds for a Command to be available.", TimerEnd( waitTimer ) );
     }
 
     ZeroMem( cmd );
@@ -340,48 +343,6 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     const byte* buffer = buffers;
     for( uint i = 0; i < bucketCount; i++ )
         WriteToFile( fileBuckets.files[i], sizes[i], buffer, _blockBuffer, fileBuckets.name, i );
-//     {
-//         const size_t bucketSize  = sizes[i];
-//         FileStream&  file        = fileBuckets.files[i];
-//         
-//         size_t       sizeToWrite = bucketSize / _blockSize * _blockSize;
-//         const size_t remainder   = bucketSize - sizeToWrite;
-// 
-//         while( sizeToWrite )
-//         {
-//             ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
-//             if( sizeWritten < 1 )
-//             {
-//                 const int err = file.GetError();
-//                 Fatal( "Failed to write to '%s.%u' work file with error %d (0x%x).", fileBuckets.name, i, err, err );
-//             }
-// 
-//             ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
-//             sizeToWrite -= (size_t)sizeWritten;
-//             buffer += sizeWritten;
-//         }
-//         
-//         if( remainder )
-//         {
-//             // #TODO: We should only write in block-sized portions?? 
-//             // We can't! Because our buckets might not have enough...
-//             // We should only flush if the buckets are at blocks sized.
-//             // So for now, ignore this (improper data, yes, but this is just for testing times.
-//             memcpy( _blockBuffer, buffer, remainder );
-//         }
-//     }
-
-//     MTJobRunner<WriteBucketsJob> job( _threadPool );
-//     
-//     const uint threadCount = _threadPool.ThreadCount();
-// 
-//     for( uint i = 0; i < threadCount; i++ )
-//     {
-//         FileStream& file = fileBuckets.files[i];
-//                 
-//         //MTJobRunner
-//     }
-
 }
 
 //-----------------------------------------------------------

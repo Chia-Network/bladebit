@@ -2,12 +2,13 @@
 #include "Util.h"
 #include "util/Log.h"
 
+//-----------------------------------------------------------
 WorkHeap::WorkHeap( size_t size, byte* heapBuffer )
-    : _heap             ( heapBuffer )
-    , _heapSize         ( size       )
-    , _usedHeapSize     ( 0          )
-    , _heapTable        ( 256u       )
-    , _allocationTable  ( 256u       )
+    : _heap            ( heapBuffer )
+    , _heapSize        ( size       )
+    , _usedHeapSize    ( 0          )
+    , _heapTable       ( 256u       )
+    , _allocationTable ( 256u       )
 {
     ASSERT( _heap     );
     ASSERT( _heapSize );
@@ -18,10 +19,22 @@ WorkHeap::WorkHeap( size_t size, byte* heapBuffer )
     firstEntry.size    = _heapSize;
 }
 
+//-----------------------------------------------------------
 WorkHeap::~WorkHeap()
 {
 }
 
+//-----------------------------------------------------------
+void WorkHeap::ResetHeap( const size_t heapSize, void* heapBuffer )
+{
+    ASSERT( _allocationTable.Length() == 0 );
+    ASSERT( _heapTable.Length()       == 1 );
+
+    _heapTable[0].address = (byte*)heapBuffer;
+    _heapTable[0].size    = heapSize;
+}
+
+//-----------------------------------------------------------
 byte* WorkHeap::Alloc( size_t size, size_t alignment )
 {
     size = alignment * CDivT( size, alignment );
@@ -68,8 +81,8 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment )
                     if( remainder )
                     {
                         HeapEntry& rightEntry = _heapTable.Insert( i + 1 );
-                        rightEntry.address = allocation.EndAddress();
-                        rightEntry.size    = remainder;
+                        rightEntry.address    = allocation.EndAddress();
+                        rightEntry.size       = remainder;
                     }
                 }
                 else
@@ -101,19 +114,23 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment )
 
         _releaseSignal.Wait();
 
-        Log::Debug( "Waited %.6lf seconds for a buffer.", TimerEnd( timer ) );
+        Log::Debug( " Waited %.6lf seconds for a buffer.", TimerEnd( timer ) );
     }
 }
 
+//-----------------------------------------------------------
 void WorkHeap::Release( byte* buffer )
 {
     ASSERT( buffer );
     ASSERT( buffer >= _heap && buffer < _heap + _heapSize );
 
     _pendingReleases.Enqueue( buffer );
+
+    // _freeHeapSize.load( std::memory_order_acquire );
     _releaseSignal.Signal();
 }
 
+//-----------------------------------------------------------
 void WorkHeap::CompletePendingReleases()
 {
     const int BUFFER_SIZE = 128;

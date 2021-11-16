@@ -29,8 +29,8 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     int fdFlags = access == FileAccess::Read  ? O_RDONLY :
                   access == FileAccess::Write ? O_WRONLY : O_RDWR;
         
-    fdFlags |= mode == FileMode::Create ? O_CREAT  :
-               mode == FileMode::Append ? O_APPEND : 0;
+    fdFlags |= mode == FileMode::Create       ? O_CREAT | O_TRUNC  :
+               mode == FileMode::OpenOrCreate ? O_CREAT : 0;
 
     #if PLATFORM_IS_LINUX
         if( IsFlagSet( flags, FileFlags::NoBuffering ) )
@@ -40,12 +40,15 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
             fdFlags |= O_LARGEFILE;
     #endif
 
-    if( mode == FileMode::Create )
+    if( mode == FileMode::Create || mode == FileMode::OpenOrCreate )
         fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
 
     int fd = open( path, fdFlags, fmode );
     if( fd < 0 )
+    {
+        file._error = errno;
         return false;
+    }
 
     #if PLATFORM_IS_MACOS
         if( IsFlagSet( flags, FileFlags::NoBuffering ) )
@@ -119,13 +122,22 @@ ssize_t FileStream::Read( void* buffer, size_t size )
     ASSERT( buffer );
 
     if( buffer == nullptr )
+    {
+        _error = -1;
         return -1;
+    }
 
     if( ! IsFlagSet( _access, FileAccess::Read ) )
+    {
+        _error = -1;
         return -1;
+    }
 
     if( _fd < 0 )
+    {
+        _error = -1;
         return -1;
+    }
 
     if( size < 1 )
         return 0;
@@ -147,13 +159,22 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
     ASSERT( _fd    );
     
     if( buffer == nullptr )
+    {
+        _error = -1;
         return -1;
+    }
 
     if( ! IsFlagSet( _access, FileAccess::Write ) )
+    {
+        _error = -1;
         return -1;
+    }
 
     if( _fd < 0 )
+    {
+        _error = -1;
         return -1;
+    }
 
     if( size < 1 )
         return 0;

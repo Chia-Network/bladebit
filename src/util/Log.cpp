@@ -6,9 +6,9 @@ FILE* Log::_errStream = nullptr;
 
 bool Log::_verbose = false;
 
-#if DBG_LOG_ENABLE
+// #if DBG_LOG_ENABLE
     std::atomic<int> _dbglock = 0;
-#endif
+// #endif
 
 //-----------------------------------------------------------
 inline FILE* Log::GetOutStream()
@@ -194,6 +194,15 @@ void Log::DebugV( const char* msg, va_list args )
 //-----------------------------------------------------------
 void Log::DebugWrite( const char* msg, size_t size )
 {
+    SafeWrite( msg, size );
+}
+
+#endif
+
+//-----------------------------------------------------------
+void Log::SafeWrite( const char* msg, size_t size )
+{
+    // #TODO: Just use futex
     // Lock
     int lock = 0;
     while( !_dbglock.compare_exchange_weak( lock, 1 ) )
@@ -205,5 +214,3 @@ void Log::DebugWrite( const char* msg, size_t size )
     // Unlock
     _dbglock.store( 0, std::memory_order_release );
 }
-
-#endif

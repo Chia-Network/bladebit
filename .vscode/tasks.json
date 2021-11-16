@@ -81,7 +81,7 @@
 				"--build", ".",
 				"--target", "bladebit_disk",
 				"--config", "Debug",
-				"-j", "8"
+				"-j", "24"
 			],
 			
 			"windows":{

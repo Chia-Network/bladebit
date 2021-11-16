@@ -32,6 +32,8 @@ public:
     WorkHeap( size_t size, byte* heapBuffer );
     ~WorkHeap();
 
+    void ResetHeap( const size_t heapSize, void* heapBuffer );
+
     // Allocate a buffer on the heap.
     // If no space is available it will block until
     // some space has become available again.
@@ -58,6 +60,10 @@ private:
 
     SPCQueue<byte*, 256> _pendingReleases;      // Released buffers waiting to be re-added to the heap table
     AutoResetSignal      _releaseSignal;        // Used to signal that there's pending released buffers
+
+    // std::atomic<size_t>  _freeHeapSize = 0;     // Current free heap size from the perspective of the consumer thread (the allocating thread)
+    // std::atomic<size_t>  _waitingSize  = 0;     // Required size for the next allocation. If the next release
+                                                // does not add up to this size, then it won't signal it
 };
 
 

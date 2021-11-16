@@ -35,19 +35,23 @@ DiskPlotter::DiskPlotter( const Config cfg )
     static_assert( sizeof( DiskPlotContext::writeIntervals ) == sizeof( Config::writeIntervals ), "Write interval array sizes do not match." );
     memcpy( _cx.writeIntervals, cfg.writeIntervals, sizeof( _cx.writeIntervals ) );
 
-//     Log::Line( "Heap size   : %.2lf MiB", (double)_cx.heapSize BtoMB );
-    Log::Line( "Work threads   : %u"      , _cx.threadCount   );
+    Log::Line( "Work Heap size : %.2lf MiB", (double)_cx.heapSize BtoMB );
+    Log::Line( "Work threads   : %u"       , _cx.threadCount   );
     Log::Line( "IO buffer size : %llu MiB (%llu MiB total)", _cx.ioBufferSize BtoMB, _cx.ioBufferSize * _cx.ioBufferCount BtoMB );
-    Log::Line( "IO threads     : %u"      , _cx.ioThreadCount );
-    Log::Line( "IO buffer count: %u"      , _cx.ioBufferCount );
+    Log::Line( "IO threads     : %u"       , _cx.ioThreadCount );
+    Log::Line( "IO buffer count: %u"       , _cx.ioBufferCount );
 
-    Log::Line( "Allocating heap of %llu MiB.", _cx.heapSize BtoMB );
-    _cx.heapBuffer = (byte*)SysHost::VirtualAlloc( _cx.heapSize );
-    FatalIf( !_cx.heapBuffer, "Failed to allocated work buffer. Make sure you have enough free memory." );
+    const size_t allocationSize = _cx.heapSize + _cx.ioHeapSize;
 
-    Log::Line( "Allocating IO buffers." );
-    _cx.ioHeap = (byte*)SysHost::VirtualAlloc( ioHeapFullSize );
-    FatalIf( !_cx.ioHeap, "Failed to allocated work buffer. Make sure you have enough free memory." );
+    // Log::Line( "Allocating heap of %llu MiB.", _cx.heapSize BtoMB );
+    Log::Line( "Allocating a heap of %llu MiB.", allocationSize BtoMB );
+    _cx.heapBuffer = (byte*)SysHost::VirtualAlloc( allocationSize );
+    FatalIf( !_cx.heapBuffer, "Failed to allocated heap buffer. Make sure you have enough free memory." );
+    
+    _cx.ioHeap = _cx.heapBuffer + _cx.heapSize;
+    // Log::Line( "Allocating IO buffers." );
+    // _cx.ioHeap = (byte*)SysHost::VirtualAlloc( ioHeapFullSize );
+    // FatalIf( !_cx.ioHeap, "Failed to allocated work buffer. Make sure you have enough free memory." );
 
     _cx.threadPool = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
     

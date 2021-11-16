@@ -70,8 +70,9 @@ struct MTJobRunner
 
     double Run();
 
-    inline TJob& operator[]( uint index ) { return this->_jobs[index]; }
-    inline TJob& operator[]( int index  ) { return this->_jobs[index]; }
+    inline TJob& operator[]( uint64 index ) { return this->_jobs[index]; }
+    inline TJob& operator[]( uint index   ) { return this->_jobs[index]; }
+    inline TJob& operator[]( int index    ) { return this->_jobs[index]; }
 
 private:
     static void RunJobWrapper( TJob* job );
@@ -175,15 +176,19 @@ inline void MTJob<TJob>::WaitForRelease()
     const uint threadThreshold = this->_jobCount - 1;
 
     // Signal the control thread that we're ready to sync
-    uint count = finishedCount.load( std::memory_order_acquire );
-    while( !finishedCount.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
-        
+    // uint count = finishedCount.load( std::memory_order_acquire );
+    finishedCount++;
+    // while( !finishedCount.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+    Trace( "[%2d] Thread finished.", _jobId );    
     // Wait for the control thread (id == 0 ) to signal us
     while( finishedCount.load( std::memory_order_relaxed ) != 0 );
 
+    
     // Ensure all threads have been released (prevent re-locking before another thread has been released)
-    count = releaseLock.load( std::memory_order_acquire );
-    while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+    // uint count = releaseLock.load( std::memory_order_acquire );
+    // while( !releaseLock.compare_exchange_weak( count, count+1, std::memory_order_release, std::memory_order_relaxed ) );
+    releaseLock++;
+    Trace( "[%2d] Thread released.", _jobId );
     while( releaseLock.load( std::memory_order_relaxed ) != threadThreshold );
 }
 
@@ -206,7 +211,7 @@ inline void MTJob<TJob>::Trace( const char* msg, ... )
     ASSERT( r > 0 );
 
     const size_t size = std::min( BUF_SIZE, (size_t)r );
-    Log::DebugWrite( buf2, size );
+    Log::SafeWrite( buf2, size );
 }
 
 #endif

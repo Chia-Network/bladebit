@@ -49,7 +49,12 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     LoadLTargets();
 
     ASSERT( cx.tmpPath );
-    _diskQueue = new DiskBufferQueue( cx.tmpPath, cx.ioHeap, cx.ioHeapSize, cx.ioThreadCount );
+
+    // Use the whole allocation for F1
+    byte*  heap     = cx.heapBuffer;
+    size_t heapSize = cx.heapSize + cx.ioHeapSize;
+
+    _diskQueue = new DiskBufferQueue( cx.tmpPath, heap, heapSize, cx.ioThreadCount );
 }
 
 //-----------------------------------------------------------
@@ -87,6 +92,10 @@ void DiskPlotPhase1::Run()
         }
     }
 #endif
+
+    // Re-create the disk queue with the io buffer only
+    // #TODO: Remove this, this is for now while testing.
+    _diskQueue->ResetHeap( _cx.ioHeapSize, _cx.ioHeap );
 
     ForwardPropagate();
 }
@@ -128,16 +137,16 @@ void DiskPlotPhase1::GenF1()
     // #TODO: Ensure each thread has at least one block.
     ASSERT( blocksPerThread > 0 );
 
-    uint  x            = 0;
-    byte* blocksRoot   = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
-    byte* blocks       = blocksRoot;
-    byte* xBuffer      = blocks + blocksPerChunk * kF1BlockSize;
+    uint  x          = 0;
+    byte* blocksRoot = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
+    byte* blocks     = blocksRoot;
+    byte* xBuffer    = blocks + blocksPerChunk * kF1BlockSize;
 
     // Allocate buffers to track the remainders that are not multiple of the block size of the drive.
     // We do double-buffering here as we these buffers are tiny and we don't expect to get blocked by them.
     const size_t driveBlockSize = _diskQueue->BlockSize();
     const size_t remaindersSize = driveBlockSize * BB_DP_BUCKET_COUNT * 2;      // Double-buffered
-    byte*        remainders    = _diskQueue->GetBuffer( remaindersSize * 2 );   // Allocate 2, one for y one for x. They are used together.
+    byte*        remainders     = _diskQueue->GetBuffer( remaindersSize * 2 );  // Allocate 2, one for y one for x. They are used together.
 
     uint32* bucketCounts = cx.bucketCounts[0];
 //     memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );    // Already zeroed.
@@ -147,18 +156,18 @@ void DiskPlotPhase1::GenF1()
     for( uint i = 0; i < threadCount; i++ )
     {
         GenF1Job& job = f1Job[i];
-        job.key            = key;
-        job.blocksPerChunk = blocksPerChunk;
-        job.chunkCount     = chunkCount;
-        job.blockCount     = blocksPerThread;
-        job.x              = x;
+        job.key              = key;
+        job.blocksPerChunk   = blocksPerChunk;
+        job.chunkCount       = chunkCount;
+        job.blockCount       = blocksPerThread;
+        job.x                = x;
 
-        job.buffer         = blocks;
-        job.xBuffer        = (uint32*)xBuffer;
+        job.buffer           = blocks;
+        job.xBuffer          = (uint32*)xBuffer;
 
-        job.counts         = nullptr;
-        job.bucketCounts   = nullptr;
-        job.buckets        = nullptr;
+        job.counts           = nullptr;
+        job.bucketCounts     = nullptr;
+        job.buckets          = nullptr;
         
         job.diskQueue        = _diskQueue;
         job.remaindersBuffer = nullptr;
@@ -198,23 +207,23 @@ void DiskPlotPhase1::GenF1()
 //-----------------------------------------------------------
 void GenF1Job::Run()
 {
-    const uint32 entriesPerBlock  = kF1BlockSize / sizeof( uint32 );
-    const uint32 kMinusKExtraBits = _K - kExtraBits;
-    const uint32 bucketShift      = (8u - (uint)kExtraBits);
-    
-    const uint32 jobId      = this->JobId();
-    const uint32 jobCount   = this->JobCount();
+    const uint32 entriesPerBlock   = kF1BlockSize / sizeof( uint32 );
+    const uint32 kMinusKExtraBits  = _K - kExtraBits;
+    const uint32 bucketShift       = (8u - (uint)kExtraBits);
 
-    byte*        blocks     = this->buffer;
-    const uint32 blockCount = this->blockCount;
-    const uint32 chunkCount = this->chunkCount;
-    const uint64 entryCount = blockCount * (uint64)entriesPerBlock;
+    const uint32 jobId             = this->JobId();
+    const uint32 jobCount          = this->JobCount();
 
-    const size_t bufferSize = this->blocksPerChunk * kF1BlockSize;
+    byte*        blocks            = this->buffer;
+    const uint32 blockCount        = this->blockCount;
+    const uint32 chunkCount        = this->chunkCount;
+    const uint64 entryCount        = blockCount * (uint64)entriesPerBlock;
+
+    const size_t bufferSize        = this->blocksPerChunk * kF1BlockSize;
 
     DiskBufferQueue& queue         = *this->diskQueue;
     const size_t     fileBlockSize = queue.BlockSize();
-    
+
 
     uint32 x = this->x;
 
@@ -223,7 +232,6 @@ void GenF1Job::Run()
 
     uint counts[BB_DP_BUCKET_COUNT];
     uint pfxSum[BB_DP_BUCKET_COUNT];
-
 
     // These are used only by the control thread
     // 
@@ -240,7 +248,7 @@ void GenF1Job::Run()
 //     uint         bucketCounts     [BB_DP_BUCKET_COUNT];
 //     uint         totalBucketCounts[BB_DP_BUCKET_COUNT];
 
-    if( IsControlThread() )
+    if( this->IsControlThread() )
     {
         // #TODO: _malloca seems to be giving issues on windows, so we're heap-allocating...
         remainders        = bbmalloc<DoubleBuffer>( sizeof( DoubleBuffer ) * BB_DP_BUCKET_COUNT );
@@ -334,7 +342,7 @@ void GenF1Job::Run()
 
         // Wait for all threads to finish ChaCha generation
         this->counts = counts;
-        SyncThreads();
+        this->SyncThreads();
 
         // Add up all of the jobs counts
         memset( pfxSum, 0, sizeof( pfxSum ) );
@@ -390,7 +398,7 @@ void GenF1Job::Run()
         }
         else
         {
-            WaitForRelease();
+            this->WaitForRelease();
             buckets = GetJob( 0 ).buckets;
             xBuffer = GetJob( 0 ).xBuffer;
         }
@@ -511,7 +519,7 @@ void GenF1Job::Run()
             this->WaitForRelease();
     }
 
-    if( IsControlThread() )
+    if( this->IsControlThread() )
     {
         // we need to write out any remainders as a whole block
         WriteFinalBlockRemainders( remainders, remainderSizes );

@@ -57,6 +57,12 @@
             
             "linux": {
                 "program": "${workspaceFolder}/build/bladebit_disk"
+                ,"args": [
+                    "-t", "64",
+                    "--f1", "256MB",
+                    "/mnt/p5510a"
+                ]
+                // ,"stopAtEntry": true
             },
 
             "osx": {

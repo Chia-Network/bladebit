@@ -103,6 +103,8 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
         while( !_object.signaled )
             rc = pthread_cond_wait( &_object.cond, &_object.mutex );
 
+        _object.signaled = false;
+
         r = pthread_mutex_unlock( &_object.mutex );
         FatalIf( r, "AutoResetSignal::Wait pthread_mutex_unlock() failed with error %d.", r );
     }
@@ -121,6 +123,9 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
 
         while( !_object.signaled && rc == 0 )
             rc = pthread_cond_timedwait( &_object.cond, &_object.mutex, &t );
+
+        _object.signaled = false;
+        
         r = pthread_mutex_unlock( &_object.mutex );
         FatalIf( r, "AutoResetSignal::Wait pthread_mutex_unlock() failed with error %d.", r );
     }

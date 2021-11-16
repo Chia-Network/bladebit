@@ -35,6 +35,8 @@ public:
     static void DebugWrite( const char* msg, size_t size ) {}
 #endif
 
+    static void SafeWrite( const char* msg, size_t size );
+
 private:
 
     static FILE* GetOutStream();

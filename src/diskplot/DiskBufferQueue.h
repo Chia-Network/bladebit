@@ -7,7 +7,7 @@
 #include "plotshared/WorkHeap.h"
 
 class Thread;
-#define BB_DISK_QUEUE_MAX_CMDS 1024
+#define BB_DISK_QUEUE_MAX_CMDS 4096 //1024
 
 enum class FileId
 {
@@ -115,7 +115,10 @@ public:
     DiskBufferQueue( const char* workDir, byte* workBuffer, 
                      size_t workBufferSize, uint ioThreadCount,
                      bool useDirectIO = true );
+    
     ~DiskBufferQueue();
+
+    void ResetHeap( const size_t heapSize, void* heapBuffer );
 
 
     void WriteBuckets( FileId id, const void* buckets, const uint* sizes );
