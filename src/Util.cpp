@@ -12,7 +12,7 @@ void VFatal( const char* message, va_list args )
     Log::Error( message, args );
     Log::FlushError();
 
-    ASSERT( 0 );
+    BBDebugBreak();
     exit( 1 );
 }
 

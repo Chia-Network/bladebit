@@ -93,8 +93,11 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
         
         for( int64 i = 0; i < entryCount; i++, refReader++ )
         {
-            const uint64 y    = bucketMask | bucketEntries[i];
-            const uint64 yRef = *refReader;
+            const uint64 y      = bucketMask | bucketEntries[i];
+            const uint64 yRef   = *refReader;
+
+            const uint32 y32    = bucketEntries[i];
+            const uint32 y32Ref = (uint32)yRef;
 
             FatalIf( y != yRef, "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld",
                      (int)table+1, bucket, i, (int64)( refReader - refEntries ) );

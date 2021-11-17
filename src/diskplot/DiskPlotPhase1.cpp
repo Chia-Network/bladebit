@@ -487,22 +487,23 @@ void GenF1Job::Run()
             xBuffer[idx14] = x + 14;
             xBuffer[idx15] = x + 15;
 
-            // if( buckets[idx0 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx1 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx2 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx3 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx4 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx5 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx6 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx7 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx8 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx9 ] == 42 ) BBDebugBreak();
-            // if( buckets[idx10] == 42 ) BBDebugBreak();
-            // if( buckets[idx11] == 42 ) BBDebugBreak();
-            // if( buckets[idx12] == 42 ) BBDebugBreak();
-            // if( buckets[idx13] == 42 ) BBDebugBreak();
-            // if( buckets[idx14] == 42 ) BBDebugBreak();
-            // if( buckets[idx15] == 42 ) BBDebugBreak();
+            const uint32 refY = 27327;
+            if( buckets[idx0 ] == refY ) BBDebugBreak();
+            if( buckets[idx1 ] == refY ) BBDebugBreak();
+            if( buckets[idx2 ] == refY ) BBDebugBreak();
+            if( buckets[idx3 ] == refY ) BBDebugBreak();
+            if( buckets[idx4 ] == refY ) BBDebugBreak();
+            if( buckets[idx5 ] == refY ) BBDebugBreak();
+            if( buckets[idx6 ] == refY ) BBDebugBreak();
+            if( buckets[idx7 ] == refY ) BBDebugBreak();
+            if( buckets[idx8 ] == refY ) BBDebugBreak();
+            if( buckets[idx9 ] == refY ) BBDebugBreak();
+            if( buckets[idx10] == refY ) BBDebugBreak();
+            if( buckets[idx11] == refY ) BBDebugBreak();
+            if( buckets[idx12] == refY ) BBDebugBreak();
+            if( buckets[idx13] == refY ) BBDebugBreak();
+            if( buckets[idx14] == refY ) BBDebugBreak();
+            if( buckets[idx15] == refY ) BBDebugBreak();
 
             // if( x + 0  == 2853878795 ) BBDebugBreak();
             // if( x + 1  == 2853878795 ) BBDebugBreak();
@@ -534,8 +535,11 @@ void GenF1Job::Run()
         {
             // Calculate the disk block-aligned size
             // #TODO: Don't do this if not using direct IO?
+            // #NOTE: We give it the non-block aligned size, but the Queue will 
+            //        only write up to the block aligned size. The rest
+            //        we write with the remainder buffers.
             for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
-                sizes[j] = (uint32)( ( bucketCounts[j] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
+                sizes[j] = (uint32)( bucketCounts[j] * sizeof( uint32 ) );
 
             queue.WriteBuckets( FileId::Y0, buckets, sizes );
             queue.WriteBuckets( FileId::X , xBuffer, sizes );

@@ -340,12 +340,19 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     Log::Debug( "  >>> Write 0x%p", buffers );
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
-    const byte* buffer = buffers;
+    const size_t blockSize = _blockSize;
+    const byte*  buffer    = buffers;
+    
     for( uint i = 0; i < bucketCount; i++ )
     {
-        const size_t writeSize = sizes[i];
+        const size_t bufferSize = sizes[i];
+        
+        // Only write up-to the block-aligned boundary.
+        // The caller is in charge of writing any remainders manually
+        const size_t writeSize = bufferSize / blockSize * blockSize;
+
         WriteToFile( fileBuckets.files[i], writeSize, buffer, _blockBuffer, fileBuckets.name, i );
-        buffer += writeSize;
+        buffer += bufferSize;
     }
 }
 
