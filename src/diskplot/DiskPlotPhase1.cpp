@@ -125,11 +125,23 @@ void DiskPlotPhase1::GenF1()
     const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
 
     // #TODO: Enforce a minimum chunk size, and ensure that a (chunk size - counts) / threadCount
-    // /      is sufficient to bee larger that the cache line size
-    // const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
+    // /      is sufficient to bee larger that the cache line size, and it must be greater than adjusted size...
 
+    // const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
     const size_t chunkBufferSize  = cx.writeIntervals[(int)TableId::Table1].fxGen;
-    const uint32 blocksPerChunk   = (uint32)( chunkBufferSize / ( kF1BlockSize * 2 ) );                 // * 2 because we also have to process/write the x values
+
+    // We need to adjust the chunk buffer size to leave some space for us to be
+    // able to align each bucket start pointer to the block size of the output device
+    const size_t driveBlockSize   = _diskQueue->BlockSize();
+
+    // This should be rare, but could happen...
+    FatalIf( driveBlockSize * BB_DP_BUCKET_COUNT >= chunkBufferSize,
+             "The output drive block size is too great for the IO buffer size.\n"
+             "Please increase your IO buffer size or use an output drive with a smaller block size." );
+    
+    const size_t usableChunkSize  = chunkBufferSize - driveBlockSize * BB_DP_BUCKET_COUNT;
+
+    const uint32 blocksPerChunk   = (uint32)( usableChunkSize / ( kF1BlockSize * 2 ) );                 // * 2 because we also have to process/write the x values
     const uint32 chunkCount       = CDivT( blockCount, blocksPerChunk );                                // How many chunks we need to process
     // const uint32 lastChunkBlocks  = blocksPerChunk - ( ( chunkCount * blocksPerChunk ) - blockCount );  // Last chunk might not need to process all blocks
 
@@ -243,10 +255,12 @@ void GenF1Job::Run()
     // #NOTE: This is a lot of stuff allocated in the stack,
     //  but are thread's stack space is large enough.
     //  Consider allocating it int the heap however
-    DoubleBuffer* remainders        = nullptr;
-    uint*         remainderSizes    = nullptr;
-    uint*         bucketCounts      = nullptr;
-    uint*         totalBucketCounts = nullptr;
+    DoubleBuffer* remainders         = nullptr;
+    uint*         remainderSizes     = nullptr;
+    uint*         bucketCounts       = nullptr;
+    uint*         totalBucketCounts  = nullptr;
+    uint*         blockAlignedCounts = nullptr;  // Used to align file block-align bucket starting points
+    
 
 //     DoubleBuffer remainders       [BB_DP_BUCKET_COUNT];
 //     uint         remainderSizes   [BB_DP_BUCKET_COUNT];
@@ -256,10 +270,11 @@ void GenF1Job::Run()
     if( this->IsControlThread() )
     {
         // #TODO: _malloca seems to be giving issues on windows, so we're heap-allocating...
-        remainders        = bbmalloc<DoubleBuffer>( sizeof( DoubleBuffer ) * BB_DP_BUCKET_COUNT );
-        remainderSizes    = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
-        bucketCounts      = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
-        totalBucketCounts = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
+        remainders         = bbmalloc<DoubleBuffer>( sizeof( DoubleBuffer ) * BB_DP_BUCKET_COUNT );
+        remainderSizes     = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
+        bucketCounts       = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
+        totalBucketCounts  = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
+        blockAlignedCounts = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
 
         memset( remainderSizes   , 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
         memset( totalBucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
@@ -346,9 +361,26 @@ void GenF1Job::Run()
             block += entriesPerBlock;
         }
 
-        // Wait for all threads to finish ChaCha generation
+        // Share our counts with other threads and wait
+        // for all threads to finish ChaCha generation
         this->counts = counts;
-        this->SyncThreads();
+
+        if( this->IsControlThread() )
+        {
+            this->LockThreads();
+            // We need to have some false counts for the
+            // first thread as we need to align the start of
+            // each bucket to the file block size.
+            this->counts = blockAlignedCounts;
+
+            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            {
+                blockAlignedCounts[i] = RoundUpToNextBoundary( counts[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+
+            }
+
+            this->ReleaseThreads();
+        }
 
         // Add up all of the jobs counts
         memset( pfxSum, 0, sizeof( pfxSum ) );
