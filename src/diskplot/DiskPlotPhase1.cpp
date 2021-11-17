@@ -9,6 +9,7 @@
 // Test
 #include "io/FileStream.h"
 #include "SysHost.h"
+#include "DiskPlotDebug.h"
 
 #if _DEBUG
     #include "../memplot/DbgHelper.h"
@@ -92,6 +93,10 @@ void DiskPlotPhase1::Run()
         }
     }
 #endif
+
+    #if BB_DP_DBG_VALIDATE_Y
+        Debug::ValidateYFileFromBuckets( *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
+    #endif
 
     // Re-create the disk queue with the io buffer only
     // #TODO: Remove this, this is for now while testing.
