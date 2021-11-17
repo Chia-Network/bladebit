@@ -9,6 +9,8 @@
     typedef HANDLE ThreadId;
     typedef HANDLE SemaphoreId;
 
+    #define BBDebugBreak() __debugbreak()
+
 // *nix
 #elif __linux__ || __APPLE__
     
@@ -27,13 +29,16 @@
     #include <sys/mman.h>
     #include <time.h>
     #include <alloca.h>
-
+    #include <signal.h>
+    
     #if __linux__
         #include <sys/sysinfo.h>
     #elif __APPLE__
         #include <mach/mach.h>
         #include <fcntl.h>
     #endif
+
+    #define BBDebugBreak() raise( SIGTRAP )
     
 
     typedef pthread_t ThreadId;

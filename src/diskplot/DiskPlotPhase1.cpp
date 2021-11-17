@@ -120,7 +120,7 @@ void DiskPlotPhase1::GenF1()
 
     // Prepare jobs
     const uint64 entryCount      = 1ull << _K;
-    const size_t entryTotalSize  = entryCount * sizeof( uint32 );
+    // const size_t entryTotalSize  = entryCount * sizeof( uint32 );
     const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
     const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
 
@@ -131,7 +131,7 @@ void DiskPlotPhase1::GenF1()
     const size_t chunkBufferSize  = cx.writeIntervals[(int)TableId::Table1].fxGen;
     const uint32 blocksPerChunk   = (uint32)( chunkBufferSize / ( kF1BlockSize * 2 ) );                 // * 2 because we also have to process/write the x values
     const uint32 chunkCount       = CDivT( blockCount, blocksPerChunk );                                // How many chunks we need to process
-    const uint32 lastChunkBlocks  = blocksPerChunk - ( ( chunkCount * blocksPerChunk ) - blockCount );  // Last chunk might not need to process all blocks
+    // const uint32 lastChunkBlocks  = blocksPerChunk - ( ( chunkCount * blocksPerChunk ) - blockCount );  // Last chunk might not need to process all blocks
 
     // Threads operate on a chunk at a time.
     const uint32 threadCount      = pool.ThreadCount();
@@ -220,9 +220,9 @@ void GenF1Job::Run()
     const uint32 jobCount          = this->JobCount();
 
     byte*        blocks            = this->buffer;
-    const uint32 blockCount        = this->blockCount;
+    const uint32 blocksPerThread   = this->blockCount;
     const uint32 chunkCount        = this->chunkCount;
-    const uint64 entryCount        = blockCount * (uint64)entriesPerBlock;
+    // const uint64 entryCount        = blockCount * (uint64)entriesPerBlock;
 
     const size_t bufferSize        = this->blocksPerChunk * kF1BlockSize;
 
@@ -287,9 +287,11 @@ void GenF1Job::Run()
         }
     }
 
-    for( uint i = 0; i < chunkCount; i++ )
+    for( uint chunk = 0; chunk < chunkCount; chunk++ )
     {
-        chacha8_get_keystream( &chacha, x, blockCount, blocks );
+        const uint64 chachaBlock = ((uint64)x) * _K / kF1BlockSizeBits;
+        
+        chacha8_get_keystream( &chacha, chachaBlock, blocksPerThread, blocks );
 
         // Count how many entries we have per bucket
         memset( counts, 0, sizeof( counts ) );
@@ -299,7 +301,7 @@ void GenF1Job::Run()
         // #TODO: If last chunk, get the block count for last chunk.
         // #TODO: Process chunk in its own function
 
-        for( uint j = 0; j < blockCount; j++ )
+        for( uint i = 0; i < blocksPerThread; i++ )
         {
             // Unroll a whole block
 
@@ -344,7 +346,6 @@ void GenF1Job::Run()
             block += entriesPerBlock;
         }
 
-
         // Wait for all threads to finish ChaCha generation
         this->counts = counts;
         this->SyncThreads();
@@ -352,12 +353,12 @@ void GenF1Job::Run()
         // Add up all of the jobs counts
         memset( pfxSum, 0, sizeof( pfxSum ) );
 
-        for( uint j = 0; j < jobCount; j++ )
+        for( uint i = 0; i < jobCount; i++ )
         {
-            const uint* tCounts = GetJob( j ).counts;
+            const uint* tCounts = GetJob( i ).counts;
 
-            for( uint k = 0; k < BB_DP_BUCKET_COUNT; k++ )
-                pfxSum[k] += tCounts[k];
+            for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
+                pfxSum[j] += tCounts[j];
         }
 
         // If we're the control thread, retain the total bucket count for this chunk
@@ -368,12 +369,12 @@ void GenF1Job::Run()
         }
         
         // #TODO: Only do this for the control thread
-        for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
-            totalCount += pfxSum[j];
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            totalCount += pfxSum[i];
 
         // Calculate the prefix sum for this thread
-        for( uint j = 1; j < BB_DP_BUCKET_COUNT; j++ )
-            pfxSum[j] += pfxSum[j-1];
+        for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
+            pfxSum[i] += pfxSum[i-1];
 
         // Subtract the count from all threads after ours
         for( uint t = jobId+1; t < jobCount; t++ )
@@ -411,7 +412,7 @@ void GenF1Job::Run()
         ASSERT( pfxSum[63] <= totalCount );
 
         // Distribute values into buckets at each thread's given offset
-        for( uint j = 0; j < blockCount; j++ )
+        for( uint i = 0; i < blocksPerThread; i++ )
         {
             // chacha output is treated as big endian, therefore swap, as required by chiapos
             const uint32 y0  = Swap32( block[0 ] );
@@ -486,9 +487,46 @@ void GenF1Job::Run()
             xBuffer[idx14] = x + 14;
             xBuffer[idx15] = x + 15;
 
+            // if( buckets[idx0 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx1 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx2 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx3 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx4 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx5 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx6 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx7 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx8 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx9 ] == 42 ) BBDebugBreak();
+            // if( buckets[idx10] == 42 ) BBDebugBreak();
+            // if( buckets[idx11] == 42 ) BBDebugBreak();
+            // if( buckets[idx12] == 42 ) BBDebugBreak();
+            // if( buckets[idx13] == 42 ) BBDebugBreak();
+            // if( buckets[idx14] == 42 ) BBDebugBreak();
+            // if( buckets[idx15] == 42 ) BBDebugBreak();
+
+            // if( x + 0  == 2853878795 ) BBDebugBreak();
+            // if( x + 1  == 2853878795 ) BBDebugBreak();
+            // if( x + 2  == 2853878795 ) BBDebugBreak();
+            // if( x + 3  == 2853878795 ) BBDebugBreak();
+            // if( x + 4  == 2853878795 ) BBDebugBreak();
+            // if( x + 5  == 2853878795 ) BBDebugBreak();
+            // if( x + 6  == 2853878795 ) BBDebugBreak();
+            // if( x + 7  == 2853878795 ) BBDebugBreak();
+            // if( x + 8  == 2853878795 ) BBDebugBreak();
+            // if( x + 9  == 2853878795 ) BBDebugBreak();
+            // if( x + 10 == 2853878795 ) BBDebugBreak();
+            // if( x + 11 == 2853878795 ) BBDebugBreak();
+            // if( x + 12 == 2853878795 ) BBDebugBreak();
+            // if( x + 13 == 2853878795 ) BBDebugBreak();
+            // if( x + 14 == 2853878795 ) BBDebugBreak();
+            // if( x + 15 == 2853878795 ) BBDebugBreak();
+
             block += entriesPerBlock;
             x     += entriesPerBlock;
         }
+
+        // #TODO: Only submit the entries needed for the chunk, if it is the last chunk,
+        //        it may have less entries than the block count
 
         // Now this chunk can be submitted to the write queue, and we can continue to the next one.
         // After all the chunks have been written, we can read back from disk to sort each bucket

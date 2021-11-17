@@ -342,7 +342,11 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     // Single-threaded for now... We don't have file handles for all the threads yet!
     const byte* buffer = buffers;
     for( uint i = 0; i < bucketCount; i++ )
-        WriteToFile( fileBuckets.files[i], sizes[i], buffer, _blockBuffer, fileBuckets.name, i );
+    {
+        const size_t writeSize = sizes[i];
+        WriteToFile( fileBuckets.files[i], writeSize, buffer, _blockBuffer, fileBuckets.name, i );
+        buffer += writeSize;
+    }
 }
 
 //-----------------------------------------------------------
