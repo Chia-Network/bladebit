@@ -21,6 +21,7 @@ void TestF1Buckets( ThreadPool& pool, const byte plotId[32], const byte memoId[1
 
     uint32 bucketCounts[BB_DP_BUCKET_COUNT];
 
+    Log::Line( "Generating in-memory bucketized F1..." );
     F1GenBucketized::GenerateF1Mem( plotId, pool, pool.ThreadCount(), blocks, yBuckets, xBuckets, bucketCounts );
     SysHost::VirtualFree( blocks ); blocks = nullptr;
     
@@ -31,6 +32,7 @@ void TestF1Buckets( ThreadPool& pool, const byte plotId[32], const byte memoId[1
     uint64* refEntries    = nullptr;
 
     // Read the whole reference table into memory
+    Log::Line( "Loading reference table..." );
     {
         char path[1024];
         sprintf( path, "%st%d.y.tmp", BB_DP_DBG_REF_DIR, 1 );
@@ -47,16 +49,25 @@ void TestF1Buckets( ThreadPool& pool, const byte plotId[32], const byte memoId[1
         refEntries = bbvirtalloc<uint64>( allocSize );
 
         // The first block contains the entry count
-        FatalIf( !refTable.Read( refEntries, blockSize ), 
+        FatalIf( refTable.Read( refEntries, blockSize ) != blockSize, 
                 "Failed to read count from reference table file %s with error: %d.", path, refTable.GetError() );
 
         refEntryCount = *refEntries;
 
         ASSERT( refEntryCount <= maxEntries );
 
-        // The rest of the blocks are entries
-        FatalIf( !refTable.Read( refEntries, allocSize ), 
-                "Failed to read entries from reference table file %s with error: %d.", path, refTable.GetError() );
+        size_t sizeToRead = allocSize;
+        byte*  reader     = (byte*)refEntries;
+        while( sizeToRead )
+        {
+            // The rest of the blocks are entries
+            const ssize_t sizeRead = refTable.Read( reader, allocSize );
+            FatalIf( sizeRead <= 0, "Failed to read entries from reference table file %s with error: %d.", path, refTable.GetError() );
+
+            sizeToRead -= (size_t)sizeRead;
+            reader += sizeRead;
+        }
+
     }
 
     uint32* yReader   = yBuckets;
@@ -64,7 +75,7 @@ void TestF1Buckets( ThreadPool& pool, const byte plotId[32], const byte memoId[1
 
     for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
     {
-        Log::Line( "Bucket %u", bucket );
+        Log::Line( "Bucket %u", bucket+1 );
 
         const int64 entryCount = bucketCounts[bucket];
         
@@ -88,6 +99,6 @@ void TestF1Buckets( ThreadPool& pool, const byte plotId[32], const byte memoId[1
                      (int)1, bucket, i, (int64)( refReader - refEntries ) );
         }
 
-        Log::Line( "  Bucket %u validated successfully!", bucket );
+        Log::Line( "  Bucket %u validated successfully!", bucket+1 );
     }
 }
