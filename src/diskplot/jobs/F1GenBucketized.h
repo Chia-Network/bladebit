@@ -13,23 +13,19 @@ struct F1GenBucketized
     static void GenerateF1Mem( 
         const byte* plotId,
         ThreadPool& pool, 
-        uint    threadCount,
-        byte*   blocks,         // Has to be big enough to hold a whole K set 
-        uint32* yBuckets,
-        uint32* xBuckets,
-        uint32  bucketCounts[BB_DP_BUCKET_COUNT]
+        uint        threadCount,
+        byte*       blocks,         // Has to be big enough to hold a whole K set 
+        uint32*     yBuckets,
+        uint32*     xBuckets,
+        uint32      bucketCounts[BB_DP_BUCKET_COUNT]
     );
 
-    void GenerateAndWriteToFile(
-            const byte* key,
-            ThreadPool& pool, uint threadCount,
-            DiskBufferQueue& diskQueue,
-            uint32 bucketCounts[BB_DP_BUCKET_COUNT],
-            const size_t chunkSize
-    );
-
-    
-
-private:
-    
+    void GenerateF1Disk(
+        const byte*      plotId,
+        ThreadPool&      pool, 
+        uint             threadCount,
+        DiskBufferQueue& diskQueue,
+        const size_t     chunkSize,
+        uint32           bucketCounts[BB_DP_BUCKET_COUNT]
+    );    
 };

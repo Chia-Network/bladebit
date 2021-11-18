@@ -80,6 +80,8 @@ struct MTJobRunner
     inline TJob& operator[]( uint index   ) { return this->_jobs[index]; }
     inline TJob& operator[]( int index    ) { return this->_jobs[index]; }
 
+    inline TJob* Jobs() { return _jobs; }
+
 private:
     static void RunJobWrapper( TJob* job );
 

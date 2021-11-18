@@ -6,8 +6,15 @@
 template<typename TJob>
 struct F1BucketJob : public MTJob<TJob>
 {
-    uint32* counts;             // Each thread's entry count per bucket
-    uint32* totalBucketCounts;  // Total counts per for all buckets. Used by the control thread
+    const byte* key;                // Chacha key
+    uint32      x;                  // Starting x value for this thread
+    uint32      blockCount;         // Total number of blocks for each thread. Or blocks per thread per chunk in the disk version.
+    uint32*     counts;             // Each thread's entry count per bucket. Shared with other threads to calculate prefix sum.
+    uint32*     totalBucketCounts;  // Total counts per for all buckets. Used by the control thread
+
+    byte*   blocks;                 // chacha blocks buffer
+    uint32* yBuckets;               // Bucket buffer for y (on the disk version, these are set by the control thread)
+    uint32* xBuckets;               // Bucket buffer for x
 
     void CalculateMultiThreadedPrefixSum( 
         uint32 counts[BB_DP_BUCKET_COUNT],
@@ -16,16 +23,23 @@ struct F1BucketJob : public MTJob<TJob>
     );
 };
 
+// Job to perform bucketized f1 generation completely in memory
 struct F1MemBucketJob : public F1BucketJob<F1MemBucketJob>
 {
-    const byte* key;
-    
-    uint32  blockCount;         // Total number of blocks for each thread
-    uint32  x;                  // This thread's starting x position
+    void Run() override;
+};
 
-    byte*   blocks;             // chacha blocks buffer
-    uint32* yBuckets;           // Set by the control thread when writing entries to buckets
-    uint32* xBuckets;           // Buffer for sort key. Also set by the control thread
+// Job to perform bucketized f1 generation and writing it
+// to disk in intervals known as "chunks".
+struct F1DiskBucketJob : public F1BucketJob<F1DiskBucketJob>
+{
+    DiskBufferQueue* diskQueue;
+
+    uint32  chunkCount;
+    uint32  chunkBufferSize;    // Allocation size for the chunk buffer.
+                                // It should be guaranteed to hold enough values
+                                // needed for all buckets, including file block size 
+                                // alignment space.
 
     void Run() override;
 };
@@ -33,12 +47,12 @@ struct F1MemBucketJob : public F1BucketJob<F1MemBucketJob>
 template<bool WriteToDisk, bool SingleThreaded, typename TJob>
 void GenerateF1(
     chacha8_ctx& chacha, 
-    uint32  x,
-    byte*   blocks,
-    uint32  blockCount,
-    uint32  entryCount,
-    uint32* buckets,
-    uint32* xBuffer,
+    uint32       x,
+    byte*        blocks,
+    uint32       blockCount,
+    uint32       entryCount,
+    uint32*      buckets,
+    uint32*      xBuffer,
 
     // For MT
     MTJobSyncT<TJob>* job,
@@ -49,38 +63,27 @@ void GenerateF1(
 );
 
 //-----------------------------------------------------------
-void F1GenBucketized::GenerateF1Mem( 
-    const byte* plotId,
-    ThreadPool& pool, 
-    uint    threadCount,
-    byte*   blocks,
-    uint32* yBuckets,
-    uint32* xBuckets,
-    uint32  bucketCounts[BB_DP_BUCKET_COUNT]
+template<typename TJob>
+void InitF1BucketJob(
+    const byte* key,
+    uint        threadCount,
+    uint        blocksPerThread,
+    uint        trailingBlocks,
+    byte*       blocks,
+    uint32*     yBuckets,
+    uint32*     xBuckets,
+    uint32      bucketCounts[BB_DP_BUCKET_COUNT],
+    F1BucketJob<TJob>* jobs
 )
 {
-    ASSERT( threadCount <= pool.ThreadCount() );
-    
-    const uint64 entryCount      = 1ull << _K;
     const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
-    const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
-    
-    const uint32 blocksPerThread = blockCount / threadCount;
-
-    uint32 trailingBlocks  = blockCount - blocksPerThread * threadCount;
-    
-    // Prepare ChaCha key
-    byte key[32] = { 1 };
-    memcpy( key + 1, plotId, 31 );
-
-    memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
 
     uint32 x = 0;
-    MTJobRunner<F1MemBucketJob> f1Job( pool );
 
     for( uint i = 0; i < threadCount; i++ )
     {
-        F1MemBucketJob& job = f1Job[i];
+        F1MemBucketJob& job = jobs[i];
+
         job.key               = key;
         job.blockCount        = blocksPerThread;
         job.x                 = x;
@@ -101,9 +104,166 @@ void F1GenBucketized::GenerateF1Mem(
         blocks  += job.blockCount * kF1BlockSize;
     }
 
-    f1Job[0].totalBucketCounts = bucketCounts;
+    jobs[0].totalBucketCounts = bucketCounts;
+}
+
+
+//-----------------------------------------------------------
+void F1GenBucketized::GenerateF1Mem( 
+    const byte* plotId,
+    ThreadPool& pool, 
+    uint        threadCount,
+    byte*       blocks,
+    uint32*     yBuckets,
+    uint32*     xBuckets,
+    uint32      bucketCounts[BB_DP_BUCKET_COUNT]
+)
+{
+    ASSERT( threadCount <= pool.ThreadCount() );
+    
+    const uint64 entryCount      = 1ull << _K;
+    const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
+    const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
+    
+    const uint32 blocksPerThread = blockCount / threadCount;
+
+    uint32 trailingBlocks  = blockCount - blocksPerThread * threadCount;
+    
+    // Prepare ChaCha key
+    byte key[32] = { 1 };
+    memcpy( key + 1, plotId, 31 );
+
+    memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+
+    // uint32 x = 0;
+    MTJobRunner<F1MemBucketJob> f1Job( pool );
+
+    InitF1BucketJob<F1MemBucketJob>( key, threadCount, blocksPerThread, trailingBlocks, 
+                                     blocks, yBuckets, xBuckets, bucketCounts, f1Job.Jobs() );
+
+    // for( uint i = 0; i < threadCount; i++ )
+    // {
+    //     F1MemBucketJob& job = f1Job[i];
+    //     job.key               = key;
+    //     job.blockCount        = blocksPerThread;
+    //     job.x                 = x;
+        
+    //     job.blocks            = blocks;
+    //     job.yBuckets          = yBuckets;
+    //     job.xBuckets          = xBuckets;
+    //     job.totalBucketCounts = nullptr;
+    //     job.counts            = nullptr;
+
+    //     if( trailingBlocks )
+    //     {
+    //         job.blockCount ++;
+    //         trailingBlocks --; 
+    //     }
+
+    //     x       += job.blockCount * entriesPerBlock;
+    //     blocks  += job.blockCount * kF1BlockSize;
+    // }
+
+    // f1Job[0].totalBucketCounts = bucketCounts;
 
     f1Job.Run( threadCount );
+}
+
+//-----------------------------------------------------------
+void F1GenBucketized::GenerateF1Disk(
+    const byte*      plotId,
+    ThreadPool&      pool, 
+    uint             threadCount,
+    DiskBufferQueue& diskQueue,
+    const size_t     chunkSize,
+    uint32           bucketCounts[BB_DP_BUCKET_COUNT]
+)
+{
+    ASSERT( threadCount <= pool.ThreadCount() );
+    
+    const uint64 entryCount      = 1ull << _K;
+    const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
+    const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
+
+    // We need to adjust the chunk buffer size to leave some space for us to be
+    // able to align each bucket start pointer to the block size of the output device
+    const size_t driveBlockSize  = diskQueue.BlockSize();
+    const size_t usableChunkSize = chunkSize - driveBlockSize * BB_DP_BUCKET_COUNT;
+
+    
+    const uint32 blocksPerChunk   = (uint32)( usableChunkSize / ( kF1BlockSize * 2 ) ); // * 2 because we also have space for the x values
+    
+    uint32 chunkCount     = blockCount / blocksPerChunk;                // How many chunks we need to process 
+                                                                        // (needs ot be floored to ensure we fit in the chunk buffer)
+    uint32 trailingBlocks = blockCount - blocksPerChunk * chunkCount;
+
+    // Threads operate on a chunk at a time.
+    const uint32 blocksPerThread  = blocksPerChunk / threadCount;
+
+    // #TODO: Ensure each thread has at least one block.
+    ASSERT( blocksPerThread > 0 );
+    
+    // Add the blocks that don't into a per-thread boundary as trailing blocks
+    trailingBlocks += ( blocksPerChunk * chunkCount ) - ( blocksPerThread * threadCount * chunkCount );
+
+    // If the trailing blocks add up to a new chunk, then add that chunk
+    // the rest will be reserved for the final block
+    if( trailingBlocks > blocksPerChunk )
+    {
+        chunkCount ++;
+        trailingBlocks -= blocksPerChunk;
+    }
+
+    // #TODO: Need to split the final block per threads or, if less than what we can do per thread,
+    //        use only the amount of threads required for it.
+    const uint32 trailingBlocksPerThread = trailingBlocks / threadCount;
+    trailingBlocks -= trailingBlocksPerThread * threadCount;
+
+
+    // Allocate our buffers
+    byte* blocks = diskQueue.GetBuffer( blocksPerThread * kF1BlockSize * threadCount );
+
+    // Remainders buffers are: 2 fileBlockSized buffers per bucket
+    byte* remainders = diskQueue.GetBuffer( diskQueue.BlockSize() * BB_DP_BUCKET_COUNT * 2 );
+
+     // Prepare Jobs
+    byte key[32] = { 1 };
+    memcpy( key + 1, plotId, 31 );
+
+    memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+
+    MTJobRunner<F1DiskBucketJob> f1Job( pool );
+
+    InitF1BucketJob<F1DiskBucketJob>( key, threadCount, blocksPerThread, 0, 
+                                      blocks, nullptr, nullptr, bucketCounts, f1Job.Jobs() );
+
+    uint32 x = 0;
+
+    for( uint i = 0; i < threadCount; i++ )
+    {
+        F1DiskBucketJob& job = f1Job[i];
+        
+        job.diskQueue  = &diskQueue;
+        job.x          = x;
+        job.chunkCount = chunkCount;
+
+        x       += job.blockCount * entriesPerBlock * chunkCount;
+    }
+
+    
+    // Release our buffers
+    {
+        AutoResetSignal fence;
+
+        diskQueue.ReleaseBuffer( blocks     );
+        diskQueue.ReleaseBuffer( remainders );
+        diskQueue.AddFence( fence );
+        diskQueue.CommitCommands();
+
+        fence.Wait();
+        diskQueue.CompletePendingReleases();
+    }
+
 }
 
 //-----------------------------------------------------------
@@ -222,8 +382,8 @@ void GenerateF1(
             // We need to align each count to file block size
             // so that each bucket starts aligned 
             // (we won't write submit these extra false entries)
-            // for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
-            //  pfxSum[i] = RoundUpToNextBoundary( pfxSum[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                pfxSum[i] = RoundUpToNextBoundary( pfxSum[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
         }
 
         for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
