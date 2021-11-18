@@ -36,6 +36,12 @@ struct MTJobSyncT
     // to wait for the control thread to release the lock on us.
     inline void WaitForRelease();
 
+    // Reduce the _jobCount to the specified amount.
+    // This is useful when a job needs to continue
+    // from its Run() function, but it needs to complete
+    // with less threads than it originally started with.
+    inline bool ReduceThreadCount( uint newThreadCount );
+
     inline uint JobId()    const { return _jobId; }
     inline uint JobCount() const { return _jobCount; }
 
@@ -209,8 +215,29 @@ inline void MTJobSyncT<TJob>::WaitForRelease()
     releaseLock++;
     while( releaseLock.load( std::memory_order_relaxed ) != threadThreshold );
     // Trace( " released: %d", count );
-
 }
+
+//-----------------------------------------------------------
+template<typename TJob>
+inline bool MTJobSyncT<TJob>::ReduceThreadCount( uint newThreadCount )
+{
+    ASSERT( newThreadCount < _jobCount );
+    ASSERT( newThreadCount > 0 );
+
+    // Does this thread need to synchronize?
+    // If not, don't participate
+    if( _jobId >= newThreadCount )
+        return false;
+    
+    // Update our job count
+    this->_jobCount = newThreadCount;
+
+    // Now synchronize
+    this->SyncThreads();
+
+    return true;
+}
+
 
 #if _DEBUG
 //-----------------------------------------------------------
