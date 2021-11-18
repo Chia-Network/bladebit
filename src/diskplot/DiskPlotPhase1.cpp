@@ -141,18 +141,32 @@ void DiskPlotPhase1::GenF1()
     
     const size_t usableChunkSize  = chunkBufferSize - driveBlockSize * BB_DP_BUCKET_COUNT;
 
-    const uint32 blocksPerChunk   = (uint32)( usableChunkSize / ( kF1BlockSize * 2 ) );                 // * 2 because we also have to process/write the x values
-    const uint32 chunkCount       = CDivT( blockCount, blocksPerChunk );                                // How many chunks we need to process
-    // const uint32 lastChunkBlocks  = blocksPerChunk - ( ( chunkCount * blocksPerChunk ) - blockCount );  // Last chunk might not need to process all blocks
+    const uint32 blocksPerChunk   = (uint32)( usableChunkSize / ( kF1BlockSize * 2 ) ); // * 2 because we also have to process/write the x values
+    
+    uint32 chunkCount     = blockCount / blocksPerChunk;                // How many chunks we need to process 
+                                                                        // (needs ot be floored to ensure we fit in the chunk buffer)
+    uint32 trailingBlocks = blockCount - blocksPerChunk * chunkCount;
 
     // Threads operate on a chunk at a time.
     const uint32 threadCount      = pool.ThreadCount();
     const uint32 blocksPerThread  = blocksPerChunk / threadCount;
     
-    uint32 trailingBlocks = blocksPerChunk - ( blocksPerThread * threadCount );
-
     // #TODO: Ensure each thread has at least one block.
     ASSERT( blocksPerThread > 0 );
+    
+    trailingBlocks += ( blocksPerChunk * chunkCount ) - ( blocksPerThread * threadCount * chunkCount );
+
+    // If the trailing blocks add up to a new chunk, then add that chunk
+    // the rest will be reserved for the final block
+    if( trailingBlocks > blocksPerChunk )
+    {
+        chunkCount ++;
+        trailingBlocks -= blocksPerChunk;
+    }
+
+    // #TODO: Need to add the last chunk to be processed, which will have less entries than the current
+    const uint32 trailingBlocksPerThread = trailingBlocks / threadCount;
+    trailingBlocks -= trailingBlocksPerThread * threadCount;
 
     uint  x          = 0;
     byte* blocksRoot = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
@@ -161,8 +175,8 @@ void DiskPlotPhase1::GenF1()
 
     // Allocate buffers to track the remainders that are not multiple of the block size of the drive.
     // We do double-buffering here as we these buffers are tiny and we don't expect to get blocked by them.
-    const size_t driveBlockSize = _diskQueue->BlockSize();
-    const size_t remaindersSize = driveBlockSize * BB_DP_BUCKET_COUNT * 2;      // Double-buffered
+    const size_t fileBlockSize  = _diskQueue->BlockSize();
+    const size_t remaindersSize = fileBlockSize * BB_DP_BUCKET_COUNT * 2;      // Double-buffered
     byte*        remainders     = _diskQueue->GetBuffer( remaindersSize * 2 );  // Allocate 2, one for y one for x. They are used together.
 
     uint32* bucketCounts = cx.bucketCounts[0];
@@ -177,6 +191,7 @@ void DiskPlotPhase1::GenF1()
         job.blocksPerChunk   = blocksPerChunk;
         job.chunkCount       = chunkCount;
         job.blockCount       = blocksPerThread;
+        job.bucketBufferSize = chunkBufferSize;
         job.x                = x;
 
         job.buffer           = blocks;
@@ -189,11 +204,13 @@ void DiskPlotPhase1::GenF1()
         job.diskQueue        = _diskQueue;
         job.remaindersBuffer = nullptr;
 
-        if( trailingBlocks > 0 )
-        {
-            job.blockCount++;
-            trailingBlocks--;
-        }
+        job.trailingBlocks   = trailingBlocksPerThread;
+
+        // if( trailingBlocks > 0 )
+        // {
+        //     job.trailingBlocks ++;
+        //     trailingBlocks--;
+        // }
 
         x       += job.blockCount * entriesPerBlock * chunkCount;
         blocks  += job.blockCount * kF1BlockSize;
@@ -205,6 +222,9 @@ void DiskPlotPhase1::GenF1()
 
     Log::Line( "Generating f1..." );
     double elapsed = f1Job.Run();
+
+    // #TODO: trailing blocks needs to be performed
+
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
 
     // Release our buffers
@@ -236,7 +256,8 @@ void GenF1Job::Run()
     const uint32 chunkCount        = this->chunkCount;
     // const uint64 entryCount        = blockCount * (uint64)entriesPerBlock;
 
-    const size_t bufferSize        = this->blocksPerChunk * kF1BlockSize;
+    const size_t bufferSize        = this->bucketBufferSize;
+    ASSERT( bufferSize >= this->blocksPerChunk * kF1BlockSize );
 
     DiskBufferQueue& queue         = *this->diskQueue;
     const size_t     fileBlockSize = queue.BlockSize();
@@ -259,7 +280,6 @@ void GenF1Job::Run()
     uint*         remainderSizes     = nullptr;
     uint*         bucketCounts       = nullptr;
     uint*         totalBucketCounts  = nullptr;
-    uint*         blockAlignedCounts = nullptr;  // Used to align file block-align bucket starting points
     
 
 //     DoubleBuffer remainders       [BB_DP_BUCKET_COUNT];
@@ -274,7 +294,6 @@ void GenF1Job::Run()
         remainderSizes     = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
         bucketCounts       = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
         totalBucketCounts  = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
-        blockAlignedCounts = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
 
         memset( remainderSizes   , 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
         memset( totalBucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
@@ -364,23 +383,7 @@ void GenF1Job::Run()
         // Share our counts with other threads and wait
         // for all threads to finish ChaCha generation
         this->counts = counts;
-
-        if( this->IsControlThread() )
-        {
-            this->LockThreads();
-            // We need to have some false counts for the
-            // first thread as we need to align the start of
-            // each bucket to the file block size.
-            this->counts = blockAlignedCounts;
-
-            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            {
-                blockAlignedCounts[i] = RoundUpToNextBoundary( counts[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
-
-            }
-
-            this->ReleaseThreads();
-        }
+        this->SyncThreads();
 
         // Add up all of the jobs counts
         memset( pfxSum, 0, sizeof( pfxSum ) );
@@ -393,22 +396,30 @@ void GenF1Job::Run()
                 pfxSum[j] += tCounts[j];
         }
 
-        // If we're the control thread, retain the total bucket count for this chunk
+        // #TODO: Only do this for the control thread?
         uint32 totalCount = 0;
-        if( this->IsControlThread() )
-        {
-            memcpy( bucketCounts, pfxSum, sizeof( pfxSum ) );
-        }
-        
-        // #TODO: Only do this for the control thread
         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
             totalCount += pfxSum[i];
 
-        // Calculate the prefix sum for this thread
+
+        // If we're the control thread, retain the total bucket count for this chunk.
+        if( this->IsControlThread() )
+            memcpy( bucketCounts, pfxSum, sizeof( pfxSum ) );
+
+        // #TODO: Only do this if using Direct IO
+        // We need to align our bucket totals to the 
+        // file block size boundary so that each block buffer
+        // is properly aligned for direct io.
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            pfxSum[i] = RoundUpToNextBoundary( pfxSum[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+        
+
+        // Calculate the prefix sum
         for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
             pfxSum[i] += pfxSum[i-1];
 
-        // Subtract the count from all threads after ours
+        // Subtract the count from all threads after ours 
+        // to get the correct prefix sum for this thread
         for( uint t = jobId+1; t < jobCount; t++ )
         {
             const uint* tCounts = GetJob( t ).counts;
@@ -440,8 +451,6 @@ void GenF1Job::Run()
             buckets = GetJob( 0 ).buckets;
             xBuffer = GetJob( 0 ).xBuffer;
         }
-
-        ASSERT( pfxSum[63] <= totalCount );
 
         // Distribute values into buckets at each thread's given offset
         for( uint i = 0; i < blocksPerThread; i++ )
@@ -565,7 +574,6 @@ void GenF1Job::Run()
         // After all the chunks have been written, we can read back from disk to sort each bucket
         if( this->LockThreads() )
         {
-            // Calculate the disk block-aligned size
             // #TODO: Don't do this if not using direct IO?
             // #NOTE: We give it the non-block aligned size, but the Queue will 
             //        only write up to the block aligned size. The rest
@@ -576,7 +584,6 @@ void GenF1Job::Run()
             queue.WriteBuckets( FileId::Y0, buckets, sizes );
             queue.WriteBuckets( FileId::X , xBuffer, sizes );
             queue.CommitCommands();
-
 
             // If we're not at our last chunk, we need to shave-off
             // any entries that will not align to the file block size and
@@ -690,8 +697,10 @@ inline void GenF1Job::SaveBlockRemainders( uint32* yBuffer, uint32* xBuffer, con
             remainderSizes[i] += (uint)remainderSize;
         }
 
-        yPtr += bucketSize;
-        xPtr += bucketSize;
+        // The next bucket buffer starts at the next file block size boundary
+        const size_t bucketOffset = RoundUpToNextBoundaryT( bucketSize, fileBlockSize );
+        yPtr += bucketOffset;
+        xPtr += bucketOffset;
     }
 }
 

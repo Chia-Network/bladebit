@@ -352,7 +352,10 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
         const size_t writeSize = bufferSize / blockSize * blockSize;
 
         WriteToFile( fileBuckets.files[i], writeSize, buffer, _blockBuffer, fileBuckets.name, i );
-        buffer += bufferSize;
+
+        // Each bucket buffer must start at the next block-aligned boundary
+        const size_t bufferOffset = RoundUpToNextBoundaryT( bufferSize, blockSize );
+        buffer += bufferOffset;
     }
 }
 
