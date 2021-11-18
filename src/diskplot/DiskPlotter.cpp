@@ -5,6 +5,10 @@
 #include "DiskPlotPhase1.h"
 #include "SysHost.h"
 
+// #TEST
+// #TODO: Remove
+#include "sandbox/Sandbox.h"
+
 //-----------------------------------------------------------
 DiskPlotter::DiskPlotter()
 {
@@ -85,6 +89,9 @@ DiskPlotter::DiskPlotter( const Config cfg )
 //-----------------------------------------------------------
 void DiskPlotter::Plot( const PlotRequest& req )
 {
+    TestF1Buckets( *_cx.threadPool, _cx.plotId, _cx.plotMemo );
+    return;
+
     Log::Line( "Started plot." );
     auto plotTimer = TimerBegin();
 

@@ -3,9 +3,35 @@
 #include "threading/ThreadPool.h"
 #include "pos/chacha8.h"
 
-//-----------------------------------------------------------
-template<bool WriteToDisk, bool SingleThreaded>
-void F1GenBucketized::Generate( 
+template<typename TJob>
+struct F1BucketJob : public MTJob<TJob>
+{
+    uint32* counts;             // Each thread's entry count per bucket
+    uint32* totalBucketCounts;  // Total counts per for all buckets. Used by the control thread
+
+    void CalculateMultiThreadedPrefixSum( 
+        uint32 counts[BB_DP_BUCKET_COUNT],
+        uint32 pfxSum[BB_DP_BUCKET_COUNT],
+        const size_t fileBlockSize
+    );
+};
+
+struct F1MemBucketJob : public F1BucketJob<F1MemBucketJob>
+{
+    const byte* key;
+    
+    uint32  blockCount;         // Total number of blocks for each thread
+    uint32  x;                  // This thread's starting x position
+
+    byte*   blocks;             // chacha blocks buffer
+    uint32* yBuckets;           // Set by the control thread when writing entries to buckets
+    uint32* xBuckets;           // Buffer for sort key. Also set by the control thread
+
+    void Run() override;
+};
+
+template<bool WriteToDisk, bool SingleThreaded, typename TJob>
+void GenerateF1(
     chacha8_ctx& chacha, 
     uint32  x,
     byte*   blocks,
@@ -14,7 +40,99 @@ void F1GenBucketized::Generate(
     uint32* buckets,
     uint32* xBuffer,
 
+    // For MT
+    MTJobSyncT<TJob>* job,
+
     // For writing to disk variant
+    size_t  fileBlockSize,
+    uint32* sizes
+);
+
+//-----------------------------------------------------------
+void F1GenBucketized::GenerateF1Mem( 
+    const byte* plotId,
+    ThreadPool& pool, 
+    uint    threadCount,
+    byte*   blocks,
+    uint32* yBuckets,
+    uint32* xBuckets,
+    uint32  bucketCounts[BB_DP_BUCKET_COUNT]
+)
+{
+    ASSERT( threadCount <= pool.ThreadCount() );
+    
+    const uint64 entryCount      = 1ull << _K;
+    const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
+    const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
+    
+    const uint32 blocksPerThread = blockCount / threadCount;
+
+    uint32 trailingBlocks  = blockCount - blocksPerThread * threadCount;
+    
+    // Prepare ChaCha key
+    byte key[32] = { 1 };
+    memcpy( key + 1, plotId, 31 );
+
+    memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+
+    uint32 x = 0;
+    MTJobRunner<F1MemBucketJob> f1Job( pool );
+
+    for( uint i = 0; i < threadCount; i++ )
+    {
+        F1MemBucketJob& job = f1Job[i];
+        job.key               = key;
+        job.blockCount        = blocksPerThread;
+        job.x                 = x;
+        
+        job.blocks            = blocks;
+        job.yBuckets          = yBuckets;
+        job.xBuckets          = xBuckets;
+        job.totalBucketCounts = nullptr;
+        job.counts            = nullptr;
+
+        if( trailingBlocks )
+        {
+            job.blockCount ++;
+            trailingBlocks --; 
+        }
+
+        x       += job.blockCount * entriesPerBlock;
+        blocks  += job.blockCount * kF1BlockSize;
+    }
+
+    f1Job[0].totalBucketCounts = bucketCounts;
+
+    f1Job.Run( threadCount );
+}
+
+//-----------------------------------------------------------
+void F1MemBucketJob::Run()
+{
+    chacha8_ctx chacha;
+    chacha8_keysetup( &chacha, key, 256, NULL );
+
+    const uint32 entriesPerBlock = kF1BlockSize / sizeof( uint32 );
+    const uint32 entryCount      = blockCount * entriesPerBlock;
+
+    // if( this->JobCount() > 1 )
+    // MTJobSyncT<F1MemBucketJob>* job = static_cast<MTJobSyncT<F1MemBucketJob>*>( this );
+    GenerateF1<false, false>( chacha, x, blocks, 
+                              blockCount, entryCount, 
+                              yBuckets, xBuckets, this, 0, nullptr );
+}
+
+//-----------------------------------------------------------
+template<bool WriteToDisk, bool SingleThreaded, typename TJob>
+void GenerateF1( 
+    chacha8_ctx& chacha, 
+    uint32  x,
+    byte*   blocks,
+    uint32  blockCount,
+    uint32  entryCount,
+    uint32* yBuckets,
+    uint32* xBuckets,
+    MTJobSyncT<TJob>* job,
     size_t  fileBlockSize,
     uint32* sizes
     )
@@ -25,10 +143,8 @@ void F1GenBucketized::Generate(
     const uint32 kMinusKExtraBits  = _K - kExtraBits;
     const uint32 bucketShift       = (8u - (uint)kExtraBits);
 
-    const uint32 jobId             = this->JobId();
-    const uint32 jobCount          = this->JobCount();
-
-    const size_t fileBlockSize     = queue->BlockSize();
+    const uint32 jobId             = job->JobId();
+    const uint32 jobCount          = job->JobCount();
 
     ASSERT( entryCount <= blockCount * entriesPerBlock );
     
@@ -44,7 +160,7 @@ void F1GenBucketized::Generate(
     const uint32* block = (uint32*)blocks;
 
     // Count entries per bucket. Only calculate the blocks that have full entries
-    const uint32 fullBlockCount  = entryCount / entriesPerBLock;
+    const uint32 fullBlockCount  = entryCount / entriesPerBlock;
     const uint32 trailingEntries = blockCount * entriesPerBlock - entryCount;
 
     for( uint i = 0; i < fullBlockCount; i++ )
@@ -106,7 +222,8 @@ void F1GenBucketized::Generate(
             // We need to align each count to file block size
             // so that each bucket starts aligned 
             // (we won't write submit these extra false entries)
-            pfxSum[i] = RoundUpToNextBoundary( pfxSum[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+            // for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
+            //  pfxSum[i] = RoundUpToNextBoundary( pfxSum[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
         }
 
         for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
@@ -114,32 +231,32 @@ void F1GenBucketized::Generate(
     }
     else
     {
-        this->CalculateMultithreadedPredixSum( counts, pfxSum );
+        static_cast<F1BucketJob<TJob>*>( job )->CalculateMultiThreadedPrefixSum( counts, pfxSum, fileBlockSize );
     }
     
     // Now we know the offset where we can start storing bucketized y values
 
+    // #TODO: No, we pass in the buffer beforehand
     // Grab a buffer from the queue
-    if constexpr ( WriteToDisk )
-    {
-        if( this->LockThreads() )
-        {
-            sizes   = (uint32*)queue.GetBuffer( (sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-            buckets = (uint32*)queue.GetBuffer( bufferSize );
-            xBuffer = (uint32*)queue.GetBuffer( bufferSize );
+    // if constexpr ( WriteToDisk )
+    // {
+    //     if( job->LockThreads() )
+    //     {
+    //         sizes   = (uint32*)queue.GetBuffer( (sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
+    //         buckets = (uint32*)queue.GetBuffer( bufferSize );
+    //         xBuffer = (uint32*)queue.GetBuffer( bufferSize );
 
-            this->buckets = buckets;
-            this->xBuffer = xBuffer;
-            this->ReleaseThreads();
-        }
-        else
-        {
-            this->WaitForRelease();
-            buckets = GetJob( 0 ).buckets;
-            xBuffer = GetJob( 0 ).xBuffer;
-        }
-    }
-
+    //         this->buckets = buckets;
+    //         this->xBuffer = xBuffer;
+    //         this->ReleaseThreads();
+    //     }
+    //     else
+    //     {
+    //         this->WaitForRelease();
+    //         buckets = GetJob( 0 ).buckets;
+    //         xBuffer = GetJob( 0 ).xBuffer;
+    //     }
+    // }
 
     // Distribute values into buckets at each thread's given offset
     block = (uint*)blocks;
@@ -184,40 +301,40 @@ void F1GenBucketized::Generate(
         // Add the x as the kExtraBits, and strip away the high kExtraBits,
         // which is now our bucket id, and place each entry into it's respective bucket
         // #NOTE: False sharing can occur here
-        buckets[idx0 ] = ( y0  << kExtraBits ) | ( ( x + 0  ) >> kMinusKExtraBits );
-        buckets[idx1 ] = ( y1  << kExtraBits ) | ( ( x + 1  ) >> kMinusKExtraBits );
-        buckets[idx2 ] = ( y2  << kExtraBits ) | ( ( x + 2  ) >> kMinusKExtraBits );
-        buckets[idx3 ] = ( y3  << kExtraBits ) | ( ( x + 3  ) >> kMinusKExtraBits );
-        buckets[idx4 ] = ( y4  << kExtraBits ) | ( ( x + 4  ) >> kMinusKExtraBits );
-        buckets[idx5 ] = ( y5  << kExtraBits ) | ( ( x + 5  ) >> kMinusKExtraBits );
-        buckets[idx6 ] = ( y6  << kExtraBits ) | ( ( x + 6  ) >> kMinusKExtraBits );
-        buckets[idx7 ] = ( y7  << kExtraBits ) | ( ( x + 7  ) >> kMinusKExtraBits );
-        buckets[idx8 ] = ( y8  << kExtraBits ) | ( ( x + 8  ) >> kMinusKExtraBits );
-        buckets[idx9 ] = ( y9  << kExtraBits ) | ( ( x + 9  ) >> kMinusKExtraBits );
-        buckets[idx10] = ( y10 << kExtraBits ) | ( ( x + 10 ) >> kMinusKExtraBits );
-        buckets[idx11] = ( y11 << kExtraBits ) | ( ( x + 11 ) >> kMinusKExtraBits );
-        buckets[idx12] = ( y12 << kExtraBits ) | ( ( x + 12 ) >> kMinusKExtraBits );
-        buckets[idx13] = ( y13 << kExtraBits ) | ( ( x + 13 ) >> kMinusKExtraBits );
-        buckets[idx14] = ( y14 << kExtraBits ) | ( ( x + 14 ) >> kMinusKExtraBits );
-        buckets[idx15] = ( y15 << kExtraBits ) | ( ( x + 15 ) >> kMinusKExtraBits );
+        yBuckets[idx0 ] = ( y0  << kExtraBits ) | ( ( x + 0  ) >> kMinusKExtraBits );
+        yBuckets[idx1 ] = ( y1  << kExtraBits ) | ( ( x + 1  ) >> kMinusKExtraBits );
+        yBuckets[idx2 ] = ( y2  << kExtraBits ) | ( ( x + 2  ) >> kMinusKExtraBits );
+        yBuckets[idx3 ] = ( y3  << kExtraBits ) | ( ( x + 3  ) >> kMinusKExtraBits );
+        yBuckets[idx4 ] = ( y4  << kExtraBits ) | ( ( x + 4  ) >> kMinusKExtraBits );
+        yBuckets[idx5 ] = ( y5  << kExtraBits ) | ( ( x + 5  ) >> kMinusKExtraBits );
+        yBuckets[idx6 ] = ( y6  << kExtraBits ) | ( ( x + 6  ) >> kMinusKExtraBits );
+        yBuckets[idx7 ] = ( y7  << kExtraBits ) | ( ( x + 7  ) >> kMinusKExtraBits );
+        yBuckets[idx8 ] = ( y8  << kExtraBits ) | ( ( x + 8  ) >> kMinusKExtraBits );
+        yBuckets[idx9 ] = ( y9  << kExtraBits ) | ( ( x + 9  ) >> kMinusKExtraBits );
+        yBuckets[idx10] = ( y10 << kExtraBits ) | ( ( x + 10 ) >> kMinusKExtraBits );
+        yBuckets[idx11] = ( y11 << kExtraBits ) | ( ( x + 11 ) >> kMinusKExtraBits );
+        yBuckets[idx12] = ( y12 << kExtraBits ) | ( ( x + 12 ) >> kMinusKExtraBits );
+        yBuckets[idx13] = ( y13 << kExtraBits ) | ( ( x + 13 ) >> kMinusKExtraBits );
+        yBuckets[idx14] = ( y14 << kExtraBits ) | ( ( x + 14 ) >> kMinusKExtraBits );
+        yBuckets[idx15] = ( y15 << kExtraBits ) | ( ( x + 15 ) >> kMinusKExtraBits );
 
         // Store the x that generated this y
-        xBuffer[idx0 ] = x + 0 ;
-        xBuffer[idx1 ] = x + 1 ;
-        xBuffer[idx2 ] = x + 2 ;
-        xBuffer[idx3 ] = x + 3 ;
-        xBuffer[idx4 ] = x + 4 ;
-        xBuffer[idx5 ] = x + 5 ;
-        xBuffer[idx6 ] = x + 6 ;
-        xBuffer[idx7 ] = x + 7 ;
-        xBuffer[idx8 ] = x + 8 ;
-        xBuffer[idx9 ] = x + 9 ;
-        xBuffer[idx10] = x + 10;
-        xBuffer[idx11] = x + 11;
-        xBuffer[idx12] = x + 12;
-        xBuffer[idx13] = x + 13;
-        xBuffer[idx14] = x + 14;
-        xBuffer[idx15] = x + 15;
+        xBuckets[idx0 ] = x + 0 ;
+        xBuckets[idx1 ] = x + 1 ;
+        xBuckets[idx2 ] = x + 2 ;
+        xBuckets[idx3 ] = x + 3 ;
+        xBuckets[idx4 ] = x + 4 ;
+        xBuckets[idx5 ] = x + 5 ;
+        xBuckets[idx6 ] = x + 6 ;
+        xBuckets[idx7 ] = x + 7 ;
+        xBuckets[idx8 ] = x + 8 ;
+        xBuckets[idx9 ] = x + 9 ;
+        xBuckets[idx10] = x + 10;
+        xBuckets[idx11] = x + 11;
+        xBuckets[idx12] = x + 12;
+        xBuckets[idx13] = x + 13;
+        xBuckets[idx14] = x + 14;
+        xBuckets[idx15] = x + 15;
 
         // const uint32 refY = 27327;
         // if( buckets[idx0 ] == refY ) BBDebugBreak();
@@ -264,51 +381,52 @@ void F1GenBucketized::Generate(
         const uint32 y   = Swap32( block[i] );
         const uint32 idx = --pfxSum[y >> kMinusKExtraBits];
         
-        buckets[idx] = ( y  << kExtraBits ) | ( ( x + i ) >> kMinusKExtraBits );
-        xBuffer[idx] = x + i;
+        yBuckets[idx] = ( y  << kExtraBits ) | ( ( x + i ) >> kMinusKExtraBits );
+        xBuckets[idx] = x + i;
     }
 
     // Now this chunk can be submitted to the write queue, and we can continue to the next one.
     // After all the chunks have been written, we can read back from disk to sort each bucket
     // #TODO: Move this to its own func
-    if constexpr ( WriteToDisk )
-    {
-        if( this->LockThreads() )
-        {
-            // #TODO: Don't do this if not using direct IO?
-            // #NOTE: We give it the non-block aligned size, but the Queue will 
-            //        only write up to the block aligned size. The rest
-            //        we write with the remainder buffers.
-            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                sizes[i] = (uint32)( bucketCounts[i] * sizeof( uint32 ) );
+    // if constexpr ( WriteToDisk )
+    // {
+    //     if( this->LockThreads() )
+    //     {
+    //         // #TODO: Don't do this if not using direct IO?
+    //         // #NOTE: We give it the non-block aligned size, but the Queue will 
+    //         //        only write up to the block aligned size. The rest
+    //         //        we write with the remainder buffers.
+    //         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+    //             sizes[i] = (uint32)( bucketCounts[i] * sizeof( uint32 ) );
 
-            queue.WriteBuckets( FileId::Y0, buckets, sizes );
-            queue.WriteBuckets( FileId::X , xBuffer, sizes );
-            queue.CommitCommands();
+    //         queue.WriteBuckets( FileId::Y0, buckets, sizes );
+    //         queue.WriteBuckets( FileId::X , xBuffer, sizes );
+    //         queue.CommitCommands();
 
-            // If we're not at our last chunk, we need to shave-off
-            // any entries that will not align to the file block size and
-            // leave them in our buckets for the next run.
-            SaveBlockRemainders( buckets, xBuffer, bucketCounts, remainders, remainderSizes );
+    //         // If we're not at our last chunk, we need to shave-off
+    //         // any entries that will not align to the file block size and
+    //         // leave them in our buckets for the next run.
+    //         SaveBlockRemainders( buckets, xBuffer, bucketCounts, remainders, remainderSizes );
 
-            queue.ReleaseBuffer( sizes   );
-            queue.ReleaseBuffer( buckets );
-            queue.ReleaseBuffer( xBuffer );
-            queue.CommitCommands();
+    //         queue.ReleaseBuffer( sizes   );
+    //         queue.ReleaseBuffer( buckets );
+    //         queue.ReleaseBuffer( xBuffer );
+    //         queue.CommitCommands();
 
-            this->ReleaseThreads();
-        }
-        else
-            this->WaitForRelease();
-    }
+    //         this->ReleaseThreads();
+    //     }
+    //     else
+    //         this->WaitForRelease();
+    // }
 }
 
 //-----------------------------------------------------------
-void F1GenBucketized::CalculateMultithreadedPredixSum( 
-        uint32 counts[BB_DP_BUCKET_COUNT],
-        uint32 pfxSum[BB_DP_BUCKET_COUNT],
-        const size_t fileBlockSize
-    )
+template<typename TJob>
+inline void F1BucketJob<TJob>::CalculateMultiThreadedPrefixSum( 
+    uint32 counts[BB_DP_BUCKET_COUNT],
+    uint32 pfxSum[BB_DP_BUCKET_COUNT],
+    const size_t fileBlockSize
+)
 {
     const uint32 jobId    = this->JobId();
     const uint32 jobCount = this->JobCount();
@@ -321,7 +439,7 @@ void F1GenBucketized::CalculateMultithreadedPredixSum(
 
     for( uint i = 0; i < jobCount; i++ )
     {
-        const uint* tCounts = GetJob( i ).counts;
+        const uint* tCounts = this->GetJob( i ).counts;
 
         for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
             pfxSum[j] += tCounts[j];
@@ -346,8 +464,11 @@ void F1GenBucketized::CalculateMultithreadedPredixSum(
     // We need to align our bucket totals to the 
     // file block size boundary so that each block buffer
     // is properly aligned for direct io.
-    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-        pfxSum[i] = RoundUpToNextBoundary( pfxSum[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+    if( fileBlockSize )
+    {
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            pfxSum[i] = RoundUpToNextBoundary( pfxSum[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+    }
 
     // Calculate the prefix sum
     for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
@@ -357,7 +478,7 @@ void F1GenBucketized::CalculateMultithreadedPredixSum(
     // to get the correct prefix sum for this thread
     for( uint t = jobId+1; t < jobCount; t++ )
     {
-        const uint* tCounts = GetJob( t ).counts;
+        const uint* tCounts = this->GetJob( t ).counts;
 
         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
             pfxSum[i] -= tCounts[i];

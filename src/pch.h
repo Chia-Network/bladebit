@@ -13,16 +13,10 @@
 // Defined in Util.cpp
 bool AssertLog( int line, const char* file, const char* func );
 
-#ifdef _WIN32
-    #define BB_DEBUG_BRK __debugbreak()
-#else
-    #define BB_DEBUG_BRK 
-#endif
-
 #if _DEBUG
     #include <assert.h>
     #define ASSERT( condition ) \
-        { if( !(condition) ) { AssertLog( __LINE__, __FILE__, __FUNCTION__ ); BB_DEBUG_BRK; } }
+        { if( !(condition) ) { AssertLog( __LINE__, __FILE__, __FUNCTION__ ); BBDebugBreak(); } }
 //     assert( x )
 #else
     #define ASSERT( x ) 

@@ -11,13 +11,13 @@ template<typename TJob, uint MaxJobs>
 struct MTJobRunner;
 
 template<typename TJob>
-struct MTJob
+struct MTJobSyncT
 {
-    template<typename,uint>
-    friend struct MTJobRunner;
-
-    // Override in the job itself
-    virtual void Run() = 0;
+    std::atomic<uint>* _finishedCount;
+    std::atomic<uint>* _releaseLock;
+    uint               _jobId;
+    uint               _jobCount;
+    TJob*              _jobs;
 
     // Synchronize all threads before continuing to the next step
     inline void SyncThreads();
@@ -53,13 +53,18 @@ struct MTJob
     #else
         inline void Trace( const char* msg, ... ) {}
     #endif
+};
 
-protected:
-    std::atomic<uint>* _finishedCount;
-    std::atomic<uint>* _releaseLock;
-    uint               _jobId;
-    uint               _jobCount;
-    TJob*              _jobs;
+struct MTJobSync : public MTJobSyncT<MTJobSync> {};
+
+template<typename TJob>
+struct MTJob : public MTJobSyncT<TJob>
+{
+    template<typename,uint>
+    friend struct MTJobRunner;
+
+    // Override in the job itself
+    virtual void Run() = 0;
 };
 
 
@@ -69,6 +74,7 @@ struct MTJobRunner
     MTJobRunner( ThreadPool& pool );
 
     double Run();
+    double Run( uint32 threadCount );
 
     inline TJob& operator[]( uint64 index ) { return this->_jobs[index]; }
     inline TJob& operator[]( uint index   ) { return this->_jobs[index]; }
@@ -92,9 +98,14 @@ inline MTJobRunner<TJob, MaxJobs>::MTJobRunner( ThreadPool& pool )
 template<typename TJob, uint MaxJobs>
 inline double MTJobRunner<TJob, MaxJobs>::Run()
 {
+    return this->Run( this->_pool.ThreadCount() );
+}
+
+template<typename TJob, uint MaxJobs>
+inline double MTJobRunner<TJob, MaxJobs>::Run( uint32 threadCount )
+{
     // Set thread ids and atomic locks
-    const uint threadCount = _pool.ThreadCount();
-    ASSERT( _pool.ThreadCount() <= MaxJobs );
+    ASSERT( threadCount <= MaxJobs );
 
     std::atomic<uint> finishedCount = 0;
     std::atomic<uint> releaseLock   = 0;
@@ -127,7 +138,7 @@ inline void MTJobRunner<TJob, MaxJobs>::RunJobWrapper( TJob* job )
 
 
 template<typename TJob>
-inline void MTJob<TJob>::SyncThreads()
+inline void MTJobSyncT<TJob>::SyncThreads()
 {
     if( LockThreads() )
         ReleaseThreads();
@@ -136,7 +147,7 @@ inline void MTJob<TJob>::SyncThreads()
 }
 
 template<typename TJob>
-inline bool MTJob<TJob>::LockThreads()
+inline bool MTJobSyncT<TJob>::LockThreads()
 {
     if( this->_jobId == 0 )
     {
@@ -156,7 +167,7 @@ inline bool MTJob<TJob>::LockThreads()
 }
 
 template<typename TJob>
-inline void MTJob<TJob>::ReleaseThreads()
+inline void MTJobSyncT<TJob>::ReleaseThreads()
 {
     ASSERT( _jobId == 0 );
 
@@ -171,7 +182,7 @@ inline void MTJob<TJob>::ReleaseThreads()
 }
 
 template<typename TJob>
-inline void MTJob<TJob>::WaitForRelease()
+inline void MTJobSyncT<TJob>::WaitForRelease()
 {
     ASSERT( _jobId != 0 );
 
@@ -202,7 +213,7 @@ inline void MTJob<TJob>::WaitForRelease()
 #if _DEBUG
 //-----------------------------------------------------------
 template<typename TJob>
-inline void MTJob<TJob>::Trace( const char* msg, ... )
+inline void MTJobSyncT<TJob>::Trace( const char* msg, ... )
 {
     const size_t BUF_SIZE = 512;
     char buf1[BUF_SIZE];
