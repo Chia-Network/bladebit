@@ -5,6 +5,7 @@
 #include "pos/chacha8.h"
 #include "b3/blake3.h"
 #include "plotshared/GenSortKey.h"
+#include "jobs/F1GenBucketized.h"
 
 // Test
 #include "io/FileStream.h"
@@ -102,7 +103,7 @@ void DiskPlotPhase1::Run()
     // #TODO: Remove this, this is for now while testing.
     _diskQueue->ResetHeap( _cx.ioHeapSize, _cx.ioHeap );
 
-    ForwardPropagate();
+    // ForwardPropagate();
 }
 
 ///
@@ -114,131 +115,136 @@ void DiskPlotPhase1::GenF1()
     DiskPlotContext& cx   = _cx;
     ThreadPool&      pool = *cx.threadPool;
 
+    F1GenBucketized::GenerateF1Disk( 
+        cx.plotId, pool, cx.threadCount, *_diskQueue, 
+        cx.writeIntervals[(int)TableId::Table1].fxGen, 
+        cx.bucketCounts[0] );
+    
     // Prepare ChaCha key
-    byte key[32] = { 1 };
-    memcpy( key + 1, cx.plotId, 31 );
+//     byte key[32] = { 1 };
+//     memcpy( key + 1, cx.plotId, 31 );
 
-    // Prepare jobs
-    const uint64 entryCount      = 1ull << _K;
-    // const size_t entryTotalSize  = entryCount * sizeof( uint32 );
-    const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
-    const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
+//     // Prepare jobs
+//     const uint64 entryCount      = 1ull << _K;
+//     // const size_t entryTotalSize  = entryCount * sizeof( uint32 );
+//     const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
+//     const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
 
-    // #TODO: Enforce a minimum chunk size, and ensure that a (chunk size - counts) / threadCount
-    // /      is sufficient to bee larger that the cache line size, and it must be greater than adjusted size...
+//     // #TODO: Enforce a minimum chunk size, and ensure that a (chunk size - counts) / threadCount
+//     // /      is sufficient to bee larger that the cache line size, and it must be greater than adjusted size...
 
-    // const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
-    const size_t chunkBufferSize  = cx.writeIntervals[(int)TableId::Table1].fxGen;
+//     // const size_t countsBufferSize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
+//     const size_t chunkBufferSize  = cx.writeIntervals[(int)TableId::Table1].fxGen;
 
-    // We need to adjust the chunk buffer size to leave some space for us to be
-    // able to align each bucket start pointer to the block size of the output device
-    const size_t driveBlockSize   = _diskQueue->BlockSize();
+//     // We need to adjust the chunk buffer size to leave some space for us to be
+//     // able to align each bucket start pointer to the block size of the output device
+//     const size_t driveBlockSize   = _diskQueue->BlockSize();
 
-    // This should be rare, but could happen...
-    FatalIf( driveBlockSize * BB_DP_BUCKET_COUNT >= chunkBufferSize,
-             "The output drive block size is too great for the IO buffer size.\n"
-             "Please increase your IO buffer size or use an output drive with a smaller block size." );
+//     // This should be rare, but could happen...
+//     FatalIf( driveBlockSize * BB_DP_BUCKET_COUNT >= chunkBufferSize,
+//              "The output drive block size is too great for the IO buffer size.\n"
+//              "Please increase your IO buffer size or use an output drive with a smaller block size." );
     
-    const size_t usableChunkSize  = chunkBufferSize - driveBlockSize * BB_DP_BUCKET_COUNT;
+//     const size_t usableChunkSize  = chunkBufferSize - driveBlockSize * BB_DP_BUCKET_COUNT;
 
-    const uint32 blocksPerChunk   = (uint32)( usableChunkSize / ( kF1BlockSize * 2 ) ); // * 2 because we also have to process/write the x values
+//     const uint32 blocksPerChunk   = (uint32)( usableChunkSize / ( kF1BlockSize * 2 ) ); // * 2 because we also have to process/write the x values
     
-    uint32 chunkCount     = blockCount / blocksPerChunk;                // How many chunks we need to process 
-                                                                        // (needs ot be floored to ensure we fit in the chunk buffer)
-    uint32 trailingBlocks = blockCount - blocksPerChunk * chunkCount;
+//     uint32 chunkCount     = blockCount / blocksPerChunk;                // How many chunks we need to process 
+//                                                                         // (needs ot be floored to ensure we fit in the chunk buffer)
+//     uint32 trailingBlocks = blockCount - blocksPerChunk * chunkCount;
 
-    // Threads operate on a chunk at a time.
-    const uint32 threadCount      = pool.ThreadCount();
-    const uint32 blocksPerThread  = blocksPerChunk / threadCount;
+//     // Threads operate on a chunk at a time.
+//     const uint32 threadCount      = pool.ThreadCount();
+//     const uint32 blocksPerThread  = blocksPerChunk / threadCount;
     
-    // #TODO: Ensure each thread has at least one block.
-    ASSERT( blocksPerThread > 0 );
+//     // #TODO: Ensure each thread has at least one block.
+//     ASSERT( blocksPerThread > 0 );
     
-    trailingBlocks += ( blocksPerChunk * chunkCount ) - ( blocksPerThread * threadCount * chunkCount );
+//     trailingBlocks += ( blocksPerChunk * chunkCount ) - ( blocksPerThread * threadCount * chunkCount );
 
-    // If the trailing blocks add up to a new chunk, then add that chunk
-    // the rest will be reserved for the final block
-    if( trailingBlocks > blocksPerChunk )
-    {
-        chunkCount ++;
-        trailingBlocks -= blocksPerChunk;
-    }
+//     // If the trailing blocks add up to a new chunk, then add that chunk
+//     // the rest will be reserved for the final block
+//     if( trailingBlocks > blocksPerChunk )
+//     {
+//         chunkCount ++;
+//         trailingBlocks -= blocksPerChunk;
+//     }
 
-    // #TODO: Need to add the last chunk to be processed, which will have less entries than the current
-    const uint32 trailingBlocksPerThread = trailingBlocks / threadCount;
-    trailingBlocks -= trailingBlocksPerThread * threadCount;
+//     // #TODO: Need to add the last chunk to be processed, which will have less entries than the current
+//     const uint32 trailingBlocksPerThread = trailingBlocks / threadCount;
+//     trailingBlocks -= trailingBlocksPerThread * threadCount;
 
-    uint  x          = 0;
-    byte* blocksRoot = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
-    byte* blocks     = blocksRoot;
-    byte* xBuffer    = blocks + blocksPerChunk * kF1BlockSize;
+//     uint  x          = 0;
+//     byte* blocksRoot = _diskQueue->GetBuffer( blocksPerChunk * kF1BlockSize * 2 );
+//     byte* blocks     = blocksRoot;
+//     byte* xBuffer    = blocks + blocksPerChunk * kF1BlockSize;
 
-    // Allocate buffers to track the remainders that are not multiple of the block size of the drive.
-    // We do double-buffering here as we these buffers are tiny and we don't expect to get blocked by them.
-    const size_t fileBlockSize  = _diskQueue->BlockSize();
-    const size_t remaindersSize = fileBlockSize * BB_DP_BUCKET_COUNT * 2;      // Double-buffered
-    byte*        remainders     = _diskQueue->GetBuffer( remaindersSize * 2 );  // Allocate 2, one for y one for x. They are used together.
+//     // Allocate buffers to track the remainders that are not multiple of the block size of the drive.
+//     // We do double-buffering here as we these buffers are tiny and we don't expect to get blocked by them.
+//     const size_t fileBlockSize  = _diskQueue->BlockSize();
+//     const size_t remaindersSize = fileBlockSize * BB_DP_BUCKET_COUNT * 2;      // Double-buffered
+//     byte*        remainders     = _diskQueue->GetBuffer( remaindersSize * 2 );  // Allocate 2, one for y one for x. They are used together.
 
-    uint32* bucketCounts = cx.bucketCounts[0];
-//     memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );    // Already zeroed.
+//     uint32* bucketCounts = cx.bucketCounts[0];
+// //     memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );    // Already zeroed.
 
-    MTJobRunner<GenF1Job> f1Job( pool );
+//     MTJobRunner<GenF1Job> f1Job( pool );
 
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        GenF1Job& job = f1Job[i];
-        job.key              = key;
-        job.blocksPerChunk   = blocksPerChunk;
-        job.chunkCount       = chunkCount;
-        job.blockCount       = blocksPerThread;
-        job.bucketBufferSize = chunkBufferSize;
-        job.x                = x;
+//     for( uint i = 0; i < threadCount; i++ )
+//     {
+//         GenF1Job& job = f1Job[i];
+//         job.key              = key;
+//         job.blocksPerChunk   = blocksPerChunk;
+//         job.chunkCount       = chunkCount;
+//         job.blockCount       = blocksPerThread;
+//         job.bucketBufferSize = chunkBufferSize;
+//         job.x                = x;
 
-        job.buffer           = blocks;
-        job.xBuffer          = (uint32*)xBuffer;
+//         job.buffer           = blocks;
+//         job.xBuffer          = (uint32*)xBuffer;
 
-        job.counts           = nullptr;
-        job.bucketCounts     = nullptr;
-        job.buckets          = nullptr;
+//         job.counts           = nullptr;
+//         job.bucketCounts     = nullptr;
+//         job.buckets          = nullptr;
         
-        job.diskQueue        = _diskQueue;
-        job.remaindersBuffer = nullptr;
+//         job.diskQueue        = _diskQueue;
+//         job.remaindersBuffer = nullptr;
 
-        job.trailingBlocks   = trailingBlocksPerThread;
+//         job.trailingBlocks   = trailingBlocksPerThread;
 
-        // if( trailingBlocks > 0 )
-        // {
-        //     job.trailingBlocks ++;
-        //     trailingBlocks--;
-        // }
+//         // if( trailingBlocks > 0 )
+//         // {
+//         //     job.trailingBlocks ++;
+//         //     trailingBlocks--;
+//         // }
 
-        x       += job.blockCount * entriesPerBlock * chunkCount;
-        blocks  += job.blockCount * kF1BlockSize;
-        xBuffer += job.blockCount * kF1BlockSize;
-    }
+//         x       += job.blockCount * entriesPerBlock * chunkCount;
+//         blocks  += job.blockCount * kF1BlockSize;
+//         xBuffer += job.blockCount * kF1BlockSize;
+//     }
 
-    f1Job[0].bucketCounts     = bucketCounts;
-    f1Job[0].remaindersBuffer = remainders;
+//     f1Job[0].bucketCounts     = bucketCounts;
+//     f1Job[0].remaindersBuffer = remainders;
 
-    Log::Line( "Generating f1..." );
-    double elapsed = f1Job.Run();
+//     Log::Line( "Generating f1..." );
+//     double elapsed = f1Job.Run();
 
-    // #TODO: trailing blocks needs to be performed
+//     // #TODO: trailing blocks needs to be performed
 
-    Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
+//     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
 
-    // Release our buffers
-    {
-        AutoResetSignal fence;
+//     // Release our buffers
+//     {
+//         AutoResetSignal fence;
 
-        _diskQueue->ReleaseBuffer( blocksRoot );
-        _diskQueue->ReleaseBuffer( remainders );
-        _diskQueue->AddFence( fence );
-        _diskQueue->CommitCommands();
+//         _diskQueue->ReleaseBuffer( blocksRoot );
+//         _diskQueue->ReleaseBuffer( remainders );
+//         _diskQueue->AddFence( fence );
+//         _diskQueue->CommitCommands();
 
-        fence.Wait();
-        _diskQueue->CompletePendingReleases();
-    }
+//         fence.Wait();
+//         _diskQueue->CompletePendingReleases();
+//     }
 }
 
 //-----------------------------------------------------------

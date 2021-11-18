@@ -17,6 +17,7 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
     uint64* refEntries    = nullptr;
 
     // Read the whole reference table into memory
+    Log::Line( "Loading reference table..." );
     {
         char path[1024];
         sprintf( path, "%st%d.y.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
@@ -40,9 +41,17 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
 
         ASSERT( refEntryCount <= maxEntries );
 
-        // The rest of the blocks are entries
-        FatalIf( !refTable.Read( refEntries, allocSize ), 
-                "Failed to read entries from reference table file %s with error: %d.", path, refTable.GetError() );
+        size_t sizeToRead = allocSize;
+        byte*  reader     = (byte*)refEntries;
+        while( sizeToRead )
+        {
+            // The rest of the blocks are entries
+            const ssize_t sizeRead = refTable.Read( reader, allocSize );
+            FatalIf( sizeRead <= 0, "Failed to read entries from reference table file %s with error: %d.", path, refTable.GetError() );
+
+            sizeToRead -= (size_t)sizeRead;
+            reader += sizeRead;
+        }
     }
 
 

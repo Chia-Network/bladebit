@@ -20,7 +20,7 @@ struct F1GenBucketized
         uint32      bucketCounts[BB_DP_BUCKET_COUNT]
     );
 
-    void GenerateF1Disk(
+    static void GenerateF1Disk(
         const byte*      plotId,
         ThreadPool&      pool, 
         uint             threadCount,

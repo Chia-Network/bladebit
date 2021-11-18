@@ -67,7 +67,6 @@ void TestF1Buckets( ThreadPool& pool, const byte plotId[32], const byte memoId[1
             sizeToRead -= (size_t)sizeRead;
             reader += sizeRead;
         }
-
     }
 
     uint32* yReader   = yBuckets;
