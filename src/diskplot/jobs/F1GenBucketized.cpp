@@ -209,10 +209,11 @@ void F1GenBucketized::GenerateF1Disk(
 
 
     // Allocate our buffers
-    byte* blocks     = diskQueue.GetBuffer( blocksPerThread * kF1BlockSize * threadCount );
+    byte* blocksRoot = diskQueue.GetBuffer( blocksPerThread * kF1BlockSize * threadCount );
+    byte* blocks     = blocksRoot;
 
-    // Remainders buffers are: 2 fileBlockSized buffers per bucket
-    byte* remainders = diskQueue.GetBuffer( diskQueue.BlockSize() * BB_DP_BUCKET_COUNT * 2 );
+    // Remainders buffers are: 2 file block-sized buffers per bucket per x/y
+    byte* remainders = diskQueue.GetBuffer( diskQueue.BlockSize() * BB_DP_BUCKET_COUNT * 4 );
 
      // Prepare Jobs
     byte key[32] = { 1 };
@@ -256,12 +257,12 @@ void F1GenBucketized::GenerateF1Disk(
     {
         AutoResetSignal fence;
 
-        // diskQueue.ReleaseBuffer( blocks     );
-        // diskQueue.ReleaseBuffer( remainders );
-        // diskQueue.AddFence( fence );
-        // diskQueue.CommitCommands();
-        // fence.Wait();
-        // diskQueue.CompletePendingReleases();
+        diskQueue.ReleaseBuffer( blocksRoot );
+        diskQueue.ReleaseBuffer( remainders );
+        diskQueue.AddFence( fence );
+        diskQueue.CommitCommands();
+        fence.Wait();
+        diskQueue.CompletePendingReleases();
     }
 }
 
@@ -379,30 +380,30 @@ void F1DiskBucketJob::Run()
         {
             this->LockThreads();
 
-            // sizes = (uint32*)diskQueue.GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-            // yBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
-            // xBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
+            sizes    = (uint32*)diskQueue.GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+            yBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
+            xBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
 
-            const size_t pageSize     = SysHost::GetPageSize();
-            const size_t sizesSize    = RoundUpToNextBoundaryT( sizeof( uint32 ) * BB_DP_BUCKET_COUNT, pageSize ) + pageSize * 2;
-            const size_t bucketsSizes = RoundUpToNextBoundaryT( chunkBufferSize, pageSize ) + pageSize * 2;
+            // const size_t pageSize     = SysHost::GetPageSize();
+            // const size_t sizesSize    = RoundUpToNextBoundaryT( sizeof( uint32 ) * BB_DP_BUCKET_COUNT, pageSize ) + pageSize * 2;
+            // const size_t bucketsSizes = RoundUpToNextBoundaryT( chunkBufferSize, pageSize ) + pageSize * 2;
 
-            byte* sizesBuffer = bbvirtalloc<byte>( sizesSize );
-            byte* ysBuffer    = bbvirtalloc<byte>( bucketsSizes );
-            byte* xsBuffer    = bbvirtalloc<byte>( bucketsSizes );
+            // byte* sizesBuffer = bbvirtalloc<byte>( sizesSize );
+            // byte* ysBuffer    = bbvirtalloc<byte>( bucketsSizes );
+            // byte* xsBuffer    = bbvirtalloc<byte>( bucketsSizes );
 
-            SysHost::VirtualProtect( sizesBuffer, pageSize );
-            SysHost::VirtualProtect( sizesBuffer + sizesSize-pageSize, pageSize );
+            // SysHost::VirtualProtect( sizesBuffer, pageSize );
+            // SysHost::VirtualProtect( sizesBuffer + sizesSize-pageSize, pageSize );
 
-            SysHost::VirtualProtect( ysBuffer, pageSize );
-            SysHost::VirtualProtect( ysBuffer + bucketsSizes-pageSize, pageSize );
+            // SysHost::VirtualProtect( ysBuffer, pageSize );
+            // SysHost::VirtualProtect( ysBuffer + bucketsSizes-pageSize, pageSize );
 
-            SysHost::VirtualProtect( xsBuffer, pageSize );
-            SysHost::VirtualProtect( xsBuffer + bucketsSizes-pageSize, pageSize );
+            // SysHost::VirtualProtect( xsBuffer, pageSize );
+            // SysHost::VirtualProtect( xsBuffer + bucketsSizes-pageSize, pageSize );
 
-            sizes    = (uint32*)( sizesBuffer + pageSize );
-            yBuckets = (uint32*)( ysBuffer + pageSize );
-            xBuckets = (uint32*)( xsBuffer + pageSize );
+            // sizes    = (uint32*)( sizesBuffer + pageSize );
+            // yBuckets = (uint32*)( ysBuffer + pageSize );
+            // xBuckets = (uint32*)( xsBuffer + pageSize );
             
             this->yBuckets = yBuckets;
             this->xBuckets = xBuckets;
@@ -452,9 +453,9 @@ void F1DiskBucketJob::Run()
             // leave them in our buckets for the next run.
             this->SaveBlockRemainders( yBuckets, xBuckets, bucketCounts, remainders, remainderSizes );
 
-            // diskQueue.ReleaseBuffer( sizes    );
-            // diskQueue.ReleaseBuffer( yBuckets );
-            // diskQueue.ReleaseBuffer( xBuckets );
+            diskQueue.ReleaseBuffer( sizes    );
+            diskQueue.ReleaseBuffer( yBuckets );
+            diskQueue.ReleaseBuffer( xBuckets );
             diskQueue.CommitCommands();
 
             this->ReleaseThreads();
@@ -515,8 +516,8 @@ inline void F1DiskBucketJob::SaveBlockRemainders( uint32* yBuckets, uint32* xBuc
             byte* yRemainder = buf.front;
             byte* xRemainder = yRemainder + fileBlockSize;
 
-            bbmemcpy_t( yRemainder + curRemainderSize, yPtr + blockAlignedSize, copySize );
-            bbmemcpy_t( xRemainder + curRemainderSize, xPtr + blockAlignedSize, copySize );
+            memcpy( yRemainder + curRemainderSize, yPtr + blockAlignedSize, copySize );
+            memcpy( xRemainder + curRemainderSize, xPtr + blockAlignedSize, copySize );
 
             curRemainderSize += remainderSize;
 
@@ -540,8 +541,8 @@ inline void F1DiskBucketJob::SaveBlockRemainders( uint32* yBuckets, uint32* xBuc
                     yRemainder = buf.front;
                     xRemainder = yRemainder + fileBlockSize;
 
-                    bbmemcpy_t( yRemainder, yPtr + blockAlignedSize + copySize, remainderSize );
-                    bbmemcpy_t( xRemainder, xPtr + blockAlignedSize + copySize, remainderSize );
+                    memcpy( yRemainder, yPtr + blockAlignedSize + copySize, remainderSize );
+                    memcpy( xRemainder, xPtr + blockAlignedSize + copySize, remainderSize );
                 }
 
                 remainderSizes[i] = 0;
@@ -781,23 +782,23 @@ void GenerateF1(
         xBuckets[idx14] = x + 14;
         xBuckets[idx15] = x + 15;
 
-        const uint32 refY = 2672319;
-        if( yBuckets[idx0 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx1 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx2 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx3 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx4 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx5 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx6 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx7 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx8 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx9 ] == refY ) BBDebugBreak();
-        if( yBuckets[idx10] == refY ) BBDebugBreak();
-        if( yBuckets[idx11] == refY ) BBDebugBreak();
-        if( yBuckets[idx12] == refY ) BBDebugBreak();
-        if( yBuckets[idx13] == refY ) BBDebugBreak();
-        if( yBuckets[idx14] == refY ) BBDebugBreak();
-        if( yBuckets[idx15] == refY ) BBDebugBreak();
+        // const uint32 refY = 2672319;
+        // if( yBuckets[idx0 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx1 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx2 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx3 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx4 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx5 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx6 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx7 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx8 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx9 ] == refY ) BBDebugBreak();
+        // if( yBuckets[idx10] == refY ) BBDebugBreak();
+        // if( yBuckets[idx11] == refY ) BBDebugBreak();
+        // if( yBuckets[idx12] == refY ) BBDebugBreak();
+        // if( yBuckets[idx13] == refY ) BBDebugBreak();
+        // if( yBuckets[idx14] == refY ) BBDebugBreak();
+        // if( yBuckets[idx15] == refY ) BBDebugBreak();
 
         // if( x + 0  == 41867 ) BBDebugBreak();
         // if( x + 1  == 41867 ) BBDebugBreak();

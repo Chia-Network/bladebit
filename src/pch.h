@@ -9,6 +9,7 @@
 #include <cstdarg>
 #include <chrono>
 #include <atomic>
+#include "Platform.h"
 
 // Defined in Util.cpp
 bool AssertLog( int line, const char* file, const char* func );
