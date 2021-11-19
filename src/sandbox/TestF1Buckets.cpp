@@ -61,7 +61,7 @@ void TestF1Buckets( ThreadPool& pool, const byte plotId[32], const byte memoId[1
         while( sizeToRead )
         {
             // The rest of the blocks are entries
-            const ssize_t sizeRead = refTable.Read( reader, allocSize );
+            const ssize_t sizeRead = refTable.Read( reader, sizeToRead );
             FatalIf( sizeRead <= 0, "Failed to read entries from reference table file %s with error: %d.", path, refTable.GetError() );
 
             sizeToRead -= (size_t)sizeRead;

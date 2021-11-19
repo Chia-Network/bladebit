@@ -38,6 +38,8 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
                 "Failed to read count from reference table file %s with error: %d.", path, refTable.GetError() );
 
         refEntryCount = *refEntries;
+        if( table == TableId::Table1 )
+            ASSERT( refEntryCount == maxEntries );
 
         ASSERT( refEntryCount <= maxEntries );
 
@@ -46,7 +48,7 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
         while( sizeToRead )
         {
             // The rest of the blocks are entries
-            const ssize_t sizeRead = refTable.Read( reader, allocSize );
+            const ssize_t sizeRead = refTable.Read( reader, sizeToRead );
             FatalIf( sizeRead <= 0, "Failed to read entries from reference table file %s with error: %d.", path, refTable.GetError() );
 
             sizeToRead -= (size_t)sizeRead;

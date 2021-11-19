@@ -148,9 +148,9 @@ void F1MemBucketJob::Run()
 
     // if( this->JobCount() > 1 )
     // MTJobSyncT<F1MemBucketJob>* job = static_cast<MTJobSyncT<F1MemBucketJob>*>( this );
-    GenerateF1<false, false>( chacha, x, blocks, 
-                              blockCount, entryCount, totalBucketCounts,
-                              yBuckets, xBuckets, this, 0 );
+    GenerateF1<false, false>( chacha, x, blocks, blockCount,
+                              entryCount, yBuckets, xBuckets,
+                              totalBucketCounts, this, 0 );
 }
 
 
@@ -368,7 +368,7 @@ void F1DiskBucketJob::Run()
             entriesPerThread = blocksPerThread * entriesPerBlock;
 
             // Update the x value to the correct starting position
-            x = entriesPerChunk * ( chunkCount - 1 ) + this->JobId() * entriesPerBlock;
+            x = entriesPerChunk * chunk + this->JobId() * entriesPerThread;
 
             ASSERT( entriesPerThread * threadCount == trailingBlocks * entriesPerBlock );
             // Continue processing trailing blocks
@@ -781,40 +781,40 @@ void GenerateF1(
         xBuckets[idx14] = x + 14;
         xBuckets[idx15] = x + 15;
 
-        // const uint32 refY = 27327;
-        // if( buckets[idx0 ] == refY ) BBDebugBreak();
-        // if( buckets[idx1 ] == refY ) BBDebugBreak();
-        // if( buckets[idx2 ] == refY ) BBDebugBreak();
-        // if( buckets[idx3 ] == refY ) BBDebugBreak();
-        // if( buckets[idx4 ] == refY ) BBDebugBreak();
-        // if( buckets[idx5 ] == refY ) BBDebugBreak();
-        // if( buckets[idx6 ] == refY ) BBDebugBreak();
-        // if( buckets[idx7 ] == refY ) BBDebugBreak();
-        // if( buckets[idx8 ] == refY ) BBDebugBreak();
-        // if( buckets[idx9 ] == refY ) BBDebugBreak();
-        // if( buckets[idx10] == refY ) BBDebugBreak();
-        // if( buckets[idx11] == refY ) BBDebugBreak();
-        // if( buckets[idx12] == refY ) BBDebugBreak();
-        // if( buckets[idx13] == refY ) BBDebugBreak();
-        // if( buckets[idx14] == refY ) BBDebugBreak();
-        // if( buckets[idx15] == refY ) BBDebugBreak();
+        const uint32 refY = 2672319;
+        if( yBuckets[idx0 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx1 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx2 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx3 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx4 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx5 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx6 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx7 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx8 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx9 ] == refY ) BBDebugBreak();
+        if( yBuckets[idx10] == refY ) BBDebugBreak();
+        if( yBuckets[idx11] == refY ) BBDebugBreak();
+        if( yBuckets[idx12] == refY ) BBDebugBreak();
+        if( yBuckets[idx13] == refY ) BBDebugBreak();
+        if( yBuckets[idx14] == refY ) BBDebugBreak();
+        if( yBuckets[idx15] == refY ) BBDebugBreak();
 
-        // if( x + 0  == 2853878795 ) BBDebugBreak();
-        // if( x + 1  == 2853878795 ) BBDebugBreak();
-        // if( x + 2  == 2853878795 ) BBDebugBreak();
-        // if( x + 3  == 2853878795 ) BBDebugBreak();
-        // if( x + 4  == 2853878795 ) BBDebugBreak();
-        // if( x + 5  == 2853878795 ) BBDebugBreak();
-        // if( x + 6  == 2853878795 ) BBDebugBreak();
-        // if( x + 7  == 2853878795 ) BBDebugBreak();
-        // if( x + 8  == 2853878795 ) BBDebugBreak();
-        // if( x + 9  == 2853878795 ) BBDebugBreak();
-        // if( x + 10 == 2853878795 ) BBDebugBreak();
-        // if( x + 11 == 2853878795 ) BBDebugBreak();
-        // if( x + 12 == 2853878795 ) BBDebugBreak();
-        // if( x + 13 == 2853878795 ) BBDebugBreak();
-        // if( x + 14 == 2853878795 ) BBDebugBreak();
-        // if( x + 15 == 2853878795 ) BBDebugBreak();
+        // if( x + 0  == 41867 ) BBDebugBreak();
+        // if( x + 1  == 41867 ) BBDebugBreak();
+        // if( x + 2  == 41867 ) BBDebugBreak();
+        // if( x + 3  == 41867 ) BBDebugBreak();
+        // if( x + 4  == 41867 ) BBDebugBreak();
+        // if( x + 5  == 41867 ) BBDebugBreak();
+        // if( x + 6  == 41867 ) BBDebugBreak();
+        // if( x + 7  == 41867 ) BBDebugBreak();
+        // if( x + 8  == 41867 ) BBDebugBreak();
+        // if( x + 9  == 41867 ) BBDebugBreak();
+        // if( x + 10 == 41867 ) BBDebugBreak();
+        // if( x + 11 == 41867 ) BBDebugBreak();
+        // if( x + 12 == 41867 ) BBDebugBreak();
+        // if( x + 13 == 41867 ) BBDebugBreak();
+        // if( x + 14 == 41867 ) BBDebugBreak();
+        // if( x + 15 == 41867 ) BBDebugBreak();
 
         block += entriesPerBlock;
         x     += entriesPerBlock;
