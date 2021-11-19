@@ -58,7 +58,7 @@
             "linux": {
                 "program": "${workspaceFolder}/build/bladebit_disk"
                 ,"args": [
-                    "-t", "64",
+                    "-t", "12",
                     // "--f1", "256MB",
                     "/mnt/p5510a/disk_tmp"
                 ]

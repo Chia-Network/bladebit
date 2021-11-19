@@ -362,16 +362,32 @@ void F1DiskBucketJob::Run()
             {
                 if( !this->ReduceThreadCount( threadCount ) )
                     return;
-            } 
+            }
+
+            // Distribute any left over blocks amongs threads
+            trailingBlocks -=  threadCount * blocksPerThread;
+
+            ASSERT( trailingBlocks < threadCount );
+            if( _jobId < trailingBlocks )
+                blocksPerThread++;
 
             // Update the block count
             blockCount       = blocksPerThread;
             entriesPerThread = blocksPerThread * entriesPerBlock;
 
             // Update the x value to the correct starting position
-            x = entriesPerChunk * chunk + this->JobId() * entriesPerThread;
+            x = entriesPerChunk * chunk;
 
-            ASSERT( entriesPerThread * threadCount == trailingBlocks * entriesPerBlock );
+            // Since threads before ours might have trailing blocks, ensure
+            // we account for that when offsetting our x
+            if( _jobId < trailingBlocks )
+                x += _jobId * entriesPerThread;
+            else
+            {
+                x += ( trailingBlocks * ( entriesPerThread + entriesPerBlock ) );
+                x += ( _jobId - trailingBlocks ) * entriesPerThread;
+            }
+
             // Continue processing trailing blocks
         }
 
