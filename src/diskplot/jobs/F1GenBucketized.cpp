@@ -3,6 +3,7 @@
 #include "threading/ThreadPool.h"
 #include "pos/chacha8.h"
 #include "plotshared/DoubleBuffer.h"
+#include "Util.h"
 
 template<typename TJob>
 struct F1BucketJob : public MTJob<TJob>
@@ -20,6 +21,7 @@ struct F1BucketJob : public MTJob<TJob>
     void CalculateMultiThreadedPrefixSum( 
         uint32 counts[BB_DP_BUCKET_COUNT],
         uint32 pfxSum[BB_DP_BUCKET_COUNT],
+        uint32 bucketCounts[BB_DP_BUCKET_COUNT],
         const size_t fileBlockSize
     );
 };
@@ -69,6 +71,7 @@ void GenerateF1(
     uint64            entryCount,
     uint32*           yBuckets,
     uint32*           xBuckets,
+    uint32            bucketCounts[BB_DP_BUCKET_COUNT],
     MTJobSyncT<TJob>* job,
     size_t            fileBlockSize
 );
@@ -146,7 +149,7 @@ void F1MemBucketJob::Run()
     // if( this->JobCount() > 1 )
     // MTJobSyncT<F1MemBucketJob>* job = static_cast<MTJobSyncT<F1MemBucketJob>*>( this );
     GenerateF1<false, false>( chacha, x, blocks, 
-                              blockCount, entryCount, 
+                              blockCount, entryCount, totalBucketCounts,
                               yBuckets, xBuckets, this, 0 );
 }
 
@@ -175,7 +178,7 @@ void F1GenBucketized::GenerateF1Disk(
     // able to align each bucket start pointer to the block size of the output device
     const size_t fileBlockSize         = diskQueue.BlockSize();
     const size_t bucketBlockAlignSize  = fileBlockSize * BB_DP_BUCKET_COUNT;
-    const size_t usableChunkSize       = chunkSize - bucketBlockAlignSize;
+    const size_t usableChunkSize       = chunkSize - bucketBlockAlignSize * 2;
 
     const size_t bucketBufferAllocSize = chunkSize / 2;                                 // Allocation size for each single bucket buffer (for x and y)
     
@@ -206,7 +209,7 @@ void F1GenBucketized::GenerateF1Disk(
 
 
     // Allocate our buffers
-    byte* blocks = diskQueue.GetBuffer( blocksPerThread * kF1BlockSize * threadCount );
+    byte* blocks     = diskQueue.GetBuffer( blocksPerThread * kF1BlockSize * threadCount );
 
     // Remainders buffers are: 2 fileBlockSized buffers per bucket
     byte* remainders = diskQueue.GetBuffer( diskQueue.BlockSize() * BB_DP_BUCKET_COUNT * 2 );
@@ -253,13 +256,12 @@ void F1GenBucketized::GenerateF1Disk(
     {
         AutoResetSignal fence;
 
-        diskQueue.ReleaseBuffer( blocks     );
-        diskQueue.ReleaseBuffer( remainders );
-        diskQueue.AddFence( fence );
-        diskQueue.CommitCommands();
-
-        fence.Wait();
-        diskQueue.CompletePendingReleases();
+        // diskQueue.ReleaseBuffer( blocks     );
+        // diskQueue.ReleaseBuffer( remainders );
+        // diskQueue.AddFence( fence );
+        // diskQueue.CommitCommands();
+        // fence.Wait();
+        // diskQueue.CompletePendingReleases();
     }
 }
 
@@ -272,9 +274,9 @@ void F1DiskBucketJob::Run()
     const size_t fileBlockSize   = diskQueue.BlockSize();
     const size_t chunkBufferSize = this->chunkBufferSize;
     
-    uint32* sizes    = nullptr;      
-    uint32* yBuckets = nullptr;
-    uint32* xBuckets = nullptr;
+    uint32* sizes           = nullptr;      
+    uint32* yBuckets        = nullptr;
+    uint32* xBuckets        = nullptr;
 
     uint32 chunkCount       = this->chunkCount;
     uint32 blockCount       = this->blockCount;
@@ -355,18 +357,18 @@ void F1DiskBucketJob::Run()
 
             // Change our participating thread counts, and if this thread
             // is no longer participating, exit early
-            if( !this->ReduceThreadCount( threadCount ) )
-                return;
+            if( this->JobCount() != threadCount )
+            {
+                if( !this->ReduceThreadCount( threadCount ) )
+                    return;
+            } 
 
             // Update the block count
             blockCount       = blocksPerThread;
             entriesPerThread = blocksPerThread * entriesPerBlock;
 
-            // Update the x value. Set it initially at the start of the next chunk
-            x = this->GetJob( 0 ).x;
-
-            // Offset it by out thread id and the entries per thread
-            x += this->JobId() * entriesPerBlock;
+            // Update the x value to the correct starting position
+            x = entriesPerChunk * ( chunkCount - 1 ) + this->JobId() * entriesPerBlock;
 
             ASSERT( entriesPerThread * threadCount == trailingBlocks * entriesPerBlock );
             // Continue processing trailing blocks
@@ -377,10 +379,30 @@ void F1DiskBucketJob::Run()
         {
             this->LockThreads();
 
-            sizes = (uint32*)diskQueue.GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+            // sizes = (uint32*)diskQueue.GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+            // yBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
+            // xBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
 
-            yBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
-            xBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
+            const size_t pageSize     = SysHost::GetPageSize();
+            const size_t sizesSize    = RoundUpToNextBoundaryT( sizeof( uint32 ) * BB_DP_BUCKET_COUNT, pageSize ) + pageSize * 2;
+            const size_t bucketsSizes = RoundUpToNextBoundaryT( chunkBufferSize, pageSize ) + pageSize * 2;
+
+            byte* sizesBuffer = bbvirtalloc<byte>( sizesSize );
+            byte* ysBuffer    = bbvirtalloc<byte>( bucketsSizes );
+            byte* xsBuffer    = bbvirtalloc<byte>( bucketsSizes );
+
+            SysHost::VirtualProtect( sizesBuffer, pageSize );
+            SysHost::VirtualProtect( sizesBuffer + sizesSize-pageSize, pageSize );
+
+            SysHost::VirtualProtect( ysBuffer, pageSize );
+            SysHost::VirtualProtect( ysBuffer + bucketsSizes-pageSize, pageSize );
+
+            SysHost::VirtualProtect( xsBuffer, pageSize );
+            SysHost::VirtualProtect( xsBuffer + bucketsSizes-pageSize, pageSize );
+
+            sizes    = (uint32*)( sizesBuffer + pageSize );
+            yBuckets = (uint32*)( ysBuffer + pageSize );
+            xBuckets = (uint32*)( xsBuffer + pageSize );
             
             this->yBuckets = yBuckets;
             this->xBuckets = xBuckets;
@@ -398,17 +420,22 @@ void F1DiskBucketJob::Run()
         }
 
         // Calculate blocks for this chunk
-        GenerateF1<true, false>( chacha, x, blocks, blockCount, entriesPerThread, yBuckets, xBuckets, this, fileBlockSize );
+        GenerateF1<true, false>( chacha, x, blocks, blockCount, entriesPerThread, yBuckets, xBuckets, bucketCounts, this, fileBlockSize );
 
         x += entriesPerChunk;
 
         // Submit the buckets for this chunk to disk
         // Now this chunk can be submitted to the write queue, and we can continue to the next one.
         // After all the chunks have been written, we can read back from disk to sort each bucket
-        // #TODO: Move this to its own func
-        
+        // #TODO: Move this to its own func?
         if( this->LockThreads() )
         {
+            // Add to total bucket counts
+            uint32* totalBucketCounts = this->totalBucketCounts;
+
+            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                totalBucketCounts[i] += bucketCounts[i];
+
             // #TODO: Don't do this if not using direct IO?
             // #NOTE: We give it the non-block aligned size, but the Queue will 
             //        only write up to the block aligned size. The rest
@@ -425,9 +452,9 @@ void F1DiskBucketJob::Run()
             // leave them in our buckets for the next run.
             this->SaveBlockRemainders( yBuckets, xBuckets, bucketCounts, remainders, remainderSizes );
 
-            diskQueue.ReleaseBuffer( sizes    );
-            diskQueue.ReleaseBuffer( yBuckets );
-            diskQueue.ReleaseBuffer( xBuckets );
+            // diskQueue.ReleaseBuffer( sizes    );
+            // diskQueue.ReleaseBuffer( yBuckets );
+            // diskQueue.ReleaseBuffer( xBuckets );
             diskQueue.CommitCommands();
 
             this->ReleaseThreads();
@@ -570,6 +597,7 @@ void GenerateF1(
     uint64            entryCount,
     uint32*           yBuckets,
     uint32*           xBuckets,
+    uint32            bucketCounts[BB_DP_BUCKET_COUNT],
     MTJobSyncT<TJob>* job,
     size_t            fileBlockSize
     )
@@ -654,11 +682,8 @@ void GenerateF1(
     {
         memcpy( pfxSum, counts, sizeof( counts ) );
 
-        // Save total bucket counts
-        uint32* totalBucketCounts = job->totalBucketCounts;
-
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            totalBucketCounts[i] += pfxSum[i];
+        // Save output bucket counts
+        memcpy( bucketCounts, counts, sizeof( counts ) );
 
         if constexpr ( WriteToDisk )
         {
@@ -674,7 +699,7 @@ void GenerateF1(
     }
     else
     {
-        static_cast<F1BucketJob<TJob>*>( job )->CalculateMultiThreadedPrefixSum( counts, pfxSum, fileBlockSize );
+        static_cast<F1BucketJob<TJob>*>( job )->CalculateMultiThreadedPrefixSum( counts, pfxSum, bucketCounts, fileBlockSize );
     }
     
     // Now we know the offset where we can start distributing
@@ -811,11 +836,17 @@ template<typename TJob>
 inline void F1BucketJob<TJob>::CalculateMultiThreadedPrefixSum( 
     uint32 counts[BB_DP_BUCKET_COUNT],
     uint32 pfxSum[BB_DP_BUCKET_COUNT],
+    uint32 bucketCounts[BB_DP_BUCKET_COUNT],
     const size_t fileBlockSize
 )
 {
     const uint32 jobId    = this->JobId();
     const uint32 jobCount = this->JobCount();
+
+    // This holds the count of extra entries added per-bucket
+    // to align each bucket starting address to disk block size.
+    // Only used when fileBlockSize > 0
+    uint32 entryPadding[BB_DP_BUCKET_COUNT];
 
     this->counts = counts;
     this->SyncThreads();
@@ -836,24 +867,45 @@ inline void F1BucketJob<TJob>::CalculateMultiThreadedPrefixSum(
     // for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
     //     totalCount += pfxSum[i];
 
-    // If we're the control thread, retain the total bucket count for this chunk.
+    // If we're the control thread, retain the total bucket count
     if( this->IsControlThread() )
     {
-        uint32* totalBucketCounts = this->totalBucketCounts;
-
-        // Add total bucket counts
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            totalBucketCounts[i] += pfxSum[i];
+        memcpy( bucketCounts, pfxSum, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
     }
 
     // #TODO: Only do this if using Direct IO
-    // We need to align our bucket totals to the 
-    // file block size boundary so that each block buffer
-    // is properly aligned for direct io.
+    // We need to align our bucket totals to the  file block size boundary
+    // so that each block buffer is properly aligned for direct io.
     if( fileBlockSize )
     {
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            pfxSum[i] = RoundUpToNextBoundary( pfxSum[i] * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+        #if _DEBUG
+            size_t bucketAddress = 0;
+        #endif
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT-1; i++ )
+        {
+            const uint32 count = pfxSum[i];
+
+            pfxSum[i]       = RoundUpToNextBoundary( count * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+            entryPadding[i] = pfxSum[i] - count;
+
+            #if _DEBUG
+                bucketAddress += pfxSum[i] * sizeof( uint32 );
+                ASSERT( bucketAddress / fileBlockSize * fileBlockSize == bucketAddress );
+            #endif
+        }
+
+        #if _DEBUG
+        // if( this->IsControlThread() )
+        // {
+        //     size_t totalSize = 0;
+        //     for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        //         totalSize += pfxSum[i];
+
+        //     totalSize *= sizeof( uint32 );
+        //     Log::Line( "Total Size: %llu", totalSize );
+        // }   
+        #endif
     }
 
     // Calculate the prefix sum
@@ -868,5 +920,17 @@ inline void F1BucketJob<TJob>::CalculateMultiThreadedPrefixSum(
 
         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
             pfxSum[i] -= tCounts[i];
+    }
+
+    if( fileBlockSize )
+    {
+        // Now that we have the starting addresses of the buckets
+        // at a block-aligned position, we need to substract
+        // the padding that we added to align them, so that
+        // the entries actually get writting to the starting
+        // point of the address
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT-1; i++ )
+            pfxSum[i] -= entryPadding[i];
     }
 }
