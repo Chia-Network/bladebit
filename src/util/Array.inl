@@ -148,7 +148,7 @@ inline T* Array<T>::Ptr() const
 template<typename T>
 inline void Array<T>::CheckCapacity( size_t count )
 {
-    ASSERT( _length < 0xFFFFFFFFFFFFFFFF );
+    ASSERT( _length < 9223372036854775807 );
     
     const size_t newLength = _length + count;
     
@@ -163,10 +163,10 @@ inline void Array<T>::CheckCapacity( size_t count )
         size_t newCapacity = _capacity + capacityGrow;
         if( newCapacity < _capacity )
         {
-            if( _capacity == 0xFFFFFFFFFFFFFFFF )
+            if( _capacity == 9223372036854775807 )
                 Fatal( "Array exceeded maximum size." );
 
-            newCapacity = 0xFFFFFFFFFFFFFFFF;
+            newCapacity = 9223372036854775807;
         }
 
         _elements = bbrealloc( _elements, newCapacity );

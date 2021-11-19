@@ -122,13 +122,13 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     target_compile_options(relic_s PRIVATE /MP)
     target_compile_options(sodium  PRIVATE /MP)
 
-    target_compile_options(bls     PRIVATE $<$<CONFIG:release>:/MT>)
-    target_compile_options(relic_s PRIVATE $<$<CONFIG:release>:/MT>)
-    target_compile_options(sodium  PRIVATE $<$<CONFIG:release>:/MT>)
+    target_compile_options(bls     PRIVATE $<$<CONFIG:Release>:/MT>)
+    target_compile_options(relic_s PRIVATE $<$<CONFIG:Release>:/MT>)
+    target_compile_options(sodium  PRIVATE $<$<CONFIG:Release>:/MT>)
 
-    target_compile_options(bls     PRIVATE $<$<CONFIG:debug>:/MTd>)
-    target_compile_options(relic_s PRIVATE $<$<CONFIG:debug>:/MTd>)
-    target_compile_options(sodium  PRIVATE $<$<CONFIG:debug>:/MTd>)
+    target_compile_options(bls     PRIVATE $<$<CONFIG:Debug>:/MTd>)
+    target_compile_options(relic_s PRIVATE $<$<CONFIG:Debug>:/MTd>)
+    target_compile_options(sodium  PRIVATE $<$<CONFIG:Debug>:/MTd>)
     
 else()
 
@@ -313,10 +313,10 @@ add_executable(bladebit_disk ${src_diskplot} ${bb_headers})
 
 macro(config_proj tgt)
 
-    target_compile_options(${tgt} PRIVATE $<$<CONFIG:release>:${c_opts} ${release_c_opts}>)
-    target_compile_options(${tgt} PRIVATE $<$<CONFIG:debug>:${c_opts} ${debug_c_opts}>)
-    target_link_options(${tgt} PRIVATE $<$<CONFIG:release>:${link_opts} ${release_link_opts}>)
-    target_link_options(${tgt} PRIVATE $<$<CONFIG:debug>:${link_opts} ${debug_link_opts}>)
+    target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+    target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+    target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
+    target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
 
     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
     target_link_libraries(${tgt} Threads::Threads bls ${platform_libs})

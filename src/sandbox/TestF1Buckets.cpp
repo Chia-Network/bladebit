@@ -2,6 +2,7 @@
 #include "diskplot/jobs/F1GenBucketized.h"
 #include "diskplot/DiskPlotConfig.h"
 #include "Util.h"
+#include "util/Log.h"
 #include "diskplot/DiskPlotDebug.h"
 #include "io/FileStream.h"
 #include "algorithm/RadixSort.h"

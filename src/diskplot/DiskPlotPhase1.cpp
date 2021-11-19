@@ -96,7 +96,7 @@ void DiskPlotPhase1::Run()
 #endif
 
     #if BB_DP_DBG_VALIDATE_Y
-        Debug::ValidateYFileFromBuckets( *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
+        // Debug::ValidateYFileFromBuckets( *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
     #endif
 
     // Re-create the disk queue with the io buffer only
