@@ -96,6 +96,9 @@ int main( int argc, const char* argv[] )
         Log::Line( "NDEBUG: OFF" );
     #endif
 
+    // Install a crash handler to dump our stack traces
+    SysHost::InstallCrashHandler();
+
     argc--;
     argv++;
     // return WriteTest( argc, argv );
