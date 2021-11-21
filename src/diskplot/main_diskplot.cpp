@@ -84,6 +84,9 @@ int WriteTest( int argc, const char* argv[] )
 //-----------------------------------------------------------
 int main( int argc, const char* argv[] )
 {
+    // Install a crash handler to dump our stack traces
+    SysHost::InstallCrashHandler();
+
     #if _DEBUG
         Log::Line( "DEBUG: ON" );
     #else
@@ -96,8 +99,6 @@ int main( int argc, const char* argv[] )
         Log::Line( "NDEBUG: OFF" );
     #endif
 
-    // Install a crash handler to dump our stack traces
-    SysHost::InstallCrashHandler();
 
     argc--;
     argv++;

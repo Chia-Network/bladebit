@@ -31,11 +31,8 @@ IFS=$'\r\n'
 stack_trace=( $(cat $log_path) )
 
 for c in ${stack_trace[@]}; do
-    # echo "Call: $c"
     address=$(printf "$c" | sed -E "s/.*\[(0x.+)\].*/\1/")
-    # echo "Address: $address"
     line=$(addr2line -ifp --demangle -a $address -e "$exe_path")
-    # echo "$c : $line"
     printf "%-58s @%s\n" "$c" "$line"
 done
 

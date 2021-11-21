@@ -391,7 +391,6 @@ void DiskPlotPhase1::ForwardPropagateTable()
             uint32* sortKeyTemp = yTemp + entryCount;
 
             RadixSort256::SortWithKey<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
-//             RadixSort256::Sort<BB_MAX_JOBS>( *cx.threadPool, bucket.y0, yTemp, entryCount );
 
             // Merge of matches here from w/ the previous bucket.
             if( bucketIdx > 0 )
