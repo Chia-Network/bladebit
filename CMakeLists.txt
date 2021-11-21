@@ -330,6 +330,17 @@ macro(config_proj tgt)
     #     endif()
     # endif()
 
+    # Strip debug symbols to separate file
+    if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+        add_custom_command(
+            TARGET ${tgt}
+            POST_BUILD
+            COMMAND "/usr/bin/env" "bash" "strip-debug-symbols.sh" "build/${tgt}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endif()
+
+
     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
     target_link_libraries(${tgt} Threads::Threads bls ${platform_libs})
 endmacro()

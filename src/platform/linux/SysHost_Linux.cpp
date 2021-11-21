@@ -8,6 +8,7 @@
 #include <atomic>
 #include <numa.h>
 #include <numaif.h>
+#include <stdio.h>
 
 // #if _DEBUG
     #include "util/Log.h"
@@ -204,6 +205,14 @@ void CrashHandler( int signal )
     int traceSize = backtrace( stackTrace, (int)MAX_POINTERS );
     backtrace_symbols_fd( stackTrace, traceSize, fileno( stderr ) );
     fflush( stderr );
+
+    FILE* crashFile = fopen( "crash.log", "w" );
+    if( crashFile )
+    {
+        backtrace_symbols_fd( stackTrace, traceSize, fileno( crashFile ) );
+        fflush( crashFile );
+        fclose( crashFile );
+    }
     
     exit( 1 );
 }
