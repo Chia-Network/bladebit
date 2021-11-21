@@ -23,7 +23,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     ASSERT( cfg.tmpPath );
     
     const size_t bucketsCountsSize = RoundUpToNextBoundaryT( BB_DP_BUCKET_COUNT * sizeof( uint32 ), cfg.expectedTmpDirBlockSize );
-    const uint32 ioBufferCount     = 3;    // Test with triple-buffering for now
+    const uint32 ioBufferCount     = cfg.ioBufferCount;
     const size_t ioHeapFullSize    = ( cfg.ioBufferSize + bucketsCountsSize ) * ioBufferCount;
 
     _cx.tmpPath       = cfg.tmpPath;
@@ -32,6 +32,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.ioBufferSize  = cfg.ioBufferSize;
     _cx.ioHeapSize    = ioHeapFullSize;
     _cx.ioBufferCount = ioBufferCount;
+    _cx.useDirectIO   = cfg.enableDirectIO;
 
     _cx.threadCount   = cfg.workThreadCount;
     _cx.ioThreadCount = cfg.ioThreadCount;
@@ -41,9 +42,10 @@ DiskPlotter::DiskPlotter( const Config cfg )
 
     Log::Line( "Work Heap size : %.2lf MiB", (double)_cx.heapSize BtoMB );
     Log::Line( "Work threads   : %u"       , _cx.threadCount   );
-    Log::Line( "IO buffer size : %llu MiB (%llu MiB total)", _cx.ioBufferSize BtoMB, _cx.ioBufferSize * _cx.ioBufferCount BtoMB );
     Log::Line( "IO threads     : %u"       , _cx.ioThreadCount );
+    Log::Line( "IO buffer size : %llu MiB (%llu MiB total)", _cx.ioBufferSize BtoMB, _cx.ioBufferSize * _cx.ioBufferCount BtoMB );
     Log::Line( "IO buffer count: %u"       , _cx.ioBufferCount );
+    Log::Line( "Unbuffered IO  : %s"       , _cx.useDirectIO ? "true" : "false" );
 
     const size_t allocationSize = _cx.heapSize + _cx.ioHeapSize;
 

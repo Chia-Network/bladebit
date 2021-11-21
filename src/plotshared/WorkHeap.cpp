@@ -109,12 +109,12 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment )
             return buffer;
 
         // No buffer found, we have to wait until buffers are released and then try again
-        Log::Debug( "No Buffers available waiting..." );
+        Log::Line( "***************************************************** No Buffers available waiting..." );
         auto timer = TimerBegin();
 
         _releaseSignal.Wait();
 
-        Log::Debug( " Waited %.6lf seconds for a buffer.", TimerEnd( timer ) );
+        Log::Line( " *****************************************************  Waited %.6lf seconds for a buffer.", TimerEnd( timer ) );
     }
 }
 

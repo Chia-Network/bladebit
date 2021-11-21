@@ -31,6 +31,7 @@ struct DiskPlotContext
 
     uint         threadCount;       // How many threads to use for in-memory plot work
     uint         ioThreadCount;     // How many threads to use for the disk buffer writer/reader
+    bool         useDirectIO;       // Use unbuffered (direct-IO) when performing temp read/writes?
 
     const byte*  plotId;
     const byte*  plotMemo;

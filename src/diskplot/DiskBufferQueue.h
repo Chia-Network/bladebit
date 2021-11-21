@@ -114,7 +114,7 @@ public:
 
     DiskBufferQueue( const char* workDir, byte* workBuffer, 
                      size_t workBufferSize, uint ioThreadCount,
-                     bool useDirectIO = true );
+                     bool useDirectIO );
     
     ~DiskBufferQueue();
 

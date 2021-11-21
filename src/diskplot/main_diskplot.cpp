@@ -23,7 +23,7 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg );
 //-----------------------------------------------------------
 int WriteTest( int argc, const char* argv[] )
 {
-    uint         threadCount  = 1;
+    uint         threadCount  = 4;
     const size_t bufferSize   = 64ull GB;
     // const uint   bufferCount  = 4;
     const char*  filePath     = "/mnt/p5510a/test.tmp";
@@ -84,6 +84,18 @@ int WriteTest( int argc, const char* argv[] )
 //-----------------------------------------------------------
 int main( int argc, const char* argv[] )
 {
+    #if _DEBUG
+        Log::Line( "DEBUG: ON" );
+    #else
+        Log::Line( "DEBUG: OFF" );
+    #endif
+
+    #if _NDEBUG
+        Log::Line( "NDEBUG: ON" );
+    #else
+        Log::Line( "NDEBUG: OFF" );
+    #endif
+
     argc--;
     argv++;
     // return WriteTest( argc, argv );
@@ -138,9 +150,10 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
 
 
      // Set defaults
-    const size_t f1DefaultWriteInterval = 128ull MB;
-    size_t fxDefaultWriteInterval       = 64ull  MB;
-    size_t matchDefaultWriteInterval    = 64ull  MB;
+    const size_t f1DefaultWriteInterval    = 128ull MB;
+    size_t       fxDefaultWriteInterval    = 64ull  MB;
+    size_t       matchDefaultWriteInterval = 64ull  MB;
+    const uint   minBufferCount            = 3;
 
     // Parse fx and match per-table
     auto checkFx = [&]( const char* a ) {
@@ -229,14 +242,22 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
         {
             cfg.workThreadCount = (uint)uvalue();
         }
-        else if( check( "--io-threads" ) )
+        else if( check( "-b" ) || check( "--buffer-count" ) )
         {
-            cfg.ioThreadCount = (uint)uvalue();
+            cfg.ioBufferCount = (uint)uvalue();
         }
-        else if( check( "-h" ) || check( "--heap" ) )
+        else if( check( "-d" ) || check( "--direct-io" ) )
         {
-            ParseSize( arg, value() );
+            cfg.enableDirectIO = true;
         }
+        // else if( check( "--io-threads" ) )
+        // {
+        //     cfg.ioThreadCount = (uint)uvalue();
+        // }
+        // else if( check( "-h" ) || check( "--heap" ) )
+        // {
+        //     ParseSize( arg, value() );
+        // }
         else if( check( "--temp" ) )
         {
             cfg.tmpPath = value();
@@ -285,6 +306,9 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
     }
 
     cfg.ioBufferSize = maxWriteInterval;
+
+    FatalIf( cfg.ioBufferCount < 3, "IO buffer (write interval buffers) cont must be 3 or more." );
+    
 
     const uint sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
 

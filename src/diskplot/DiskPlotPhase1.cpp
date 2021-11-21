@@ -56,7 +56,7 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     byte*  heap     = cx.heapBuffer;
     size_t heapSize = cx.heapSize + cx.ioHeapSize;
 
-    _diskQueue = new DiskBufferQueue( cx.tmpPath, heap, heapSize, cx.ioThreadCount );
+    _diskQueue = new DiskBufferQueue( cx.tmpPath, heap, heapSize, cx.ioThreadCount, cx.useDirectIO );
 }
 
 //-----------------------------------------------------------
@@ -103,7 +103,7 @@ void DiskPlotPhase1::Run()
     // #TODO: Remove this, this is for now while testing.
     _diskQueue->ResetHeap( _cx.ioHeapSize, _cx.ioHeap );
 
-    // ForwardPropagate();
+    ForwardPropagate();
 }
 
 ///
@@ -115,10 +115,16 @@ void DiskPlotPhase1::GenF1()
     DiskPlotContext& cx   = _cx;
     ThreadPool&      pool = *cx.threadPool;
 
+    Log::Line( "Generating f1..." );
+    auto timer = TimerBegin();
+    
     F1GenBucketized::GenerateF1Disk( 
         cx.plotId, pool, cx.threadCount, *_diskQueue, 
         cx.writeIntervals[(int)TableId::Table1].fxGen, 
         cx.bucketCounts[0] );
+    
+    double elapsed = TimerEnd( timer );
+    Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
     
     // Prepare ChaCha key
 //     byte key[32] = { 1 };

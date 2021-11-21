@@ -13,7 +13,9 @@ public:
         uint              workThreadCount;
         uint              ioThreadCount;
         size_t            ioBufferSize;
+        uint              ioBufferCount;
         DiskWriteInterval writeIntervals[(uint)TableId::_Count];
+        bool              enableDirectIO;
     };
 
     struct PlotRequest

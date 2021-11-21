@@ -50,7 +50,7 @@
 
 
 #if !_DEBUG
-    #undef BBDebugBreak()
+    #undef BBDebugBreak
     #define BBDebugBreak() 
 #endif
 
