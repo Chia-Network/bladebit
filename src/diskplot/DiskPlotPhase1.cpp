@@ -107,6 +107,28 @@ void DiskPlotPhase1::Run()
 }
 
 ///
+/// F1 Generation
+///
+//-----------------------------------------------------------
+void DiskPlotPhase1::GenF1()
+{
+    DiskPlotContext& cx   = _cx;
+    ThreadPool&      pool = *cx.threadPool;
+
+    Log::Line( "Generating f1..." );
+    auto timer = TimerBegin();
+    
+    F1GenBucketized::GenerateF1Disk( 
+        cx.plotId, pool, cx.threadCount, *_diskQueue, 
+        cx.writeIntervals[(int)TableId::Table1].fxGen, 
+        cx.bucketCounts[0] );
+    
+    double elapsed = TimerEnd( timer );
+    Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
+}
+
+
+///
 /// Forward Propagate Tables
 ///
 //-----------------------------------------------------------
@@ -665,13 +687,13 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
     {
         auto& job = jobs[i];
 
-        job.yBuffer      = yBuffer;
-        job.bucketIdx    = bucketIdx;
-        job.maxPairCount = maxPairsPerThread;
-        job.pairCount    = 0;
-        job.groupInfo    = &groupInfos[i];
-        job.copyLDst     = nullptr;
-        job.copyRDst     = nullptr;
+        job.yBuffer         = yBuffer;
+        job.bucketIdx       = bucketIdx;
+        job.maxPairCount    = maxPairsPerThread;
+        job.pairCount       = 0;
+        job.groupInfo       = &groupInfos[i];
+        job.copyLDst        = nullptr;
+        job.copyRDst        = nullptr;
     }
 
     const double elapsed = jobs.Run();
@@ -1711,7 +1733,7 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
 //-----------------------------------------------------------
 template<typename TJob>
 void BucketJob<TJob>::CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT], 
-                                          uint32 pfxSum      [BB_DP_BUCKET_COUNT], 
+                                          uint32 pfxSum[BB_DP_BUCKET_COUNT], 
                                           uint32 bucketCounts[BB_DP_BUCKET_COUNT] )
 {
     const size_t copySize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
