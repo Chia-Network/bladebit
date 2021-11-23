@@ -181,10 +181,10 @@ void F1GenBucketized::GenerateF1Disk(
     const size_t usableChunkSize       = chunkSize - bucketBlockAlignSize * 2;
 
     const size_t bucketBufferAllocSize = chunkSize / 2;                                 // Allocation size for each single bucket buffer (for x and y)
-    
+
     const uint32 blocksPerChunk   = (uint32)( usableChunkSize / ( kF1BlockSize * 2 ) ); // * 2 because we also have space for the x values
     ASSERT( blocksPerChunk * kF1BlockSize <= bucketBufferAllocSize );
-    
+
     uint32 chunkCount     = blockCount / blocksPerChunk;                // How many chunks we need to process 
                                                                         // (needs ot be floored to ensure we fit in the chunk buffer)
     uint32 trailingBlocks = blockCount - blocksPerChunk * chunkCount;
@@ -951,3 +951,4 @@ inline void F1BucketJob<TJob>::CalculateMultiThreadedPrefixSum(
             pfxSum[i] -= entryPadding[i];
     }
 }
+

@@ -2,15 +2,11 @@
 #include "DiskPlotContext.h"
 #include "plotshared/MTJob.h"
 #include "plotshared/DoubleBuffer.h"
+#include "plotshared/PlotTypes.h"
 #include "DiskBufferQueue.h"
 #include "util/Log.h"
 #include "ChiaConsts.h"
 
-struct Pairs
-{
-    uint32* left ;
-    uint16* right;
-};
 
 struct GroupInfo
 {
@@ -24,6 +20,17 @@ struct GroupInfo
     Pairs   pairs;
 };
 
+// Data covering the last 2 groups of a bucket.
+// This is to match and calculate fx for groups
+// that crossed the boundaries between 2 adjacent buckets.
+struct AdjacentBucketInfo
+{
+    uint32* y    ;
+    uint64* metaA;
+    uint64* metaB;
+    uint32  groupCounts[2];
+    uint32  matchCount;
+};
 
 
 struct OverflowBuffer
@@ -71,6 +78,8 @@ class DiskPlotPhase1
         OverflowBuffer yOverflow;
         OverflowBuffer metaAOverflow;
         OverflowBuffer metaBOverflow;
+
+        AdjacentBucketInfo crossBucketInfo;
     };
 
 public:
@@ -84,10 +93,10 @@ private:
     template<TableId tableId>
     void ForwardPropagateTable();
 
-    void ForwardPropagateBucket( TableId table, uint bucketIdx );
-
     template<TableId tableId>
-    void SortBucket( uint32* y, uint32* yTmp, uint64* meta, uint64* metaTmp );
+    uint32 ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
+
+    uint32 MatchBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] );
 
     uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
 
@@ -103,6 +112,7 @@ private:
                         const uint32* yIn, uint32* yOut, byte* bucketIdOut,
                         const uint64* metaInA, const uint64* metaInB,
                         uint64* metaOutA, uint64* metaOutB );
+
 
 private:
     DiskPlotContext& _cx;

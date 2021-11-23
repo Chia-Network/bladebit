@@ -224,12 +224,16 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
         return false;
     };
    
-    // Start parsing
+    // Set some defaults
     ZeroMem( &cfg );
     cfg.workHeapSize = BB_DP_MIN_RAM_SIZE;  // #TODO: I don't think we need this anymore.
                                             //        We only need a variable size for the write intervals.
                                             //        This size will be fixed.
 
+    cfg.ioBufferCount = minBufferCount;
+
+
+    // Start parsing
     for( i = 0; i < argc; i++ )
     {
         arg = argv[i];
