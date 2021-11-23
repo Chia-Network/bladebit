@@ -17,7 +17,7 @@ DiskBufferQueue::DiskBufferQueue(
     bool useDirectIO )
     : _workDir       ( workDir     )
     , _workHeap      ( workBufferSize, workBuffer )
-    , _userDirectIO  ( useDirectIO )
+    , _useDirectIO   ( useDirectIO )
     , _threadPool    ( ioThreadCount, ThreadPool::Mode::Fixed, true )
     , _dispatchThread()
 {
@@ -78,7 +78,7 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     char* baseName = pathBuffer + workDirLength;
 
     FileFlags flags = FileFlags::LargeFile;
-    if( _userDirectIO )
+    if( _useDirectIO )
         flags |= FileFlags::NoBuffering;
 
     FileSet& fileSet = _files[(uint)fileId];

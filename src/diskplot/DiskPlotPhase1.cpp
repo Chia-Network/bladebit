@@ -460,8 +460,9 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     // constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
     constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
 
+    DiskPlotContext& cx         = _cx;
     DiskBufferQueue& ioQueue    = *_diskQueue;
-    ThreadPool&      threadPool = *_cx.threadPool;
+    ThreadPool&      threadPool = *cx.threadPool;
 
      const uint nextBucketIdx = bucketIdx + 1;
 
@@ -500,7 +501,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         // #TODO: Write sort key to disk as the previous table's sort key, 
         //        so that we can do a quick sort of L/R later.
 
-        // OK to load next (back) metadata buffer now (see comment above)
+        // OK to load next (back) metadata buffer now (see comment above in ForwardPropagateTable)
         if( nextBucketIdx < BB_DP_BUCKET_COUNT )
             ioQueue.CommitCommands();
 
@@ -553,11 +554,35 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     ///
     /// FX
     ///
-    GenFxForTable<tableId>( 
-        bucketIdx, matchCount, bucket.pairs,
-        bucket.y0, bucket.yTmp, (byte*)bucket.sortKey,    // #TODO: Change this, for now use sort key buffer
-        fxMetaInA, fxMetaInB,
-        fxMetaOutA, fxMetaOutB );
+    // GenFxForTable<tableId>( 
+    //     bucketIdx, matchCount, bucket.pairs,
+    //     bucket.y0, bucket.yTmp, (byte*)bucket.sortKey,    // #TODO: Change this, for now use sort key buffer
+    //     fxMetaInA, fxMetaInB,
+    //     fxMetaOutA, fxMetaOutB );
+
+    {
+        Log::Line( "Generating fx..." );
+        const auto timer = TimerBegin();
+
+        const size_t chunkSize = cx.writeIntervals[(int)tableId].fxGen;
+
+        FxGenBucketized<tableId>::GenerateFxBucketizedToDisk(
+            ioQueue, 
+            chunkSize,    
+            threadPool, 
+            cx.threadCount, 
+            bucketIdx, 
+            matchCount, 
+            bucket.pairs, 
+            (byte*)bucket.sortKey,                   // #TODO: Change this, for now use sort key buffer
+            bucket.y0  , fxMetaInA , fxMetaInB,
+            bucket.yTmp, fxMetaOutA, fxMetaOutB,
+            cx.bucketCounts[(uint)tableId]
+        );
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished generating fx in %.2lf seconds.", elapsed );
+    }
 
     ///
     /// Save the last 2 groups worth of data for this bucket.

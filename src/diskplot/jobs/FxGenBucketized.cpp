@@ -16,7 +16,7 @@ struct FxBucketJob : MTJob<FxBucketJob>
     TableId       table;
 
     
-    const Pairs   pairs;
+    Pairs         pairs;
     const uint32* yIn;
     const uint64* metaInA;
     const uint64* metaInB;
@@ -84,15 +84,15 @@ static void ComputeFxForTable(
     uint64*       metaOutA, 
     uint64*       metaOutB );
 
-
 //-----------------------------------------------------------
 template<TableId tableId>
 void GenFxBucketizedChunked(
     DiskBufferQueue* diskQueue,
-    ThreadPool&      threadPool,
-    uint             threadCount,
     size_t           chunkSize,
     bool             directIO,
+
+    ThreadPool&      threadPool,
+    uint             threadCount,
     
     uint             bucketIdx,        // Inputs
     uint             entryCount, 
@@ -110,40 +110,174 @@ void GenFxBucketizedChunked(
     uint64*          metaOutA,
     uint64*          metaOutB,
 
+    uint32           bucketCounts[BB_DP_BUCKET_COUNT] );
+
+
+//-----------------------------------------------------------
+template<TableId table>
+void FxGenBucketized<table>::GenerateFxBucketizedToDisk(
+    DiskBufferQueue& diskQueue,
+    size_t           writeInterval,
+
+    ThreadPool&      pool, 
+    uint32           threadCount,
+
+    const uint32     bucketIdx,
+    const uint32     entryCount,
+    Pairs            pairs,
+    byte*            bucketIndices,
+
+    const uint32*    yIn,
+    const uint64*    metaAIn,
+    const uint64*    metaBIn,
+
+    uint32*          yTmp,
+    uint64*          metaATmp,
+    uint64*          metaBTmp,
+
     uint32           bucketCounts[BB_DP_BUCKET_COUNT]
 )
+{
+    GenFxBucketizedChunked<table>(
+        &diskQueue, 
+        writeInterval, 
+        diskQueue.UseDirectIO(),
+        
+        pool, 
+        threadCount,
+
+        bucketIdx,
+        entryCount,
+        pairs,
+        yIn,
+        metaAIn,
+        metaBIn,
+
+        bucketIndices,
+        yTmp,
+        metaATmp,
+        metaBTmp,
+        
+        nullptr,            // These will be obtained from the disk queue
+        nullptr,
+        nullptr,
+
+        bucketCounts
+    );
+}
+
+//-----------------------------------------------------------
+// template<TableId table>
+// void FxGenBucketized<table>::GenerateFxBucketizedInMemory(
+//     ThreadPool&      pool, 
+//     uint32           threadCount,
+//     uint32           bucketIdx,
+//     const uint32     entryCount,
+//     Pairs            pairs,
+//     byte*            bucketIndices,
+
+//     const uint32*    yIn,
+//     const uint64*    metaAIn,
+//     const uint64*    metaBIn,
+
+//     uint32*          yTmp,
+//     uint32*          metaATmp,
+//     uint32*          metaBTmp,
+
+//     uint32*          yOut,
+//     uint32*          metaAOut,
+//     uint32*          metaBOut,
+
+//     uint32           bucketCounts[BB_DP_BUCKET_COUNT]
+// )
+// {
+//     GenFxBucketizedChunked<table>(
+//         nullptr, 0, false, // Chunk size of 0 means unchunked
+//         pool, threadCount,
+        
+//         bucketIdx,
+//         entryCount,
+//         pairs,
+        
+//         yIn,
+//         metaAIn,
+//         metaBIn,
+
+//         bucketIndices,
+//         yTmp,
+//         metaATmp,
+//         metaBTmp,
+        
+//         yOut,
+//         metaAOut,
+//         metaBOut,
+
+//         bucketCounts
+//     );
+// }
+
+
+//-----------------------------------------------------------
+template<TableId tableId>
+void GenFxBucketizedChunked(
+    DiskBufferQueue* diskQueue,
+    size_t           chunkSize,
+    bool             directIO,
+
+    ThreadPool&      threadPool,
+    uint             threadCount,
+    
+    uint             bucketIdx,        // Inputs
+    uint             entryCount, 
+    Pairs            pairs,
+    const uint32*    yIn,
+    const uint64*    metaInA, 
+    const uint64*    metaInB,
+
+    byte*            bucketIdOut,     // Tmp
+    uint32*          yTmp,
+    uint64*          metaTmpA,
+    uint64*          metaTmpB,
+
+    uint32*          yOut,             // Outputs
+    uint64*          metaOutA,
+    uint64*          metaOutB,
+
+    uint32           bucketCounts[BB_DP_BUCKET_COUNT] )
 {
     const size_t outMetaSizeA = TableMetaOut<tableId>::SizeA;
     const size_t outMetaSizeB = TableMetaOut<tableId>::SizeB;
 
-    const size_t sizePerEntry = sizeof( uint32 ) + sizeof( outMetaSizeA ) + sizeof( outMetaSizeB );
+    const size_t sizePerEntry = sizeof( uint32 ) + outMetaSizeA + outMetaSizeB;
 
     // We need to adjust the chunk buffer size to leave some space for us to be
     // able to align each bucket start pointer to the block size of the output device
     const size_t fileBlockSize         = diskQueue ? 1ull : diskQueue->BlockSize();
     const size_t bucketBlockAlignSize  = fileBlockSize * BB_DP_BUCKET_COUNT;
-    const size_t usableChunkSize       = directIO ? chunkSize : chunkSize - bucketBlockAlignSize * 2;
+    const size_t usableChunkSize       = directIO == false ? chunkSize : chunkSize - bucketBlockAlignSize * 2;
 
     const uint32 entriesPerChunk       = chunkSize == 0 ? entryCount : (uint32)( usableChunkSize / sizePerEntry );
 
-    uint32 chunkCount            = entriesPerChunk / entryCount;
+    uint32 chunkCount            = entryCount / entriesPerChunk;
     uint32 chunkTrailingEntries  = entryCount - entriesPerChunk * chunkCount;
     uint32 entriesPerThread      = entriesPerChunk / threadCount;
 
     ASSERT( entriesPerThread > 0 );
 
+    // Left-over entries per thread, per chunk can be spread out
+    // between threads since we are guaranteed they still fit in a chunk,
+    // and are less than thread count
+    uint32 threadTrailingEntries = entriesPerChunk - entriesPerThread * threadCount;
+    chunkTrailingEntries += threadTrailingEntries;
+
     // If the leftover entries per chunk add up to a full chunk, then count it
-    while( chunkTrailingEntries >= chunkCount )
+    while( chunkTrailingEntries >= entriesPerChunk )
     {
         chunkCount++;
         chunkTrailingEntries -= entriesPerChunk;
     }
 
-    // Left-over entries per thread, per chunk can be spread out
-    // between threads since we are guaranteed they still fit in a chunk,
-    // and are less than thread count
 
-    uint32 threadTrailingEntries = entriesPerChunk - entriesPerThread * threadCount;
     
     MTJobRunner<FxBucketJob> jobs( threadPool );
 
@@ -194,58 +328,6 @@ void GenFxBucketizedChunked(
         if constexpr ( outMetaSizeB > 0 )
             metaTmpB += job.entryCount;
     }
-}
-
-//-----------------------------------------------------------
-template<TableId table>
-void FxGenBucketized<table>::GenerateFxBucketizedInMemory(
-        ThreadPool&      pool, 
-        uint32           threadCount,
-        uint32           bucketIdx,
-        const uint32     entryCount,
-        Pairs            pairs,
-        byte*            bucketIndices,
-
-        const uint32*    yIn,
-        const uint64*    metaAIn,
-        const uint64*    metaBIn,
-
-        uint32*          yTmp,
-        uint32*          metaATmp,
-        uint32*          metaBTmp,
-
-        uint32*          yOut,
-        uint32*          metaAOut,
-        uint32*          metaBOut,
-
-        uint32           bucketCounts[BB_DP_BUCKET_COUNT]
-    )
-{
-    GenFxBucketizedChunked<table>(
-        nullptr,
-        pool, threadCount,
-        0,                  // Chunk size of 0 means unchunked
-        false,
-
-        bucketIdx,
-        entryCount,
-        pairs,
-        
-        yIn,
-        metaAIn,
-        metaBIn,
-
-        bucketIndices,
-        yTmp,
-        metaATmp,
-        metaBTmp,
-        
-        yOut,
-        metaAOut,
-        metaBOut,
-
-        bucketCounts
-    );
 }
 
 //-----------------------------------------------------------

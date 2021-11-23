@@ -54,6 +54,28 @@ struct FxGenBucketized
     //     const size_t     chunkSize
     // );
 
+    static void GenerateFxBucketizedToDisk(
+        DiskBufferQueue& diskQueue,
+        size_t           writeInterval,
+        ThreadPool&      pool, 
+        uint32           threadCount,
+
+        const uint32     bucketIdx,
+        const uint32     entryCount,
+        Pairs            pairs,
+        byte*            bucketIndices,
+
+        const uint32*    yIn,
+        const uint64*    metaAIn,
+        const uint64*    metaBIn,
+
+        uint32*          yTmp,
+        uint64*          metaATmp,
+        uint64*          metaBTmp,
+
+        uint32           bucketCounts[BB_DP_BUCKET_COUNT]
+    );
+
     static void GenerateFxBucketizedInMemory(
         ThreadPool&      pool, 
         uint32           threadCount,
@@ -79,10 +101,10 @@ struct FxGenBucketized
 };
 
 // Instantiate a version for each table
-template<> struct FxGenBucketized<TableId::Table1>;
-template<> struct FxGenBucketized<TableId::Table2>;
-template<> struct FxGenBucketized<TableId::Table3>;
-template<> struct FxGenBucketized<TableId::Table4>;
-template<> struct FxGenBucketized<TableId::Table5>;
-template<> struct FxGenBucketized<TableId::Table6>;
-template<> struct FxGenBucketized<TableId::Table7>;
+template struct FxGenBucketized<TableId::Table1>;
+template struct FxGenBucketized<TableId::Table2>;
+template struct FxGenBucketized<TableId::Table3>;
+template struct FxGenBucketized<TableId::Table4>;
+template struct FxGenBucketized<TableId::Table5>;
+template struct FxGenBucketized<TableId::Table6>;
+template struct FxGenBucketized<TableId::Table7>;

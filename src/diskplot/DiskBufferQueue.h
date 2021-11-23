@@ -153,7 +153,8 @@ public:
     void CompletePendingReleases();
 
     inline size_t BlockSize() const { return _blockSize; }
-
+    inline bool UseDirectIO() const { return _useDirectIO; }
+    
 private:
 
     void InitFileSet( FileId fileId, const char* name, uint bucketCount, char* pathBuffer, size_t workDirLength );
@@ -174,6 +175,7 @@ private:
 
     static const char* DbgGetCommandName( Command::CommandType type );
 
+
 private:
 
     const char*      _workDir;              // Temporary directory in which we will store our temporary files
@@ -190,7 +192,7 @@ private:
 //     Command           _commands[BB_DISK_QUEUE_MAX_CMDS];
     SPCQueue<Command, BB_DISK_QUEUE_MAX_CMDS> _commands;
 
-    bool              _userDirectIO;
+    bool              _useDirectIO;
     ThreadPool        _threadPool;
 
     AutoResetSignal   _cmdReadySignal;
