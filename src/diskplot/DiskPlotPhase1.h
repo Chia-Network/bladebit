@@ -96,6 +96,10 @@ private:
     template<TableId tableId>
     uint32 ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
 
+    template<TableId tableId>
+    uint32 ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
+
+
     uint32 MatchBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] );
 
     uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );

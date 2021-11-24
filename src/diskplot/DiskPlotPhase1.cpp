@@ -273,6 +273,11 @@ void DiskPlotPhase1::ForwardPropagate()
         bucket.metaAOverflow.Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
         bucket.metaBOverflow.Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
 
+        // #TODO: Remove these also. Testing the allocation here for now
+        bucket.crossBucketInfo.y     = bbcvirtalloc<uint32>(  kBC * 4 );
+        bucket.crossBucketInfo.metaA = bbcvirtalloc<uint64>(  kBC * 4 );
+        bucket.crossBucketInfo.metaB = bbcvirtalloc<uint64>(  kBC * 4 );
+
         bucket.fpBuffer = _cx.heapBuffer;
 
         byte* ptr = bucket.fpBuffer;
@@ -463,8 +468,9 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     DiskPlotContext& cx         = _cx;
     DiskBufferQueue& ioQueue    = *_diskQueue;
     ThreadPool&      threadPool = *cx.threadPool;
+    const uint32     threadCount = cx.threadCount;
 
-     const uint nextBucketIdx = bucketIdx + 1;
+    const uint nextBucketIdx = bucketIdx + 1;
 
     ///
     /// Sort our current bucket
@@ -538,11 +544,8 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     /// 
     if( bucketIdx > 0 )
     {
-        // Spill over matches into current bucket
-        // matchCount = MatchAdjoiningBucketGroups( 
-        //                 bucket.yTmp, bucket.y0, bucket.pairs,
-        //                 prevBucketGroupCounts, entryCount,
-        //                 BB_DP_MAX_ENTRIES_PER_BUCKET, bucketIdx-1, bucketIdx );
+        // Spill over matches into the last
+        ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount );
     }
 
     ///
@@ -587,43 +590,50 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     ///
     /// Save the last 2 groups worth of data for this bucket.
     ///
-    // #TODO: This
      // If not the last group, save info to match adjacent bucket groups (cross-bucket matches)
-    // if( bucketIdx + 1 < BB_DP_BUCKET_COUNT )
-    if( 0 )
+    if( bucketIdx + 1 < BB_DP_BUCKET_COUNT )
     {
         // Copy over the last 2 groups worth of y values to 
         // our new bucket's y buffer. There's space reserved before the start
         // of our y buffers that allow for it.
-        // const GroupInfo& lastThreadGrp = groupInfos[threadCount-1];
+        const GroupInfo& lastThreadGrp = groupInfos[threadCount-1];
 
-        // const uint32 penultimateGroupIdx = lastThreadGrp.groupBoundaries[lastThreadGrp.groupCount-2];
-        // const uint32 lastGroupIdx        = lastThreadGrp.groupBoundaries[lastThreadGrp.groupCount-1];
+        AdjacentBucketInfo& crossBucketInfo = bucket.crossBucketInfo;
 
-        // crossBucketInfo.groupCounts[0]   = lastGroupIdx - penultimateGroupIdx;
-        // crossBucketInfo.groupCounts[1]   = entryCount - lastGroupIdx;
+        const uint32 penultimateGroupIdx = lastThreadGrp.groupBoundaries[lastThreadGrp.groupCount-2];
+        const uint32 lastGroupIdx        = lastThreadGrp.groupBoundaries[lastThreadGrp.groupCount-1];
+
+        crossBucketInfo.groupCounts[0]   = lastGroupIdx - penultimateGroupIdx;
+        crossBucketInfo.groupCounts[1]   = entryCount - lastGroupIdx;
 
         // // Copy over the last 2 groups worth of entries to the reserved area of our current bucket
-        // const uint32 last2GroupEntryCount = crossBucketInfo.groupCounts[0] + crossBucketInfo.groupCounts[1];
-
-        // ASSERT( last2GroupEntryCount <= kBC * 2 );
+        const uint32 last2GroupEntryCount = crossBucketInfo.groupCounts[0] + crossBucketInfo.groupCounts[1];
+        ASSERT( last2GroupEntryCount <= kBC * 2 );
 
         // crossBucketInfo.y     = bucket.yTmp;
         // crossBucketInfo.metaA = bucket.metaATmp;
         // crossBucketInfo.metaB = bucket.metaBTmp;
 
-        // bbmemcpy_t( crossBucketInfo.y    , bucket.y0     + penultimateGroupIdx, last2GroupEntryCount );
-        // bbmemcpy_t( crossBucketInfo.metaA, bucket.metaA0 + penultimateGroupIdx, last2GroupEntryCount );
-        // bbmemcpy_t( crossBucketInfo.metaB, bucket.metaB0 + penultimateGroupIdx, last2GroupEntryCount );
+        bbmemcpy_t( crossBucketInfo.y    , bucket.y0     + penultimateGroupIdx, last2GroupEntryCount );
+        bbmemcpy_t( crossBucketInfo.metaA, bucket.metaA0 + penultimateGroupIdx, last2GroupEntryCount );
+        bbmemcpy_t( crossBucketInfo.metaB, bucket.metaB0 + penultimateGroupIdx, last2GroupEntryCount );
     }
 
     return matchCount;
 }
 
+
+//-----------------------------------------------------------
+template<TableId tableId>
+uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount )
+{
+
+}
+
+
 ///
 /// Group Matching
 ///
-
 //-----------------------------------------------------------
 uint32 DiskPlotPhase1::MatchBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] )
 {
@@ -856,7 +866,7 @@ uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, P
     // We expect yBuffer to be pointing to an area before the start of bucket.y0,
     // which has the y entries from the last bucket's last 2 groups added to it.
 
-    const uint threadCount = _cx.threadCount;
+    const uint threadCount           = _cx.threadCount;
 
     const uint32 penultimateGrpCount = prevGroupsCounts[0];
     const uint32 lastGrpCount        = prevGroupsCounts[1];
