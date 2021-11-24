@@ -36,12 +36,15 @@ struct FxBucketJob : MTJob<FxBucketJob>
     uint32*       totalBucketCounts;    // Total counts per for all buckets. Used by the control thread
 
     // For chunked jobs:
-    uint32           chunkSize;
     uint32           entriesPerChunk;
     uint32           chunkCount;
     uint32           trailingChunkEntries;
+    uint32           entriesOffset;         // How many entries to move forward our pointer for the next chunk
     DiskBufferQueue* queue;
     bool             writeToDisk;
+    uint32           bufferSizeY;
+    uint32           bufferSizeMetaA;
+    uint32           bufferSizeMetaB;
 
     void Run() override;
 
@@ -55,7 +58,8 @@ struct FxBucketJob : MTJob<FxBucketJob>
         uint32*       yBuckets,         // Output buckets
         TMetaA*       metaABuckets,
         TMetaB*       metaBBuckets,
-        uint32        outBucketCounts[BB_DP_BUCKET_COUNT], // Entry count per bucket (across all threads)
+        uint32        counts         [BB_DP_BUCKET_COUNT],  // Current job's count per bucket
+        uint32        outBucketCounts[BB_DP_BUCKET_COUNT],  // Entry count per bucket (across all threads)
         const size_t  fileBlockSize
     );
 
@@ -252,23 +256,21 @@ void GenFxBucketizedChunked(
 
     // We need to adjust the chunk buffer size to leave some space for us to be
     // able to align each bucket start pointer to the block size of the output device
-    const size_t fileBlockSize         = diskQueue ? 1ull : diskQueue->BlockSize();
+    const size_t fileBlockSize         = diskQueue ? 0ull : diskQueue->BlockSize();
     const size_t bucketBlockAlignSize  = fileBlockSize * BB_DP_BUCKET_COUNT;
     const size_t usableChunkSize       = directIO == false ? chunkSize : chunkSize - bucketBlockAlignSize * 2;
 
     const uint32 entriesPerChunk       = chunkSize == 0 ? entryCount : (uint32)( usableChunkSize / sizePerEntry );
+
+    const uint32 sizeYBuffer     = (uint32)( sizeof( uint32 ) * entriesPerChunk );
+    const uint32 sizeMetaABuffer = (uint32)( outMetaSizeA * entriesPerChunk );
+    const uint32 sizeMetaBBuffer = (uint32)( outMetaSizeB * entriesPerChunk );
 
     uint32 chunkCount            = entryCount / entriesPerChunk;
     uint32 chunkTrailingEntries  = entryCount - entriesPerChunk * chunkCount;
     uint32 entriesPerThread      = entriesPerChunk / threadCount;
 
     ASSERT( entriesPerThread > 0 );
-
-    // Left-over entries per thread, per chunk can be spread out
-    // between threads since we are guaranteed they still fit in a chunk,
-    // and are less than thread count
-    uint32 threadTrailingEntries = entriesPerChunk - entriesPerThread * threadCount;
-    chunkTrailingEntries += threadTrailingEntries;
 
     // If the leftover entries per chunk add up to a full chunk, then count it
     while( chunkTrailingEntries >= entriesPerChunk )
@@ -277,8 +279,12 @@ void GenFxBucketizedChunked(
         chunkTrailingEntries -= entriesPerChunk;
     }
 
+    // Left-over entries per thread, per chunk can be spread out
+    // between threads since we are guaranteed they still fit in a chunk,
+    // and are less than thread count
+    uint32 threadTrailingEntries = entriesPerChunk - entriesPerThread * threadCount;
+    uint32 entriesOffset = 0;
 
-    
     MTJobRunner<FxBucketJob> jobs( threadPool );
 
     for( uint i = 0; i < threadCount; i++ )
@@ -307,11 +313,16 @@ void GenFxBucketizedChunked(
         job.bucketIdOut   = bucketIdOut;
 
         job.totalBucketCounts    = bucketCounts;
+        
 
-        job.chunkSize            = usableChunkSize;
+        // job.chunkSize            = usableChunkSize;
+        job.writeToDisk          = true;
         job.chunkCount           = chunkCount;
         job.entriesPerChunk      = entriesPerChunk;
         job.trailingChunkEntries = chunkTrailingEntries;
+        job.bufferSizeY          = sizeYBuffer;
+        job.bufferSizeMetaA      = sizeMetaABuffer;
+        job.bufferSizeMetaB      = sizeMetaBBuffer;
 
         if( threadTrailingEntries )
         {
@@ -319,15 +330,22 @@ void GenFxBucketizedChunked(
             threadTrailingEntries --;
         }
 
+        job.entriesOffset = entriesOffset;
+        entriesOffset += job.entryCount;
+
         pairs.left  += job.entryCount;
         pairs.right += job.entryCount;
 
-        yTmp        += job.entryCount;
+        bucketIdOut += job.entryCount;
+
         metaTmpA    += job.entryCount;
+        yTmp        += job.entryCount;
 
         if constexpr ( outMetaSizeB > 0 )
             metaTmpB += job.entryCount;
     }
+
+    jobs.Run( threadCount );
 }
 
 //-----------------------------------------------------------
@@ -453,23 +471,27 @@ void FxBucketJob::RunForTable()
     using TMetaA = typename TableMetaOut<tableId>::MetaA;
     using TMetaB = typename TableMetaOut<tableId>::MetaB;
 
+    const size_t SizeMetaA = TableMetaOut<tableId>::SizeA;
+    const size_t SizeMetaB = TableMetaOut<tableId>::SizeB;
+
     DiskBufferQueue* diskQueue = this->queue;
 
     uint32       chunkCount      = this->chunkCount;
     uint32       entryCount      = this->entryCount;
-    const uint32 bucketIdx       = this->bucketIdx;
+    const uint64 bucket          = ((uint64)this->bucketIdx) << 32;
     const size_t fileBlockSize   = this->fileBlockSize;
     const uint32 entriesPerChunk = this->entriesPerChunk;
     
-    Pairs         pairs        = this->pairs;
-    const uint32* yIn          = this->yIn;
-    const uint64* metaInA      = this->metaInA;
-    const uint64* metaInB      = this->metaInB;
+    Pairs         pairs          = this->pairs;
+    const uint32* yIn            = this->yIn;
+    const uint64* metaInA        = this->metaInA;
+    const uint64* metaInB        = this->metaInB;
 
     // Temporary buffers used when we're calculating FX, but before distribution into buckets.
-    uint32* yTmp     = this->yTmp ;
-    uint64* metaATmp = this->metaTmpA;
-    uint64* metaBTmp = this->metaTmpB;
+    uint32* yTmp          = this->yTmp ;
+    uint64* metaATmp      = this->metaTmpA;
+    uint64* metaBTmp      = this->metaTmpB;
+    byte*   bucketIndices = this->bucketIdOut;
 
     // If writing to mmemory, these are not null.
     // When writing to disk, we get a buffer from the queue.
@@ -478,8 +500,14 @@ void FxBucketJob::RunForTable()
     uint32* yOut          = this->yOut;
     uint64* metaOutA      = this->metaOutA;
     uint64* metaOutB      = this->metaOutB;
-    byte*   bucketIndices = this->bucketIdOut;
 
+    uint32* sizes         = nullptr;
+    uint32* metaASizes    = nullptr;
+    uint32* metaBSizes    = nullptr;
+
+    uint counts      [BB_DP_BUCKET_COUNT];  // How many entries we have per bucket for this thread only.
+                                            // Has to be defined out here instead of inside DistributeIntoBuckets()
+                                            // because we need its scope to live on when another thread exists that function.
 
     uint bucketCounts[BB_DP_BUCKET_COUNT];  // Count how many entries we have per bucket, across all threads.
                                             // This is only used by the main thread
@@ -499,28 +527,105 @@ void FxBucketJob::RunForTable()
         if( chunk == trailingChunk )
         {
             ASSERT( this->trailingChunkEntries );
-            // #TODO: This
+            
+            // Trailing chunk is special-case, has les entries than a full chunk.
+            // We may not have to use all threads here as the trailing entries may
+            // be less than we can handle per thread.
+            uint32 threadCount      = this->_jobCount;
+
+            uint32 trailingEntries  = this->trailingChunkEntries;
+            uint32 entriesPerThread = trailingEntries / threadCount;
+
+            while( !entriesPerThread )
+            {
+                entriesPerThread = trailingEntries / --threadCount;
+            }
+
+            // Reduce the number of jobs running if we now have
+            // less thread counts than we started with
+            if( threadCount != this->JobCount() )
+            {
+                if( !this->ReduceThreadCount( threadCount ) )
+                    return;
+            }
+
+            // Get new trailing entries
+            trailingEntries -= entriesPerThread * threadCount;
+
+            // Set our new starting point
+            uint32 chunkOffset = entriesPerChunk * chunk + entriesPerThread * _jobId;
+
+            // Spread out any left-over entries accross the remaining threads
+            if( _jobId < trailingEntries )
+            {
+                entriesPerThread ++;
+                chunkOffset += _jobId;  // Add one entry for each job below ours
+            }
+            else
+            {
+                chunkOffset += trailingEntries; // Add add all trailing entries spread over the first threads
+            }
+
+            // Set new entry count & starting pos
+            entryCount = entriesPerThread;
+            
+            pairs = this->GetJob( 0 ).pairs;
+            pairs.left  += chunkOffset;
+            pairs.right += chunkOffset;
         }
 
         // Grab a buffer
-        if constexpr( WriteToDisk )
+        if constexpr ( WriteToDisk )
         {
-            // #TODO: This
             ASSERT( diskQueue );
+
+            if( this->IsControlThread() )
+            {
+                this->LockThreads();
+
+                sizes = (uint32*)diskQueue->GetBuffer( BB_DP_BUCKET_COUNT * sizeof( uint32 ) );
+                yOut  = (uint32*)diskQueue->GetBuffer( this->bufferSizeY );
+
+                if constexpr ( SizeMetaA > 0 )
+                {
+                    metaOutA   = (uint64*)diskQueue->GetBuffer( this->bufferSizeMetaA );
+                    metaASizes = (uint32*)diskQueue->GetBuffer( BB_DP_BUCKET_COUNT * sizeof( uint32 ) );
+                }
+
+                if constexpr ( SizeMetaB > 0 )
+                {
+                    metaOutB   = (uint64*)diskQueue->GetBuffer( this->bufferSizeMetaB );
+                    metaBSizes = (uint32*)diskQueue->GetBuffer( BB_DP_BUCKET_COUNT * sizeof( uint32 ) );
+                }
+
+                this->yOut     = yOut    ;
+                this->metaOutA = metaOutA;
+                this->metaOutB = metaOutB;
+
+                this->ReleaseThreads();
+            }
+            else
+            {
+                this->WaitForRelease();
+
+                yOut     = this->GetJob( 0 ).yOut;
+                metaOutA = this->GetJob( 0 ).metaOutA;
+                metaOutB = this->GetJob( 0 ).metaOutB;
+            }
         }
 
         // Calculate fx for chunk
         ComputeFxForTable<tableId>( 
-            bucketIdx, entryCount, pairs,
+            bucket, entryCount, pairs,
             yIn, metaInA, metaInB,
-            yOut, bucketIdOut, metaOutA, metaOutB );
+            yTmp, bucketIdOut, metaTmpA, metaTmpB );
 
         // Distribute entries into their corresponding buckets
         DistributeIntoBuckets<tableId, TMetaA, TMetaB>(
             entryCount, bucketIndices, 
             yTmp, (TMetaA*)metaATmp, (TMetaB*)metaBTmp,
             yOut, (TMetaA*)metaOutA, (TMetaB*)metaOutB,
-            bucketCounts, fileBlockSize );
+            counts, bucketCounts, fileBlockSize );
 
         if( this->IsControlThread() )
         {
@@ -532,10 +637,57 @@ void FxBucketJob::RunForTable()
         }
 
         // Submit bucket buffers
-        if constexpr( WriteToDisk )
+        if constexpr ( WriteToDisk )
         {
             ASSERT( diskQueue );
-            // #TODO: This
+            
+            if( IsControlThread() )
+            {
+                this->LockThreads();
+
+                // #TODO: Pass these as job input
+                const bool isEven = static_cast<uint>( tableId ) & 1;
+
+                const FileId yFileId     = isEven ? FileId::Y1       : FileId::Y0;
+                const FileId metaAFileId = isEven ? FileId::META_A_0 : FileId::META_A_1;
+                const FileId metaBFileId = isEven ? FileId::META_B_0 : FileId::META_B_1;
+                
+                for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                    sizes[i] = (uint32)( bucketCounts[i] * sizeof( uint32 ) );
+
+                diskQueue->WriteBuckets( yFileId, yOut, sizes );
+                diskQueue->ReleaseBuffer( sizes );
+                diskQueue->ReleaseBuffer( yOut  );
+                diskQueue->CommitCommands();
+
+                if constexpr ( SizeMetaA > 0 )
+                {
+                    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                        metaASizes[i] = (uint32)( bucketCounts[i] * SizeMetaA );
+
+                    diskQueue->WriteBuckets( metaAFileId, metaOutA, metaASizes );
+                    diskQueue->ReleaseBuffer( metaASizes );
+                    diskQueue->ReleaseBuffer( metaOutA );
+                    diskQueue->CommitCommands();
+                }
+
+                if constexpr ( SizeMetaB > 0 )
+                {
+                    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                        metaBSizes[i] = (uint32)( bucketCounts[i] * SizeMetaB );
+
+                    diskQueue->WriteBuckets( metaBFileId, metaOutB, metaBSizes );
+                    diskQueue->ReleaseBuffer( metaBSizes );
+                    diskQueue->ReleaseBuffer( metaOutB );
+                    diskQueue->CommitCommands();
+                }
+
+                this->ReleaseThreads();
+            }
+            else
+            {
+                this->WaitForRelease();
+            }
         }
 
         // Go to next chunk
@@ -568,7 +720,7 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
     constexpr size_t bufferSize  = CDiv( ySize + metaSizeLR, 8u );
 
     // Bucket for extending y
-//     const uint64 bucket = ( (uint64)bucketIdx ) << 32;
+    // const uint64 bucket = ( (uint64)bucketIdx ) << 32;
 
     // Meta extraction
     uint64 l0, l1, r0, r1;
@@ -589,6 +741,7 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
     {
         const uint32 left  = pairs.left[i];
         const uint32 right = left + pairs.right[i];
+        ASSERT( left < right );
 
         const uint64 y     = bucket | yIn[left];
 
@@ -714,6 +867,7 @@ void FxBucketJob::DistributeIntoBuckets(
     uint32*       yBuckets,
     TMetaA*       metaABuckets,
     TMetaB*       metaBBuckets,
+    uint32        counts         [BB_DP_BUCKET_COUNT],
     uint32        outBucketCounts[BB_DP_BUCKET_COUNT],
     const size_t  fileBlockSize
 )
@@ -721,24 +875,41 @@ void FxBucketJob::DistributeIntoBuckets(
     const size_t metaSizeA = TableMetaOut<tableId>::SizeA;
     const size_t metaSizeB = TableMetaOut<tableId>::SizeB;
 
-    uint32 counts[BB_DP_BUCKET_COUNT];
     uint32 pfxSum[BB_DP_BUCKET_COUNT];
 
     // Count our buckets
-    memset( counts, 0, sizeof( counts ) );
+    memset( counts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
     for( const byte* ptr = bucketIndices, *end = ptr + entryCount; ptr < end; ptr++ )
     {
         ASSERT( *ptr <= ( 0b111111u ) );
         counts[*ptr] ++;
     }
 
+    // #if _DEBUG
+    //     this->counts = counts;
+    //     this->SyncThreads();
+
+    //     uint32 totalCount = 0;
+    //     for( uint t = 0; t < _jobCount; t++ )
+    //         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+    //             totalCount += _jobs[t].counts[i];
+    // #endif
+
     this->CalculatePrefixSum( counts, pfxSum, outBucketCounts, fileBlockSize );
+
+    // #if _DEBUG
+    //     ASSERT( pfxSum[63] <= totalCount );
+    // #endif
 
     // #TODO: Unroll this a bit?
     // Distribute values into buckets at each thread's given offset
     for( uint i = 0; i < entryCount; i++ )
     {
         const uint32 dstIdx = --pfxSum[bucketIndices[i]];
+
+        // #if _DEBUG
+        //     dstIdx < totalCount;
+        // #endif
 
         yBuckets[dstIdx] = y[i];
 
@@ -780,18 +951,13 @@ inline void FxBucketJob::CalculatePrefixSum(
             pfxSum[j] += tCounts[j];
     }
 
-    // #TODO: Only do this for the control thread?
-    // uint32 totalCount = 0;
-    // for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-    //     totalCount += pfxSum[i];
-
     // If we're the control thread, retain the total bucket count
     if( this->IsControlThread() )
     {
         memcpy( bucketCounts, pfxSum, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
     }
 
-    // #TODO: Only do this if using Direct IO
+    // Only do this if using Direct IO
     // We need to align our bucket totals to the  file block size boundary
     // so that each block buffer is properly aligned for direct io.
     if( fileBlockSize )

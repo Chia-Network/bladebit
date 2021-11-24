@@ -349,12 +349,15 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
         
         // Only write up-to the block-aligned boundary.
         // The caller is in charge of writing any remainders manually
-        const size_t writeSize = bufferSize / blockSize * blockSize;
+        const size_t writeSize = _useDirectIO == false ? bufferSize :
+                                 bufferSize / blockSize * blockSize;
 
         WriteToFile( fileBuckets.files[i], writeSize, buffer, _blockBuffer, fileBuckets.name, i );
 
         // Each bucket buffer must start at the next block-aligned boundary
-        const size_t bufferOffset = RoundUpToNextBoundaryT( bufferSize, blockSize );
+        const size_t bufferOffset = _useDirectIO == false ? bufferSize :
+                                    RoundUpToNextBoundaryT( bufferSize, blockSize );
+
         buffer += bufferOffset;
     }
 }
