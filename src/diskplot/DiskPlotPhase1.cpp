@@ -144,7 +144,7 @@ void DiskPlotPhase1::Run()
 #endif
 
     #if BB_DP_DBG_VALIDATE_Y
-        Debug::ValidateYFileFromBuckets( FileId::Y0, *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
+        // Debug::ValidateYFileFromBuckets( FileId::Y0, *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
     #endif
 
     // Re-create the disk queue with the io buffer only (remove working heap section)
@@ -539,12 +539,6 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
         uint32* yTemp       = (uint32*)bucket.metaB1;
         uint32* sortKeyTemp = yTemp + entryCount;
-
-        for( uint32 i = 0; i < entryCount; i++ )
-        {
-            if( bucket.y0[i] == 3022 )
-                BBDebugBreak();
-        }
 
         RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
 
