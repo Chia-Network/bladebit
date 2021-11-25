@@ -109,6 +109,29 @@ private:
     uint32 MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
                                        uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
 
+    template<TableId tableId>
+    uint32 ProcessCrossBucketGroups(
+        const uint32* prevBucketY,
+        const uint64* prevBucketMetaA,
+        const uint64* prevBucketMetaB,
+        const uint32* curBucketY,
+        const uint64* curBucketMetaA,
+        const uint64* curBucketMetaB,
+        uint32*       tmpY,
+        uint64*       tmpMetaA,
+        uint64*       tmpMetaB,
+        uint32*       outY,
+        uint64*       outMetaA,
+        uint64*       outMetaB,
+        uint32        prevBucketGroupCount,
+        uint32        curBucketEntryCount,
+        uint32        prevBucketIndex,
+        uint32        curBucketIndex,
+        Pairs         pairs,
+        uint32        maxPairs,
+        uint32        yStartIndex
+    );
+
     void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
     
     template<TableId tableId>
@@ -116,6 +139,10 @@ private:
                         const uint32* yIn, uint32* yOut, byte* bucketIdOut,
                         const uint64* metaInA, const uint64* metaInB,
                         uint64* metaOutA, uint64* metaOutB );
+
+
+    void GetWriteFileIdsForBucket( TableId table, FileId& outYId, 
+                                   FileId& outMetaAId, FileId& outMetaBId );
 
 
 private:
