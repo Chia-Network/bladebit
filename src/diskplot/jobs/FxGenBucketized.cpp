@@ -349,86 +349,86 @@ void GenFxBucketizedChunked(
 }
 
 //-----------------------------------------------------------
-template<TableId tableId>
-FORCE_INLINE
-void GenFxBucketized(
+// template<TableId tableId>
+// FORCE_INLINE
+// void GenFxBucketized(
     
-    ThreadPool&   threadPool,
-    uint          threadCount,
-    size_t        fileBlockSize,    // For direct I/O alignment
+//     ThreadPool&   threadPool,
+//     uint          threadCount,
+//     size_t        fileBlockSize,    // For direct I/O alignment
 
-    uint          bucketIdx,        // Inputs
-    uint          entryCount, 
-    Pairs         pairs,
-    const uint32* yIn,
-    const uint64* metaInA, 
-    const uint64* metaInB,
+//     uint          bucketIdx,        // Inputs
+//     uint          entryCount, 
+//     Pairs         pairs,
+//     const uint32* yIn,
+//     const uint64* metaInA, 
+//     const uint64* metaInB,
 
-    uint32*       yTmp,             // Tmp
-    uint64*       metaTmpA,
-    uint64*       metaTmpB,
+//     uint32*       yTmp,             // Tmp
+//     uint64*       metaTmpA,
+//     uint64*       metaTmpB,
 
-    uint32*       yOut,             // Outputs
-    uint64*       metaOutA,
-    uint64*       metaOutB,
-    byte*         bucketIdOut,
+//     uint32*       yOut,             // Outputs
+//     uint64*       metaOutA,
+//     uint64*       metaOutB,
+//     byte*         bucketIdOut,
 
-    uint32        bucketCounts[BB_DP_BUCKET_COUNT]
-)
-{
-    const size_t outMetaSizeA = TableMetaOut<tableId>::SizeA;
-    const size_t outMetaSizeB = TableMetaOut<tableId>::SizeB;
+//     uint32        bucketCounts[BB_DP_BUCKET_COUNT]
+// )
+// {
+//     const size_t outMetaSizeA = TableMetaOut<tableId>::SizeA;
+//     const size_t outMetaSizeB = TableMetaOut<tableId>::SizeB;
 
-    const uint32 entriesPerThread = entryCount / threadCount;
+//     const uint32 entriesPerThread = entryCount / threadCount;
 
-    uint32 trailingEntries = entryCount - entriesPerThread * threadCount;
+//     uint32 trailingEntries = entryCount - entriesPerThread * threadCount;
 
-    MTJobRunner<FxBucketJob> jobs( threadPool );
+//     MTJobRunner<FxBucketJob> jobs( threadPool );
 
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        FxBucketJob& job = jobs[i];
+//     for( uint i = 0; i < threadCount; i++ )
+//     {
+//         FxBucketJob& job = jobs[i];
 
-        job.bucketIdx     = bucketIdx;
-        job.entryCount    = entriesPerThread;
-        job.fileBlockSize = (uint32)fileBlockSize;
-        job.table         = tableId;
+//         job.bucketIdx     = bucketIdx;
+//         job.entryCount    = entriesPerThread;
+//         job.fileBlockSize = (uint32)fileBlockSize;
+//         job.table         = tableId;
 
-        job.pairs         = pairs;
-        job.yIn           = yIn;
-        job.metaInA       = metaInA;
-        job.metaInB       = metaInB;
-        job.counts        = nullptr;
+//         job.pairs         = pairs;
+//         job.yIn           = yIn;
+//         job.metaInA       = metaInA;
+//         job.metaInB       = metaInB;
+//         job.counts        = nullptr;
 
-        job.yTmp          = yTmp;
-        job.metaTmpA      = metaTmpA;
-        job.metaTmpB      = metaTmpB;
+//         job.yTmp          = yTmp;
+//         job.metaTmpA      = metaTmpA;
+//         job.metaTmpB      = metaTmpB;
 
-        job.yOut          = yOut;
-        job.metaOutA      = metaOutA;
-        job.metaOutB      = metaOutB;
-        job.bucketIdOut   = bucketIdOut;
+//         job.yOut          = yOut;
+//         job.metaOutA      = metaOutA;
+//         job.metaOutB      = metaOutB;
+//         job.bucketIdOut   = bucketIdOut;
 
-        job.totalBucketCounts = bucketCounts;
+//         job.totalBucketCounts = bucketCounts;
 
-        if( trailingEntries )
-        {
-            job.entryCount ++;
-            trailingEntries --;
-        }
+//         if( trailingEntries )
+//         {
+//             job.entryCount ++;
+//             trailingEntries --;
+//         }
 
-        pairs.left  += job.entryCount;
-        pairs.right += job.entryCount;
+//         pairs.left  += job.entryCount;
+//         pairs.right += job.entryCount;
 
-        yTmp        += job.entryCount;
-        metaTmpA    += job.entryCount;
+//         yTmp        += job.entryCount;
+//         metaTmpA    += job.entryCount;
 
-        if constexpr ( outMetaSizeB > 0 )
-            metaTmpB += job.entryCount;
-    }
+//         if constexpr ( outMetaSizeB > 0 )
+//             metaTmpB += job.entryCount;
+//     }
 
-    jobs.Run( threadCount );
-}
+//     jobs.Run( threadCount );
+// }
 
 //-----------------------------------------------------------
 void FxBucketJob::Run()

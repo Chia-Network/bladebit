@@ -798,7 +798,7 @@ void GenerateF1(
         xBuckets[idx14] = x + 14;
         xBuckets[idx15] = x + 15;
 
-        // const uint32 refY = 2672319;
+        // const uint32 refY = 3022;
         // if( yBuckets[idx0 ] == refY ) BBDebugBreak();
         // if( yBuckets[idx1 ] == refY ) BBDebugBreak();
         // if( yBuckets[idx2 ] == refY ) BBDebugBreak();

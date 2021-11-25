@@ -60,6 +60,7 @@
                 ,"args": [
                     // "-t", "12",
                     // "--f1", "256MB",
+                    "-b", "32",
                     "/mnt/p5510a/disk_tmp"
                 ]
                 // ,"stopAtEntry": true

@@ -143,9 +143,9 @@ ssize_t FileStream::Read( void* buffer, size_t size )
         return 0;
 
     const ssize_t sizeRead = read( _fd, buffer, size );
-    if( sizeRead >= 0 )
+    if( sizeRead > 0 )
         _readPosition += (size_t)sizeRead;
-    else 
+    else
         _error = errno;
 
     return sizeRead;

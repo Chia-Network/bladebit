@@ -254,10 +254,10 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
         {
             cfg.ioBufferCount = (uint)uvalue();
         }
-        else if( check( "-d" ) || check( "--direct-io" ) )
-        {
-            cfg.enableDirectIO = true;
-        }
+        // else if( check( "-d" ) || check( "--direct-io" ) )
+        // {
+        //     cfg.enableDirectIO = true;
+        // }
         // else if( check( "--io-threads" ) )
         // {
         //     cfg.ioThreadCount = (uint)uvalue();

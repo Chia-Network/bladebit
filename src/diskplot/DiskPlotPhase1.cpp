@@ -144,7 +144,7 @@ void DiskPlotPhase1::Run()
 #endif
 
     #if BB_DP_DBG_VALIDATE_Y
-        // Debug::ValidateYFileFromBuckets( *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
+        Debug::ValidateYFileFromBuckets( FileId::Y0, *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
     #endif
 
     // Re-create the disk queue with the io buffer only (remove working heap section)
@@ -346,9 +346,17 @@ void DiskPlotPhase1::ForwardPropagate()
 
         const double tableElapsed = TimerEnd( tableTimer );
         Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
+
+        #if _DEBUG
+        {
+            Log::Line( "Validating table %d...", (int)table + 1 );
+            const FileId fileId = isEven ? FileId::Y1 : FileId::Y0;
+            Debug::ValidateYFileFromBuckets( fileId, *_cx.threadPool, *_diskQueue, table, _cx.bucketCounts[(int)table] );
+        }
+        #endif
+
     }
 }
-
 
 
 //-----------------------------------------------------------
@@ -381,7 +389,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
         }
     }
 
-    // Load first bucket
+    // Seek all buckets to the start
     ioQueue.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
     ioQueue.SeekBucket( FileId::Y1, 0, SeekOrigin::Begin );
 
@@ -398,25 +406,40 @@ void DiskPlotPhase1::ForwardPropagateTable()
     }
     ioQueue.CommitCommands();
 
-    ioQueue.ReadFile( bucket.yFileId, 0, bucket.y0, inputBucketCounts[0] * sizeof( uint32 ) );
-    ioQueue.AddFence( bucket.frontFence );
-
-    // Read to tmp (when > table 2) so we can sort it with a key back to bucket.metaA
-    ioQueue.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, inputBucketCounts[0] * MetaInASize );
-    
-    // Start reading files
-    ioQueue.CommitCommands();
-    
-    // Fence for metadata A
-    ioQueue.AddFence( bucket.frontFence );
-
-    if constexpr ( MetaInBSize > 0 )
+    // Read first bucket y & metadata values
     {
-        ioQueue.ReadFile( bucket.metaBFileId, 0, bucket.metaBTmp, inputBucketCounts[0] * MetaInBSize );
+        Log::Write( " Reading 1st bucket..." );
+        auto timer  = TimerBegin();
+
+        ioQueue.ReadFile( bucket.yFileId, 0, bucket.y0, inputBucketCounts[0] * sizeof( uint32 ) );
+        ioQueue.AddFence( bucket.frontFence );
+        ioQueue.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, inputBucketCounts[0] * MetaInASize );
+        ioQueue.CommitCommands();
+
+        // Fence for metadata A
+        ioQueue.AddFence( bucket.frontFence );
+
+        if constexpr ( MetaInBSize > 0 )
+        {
+            ioQueue.ReadFile( bucket.metaBFileId, 0, bucket.metaB0, inputBucketCounts[0] * MetaInBSize );
+            ioQueue.AddFence( bucket.metaBFence );
+        }
+        
+        bucket.frontFence.Wait();
+
+        // Commit metadata fences. Must commit after the first Wait() to avoid a race condition 
+        // (since we re-use front fence form meta A)
+        ioQueue.CommitCommands();
+
+        // For table 2, we need to wait for the metadata (x) to be loaded,
+        // as there is no sort key for this one, just metadata.
+        if constexpr ( tableId == TableId::Table2 )
+            bucket.frontFence.Wait();
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( " Finished in %.2lf seconds.", elapsed );
     }
-    
-    bucket.frontFence.Wait();
-    ioQueue.CommitCommands();    // Commit metadata fence. Must commit after the first Wait() to avoid a race condition
+
 
     for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
     {
@@ -433,19 +456,18 @@ void DiskPlotPhase1::ForwardPropagateTable()
             const size_t nextBufferCount = inputBucketCounts[nextBucketIdx];
 
             ioQueue.ReadFile( bucket.yFileId    , nextBucketIdx, bucket.y1    , nextBufferCount * sizeof( uint32 ) );
-
-            // #TODO: Maybe we should just allocate .5 GiB more for the temp buffers?
-            //        for now, try it this way.
-            // Don't load the metadata yet, we will use the metadata back buffer as our temporary buffer for sorting
-            ioQueue.CommitCommands();
-
             ioQueue.ReadFile( bucket.metaAFileId, nextBucketIdx, bucket.metaA1, nextBufferCount * MetaInASize );
+            ioQueue.CommitCommands();
 
             if constexpr ( MetaInBSize > 0 )
             {
                 ioQueue.ReadFile( bucket.metaBFileId, nextBucketIdx, bucket.metaB1, nextBufferCount * MetaInBSize );
             }
 
+            // Don't load the metadata B yet, we will use the metadata B back buffer as our temporary buffer for sorting
+            
+            // #TODO: Maybe we should just allocate .5 GiB more for the temp buffers?
+            //        for now, try it this way.
             ioQueue.AddFence( bucket.backFence );
             //ioDispatch.CommitCommands();
         }
@@ -458,7 +480,6 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
         // Forward propagate this bucket
         const uint32 newEntryCount = ForwardPropagateBucket<tableId>( bucketIdx, bucket, entryCount );
-        _cx.bucketCounts[(int)tableId][bucketIdx] += newEntryCount;
 
         // Ensure the next bucket has finished loading
         bucket.backFence.Wait();
@@ -504,6 +525,11 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         {
             // No sort key needed for table 1, just sort x along with y
             sortKey = (uint32*)bucket.metaA0;
+
+            fxMetaInA  = bucket.metaA0;
+            fxMetaInB  = bucket.metaB0;
+            fxMetaOutA = bucket.metaATmp;
+            fxMetaOutB = bucket.metaBTmp;
         }
         else
         {
@@ -511,35 +537,43 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             SortKeyGen::Generate<BB_MAX_JOBS>( threadPool, entryCount, sortKey );
         }
 
-        uint32* yTemp       = (uint32*)bucket.metaA1;
+        uint32* yTemp       = (uint32*)bucket.metaB1;
         uint32* sortKeyTemp = yTemp + entryCount;
+
+        for( uint32 i = 0; i < entryCount; i++ )
+        {
+            if( bucket.y0[i] == 3022 )
+                BBDebugBreak();
+        }
 
         RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
 
         // #TODO: Write sort key to disk as the previous table's sort key, 
         //        so that we can do a quick sort of L/R later.
 
-        // OK to load next (back) metadata buffer now (see comment above in ForwardPropagateTable)
+        // OK to load next (back) metadata B buffer now (see comment above in ForwardPropagateTable)
         if( nextBucketIdx < BB_DP_BUCKET_COUNT )
             ioQueue.CommitCommands();
 
         #if _DEBUG
             //ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
         #endif
-
-        // If this is the first bucket, ensure metadata has finished loading
-        if( bucketIdx == 0 )
-            bucket.frontFence.Wait();
     
         // Sort metadata with the key
         if constexpr( tableId > TableId::Table2 )
         {
+            // Ensure metadata A finished loading
+            bucket.frontFence.Wait();
+
             using TMetaA = typename TableMetaIn<tableId>::MetaA;
 
             SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
         
             if constexpr ( MetaInBSize > 0 )
             {
+                // Ensure metadata B finished loading
+                bucket.metaBFence.Wait();
+
                 using TMetaB = typename TableMetaIn<tableId>::MetaB;
                 SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
             }
@@ -576,7 +610,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     //     fxMetaOutA, fxMetaOutB );
 
     {
-        Log::Line( "Generating fx..." );
+        Log::Line( "  Generating fx..." );
         const auto timer = TimerBegin();
 
         const size_t chunkSize = cx.writeIntervals[(int)tableId].fxGen;
@@ -596,7 +630,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         );
 
         const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished generating fx in %.2lf seconds.", elapsed );
+        Log::Line( "  Finished generating fx in %.2lf seconds.", elapsed );
     }
 
     ///
@@ -626,17 +660,123 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         // crossBucketInfo.metaA = bucket.metaATmp;
         // crossBucketInfo.metaB = bucket.metaBTmp;
 
-        bbmemcpy_t( crossBucketInfo.y    , bucket.y0     + penultimateGroupIdx, last2GroupEntryCount );
-        bbmemcpy_t( crossBucketInfo.metaA, bucket.metaA0 + penultimateGroupIdx, last2GroupEntryCount );
-        bbmemcpy_t( crossBucketInfo.metaB, bucket.metaB0 + penultimateGroupIdx, last2GroupEntryCount );
+        bbmemcpy_t( crossBucketInfo.y    , bucket.y0 + penultimateGroupIdx, last2GroupEntryCount );
+        bbmemcpy_t( crossBucketInfo.metaA, fxMetaInA + penultimateGroupIdx, last2GroupEntryCount );
+        bbmemcpy_t( crossBucketInfo.metaB, fxMetaInB + penultimateGroupIdx, last2GroupEntryCount );
     }
 
     return matchCount;
 }
 
+
+///
+/// Adjacent Bucket Groups
+///
 //-----------------------------------------------------------
 template<TableId tableId>
-uint32 DiskPlotPhase1::ProcessCrossBucket(
+uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount )
+{
+    AdjacentBucketInfo& crossBucketInfo = bucket.crossBucketInfo;
+
+    // #TODO: Get the current maximum entries of the previous bucket?
+    uint32 maxEntries = BB_DP_MAX_ENTRIES_PER_BUCKET;
+
+    const uint32 prevBucket = bucketIdx - 1;
+
+    uint32        prevGroupCount = crossBucketInfo.groupCounts[0];
+    const uint32* prevGroupY     = crossBucketInfo.y;
+    const uint64* prevGroupMetaA = crossBucketInfo.metaA;
+    const uint64* prevGroupMetaB = crossBucketInfo.metaB;
+    const uint32* curGroupY      = bucket.y0;
+    const uint64* curGroupMetaA  = bucket.metaA0;
+    const uint64* curGroupMetaB  = bucket.metaA1;
+
+    byte*         bucketIndices  = (byte*)bucket.sortKey;   // #TODO: Use its own buffer, instead of sort key
+    Pairs         pairs          = bucket.pairs;
+    uint32*       yTmp           = bucket.yTmp;
+    uint64*       metaATmp       = bucket.metaATmp;
+    uint64*       metaBTmp       = bucket.metaBTmp;
+    uint32*       yOut           = bucket.yTmp     + kBC * 2;   // #TODO: Use proper buffer for this. Not temp, since it may not be big enough?
+    uint64*       metaAOut       = bucket.metaATmp + kBC * 2;   // #TODO: Use proper buffer for this. Not temp, since it may not be big enough?
+    uint64*       metaBOut       = bucket.metaBTmp + kBC * 2;   // #TODO: Use proper buffer for this. Not temp, since it may not be big enough?
+
+    // Get matches between the adjoining groups
+    uint32 curGroupCount    = 0;
+    uint32 matchesSecndLast = 0;
+    uint32 matchesLast      = 0;
+    
+    uint32 yIndex = 0;
+
+    // Process penultimate group from the previous bucket & 
+    // the first group from the current bucket
+    matchesSecndLast = ProcessCrossBucketGroups<tableId>(
+        prevGroupY, 
+        prevGroupMetaA, 
+        prevGroupMetaB,
+        curGroupY, 
+        curGroupMetaA, 
+        curGroupMetaB,
+        yTmp, 
+        metaATmp, 
+        metaBTmp,
+        yOut,
+        metaAOut,
+        metaBOut,
+        prevGroupCount, 
+        entryCount,
+        prevBucket, 
+        bucketIdx,
+        pairs, 
+        maxEntries,
+        yIndex,              // #TODO: Set this to the proper value
+        curGroupCount );
+
+
+    // Process the last group from the previous bucket &
+    // the second group from the current bucket
+
+    prevGroupY     += prevGroupCount;
+    prevGroupMetaA += prevGroupCount;
+    prevGroupMetaB += prevGroupCount;
+    curGroupY      += curGroupCount;
+    curGroupMetaA  += curGroupCount;
+    curGroupMetaB  += curGroupCount;
+    
+    maxEntries     -= matchesSecndLast;
+    entryCount     -= curGroupCount;
+    
+    prevGroupCount = crossBucketInfo.groupCounts[1];
+
+    matchesLast = ProcessCrossBucketGroups<tableId>(
+        prevGroupY, 
+        prevGroupMetaA, 
+        prevGroupMetaB,
+        curGroupY, 
+        curGroupMetaA, 
+        curGroupMetaB,
+        yTmp, 
+        metaATmp, 
+        metaBTmp,
+        yOut,
+        metaAOut,
+        metaBOut,
+        prevGroupCount, 
+        entryCount,
+        prevBucket, 
+        bucketIdx,
+        pairs, 
+        maxEntries,
+        yIndex,              // #TODO: Set this to the proper value
+        curGroupCount );
+
+
+    const uint32 crossMatches = matchesSecndLast + matchesLast;
+    return crossMatches;
+}
+
+//-----------------------------------------------------------
+template<TableId tableId>
+uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     const uint32* prevBucketY,
     const uint64* prevBucketMetaA,
     const uint64* prevBucketMetaB,
@@ -655,7 +795,8 @@ uint32 DiskPlotPhase1::ProcessCrossBucket(
     uint32        curBucketIndex,
     Pairs         pairs,
     uint32        maxPairs,
-    uint32        yStartIndex )
+    uint32        yStartIndex,
+    uint32&       outCurGroupCount )
 {
     constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
     constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
@@ -667,6 +808,7 @@ uint32 DiskPlotPhase1::ProcessCrossBucket(
     const uint64 rBucketGrp = ( rBucket | *curBucketY  ) / kBC;
 
     ASSERT( rBucketGrp > lBucketGrp );
+    outCurGroupCount = 0;
 
     // Ensure the groups are adjoining
     if( rBucketGrp - lBucketGrp > 1 )
@@ -701,7 +843,7 @@ uint32 DiskPlotPhase1::ProcessCrossBucket(
     if( matches )
     {
         // Process Fx
-        ComputeFxForTable( 
+        ComputeFxForTable<tableId>( 
             lBucket, matches, pairs, 
             tmpY, tmpMetaA, tmpMetaB,
             outY, bucketIndices, outMetaA, outMetaB );
@@ -763,7 +905,9 @@ uint32 DiskPlotPhase1::ProcessCrossBucket(
                 sizes[i] = counts[i] * sizeof( uint32 );
 
             _diskQueue->WriteBuckets( yId, yBuckets, sizes );
-
+            _diskQueue->ReleaseBuffer( yBuckets );
+            _diskQueue->ReleaseBuffer( sizes );
+            _diskQueue->CommitCommands();
         }
 
         if constexpr ( MetaInASize > 0 )
@@ -773,6 +917,9 @@ uint32 DiskPlotPhase1::ProcessCrossBucket(
                 sizes[i] = counts[i] * MetaInASize;
 
             _diskQueue->WriteBuckets( metaAId, metaABuckets, sizes );
+            _diskQueue->ReleaseBuffer( metaABuckets );
+            _diskQueue->ReleaseBuffer( sizes );
+            _diskQueue->CommitCommands();
         }
 
         if constexpr ( MetaInBSize > 0 )
@@ -782,74 +929,19 @@ uint32 DiskPlotPhase1::ProcessCrossBucket(
                 sizes[i] = counts[i] * MetaInBSize;
 
             _diskQueue->WriteBuckets( metaBId, metaBBuckets, sizes );
+            _diskQueue->ReleaseBuffer( metaBBuckets );
+            _diskQueue->ReleaseBuffer( sizes );
+            _diskQueue->CommitCommands();
         }
+
+        // Save total bucket conts
+        uint32* totalBucketCounts = _cx.bucketCounts[(int)tableId];
+        for( uint32 i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            totalBucketCounts[i] += counts[i];
     }
 
+    outCurGroupCount = curBucketGroupCount;
     return matches;
-}
-
-//-----------------------------------------------------------
-template<TableId tableId>
-uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount )
-{
-    constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
-    constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
-
-    AdjacentBucketInfo& crossBucketInfo = bucket.crossBucketInfo;
-
-    // #TODO: Get the current maximum entries of the previous bucket?
-    const uint32 maxEntries = BB_DP_MAX_ENTRIES_PER_BUCKET;
-    const uint32 prevBucket = bucketIdx - 1;
-
-    uint32        prevGroupCount = crossBucketInfo.groupCounts[0];
-    const uint32* prevGroupY     = crossBucketInfo.y;
-    const uint64* prevGroupMetaA = crossBucketInfo.metaA;
-    const uint64* prevGroupMetaB = crossBucketInfo.metaB;
-    const uint32* curGroupY      = bucket.y0;
-    const uint64* curGroupMetaA  = bucket.metaA0;
-    const uint64* curGroupMetaB  = bucket.metaA1;
-
-    byte*         bucketIndices  = (byte*)bucket.sortKey;   // #TODO: Use its own buffer, instead of sort key
-    uint32*       yTmp           = bucket.yTmp;
-    uint64*       metaATmp       = bucket.metaATmp;
-    uint64*       metaBTmp       = bucket.metaBTmp;
-    Pairs         pairs          = bucket.pairs;
-
-    // Get matches between the adjoining groups
-    uint32 curGroupCount = 0;
-    uint32 matches       = 0;
-    
-    matches = ProcessCrossBucket(
-        prevGroupY, curGroupY, yTmp,
-        prevGroupCount, entryCount,
-        prevBucket, bucketIdx,
-        pairs, maxEntries, curGroupCount );
-
-    if( matches )
-    {
-        // Generate FX for this
-        if constexpr ( MetaInASize )
-        {
-            bbmemcpy_t( metaATmp, prevGroupMetaA, prevGroupCount );
-            bbmemcpy_t( metaATmp + prevGroupCount, curGroupMetaA, curGroupCount );
-        }
-
-        if constexpr ( MetaInBSize )
-        {
-            bbmemcpy_t( metaBTmp, prevGroupMetaB, prevGroupCount );
-            bbmemcpy_t( metaBTmp + prevGroupCount, curGroupMetaB, curGroupCount );
-        }
-
-        // Grab a buffer
-        // _diskQueue->GetBuffer()
-        
-        // ComputeFxForTable( prevBucket, matches, pairs, yTmp, metaATmp, metaBTmp,
-    }
-
-
-    // #TODO: Matches need to be extended to their absolute y location, or we have to
-    //        track that for when we load them.
-
 }
 
 
@@ -1082,131 +1174,131 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
 }
 
 //-----------------------------------------------------------
-uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
-                                                   uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket )
-{
-    // We expect yBuffer to be pointing to an area before the start of bucket.y0,
-    // which has the y entries from the last bucket's last 2 groups added to it.
+// uint32 DiskPlotPhase1::MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
+//                                                    uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket )
+// {
+//     // We expect yBuffer to be pointing to an area before the start of bucket.y0,
+//     // which has the y entries from the last bucket's last 2 groups added to it.
 
-    const uint threadCount           = _cx.threadCount;
+//     const uint threadCount           = _cx.threadCount;
 
-    const uint32 penultimateGrpCount = prevGroupsCounts[0];
-    const uint32 lastGrpCount        = prevGroupsCounts[1];
+//     const uint32 penultimateGrpCount = prevGroupsCounts[0];
+//     const uint32 lastGrpCount        = prevGroupsCounts[1];
 
-    const uint32 penultimateGrpStart = 0;
-    const uint32 lastGrpStart        = penultimateGrpCount;
+//     const uint32 penultimateGrpStart = 0;
+//     const uint32 lastGrpStart        = penultimateGrpCount;
     
-    const uint32 prevGroupsCount     = penultimateGrpCount + lastGrpCount;
+//     const uint32 prevGroupsCount     = penultimateGrpCount + lastGrpCount;
 
-    // Let's use the section starting after where are previous' bucket's groups are 
-    // stored as the location where we will copy our groups for matching.
-    uint32* yBuffer = yTmp + prevGroupsCount;
+//     // Let's use the section starting after where are previous' bucket's groups are 
+//     // stored as the location where we will copy our groups for matching.
+//     uint32* yBuffer = yTmp + prevGroupsCount;
 
-    ASSERT( penultimateGrpCount + lastGrpCount < kBC * 2 );
+//     ASSERT( penultimateGrpCount + lastGrpCount < kBC * 2 );
 
-    // Find the first 2 groups of the new bucket
-    ASSERT( curBucketLength > kBC * 2 );
+//     // Find the first 2 groups of the new bucket
+//     ASSERT( curBucketLength > kBC * 2 );
 
-    const uint64 lBucket = ((uint64)prevBucket) << 32;
-    const uint64 rBucket = ((uint64)curBucket ) << 32;
+//     const uint64 lBucket = ((uint64)prevBucket) << 32;
+//     const uint64 rBucket = ((uint64)curBucket ) << 32;
 
-    const uint64 prevBucketGrp1 = ( lBucket | yTmp[penultimateGrpStart] ) / kBC;
-    const uint64 prevBucketGrp2 = ( lBucket | yTmp[penultimateGrpCount] ) / kBC;
-    ASSERT( prevBucketGrp2 > prevBucketGrp1 );
-
-
-    uint64 newBucketGrp1      = ( rBucket | curY[0] ) / kBC;
-    uint64 newBucketGrp2      = 0;
-    uint32 newBucketGrp1Count = 0;
-    uint32 newBucketGrp2Count = 0;
-    ASSERT( newBucketGrp1 >= prevBucketGrp2 );
-
-    for( uint32 i = 1; i < curBucketLength; i++ )
-    {
-        uint64 grp = ( rBucket | curY[i] ) / kBC;
-        if( grp != newBucketGrp1 )
-        {
-            // Found second group, now try to find the end
-            newBucketGrp2 = grp;
-
-            for( uint32 j = i+1; j < curBucketLength; j++ )
-            {
-                grp = ( rBucket | curY[j] ) / kBC;
-                if( grp != newBucketGrp2 )
-                {
-                    newBucketGrp1Count = i;
-                    newBucketGrp2Count = j - i;
-                    break;
-                }
-            }
-
-            break;  // New group found
-        }
-    }
-
-    uint32 matches = 0;
-
-    ASSERT( newBucketGrp2 && newBucketGrp1Count && newBucketGrp2Count );
-
-    const size_t entrySize            = sizeof( uint32 ) + sizeof( uint16 );
-    const uint32 writeIntervalEntries = (uint32)( _cx.matchWriteInterval / entrySize );
-
-    // If the new bucket starts at an adjacent group from the penultimate group 
-    // from the last bucket, then let's perform matches on it.
-    if( newBucketGrp1 - prevBucketGrp1 == 1 )
-    {
-        // Copy the penultimate group from the last bucket and the
-        // first group of the current bucket into yBuffer contiguously
-        bbmemcpy_t( yBuffer, yTmp , penultimateGrpCount );
-        bbmemcpy_t( yBuffer + penultimateGrpCount, curY, newBucketGrp1Count );
-
-        uint32 boundaries[2] = { penultimateGrpCount, penultimateGrpCount + newBucketGrp1Count };
-
-        matches += MatchEntries<true>( yBuffer, boundaries, pairs, 1, 0,
-                                       maxPairs, lBucket, rBucket,
-                                       _diskQueue, writeIntervalEntries );
-
-        maxPairs -= matches;
-
-        if( matches )
-        {
-            // Generate fx for these
-
-            // Adjust back pointers to point to the correct location
-        }
-    }
-
-    // If the last group from the prev bucket is in the same group
-    // as the first group from the new bucket, then match against the
-    // second group from the new bucket
-    if( prevBucketGrp2 == newBucketGrp1 && newBucketGrp2 - prevBucketGrp2 == 1 )
-    {
-        // Copy our last group from the last bucket and our second group
-        // from our current bucket into yBuffer contiguously
-        bbmemcpy_t( yBuffer, yTmp + penultimateGrpCount, lastGrpCount );
-        bbmemcpy_t( yBuffer + lastGrpCount, curY + newBucketGrp1Count, newBucketGrp2Count );
-
-        uint32 boundaries[2] = { lastGrpCount, lastGrpCount + newBucketGrp2Count };
-
-        uint32 newMatches;
-        newMatches = MatchEntries<true>( yBuffer, boundaries, pairs, 1, 0,
-                                         maxPairs, lBucket, rBucket, 
-                                         _diskQueue, writeIntervalEntries );
-
-        matches += newMatches;
-
-        if( newMatches )
-        {
-            // Generate fx for these
-
-            // Adjust back pointers to point to the correct location
-        }
-    }
+//     const uint64 prevBucketGrp1 = ( lBucket | yTmp[penultimateGrpStart] ) / kBC;
+//     const uint64 prevBucketGrp2 = ( lBucket | yTmp[penultimateGrpCount] ) / kBC;
+//     ASSERT( prevBucketGrp2 > prevBucketGrp1 );
 
 
-    // Return the number of matches found
-    return matches;
-}
+//     uint64 newBucketGrp1      = ( rBucket | curY[0] ) / kBC;
+//     uint64 newBucketGrp2      = 0;
+//     uint32 newBucketGrp1Count = 0;
+//     uint32 newBucketGrp2Count = 0;
+//     ASSERT( newBucketGrp1 >= prevBucketGrp2 );
+
+//     for( uint32 i = 1; i < curBucketLength; i++ )
+//     {
+//         uint64 grp = ( rBucket | curY[i] ) / kBC;
+//         if( grp != newBucketGrp1 )
+//         {
+//             // Found second group, now try to find the end
+//             newBucketGrp2 = grp;
+
+//             for( uint32 j = i+1; j < curBucketLength; j++ )
+//             {
+//                 grp = ( rBucket | curY[j] ) / kBC;
+//                 if( grp != newBucketGrp2 )
+//                 {
+//                     newBucketGrp1Count = i;
+//                     newBucketGrp2Count = j - i;
+//                     break;
+//                 }
+//             }
+
+//             break;  // New group found
+//         }
+//     }
+
+//     uint32 matches = 0;
+
+//     ASSERT( newBucketGrp2 && newBucketGrp1Count && newBucketGrp2Count );
+
+//     const size_t entrySize            = sizeof( uint32 ) + sizeof( uint16 );
+//     const uint32 writeIntervalEntries = (uint32)( _cx.matchWriteInterval / entrySize );
+
+//     // If the new bucket starts at an adjacent group from the penultimate group 
+//     // from the last bucket, then let's perform matches on it.
+//     if( newBucketGrp1 - prevBucketGrp1 == 1 )
+//     {
+//         // Copy the penultimate group from the last bucket and the
+//         // first group of the current bucket into yBuffer contiguously
+//         bbmemcpy_t( yBuffer, yTmp , penultimateGrpCount );
+//         bbmemcpy_t( yBuffer + penultimateGrpCount, curY, newBucketGrp1Count );
+
+//         uint32 boundaries[2] = { penultimateGrpCount, penultimateGrpCount + newBucketGrp1Count };
+
+//         matches += MatchEntries<TableId>( yBuffer, boundaries, pairs, 1, 0,
+//                                           maxPairs, lBucket, rBucket,
+//                                          _diskQueue, writeIntervalEntries );
+
+//         maxPairs -= matches;
+
+//         if( matches )
+//         {
+//             // Generate fx for these
+
+//             // Adjust back pointers to point to the correct location
+//         }
+//     }
+
+//     // If the last group from the prev bucket is in the same group
+//     // as the first group from the new bucket, then match against the
+//     // second group from the new bucket
+//     if( prevBucketGrp2 == newBucketGrp1 && newBucketGrp2 - prevBucketGrp2 == 1 )
+//     {
+//         // Copy our last group from the last bucket and our second group
+//         // from our current bucket into yBuffer contiguously
+//         bbmemcpy_t( yBuffer, yTmp + penultimateGrpCount, lastGrpCount );
+//         bbmemcpy_t( yBuffer + lastGrpCount, curY + newBucketGrp1Count, newBucketGrp2Count );
+
+//         uint32 boundaries[2] = { lastGrpCount, lastGrpCount + newBucketGrp2Count };
+
+//         uint32 newMatches;
+//         newMatches = MatchEntries<true>( yBuffer, boundaries, pairs, 1, 0,
+//                                          maxPairs, lBucket, rBucket, 
+//                                          _diskQueue, writeIntervalEntries );
+
+//         matches += newMatches;
+
+//         if( newMatches )
+//         {
+//             // Generate fx for these
+
+//             // Adjust back pointers to point to the correct location
+//         }
+//     }
+
+
+//     // Return the number of matches found
+//     return matches;
+// }
 
 //-----------------------------------------------------------
 void ScanGroupJob::Run()

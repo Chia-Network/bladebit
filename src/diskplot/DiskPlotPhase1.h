@@ -74,6 +74,8 @@ class DiskPlotPhase1
         AutoResetSignal frontFence;
         AutoResetSignal backFence;
 
+        AutoResetSignal metaBFence;
+
         // Used for overflows
         OverflowBuffer yOverflow;
         OverflowBuffer metaAOverflow;
@@ -96,9 +98,6 @@ private:
     template<TableId tableId>
     uint32 ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
 
-    template<TableId tableId>
-    uint32 ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
-
 
     uint32 MatchBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] );
 
@@ -106,8 +105,11 @@ private:
 
     uint32 Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS] );
 
-    uint32 MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
-                                       uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
+    // uint32 MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
+    //                                    uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
+
+    template<TableId tableId>
+    uint32 ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
 
     template<TableId tableId>
     uint32 ProcessCrossBucketGroups(
@@ -129,7 +131,8 @@ private:
         uint32        curBucketIndex,
         Pairs         pairs,
         uint32        maxPairs,
-        uint32        yStartIndex
+        uint32        yStartIndex,
+        uint32&       outCurGroupCount
     );
 
     void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );

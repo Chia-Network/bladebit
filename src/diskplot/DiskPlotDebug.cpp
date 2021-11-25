@@ -1,5 +1,4 @@
 #include "DiskPlotDebug.h"
-#include "DiskBufferQueue.h"
 #include "io/FileStream.h"
 #include "threading/ThreadPool.h"
 #include "threading/AutoResetSignal.h"
@@ -8,7 +7,7 @@
 #include "util/Log.h"
 
 //-----------------------------------------------------------
-void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, TableId table, 
+void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBufferQueue& queue, TableId table, 
                                       uint32 bucketCounts[BB_DP_BUCKET_COUNT] )
 {
     const size_t bucketMaxCount  = BB_DP_MAX_ENTRIES_PER_BUCKET;
@@ -29,9 +28,10 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
         const size_t blockSize  = refTable.BlockSize();
         const uint64 maxEntries = 1ull << _K;
 
-        const size_t allocSize = RoundUpToNextBoundaryT( (size_t)maxEntries * sizeof( uint64 ), blockSize );
+        const size_t allocSize = (size_t)maxEntries * sizeof( uint64 );
 
-        refEntries = bbvirtalloc<uint64>( allocSize );
+        byte* block = bbvirtalloc<byte>( blockSize );
+        refEntries  = bbvirtalloc<uint64>( allocSize );
 
         // The first block contains the entry count
         FatalIf( !refTable.Read( refEntries, blockSize ), 
@@ -43,17 +43,41 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
 
         ASSERT( refEntryCount <= maxEntries );
 
-        size_t sizeToRead = allocSize;
+        const size_t totalSize          = refEntryCount * sizeof( uint64 );
+        const size_t blockSizeToRead    = totalSize / blockSize * blockSize;
+        const size_t remainder          = totalSize - blockSizeToRead;
+
+        // Read blocks
+        size_t sizeToRead = blockSizeToRead;
         byte*  reader     = (byte*)refEntries;
         while( sizeToRead )
         {
             // The rest of the blocks are entries
             const ssize_t sizeRead = refTable.Read( reader, sizeToRead );
-            FatalIf( sizeRead <= 0, "Failed to read entries from reference table file %s with error: %d.", path, refTable.GetError() );
+            if( sizeRead < 1 )
+            {
+                const int err = refTable.GetError();
+                Fatal( "Failed to read entries from reference table file %s with error: %d.", path, err );
+            }
 
             sizeToRead -= (size_t)sizeRead;
             reader += sizeRead;
         }
+
+        // #TODO: This, for now ignore it?
+        if( remainder )
+        {
+            // if( refTable.Read( block, blockSize ) != (ssize_t)blockSize )
+            // {
+            //     const int err = refTable.GetError();
+            //     Fatal( "Failed to read entries from reference table file %s with error: %d.", path, err );
+            // }
+
+            // ASSERT( blockSizeToRead / sizeof( uint64 ) + remainder / sizeof( uint64 ) == refEntryCount );
+            // memcpy( reader, block, remainder );
+        }
+
+        SysHost::VirtualFree( block );
     }
 
 
@@ -65,8 +89,8 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
     AutoResetSignal fence;
 
     // Load the first bucket
-    queue.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
-    queue.ReadFile( FileId::Y0, 0, bucketEntries, bucketCounts[0] * sizeof( uint32 ) );
+    queue.SeekBucket( yFileId, 0, SeekOrigin::Begin );
+    queue.ReadFile( yFileId, 0, bucketEntries, bucketCounts[0] * sizeof( uint32 ) );
     queue.AddFence( fence );
     queue.CommitCommands();
 
@@ -93,7 +117,7 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
         
         if( nextBucket < BB_DP_BUCKET_COUNT )
         {
-            queue.ReadFile( FileId::Y0, nextBucket, bucketSortTmp, bucketCounts[nextBucket] * sizeof( uint32 ) );
+            queue.ReadFile( yFileId, nextBucket, bucketSortTmp, bucketCounts[nextBucket] * sizeof( uint32 ) );
             queue.AddFence( fence );
             queue.CommitCommands();
         }
@@ -123,7 +147,7 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
     Log::Line( "Table %d y values validated successfully.", (int)table+1 );
 
     // Restore files to their position, just in case
-    queue.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
+    queue.SeekBucket( yFileId, 0, SeekOrigin::Begin );
     queue.AddFence( fence );
     queue.CommitCommands();
     fence.Wait();
@@ -132,3 +156,5 @@ void Debug::ValidateYFileFromBuckets( ThreadPool& pool, DiskBufferQueue& queue, 
     SysHost::VirtualFree( refEntries    );
     SysHost::VirtualFree( bucketEntries );
 }
+
+
