@@ -31,12 +31,20 @@
 ///
 /// Assorted utility functions
 /// 
+void FatalExit();
+void FatalErrorMsg( const char* message, ... );
+void _Fatal( const char* message, ... );
 
 // Post a message and exit with error
 //-----------------------------------------------------------
-void Fatal( const char* message, ... );
+#ifdef _WIN32
+    #define Fatal( message, ... )  FatalErrorMsg( message, __VA_ARGS__ ); BBDebugBreak(); FatalExit()
+#else
+    #define Fatal( message, ... )  { FatalErrorMsg( message, ## __VA_ARGS__ ); BBDebugBreak(); FatalExit(); }
+#endif
 
-void FatalIf( bool condition, const char* message, ... );
+#define FatalIf( cond, message, ... ) if( (cond) ) { Fatal( message, ## __VA_ARGS__ ); }
+
 
 //-----------------------------------------------------------
 template<typename T>

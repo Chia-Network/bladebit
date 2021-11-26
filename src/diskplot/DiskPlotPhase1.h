@@ -111,17 +111,17 @@ private:
     template<TableId tableId>
     uint32 ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
 
-    template<TableId tableId>
+    template<TableId tableId, typename TMetaA, typename TMetaB>
     uint32 ProcessCrossBucketGroups(
         const uint32* prevBucketY,
-        const uint64* prevBucketMetaA,
-        const uint64* prevBucketMetaB,
+        const TMetaA* prevBucketMetaA,
+        const TMetaB* prevBucketMetaB,
         const uint32* curBucketY,
-        const uint64* curBucketMetaA,
-        const uint64* curBucketMetaB,
+        const TMetaA* curBucketMetaA,
+        const TMetaB* curBucketMetaB,
         uint32*       tmpY,
-        uint64*       tmpMetaA,
-        uint64*       tmpMetaB,
+        TMetaA*       tmpMetaA,
+        TMetaB*       tmpMetaB,
         uint32*       outY,
         uint64*       outMetaA,
         uint64*       outMetaB,

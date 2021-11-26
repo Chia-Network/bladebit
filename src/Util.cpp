@@ -2,22 +2,40 @@
 #include "util/Log.h"
 
 //-----------------------------------------------------------
-void VFatal( const char* message, va_list args )
+void FatalExit()
 {
-    Log::Flush();
-    Log::FlushError();
-
-    Log::Error( "Fatal Error:" );
-    Log::WriteError( "  " );
-    Log::Error( message, args );
-    Log::FlushError();
-
-    BBDebugBreak();
     exit( 1 );
 }
 
 //-----------------------------------------------------------
-void Fatal( const char* message, ... )
+void VFatalErrorMsg( const char* message, va_list args  )
+{
+    Log::Flush();
+    Log::FlushError();
+
+    Log::Error( "\nFatal Error:  " );
+    Log::Error( message, args );
+    Log::FlushError();
+}
+
+//-----------------------------------------------------------
+void FatalErrorMsg( const char* message, ... )
+{
+    va_list args;
+    va_start( args, message );
+    VFatalErrorMsg( message, args );
+    va_end( args );
+}
+
+//-----------------------------------------------------------
+void VFatal( const char* message, va_list args )
+{
+    VFatalErrorMsg( message, args );
+    FatalExit();
+}
+
+//-----------------------------------------------------------
+void _Fatal( const char* message, ... )
 {
     va_list args;
     va_start( args, message );
@@ -26,7 +44,7 @@ void Fatal( const char* message, ... )
 }
 
 //-----------------------------------------------------------
-void FatalIf( bool condition, const char* message, ... )
+void _FatalIf( bool condition, const char* message, ... )
 {
     if( condition )
     {

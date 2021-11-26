@@ -243,8 +243,9 @@ void SysHost::Random( byte* buffer, size_t size )
         sizeRead = getrandom( writer, readSize, 0 );
 
         // Should never get EINTR, but docs say to check anyway.
-        if( sizeRead < 0 && errno != EINTR )
-            Fatal( "getrandom syscall failed." );
+        int err = errno;
+        if( sizeRead < 0 && err != EINTR )
+            Fatal( "getrandom syscall failed with error %d.", err );
 
         writer += (size_t)sizeRead;
     }

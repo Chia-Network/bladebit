@@ -131,11 +131,15 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
             const uint64 y      = bucketMask | bucketEntries[i];
             const uint64 yRef   = *refReader;
 
+            // if( y == 112675641563 ) BBDebugBreak();
+
             const uint32 y32    = bucketEntries[i];
             const uint32 y32Ref = (uint32)yRef;
 
-            FatalIf( y != yRef, "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld",
-                     (int)table+1, bucket, i, (int64)( refReader - refEntries ) );
+            FatalIf( y != yRef, 
+                    "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                    " Expected %llu but got %llu",
+                     (int)table+1, bucket, i, (int64)( refReader - refEntries ), yRef, y );
         }
 
         Log::Line( "  Bucket %u validated successfully!", bucket );
