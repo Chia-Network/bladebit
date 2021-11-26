@@ -604,7 +604,8 @@ void FxBucketJob::RunForTable()
         ComputeFxForTable<tableId>( 
             bucket, entryCount, pairs,
             yIn, metaInA, metaInB,
-            yTmp, bucketIdOut, metaTmpA, metaTmpB );
+            yTmp, bucketIdOut, metaTmpA, metaTmpB
+            ,this->_jobId ); // #TODO: Remove job Id. It's for testing
 
         // Distribute entries into their corresponding buckets
         DistributeIntoBuckets<tableId, TMetaA, TMetaB>(
@@ -742,7 +743,10 @@ void FxBucketJob::DistributeIntoBuckets(
         yBuckets[dstIdx] = y[i];
 
         if constexpr ( metaSizeA > 0 )
+        {
+            // if( metaA[i] == 17265369914238941055 ) BBDebugBreak();
             metaABuckets[dstIdx] = metaA[i];
+        }
 
         if constexpr ( metaSizeB > 0 )
             metaBBuckets[dstIdx] = metaB[i];

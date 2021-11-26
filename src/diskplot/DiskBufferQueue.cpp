@@ -465,7 +465,7 @@ void DiskBufferQueue::ReadFromFile( FileStream& file, size_t size, byte* buffer,
             if( sizeRead < 1 )
             {
                 const int err = file.GetError();
-                Fatal( "Failed to read from '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+                Fatal( "Failed to read from '%s_%u' work file with error %d (0x%x).", fileName, bucket, err, err );
             }
 
             size  -= (size_t)sizeRead;
@@ -489,7 +489,7 @@ void DiskBufferQueue::ReadFromFile( FileStream& file, size_t size, byte* buffer,
             if( sizeRead < 1 )
             {
                 const int err = file.GetError();
-                Fatal( "Failed to read from '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+                Fatal( "Failed to read from '%s_%u' work file with error %d (0x%x).", fileName, bucket, err, err );
             }
 
             ASSERT( sizeRead <= (ssize_t)sizeToRead );

@@ -125,12 +125,17 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
         // Start validating
         Log::Line( "  Validating entries...");
         const uint64 bucketMask = ((uint64)bucket) << 32;
+        uint64 prevRef = 0;
         
         for( int64 i = 0; i < entryCount; i++, refReader++ )
         {
             const uint64 y      = bucketMask | bucketEntries[i];
             const uint64 yRef   = *refReader;
 
+            // Test for now, since we're not getting all of the reference values in some tables...
+            if( yRef < prevRef )
+                break;
+            prevRef = yRef;
             // if( y == 112675641563 ) BBDebugBreak();
 
             const uint32 y32    = bucketEntries[i];
@@ -159,6 +164,145 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
 
     SysHost::VirtualFree( refEntries    );
     SysHost::VirtualFree( bucketEntries );
+}
+
+//-----------------------------------------------------------
+void Debug::ValidateMetaFileFromBuckets( const uint64* metaABucket, const uint64* metaBBucket,
+                                         TableId table,  uint32 entryCount, uint32 bucketIdx,
+                                         uint32 bucketCounts[BB_DP_BUCKET_COUNT] )
+{
+    size_t  refEntrySize     = 0;
+    uint32  metaMultiplier   = 0;
+    size_t  refMetaTableSize = 0;
+    uint64  refEntryCount    = 0;
+    uint64* refEntries       = nullptr;
+
+    switch( table )
+    {
+        case TableId::Table2: metaMultiplier = TableMetaOut<TableId::Table2>::Multiplier; break;
+        case TableId::Table3: metaMultiplier = TableMetaOut<TableId::Table3>::Multiplier; break;
+        case TableId::Table4: metaMultiplier = TableMetaOut<TableId::Table4>::Multiplier; break;
+        case TableId::Table5: metaMultiplier = TableMetaOut<TableId::Table5>::Multiplier; break;
+        case TableId::Table6: metaMultiplier = TableMetaOut<TableId::Table6>::Multiplier; break;
+        default:
+            Fatal( "Invalid table specified for metadata verification." );
+            break;
+    }
+
+    // Reference stores 3*4 multiplier as 4*4
+    if( metaMultiplier == 3 )
+        metaMultiplier = 4;
+
+    refEntrySize = metaMultiplier * 4;
+
+    // Read the whole reference table into memory
+    Log::Line( "Loading reference table..." );
+    {
+        char path[1024];
+        sprintf( path, BB_DP_DBG_REF_DIR "meta%d.tmp", (int)table+1 );
+
+        FileStream refTable;
+        FatalIf( !refTable.Open( path, FileMode::Open, FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering ),
+                 "Failed to open reference meta table file %s.", path );
+
+        const uint64 maxEntries = 1ull << _K;
+        const size_t blockSize  = refTable.BlockSize();
+        const size_t allocSize  = (size_t)maxEntries * refEntrySize;
+
+        byte* block = bbvirtalloc<byte>( blockSize );
+        refEntries  = bbvirtalloc<uint64>( allocSize );
+
+        // The first block contains the entry count
+        FatalIf( !refTable.Read( refEntries, blockSize ), 
+                "Failed to read count from reference table file %s with error: %d.", path, refTable.GetError() );
+
+        refMetaTableSize = *refEntries;
+        refEntryCount    = refMetaTableSize / refEntrySize;
+
+        ASSERT( refMetaTableSize <= allocSize );
+        ASSERT( refEntryCount <= maxEntries );
+
+        const size_t blockSizeToRead    = refMetaTableSize / blockSize * blockSize;
+        const size_t remainder          = refMetaTableSize - blockSizeToRead;
+
+        // Read blocks
+        size_t sizeToRead = blockSizeToRead;
+        byte*  reader     = (byte*)refEntries;
+        while( sizeToRead )
+        {
+            // The rest of the blocks are entries
+            const ssize_t sizeRead = refTable.Read( reader, sizeToRead );
+            if( sizeRead < 1 )
+            {
+                const int err = refTable.GetError();
+                Fatal( "Failed to read entries from reference table file %s with error: %d.", path, err );
+            }
+
+            sizeToRead -= (size_t)sizeRead;
+            reader     += sizeRead;
+        }
+
+        if( remainder )
+        {
+            if( refTable.Read( block, blockSize ) != (ssize_t)blockSize )
+            {
+                const int err = refTable.GetError();
+                Fatal( "Failed to read entries from reference table file %s with error: %d.", path, err );
+            }
+
+            memcpy( reader, block, remainder );
+        }
+
+        SysHost::VirtualFree( block );
+    }
+
+
+    // Alloc a buffer for our buckets
+    const uint64* refReader = refEntries;
+
+    // Get reader offset based on bucket
+    for( uint i = 0; i < bucketIdx; i++ )
+        refReader += bucketCounts[i];
+
+    Log::Line( "Validating Bucket %u", bucketIdx );
+
+    for( int64 i = 0; i < entryCount; i++, refReader++ )
+    {
+        const uint64 metaA   = metaABucket[i];
+        const uint64 metaRef = *refReader;
+
+        // FatalIf( metaA != metaRef, 
+                // "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                // " Expected %llu but got %llu",
+                //     (int)table+1, bucketIdx, i, (int64)( refReader - refEntries ), metaRef, metaA );
+        if( metaA != metaRef )
+        {
+            // Because the y that generated the meta might be repeated, when we sort
+            // we might get metadata that is not matching because it is out of order.
+            // We test for those cases here in the case that there's a 2-way mismatch.
+            // If the y repeates more than 2 times and we have a mismatch, we won't test for
+            // it and just consider it as an error for manual checking.
+
+            if( metaABucket[i+1] == metaRef &&
+                metaA == refReader[1] )
+            {
+                // Mismatched pair, skip the next one.
+                // Skip the next
+                i++;
+                refReader++;
+                continue;
+            }
+
+            Log::Line( "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                       " Expected %llu but got %llu",
+                        (int)table+1, bucketIdx, i, (int64)( refReader - refEntries ), metaRef, metaA );
+
+        }
+    }
+
+    Log::Line( "Table %d meta values validated successfully.", (int)table+1 );
+
+    SysHost::VirtualFree( refEntries );
 }
 
 

@@ -343,7 +343,7 @@ void DiskPlotPhase1::ForwardPropagate()
         const double tableElapsed = TimerEnd( tableTimer );
         Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
 
-        #if _DEBUG
+        #if _DEBUG && BB_DP_DBG_VALIDATE_Y
         {
             Log::Line( "Validating table %d...", (int)table + 1 );
             const FileId fileId = isEven ? FileId::Y1 : FileId::Y0;
@@ -464,6 +464,9 @@ void DiskPlotPhase1::ForwardPropagateTable()
             
             // #TODO: Maybe we should just allocate .5 GiB more for the temp buffers?
             //        for now, try it this way.
+            // #TODO: Add another fence after y load, so we can sort even if the meta hasn't finished loading yet.
+            //        Instead of using multiple autoreset event, create a index memory fence object wrapping the fence
+            //        so that we can simply compart the index
             ioQueue.AddFence( bucket.backFence );
             //ioDispatch.CommitCommands();
         }
@@ -553,12 +556,24 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         if constexpr( tableId > TableId::Table2 )
         {
             // Ensure metadata A finished loading
-            bucket.frontFence.Wait();
+            // #TODO: Add fence here for meta A only as well, even if not the first bucket.
+            if( bucketIdx == 0 )
+                bucket.frontFence.Wait();
 
             using TMetaA = typename TableMetaIn<tableId>::MetaA;
 
             SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
         
+            // #TEST
+            // #TODO: Remove me
+            #if _DEBUG
+            if( tableId > TableId::Table2 )
+            {
+                Debug::ValidateMetaFileFromBuckets( fxMetaInA, nullptr, tableId-(TableId)1, entryCount, bucketIdx, 
+                                                   _cx.bucketCounts[(int)tableId-1] );
+            }
+            #endif
+
             if constexpr ( MetaInBSize > 0 )
             {
                 // Ensure metadata B finished loading
@@ -800,8 +815,12 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     uint32&       outCurGroupCount
 )
 {
-    constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
-    constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
+    const size_t MetaInASize  = TableMetaIn<tableId>::SizeA;
+    const size_t MetaInBSize  = TableMetaIn<tableId>::SizeB;
+    const size_t MetaOutASize = TableMetaOut<tableId>::SizeA;
+    const size_t MetaOutBSize = TableMetaOut<tableId>::SizeB;
+
+
     ASSERT( MetaInASize );
 
     const uint64 lBucket    = ((uint64)prevBucketIndex) << 32;
@@ -859,7 +878,8 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
         ComputeFxForTable<tableId>( 
             lBucket, matches, pairs, 
             tmpY, (uint64*)tmpMetaA, (uint64*)tmpMetaB,
-            outY, bucketIndices, outMetaA, outMetaB );
+            outY, bucketIndices, outMetaA, outMetaB, 
+            0 );    // #TODO: Remove job Id. It's for testing
         
         // Count how many entries we have per buckets
         uint32 counts[BB_DP_BUCKET_COUNT];
@@ -882,21 +902,23 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
         uint64* metaABuckets = nullptr;
         uint64* metaBBuckets = nullptr;
 
-        yBuckets     = (uint32*)_diskQueue->GetBuffer( sizeof( uint32 ) * matches );
-        metaABuckets = (uint64*)_diskQueue->GetBuffer( MetaInASize * matches );
+        yBuckets = (uint32*)_diskQueue->GetBuffer( sizeof( uint32 ) * matches );
 
-        if constexpr ( MetaInBSize )
-        {
-            metaBBuckets = (uint64*)_diskQueue->GetBuffer( MetaInBSize * matches );
-        }
+        if constexpr ( MetaOutASize )
+            metaABuckets = (uint64*)_diskQueue->GetBuffer( MetaOutASize * matches );
+
+        if constexpr ( MetaOutBSize )
+            metaBBuckets = (uint64*)_diskQueue->GetBuffer( MetaOutBSize * matches );
 
         // Distribute entries into their respective buckets
         for( uint32 i = 0; i < matches; i++ )
         {
             const uint32 dstIdx = --pfxSum[bucketIndices[i]];
 
-            yBuckets[dstIdx]     = outY[i];
-            metaABuckets[dstIdx] = outMetaA[i];
+            yBuckets[dstIdx] = outY[i];
+
+            if constexpr ( MetaInASize > 0 )
+                metaABuckets[dstIdx] = outMetaA[i];
 
             if constexpr ( MetaInBSize > 0 )
                 metaBBuckets[dstIdx] = outMetaB[i];
@@ -917,10 +939,11 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
             _diskQueue->CommitCommands();
         }
 
+        if constexpr ( MetaOutASize > 0 )
         {
-            uint32* sizes = (uint32*)_diskQueue->GetBuffer( MetaInASize * BB_DP_BUCKET_COUNT );
+            uint32* sizes = (uint32*)_diskQueue->GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
             for( uint32 i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                sizes[i] = counts[i] * MetaInASize;
+                sizes[i] = counts[i] * MetaOutASize;
 
             _diskQueue->WriteBuckets( metaAId, metaABuckets, sizes );
             _diskQueue->ReleaseBuffer( metaABuckets );
@@ -928,11 +951,11 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
             _diskQueue->CommitCommands();
         }
 
-        if constexpr ( MetaInBSize > 0 )
+        if constexpr ( MetaOutBSize > 0 )
         {
-            uint32* sizes = (uint32*)_diskQueue->GetBuffer( MetaInBSize * BB_DP_BUCKET_COUNT );
+            uint32* sizes = (uint32*)_diskQueue->GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
             for( uint32 i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                sizes[i] = counts[i] * MetaInBSize;
+                sizes[i] = counts[i] * MetaOutBSize;
 
             _diskQueue->WriteBuckets( metaBId, metaBBuckets, sizes );
             _diskQueue->ReleaseBuffer( metaBBuckets );
@@ -1546,316 +1569,25 @@ void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs
 //-----------------------------------------------------------
 void FxJob::Run()
 {
-    ASSERT( this->entriesPerChunk == this->entryCount * this->_jobCount );
-    switch( tableId )
-    {
-        case TableId::Table1: RunForTable<TableId::Table1>(); return;
-        case TableId::Table2: RunForTable<TableId::Table2>(); return;
-        case TableId::Table3: RunForTable<TableId::Table3>(); return;
-        case TableId::Table4: RunForTable<TableId::Table4>(); return;
-        case TableId::Table5: RunForTable<TableId::Table5>(); return;
-        case TableId::Table6: RunForTable<TableId::Table6>(); return;
-        case TableId::Table7: RunForTable<TableId::Table7>(); return;
+    // ASSERT( this->entriesPerChunk == this->entryCount * this->_jobCount );
+    // switch( tableId )
+    // {
+    //     case TableId::Table1: RunForTable<TableId::Table1>(); return;
+    //     case TableId::Table2: RunForTable<TableId::Table2>(); return;
+    //     case TableId::Table3: RunForTable<TableId::Table3>(); return;
+    //     case TableId::Table4: RunForTable<TableId::Table4>(); return;
+    //     case TableId::Table5: RunForTable<TableId::Table5>(); return;
+    //     case TableId::Table6: RunForTable<TableId::Table6>(); return;
+    //     case TableId::Table7: RunForTable<TableId::Table7>(); return;
         
-        default:
-            ASSERT( 0 );
-        break;
-    }
-}
-
-//-----------------------------------------------------------
-template<TableId tableId>
-void FxJob::RunForTable()
-{
-    using TMetaA = typename TableMetaOut<tableId>::MetaA;
-    using TMetaB = typename TableMetaOut<tableId>::MetaB;
-
-    const uint32   entryCount       = this->entryCount;
-    const uint32   chunkCount       = this->chunkCount;
-    const uint32   entriesPerChunk  = this->entriesPerChunk;
-    const uint64   bucket           = ( (uint64)this->bucketIdx ) << 32;
-
-    Pairs          lrPairs          = this->pairs;
-    const uint64*  inMetaA          = this->metaInA;
-    const uint64*  inMetaB          = this->metaInB;
-    const uint32*  inY              = this->yIn;
-    
-    uint32*        outY             = this->yOut;
-    byte*          outBucketId      = this->bucketIdOut;
-    uint64*        outMetaA         = this->metaOutA;
-    uint64*        outMetaB         = this->metaOutB;
-
-    uint bucketCounts[BB_DP_BUCKET_COUNT];
-
-    for( uint chunk = 0; chunk < chunkCount; chunk++ )
-    {
-//         auto timer = TimerBegin();
-
-//         if( _jobId == 23 ) __debugbreak();
-        ComputeFxForTable<tableId>( bucket, entryCount, lrPairs, inY, inMetaA, inMetaB,
-                                    outY, outBucketId, outMetaA, outMetaB );
-
-//         double elapsed = TimerEnd( timer );
-//         Trace( "Finished chunk %-2u in %.2lf seconds", chunk, elapsed );
-//         this->SyncThreads();
-        
-        SortToBucket<tableId, TMetaA, TMetaB>(
-            entryCount, outBucketId, outY, 
-            (TMetaA*)outMetaA, (TMetaB*)outMetaB, bucketCounts );
-
-        // Offset to our start position on the next chunk
-        lrPairs.left  += entriesPerChunk;
-        lrPairs.right += entriesPerChunk;
-    }
-
-    const uint32 trailingChunkEntries = this->trailingChunkEntries;
-    if( trailingChunkEntries )
-    {
-        // Set correct pair starting point, as the offset will be different here
-        // #NOTE: Since the last thread may have more entries than the rest of the threads,
-        // we account for that here by using thread 0's trailingChunkEntries.
-        lrPairs = _jobs[0].pairs;
-        
-        const size_t offset = entriesPerChunk * chunkCount + _jobs[0].trailingChunkEntries * _jobId;
-
-        lrPairs.left  += offset;
-        lrPairs.right += offset;
-
-        ComputeFxForTable<tableId>( bucket, trailingChunkEntries, lrPairs, inY, inMetaA, inMetaB,
-                                    outY, outBucketId, outMetaA, outMetaB );
-
-        SortToBucket<tableId, TMetaA, TMetaB>(
-            trailingChunkEntries, outBucketId, outY, 
-            (TMetaA*)outMetaA, (TMetaB*)outMetaB, bucketCounts );
-    }
-    else if( _jobs[_jobCount-1].trailingChunkEntries > 0 )
-    {
-        // If the last thread did have some trailing entries, but
-        // the rest didn't, we need to sync here.
-
-        // Set our counts to zero
-        memset( bucketCounts, 0, sizeof( bucketCounts ) );
-
-        // Dummy sort to bucket so that we don't lock the last thread.
-        // Not ideal, but simple solution for now, and the time spent is little.
-        SortToBucket<tableId, TMetaA, TMetaB>(
-            0, outBucketId, outY, 
-            (TMetaA*)outMetaA, (TMetaB*)outMetaB, bucketCounts );
-    }
-
-    // Write any remaining overflow buffers
-    if( this->IsControlThread() )
-    {
-        // #NOTE: Sync threads here anyway (even though SortToBucket syncs) because
-        //        the last thread may have had trailingChunkEntries whilst the
-        //        rest of the threads didn't. This amount is < thread count, so it won't be much of a wait.
-        this->LockThreads();
-        this->ReleaseThreads();
-
-        const bool isEven = static_cast<uint>( tableId ) & 1;
-
-        const FileId yFileId     = isEven ? FileId::Y1       : FileId::Y0;
-        const FileId metaAFileId = isEven ? FileId::META_A_0 : FileId::META_A_1;
-        const FileId metaBFileId = isEven ? FileId::META_B_0 : FileId::META_B_1;
-
-        DiskBufferQueue& queue         = *this->diskQueue;
-        const size_t     fileBlockSize = queue.BlockSize();
-
-        DoubleBuffer* yOverflow     = this->yOverflows    ->buffers;
-        DoubleBuffer* metaAOverflow = this->metaAOverflows->buffers;
-        DoubleBuffer* metaBOverflow = this->metaBOverflows->buffers;
-
-        for( int i = 0; i < (int)BB_DP_BUCKET_COUNT; i++ )
-            queue.WriteFile( yFileId, i, yOverflow[i].front, fileBlockSize );
-
-        if constexpr ( TableMetaOut<tableId>::SizeA > 0 )
-        {
-            for( int i = 0; i < (int)BB_DP_BUCKET_COUNT; i++ )
-                queue.WriteFile( metaAFileId, i, metaAOverflow[i].front, fileBlockSize );
-        }
-
-        if constexpr ( TableMetaOut<tableId>::SizeB > 0 )
-        {
-            for( int i = 0; i < (int)BB_DP_BUCKET_COUNT; i++ )
-                queue.WriteFile( metaBFileId, i, metaBOverflow[i].front, fileBlockSize );
-        }
-
-        queue.CommitCommands();
-
-        // Wait for all buffers to finish writing
-        AutoResetSignal fence;
-        queue.AddFence( fence );
-        queue.CommitCommands();
-        fence.Wait();
-    }
-    else
-        this->WaitForRelease();
+    //     default:
+    //         ASSERT( 0 );
+    //     break;
+    // }
 }
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
-
-//-----------------------------------------------------------
-template<TableId tableId, typename TMetaA, typename TMetaB>
-inline
-void FxJob::SortToBucket( uint entryCount, const byte* bucketIndices, const uint32* yBuffer, 
-                          const TMetaA* metaABuffer, const TMetaB* metaBBuffer,
-                          uint bucketCounts[BB_DP_BUCKET_COUNT] )
-{
-    const bool isEven = static_cast<uint>( tableId ) & 1;
-
-    const FileId yFileId     = isEven ? FileId::Y1       : FileId::Y0;
-    const FileId metaAFileId = isEven ? FileId::META_A_0 : FileId::META_A_1;
-    const FileId metaBFileId = isEven ? FileId::META_B_0 : FileId::META_B_1;
-
-    const size_t metaSizeA = TableMetaOut<tableId>::SizeA;
-    const size_t metaSizeB = TableMetaOut<tableId>::SizeB;
-
-    DiskBufferQueue& queue = *this->diskQueue;
-
-    const size_t fileBlockSize = queue.BlockSize();
-
-    uint32* ySizes       = nullptr;
-    uint32* metaASizes   = nullptr;
-    uint32* metaBSizes   = nullptr;
-    uint32* yBuckets     = nullptr;
-    TMetaA* metaABuckets = nullptr;
-    TMetaB* metaBBuckets = nullptr;
-
-    uint counts[BB_DP_BUCKET_COUNT];
-    uint pfxSum[BB_DP_BUCKET_COUNT];
-
-    // Count our buckets
-    memset( counts, 0, sizeof( counts ) );
-    for( const byte* ptr = bucketIndices, *end = ptr + entryCount; ptr < end; ptr++ )
-    {
-        ASSERT( *ptr <= ( 0b111111u ) );
-        counts[*ptr] ++;
-    }
-
-    CalculatePrefixSum( counts, pfxSum, bucketCounts );
-
-    // Grab a buffer from the queue
-    if( this->LockThreads() )
-    {
-        uint totalCount = 0;
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            totalCount += bucketCounts[i];
-
-        ASSERT( totalCount <= this->entriesPerChunk );
-
-        ySizes   = (uint32*)queue.GetBuffer( BB_DP_BUCKET_COUNT * sizeof( uint32 ) );
-        yBuckets = (uint32*)queue.GetBuffer( sizeof( uint32 ) * totalCount );
-
-        if constexpr ( metaSizeA > 0 )
-        {
-            metaASizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-            metaABuckets = (TMetaA*)queue.GetBuffer( sizeof( TMetaA ) * totalCount );
-        }
-
-        if constexpr ( metaSizeB > 0 )
-        {
-            metaBSizes   = (uint32*)queue.GetBuffer( ( sizeof( uint32 ) * BB_DP_BUCKET_COUNT ) );
-            metaBBuckets = (TMetaB*)queue.GetBuffer( sizeof( TMetaB ) * totalCount );
-        }
-
-        _bucketY     = yBuckets;
-        _bucketMetaA = metaABuckets;
-        _bucketMetaB = metaBBuckets;
-        this->ReleaseThreads();
-    }
-    else
-    {
-        // #TODO: We need to wait for release and sleep/block when
-        //        if the control thread starts blocking because it
-        //        was not able to secure a buffer for writing
-        this->WaitForRelease();
-
-        yBuckets     = (uint32*)GetJob( 0 )._bucketY;
-        metaABuckets = (TMetaA*)GetJob( 0 )._bucketMetaA;
-        metaBBuckets = (TMetaB*)GetJob( 0 )._bucketMetaB;
-    }
-    
-    // #TODO: Unroll this a bit?
-    // Distribute values into buckets at each thread's given offset
-    for( uint i = 0; i < entryCount; i++ )
-    {
-        const uint32 dstIdx = --pfxSum[bucketIndices[i]];
-
-        yBuckets[dstIdx] = yBuffer[i];
-
-        if constexpr ( metaSizeA > 0 )
-        {
-            metaABuckets[dstIdx] = metaABuffer[i];
-        }
-
-        if constexpr ( metaSizeB > 0 )
-        {
-            metaBBuckets[dstIdx] = metaBBuffer[i];
-        }
-    }
-
-    // Write buckets to disk
-    if( this->LockThreads() )
-    {
-        // Calculate the disk block-aligned size
-        // #TODO: Don't do this if not using direct IO?
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            ySizes[i] = (uint32)( ( bucketCounts[i] * sizeof( uint32 ) ) / fileBlockSize * fileBlockSize );
-
-        queue.WriteBuckets( yFileId, yBuckets, ySizes );
-
-        if constexpr ( metaSizeA > 0 )
-        {
-            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                metaASizes[i] = (uint32)( ( bucketCounts[i] * metaSizeA ) / fileBlockSize * fileBlockSize );
-
-            queue.WriteBuckets( metaAFileId, metaABuckets, metaASizes );
-        }
-
-        if constexpr ( metaSizeB > 0 )
-        {
-            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                metaBSizes[i] = (uint32)( ( bucketCounts[i] * metaSizeB ) / fileBlockSize * fileBlockSize );
-
-            queue.WriteBuckets( metaBFileId, metaBBuckets, metaBSizes );
-        }
-
-        queue.CommitCommands();
-
-        // #NOTE: Don't commit release buckets buffer command until we calculate 
-        // remainders/overflows as we will read from those buffers.
-        SaveBlockRemainders( yFileId, bucketCounts, yBuckets, yOverflows->sizes, yOverflows->buffers );
-        queue.ReleaseBuffer( ySizes   );
-        queue.ReleaseBuffer( yBuckets );
-        queue.CommitCommands();
-
-        if constexpr( metaSizeA > 0 )
-        {
-            SaveBlockRemainders( metaAFileId, bucketCounts, metaABuckets, metaAOverflows->sizes, metaAOverflows->buffers );
-            queue.ReleaseBuffer( metaASizes   );
-            queue.ReleaseBuffer( metaABuckets );
-            queue.CommitCommands();
-        }
-
-        if constexpr( metaSizeB > 0 )
-        {
-            SaveBlockRemainders( metaBFileId, bucketCounts, metaBBuckets, metaBOverflows->sizes, metaBOverflows->buffers );
-            queue.ReleaseBuffer( metaBSizes   );
-            queue.ReleaseBuffer( metaBBuckets );
-            queue.CommitCommands();
-        }
-
-        this->ReleaseThreads();
-
-        // Add total bucket counts
-        uint32* totalBuckets = this->totalBucketCounts;
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            totalBuckets[i] += bucketCounts[i];
-    }
-    else
-        this->WaitForRelease();
-}
 
 //-----------------------------------------------------------
 template<typename T>
@@ -1925,211 +1657,7 @@ void FxJob::SaveBlockRemainders( FileId fileId, const uint32* bucketCounts, cons
     }
 }
 
-//-----------------------------------------------------------
-template<typename TJob>
-void BucketJob<TJob>::CalculatePrefixSum( const uint32 counts[BB_DP_BUCKET_COUNT], 
-                                          uint32 pfxSum[BB_DP_BUCKET_COUNT], 
-                                          uint32 bucketCounts[BB_DP_BUCKET_COUNT] )
-{
-    const size_t copySize = sizeof( uint32 ) * BB_DP_BUCKET_COUNT;
-    const uint   jobId    = this->JobId();
-
-    this->counts = counts;
-    this->SyncThreads();
-
-    const uint jobCount = this->JobCount();
-
-    // Add up all of the jobs counts
-    memcpy( pfxSum, this->GetJob( 0 ).counts, copySize );
-
-    for( uint t = 1; t < jobCount; t++ )
-    {
-        const uint* tCounts = this->GetJob( t ).counts;
-
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            pfxSum[i] += tCounts[i];
-    }
-
-    // If we're the control thread, retain the total bucket count for this chunk
-//     uint32 totalCount = 0;
-    if( this->IsControlThread() )
-    {
-        memcpy( bucketCounts, pfxSum, copySize );
-    }
-        
-    // #TODO: Only do this for the control thread
-//     for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
-//         totalCount += pfxSum[j];
-
-    // Calculate the prefix sum for this thread
-    for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
-        pfxSum[i] += pfxSum[i-1];
-
-    // Subtract the count from all threads after ours
-    for( uint t = jobId+1; t < jobCount; t++ )
-    {
-        const uint* tCounts = this->GetJob( t ).counts;
-
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            pfxSum[i] -= tCounts[i];
-    }
-}
-
 #pragma GCC diagnostic pop
-
-//-----------------------------------------------------------
-void WriteFileJob::Run( WriteFileJob* job )
-{
-    job->success = false;
-
-    FileStream file;
-    if( !file.Open( job->filePath, FileMode::Open, FileAccess::Write, FileFlags::NoBuffering | FileFlags::LargeFile ) )
-        return;
-
-    ASSERT( job->offset == ( job->offset / file.BlockSize() ) * file.BlockSize() );
-
-    if( !file.Seek( (int64)job->offset, SeekOrigin::Begin ) )
-        return;
-
-    // Begin writing at offset
-    size_t sizeToWrite = job->size;
-    byte*  buffer      = job->buffer;
-
-    while( sizeToWrite )
-    {
-        const ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
-        if( sizeWritten < 1 )
-            return;
-
-        ASSERT( (size_t)sizeWritten >= sizeToWrite );
-        sizeToWrite -= (size_t)sizeWritten;
-    }
-
-    // OK
-    job->success = true;
-}
-
-//-----------------------------------------------------------
-void TestWrites()
-{
-    // Test file
-    const char* filePath = "E:/bbtest.data";
-
-    FileStream file;
-    if( !file.Open( filePath, FileMode::Create, FileAccess::Write, FileFlags::LargeFile | FileFlags::NoBuffering ) )
-        Fatal( "Failed to open file." );
-
-    const size_t blockSize = file.BlockSize();
-
-    byte key[32] = {
-        22, 24, 11, 3, 1, 15, 11, 6, 23, 22,
-        22, 24, 11, 3, 1, 15, 11, 6, 23, 22,
-        22, 24, 11, 3, 1, 15, 11, 6, 23, 22, 5, 28
-    };
-
-    const uint   chachaBlockSize = 64;
-
-    const uint   k          = 30;
-    const uint64 entryCount = 1ull << k;
-    const uint   blockCount = (uint)( entryCount / chachaBlockSize );
-    
-    SysHost::SetCurrentThreadAffinityCpuId( 0 );
-
-    uint32* buffer;
-
-    {
-        Log::Line( "Allocating %.2lf MB buffer...", (double)( entryCount * sizeof( uint32 ) ) BtoMB );
-        auto timer = TimerBegin();
-
-        buffer = (uint32*)SysHost::VirtualAlloc( entryCount * sizeof( uint32 ), true );
-        FatalIf( !buffer, "Failed to allocate buffer." );
-
-        double elapsed = TimerEnd( timer );
-        Log::Line( "Finished in %.2lf seconds.", elapsed );
-    }
-
-    {
-        chacha8_ctx chacha;
-        ZeroMem( &chacha );
-
-        Log::Line( "Generating ChaCha..." );
-        auto timer = TimerBegin();
-
-        chacha8_keysetup( &chacha, key, 256, NULL );
-        chacha8_get_keystream( &chacha, 0, blockCount, (byte*)buffer );
-
-        double elapsed = TimerEnd( timer );
-        Log::Line( "Finished in %.2lf seconds.", elapsed );
-    }
-
-    bool singleThreaded = false;
-    
-    if( singleThreaded )
-    {
-        Log::Line( "Started writing to file..." );
-
-        const size_t sizeWrite = entryCount * sizeof( uint );
-        const size_t blockSize = file.BlockSize();
-        
-        size_t blocksToWrite = sizeWrite / blockSize;
-
-        auto timer = TimerBegin();
-
-        do
-        {
-            ssize_t written = file.Write( buffer, blocksToWrite * blockSize );
-            FatalIf( written <= 0, "Failed to write to file." );
-
-            size_t blocksWritten = (size_t)written / blockSize;
-            ASSERT( blocksWritten <= blocksToWrite );
-
-            blocksToWrite -= blocksWritten;
-        } while( blocksToWrite > 0 );
-        
-        double elapsed = TimerEnd( timer );
-        Log::Line( "Finished in %.2lf seconds.", elapsed );
-    }
-    else
-    {
-        const uint threadCount = 1;
-
-        WriteFileJob jobs[threadCount];
-
-        const size_t blockSize       = file.BlockSize();
-        const size_t sizeWrite       = entryCount * sizeof( uint );
-        const size_t totalBlocks     = sizeWrite / blockSize;
-        const size_t blocksPerThread = totalBlocks / threadCount;
-        const size_t sizePerThread   = blocksPerThread * blockSize;
-
-        const size_t trailingSize    = sizeWrite - (sizePerThread * threadCount);
-
-        byte* buf = (byte*)buffer;
-
-        for( uint i = 0; i < threadCount; i++ )
-        {
-            WriteFileJob& job = jobs[i];
-
-            job.filePath = filePath;
-            job.success  = false;
-            job.size     = sizePerThread;
-            job.offset   = sizePerThread * i;
-            job.buffer   = buf + job.offset;
-        }
-
-        jobs[threadCount-1].size += trailingSize;
-        
-        ThreadPool pool( threadCount );
-
-        Log::Line( "Writing to file with %u threads.", threadCount );
-        
-        auto timer = TimerBegin();
-        pool.RunJob( WriteFileJob::Run, jobs, threadCount );
-        double elapsed = TimerEnd( timer );
-
-        const double bytesPerSecond = sizeWrite / elapsed;
-        Log::Line( "Finished writing to file in %.2lf seconds @ %.2lf MB/s.", elapsed, ((double)bytesPerSecond) BtoMB );
-    }
-}
 
 //-----------------------------------------------------------
 void OverflowBuffer::Init( void* bucketBuffers, const size_t fileBlockSize )

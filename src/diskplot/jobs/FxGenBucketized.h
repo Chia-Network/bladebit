@@ -125,6 +125,8 @@ template struct FxGenBucketized<TableId::Table5>;
 template struct FxGenBucketized<TableId::Table6>;
 template struct FxGenBucketized<TableId::Table7>;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 
 
 //-----------------------------------------------------------
@@ -132,7 +134,7 @@ template<TableId tableId>
 FORCE_INLINE 
 void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pairs, 
                         const uint32* yIn, const uint64* metaInA, const uint64* metaInB, 
-                        uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB )
+                        uint32* yOut, byte* bucketOut, uint64* metaOutA, uint64* metaOutB, uint32 jobId )
 {
     constexpr size_t metaKMultiplierIn  = TableMetaIn <tableId>::Multiplier;
     constexpr size_t metaKMultiplierOut = TableMetaOut<tableId>::Multiplier;
@@ -251,6 +253,7 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         if constexpr( metaKMultiplierOut == 2 && metaKMultiplierIn == 1 )
         {
             metaOutA[i] = l0 << 32 | r0;
+            // if( metaOutA[i] == 17265369914238941055 ) BBDebugBreak();
         }
         else if constexpr ( metaKMultiplierOut == 2 && metaKMultiplierIn == 3 )
         {
@@ -284,4 +287,6 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         }
     }
 }
+
+#pragma GCC diagnostic pop
 
