@@ -257,46 +257,99 @@ void Debug::ValidateMetaFileFromBuckets( const uint64* metaABucket, const uint64
     }
 
 
-    // Alloc a buffer for our buckets
-    const uint64* refReader = refEntries;
-
-    // Get reader offset based on bucket
-    for( uint i = 0; i < bucketIdx; i++ )
-        refReader += bucketCounts[i];
-
+    // Test
     Log::Line( "Validating Bucket %u", bucketIdx );
 
-    for( int64 i = 0; i < entryCount; i++, refReader++ )
+    if( metaMultiplier == 2 )
     {
-        const uint64 metaA   = metaABucket[i];
-        const uint64 metaRef = *refReader;
+        const uint64* refReader = refEntries;
 
-        // FatalIf( metaA != metaRef, 
-                // "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
-                // " Expected %llu but got %llu",
-                //     (int)table+1, bucketIdx, i, (int64)( refReader - refEntries ), metaRef, metaA );
-        if( metaA != metaRef )
+        // Get reader offset based on bucket
+        for( uint i = 0; i < bucketIdx; i++ )
+            refReader += bucketCounts[i];
+
+        for( int64 i = 0; i < entryCount; i++, refReader++ )
         {
-            // Because the y that generated the meta might be repeated, when we sort
-            // we might get metadata that is not matching because it is out of order.
-            // We test for those cases here in the case that there's a 2-way mismatch.
-            // If the y repeates more than 2 times and we have a mismatch, we won't test for
-            // it and just consider it as an error for manual checking.
+            const uint64 metaA   = metaABucket[i];
+            const uint64 metaRef = *refReader;
 
-            if( metaABucket[i+1] == metaRef &&
-                metaA == refReader[1] )
+            // FatalIf( metaA != metaRef, 
+                    // "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                    // " Expected %llu but got %llu",
+                    //     (int)table+1, bucketIdx, i, (int64)( refReader - refEntries ), metaRef, metaA );
+            if( metaA != metaRef )
             {
-                // Mismatched pair, skip the next one.
-                // Skip the next
-                i++;
-                refReader++;
-                continue;
+                // Because the y that generated the meta might be repeated, when we sort
+                // we might get metadata that is not matching because it is out of order.
+                // We test for those cases here in the case that there's a 2-way mismatch.
+                // If the y repeates more than 2 times and we have a mismatch, we won't test for
+                // it and just consider it as an error for manual checking.
+
+                if( metaABucket[i+1] == metaRef &&
+                    metaA == refReader[1] )
+                {
+                    // Mismatched pair, skip the next one.
+                    // Skip the next
+                    i++;
+                    refReader++;
+                    continue;
+                }
+
+                Log::Line( "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                        " Expected %llu but got %llu",
+                            (int)table+1, bucketIdx, i, (int64)( refReader - refEntries ), metaRef, metaA );
+
             }
+        }
+    }
+    else if( metaMultiplier == 4 )
+    {
+        struct Meta4 { uint64 a, b; };
 
-            Log::Line( "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
-                       " Expected %llu but got %llu",
-                        (int)table+1, bucketIdx, i, (int64)( refReader - refEntries ), metaRef, metaA );
+        const Meta4* refReader = (Meta4*)refEntries;
 
+        // Get reader offset based on bucket
+        for( uint i = 0; i < bucketIdx; i++ )
+            refReader += bucketCounts[i];
+
+        for( int64 i = 0; i < entryCount; i++, refReader++ )
+        {
+            const uint64 metaA    = metaABucket[i];
+            const uint64 metaB    = metaBBucket[i];
+            const uint64 metaARef = refReader->a;
+            const uint64 metaBRef = refReader->b;
+
+            // FatalIf( metaA != metaRef, 
+                    // "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                    // " Expected %llu but got %llu",
+                    //     (int)table+1, bucketIdx, i, (int64)( refReader - refEntries ), metaRef, metaA );
+            if( metaA != metaARef || metaB != metaBRef )
+            {
+                // Because the y that generated the meta might be repeated, when we sort
+                // we might get metadata that is not matching because it is out of order.
+                // We test for those cases here in the case that there's a 2-way mismatch.
+                // If the y repeates more than 2 times and we have a mismatch, we won't test for
+                // it and just consider it as an error for manual checking.
+
+                if( metaABucket[i+1] == metaARef && metaA == refReader[1].a &&
+                    metaBBucket[i+1] == metaBRef && metaB == refReader[1].b )
+                {
+                    // Mismatched pair, skip the next one.
+                    // Skip the next
+                    i++;
+                    refReader++;
+                    continue;
+                }
+
+                const intptr_t globalPos = ((intptr_t)refReader - (intptr_t)refEntries) / (intptr_t)sizeof( Meta4 );
+
+                Log::Line( "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                        " Expected A:%llu but got A:%llu\n"
+                        " Expected B:%llu but got B:%llu",
+                            (int)table+1, bucketIdx, i, 
+                            globalPos, metaARef, metaA, metaBRef, metaB );
+
+            }
         }
     }
 

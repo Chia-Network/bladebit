@@ -580,24 +580,28 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
         SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
     
-        // #TEST
-        // #TODO: Remove me
-        #if _DEBUG
-        // if( tableId > TableId::Table2 )
-        // {
-        //     Debug::ValidateMetaFileFromBuckets( fxMetaInA, nullptr, tableId-(TableId)1, entryCount, bucketIdx, 
-        //                                        _cx.bucketCounts[(int)tableId-1] );
-        // }
-        #endif
-
         if constexpr ( MetaInBSize > 0 )
         {
             // Ensure metadata B finished loading
-            bucket.metaBFence.Wait();
+            // #TODO: Remove this and just use separate fences for meta.
+            if( bucketIdx == 0 )
+                bucket.metaBFence.Wait();
 
             using TMetaB = typename TableMetaIn<tableId>::MetaB;
             SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
         }
+
+        
+        // #TEST
+        // #TODO: Remove me
+        #if _DEBUG
+        if( tableId == TableId::Table4 )
+        {
+            // Debug::ValidateMetaFileFromBuckets( fxMetaInA, fxMetaInB, tableId-(TableId)1, entryCount, bucketIdx, 
+            //                                    _cx.bucketCounts[(int)tableId-1] );
+        }
+        #endif
+
     }
 
     ///
@@ -928,7 +932,7 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
             if constexpr ( MetaInASize > 0 )
                 metaABuckets[dstIdx] = outMetaA[i];
 
-            if constexpr ( MetaInBSize > 0 )
+            if constexpr ( MetaOutBSize > 0 )
                 metaBBuckets[dstIdx] = outMetaB[i];
         }
 

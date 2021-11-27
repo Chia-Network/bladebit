@@ -178,7 +178,7 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         ASSERT( left < right );
 
         const uint64 y     = bucket | yIn[left];
-        
+        // if( y == 213351921929 ) BBDebugBreak();
         #if _DEBUG
             ASSERT( y >= prevY );
             ASSERT( left >= prevLeft );
@@ -237,6 +237,9 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
 
         uint64 fx = Swap64( *output ) >> yShift;
         yOut[i] = (uint32)fx;
+        
+        // if( l0 == 7987994178545208678 ) BBDebugBreak();
+        
 
         if constexpr( tableId != TableId::Table7 )
         {
