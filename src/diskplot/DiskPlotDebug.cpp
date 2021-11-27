@@ -43,9 +43,9 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
 
         ASSERT( refEntryCount <= maxEntries );
 
-        const size_t totalSize          = refEntryCount * sizeof( uint64 );
-        const size_t blockSizeToRead    = totalSize / blockSize * blockSize;
-        const size_t remainder          = totalSize - blockSizeToRead;
+        const size_t totalSize       = RoundUpToNextBoundaryT( (size_t)refEntryCount * ( table == TableId::Table7 ? sizeof( uint32 ) : sizeof( uint64 ) ), blockSize );
+        const size_t blockSizeToRead = totalSize / blockSize * blockSize;
+        const size_t remainder       = totalSize - blockSizeToRead;
 
         // Read blocks
         size_t sizeToRead = blockSizeToRead;
@@ -64,17 +64,16 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
             reader += sizeRead;
         }
 
-        // #TODO: This, for now ignore it?
         if( remainder )
         {
-            // if( refTable.Read( block, blockSize ) != (ssize_t)blockSize )
-            // {
-            //     const int err = refTable.GetError();
-            //     Fatal( "Failed to read entries from reference table file %s with error: %d.", path, err );
-            // }
+            if( refTable.Read( block, blockSize ) != (ssize_t)blockSize )
+            {
+                const int err = refTable.GetError();
+                Fatal( "Failed to read entries from reference table file %s with error: %d.", path, err );
+            }
 
             // ASSERT( blockSizeToRead / sizeof( uint64 ) + remainder / sizeof( uint64 ) == refEntryCount );
-            // memcpy( reader, block, remainder );
+            memcpy( reader, block, remainder );
         }
 
         SysHost::VirtualFree( block );
@@ -98,6 +97,7 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
     fence.Signal(); // Set as signaled initially since we wait for the next bucket in the loop
 
     const uint64* refReader = refEntries;
+    const uint32* f7Reader  = (uint32*)refEntries; 
 
     for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
     {
@@ -109,8 +109,11 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
         const int64 entryCount = bucketCounts[bucket];
         
         // Sort the bucket
-        Log::Line( "  Sorting bucket..." );
-        RadixSort256::Sort<BB_MAX_JOBS>( pool, bucketEntries, bucketSortTmp, (uint64)entryCount );
+    // if( table < TableId::Table7 )
+        {
+            Log::Line( "  Sorting bucket..." );
+            RadixSort256::Sort<BB_MAX_JOBS>( pool, bucketEntries, bucketSortTmp, (uint64)entryCount );
+        }
 
         // Load the next bucket
         const uint nextBucket = bucket + 1;
@@ -124,27 +127,45 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
 
         // Start validating
         Log::Line( "  Validating entries...");
-        const uint64 bucketMask = ((uint64)bucket) << 32;
-        uint64 prevRef = 0;
-        
-        for( int64 i = 0; i < entryCount; i++, refReader++ )
+        if( table < TableId::Table7 )
         {
-            const uint64 y      = bucketMask | bucketEntries[i];
-            const uint64 yRef   = *refReader;
+            const uint64 bucketMask = ((uint64)bucket) << 32;
+            uint64 prevRef = 0;
+            
+            for( int64 i = 0; i < entryCount; i++, refReader++ )
+            {
+                const uint64 y      = bucketMask | bucketEntries[i];
+                const uint64 yRef   = *refReader;
 
-            // Test for now, since we're not getting all of the reference values in some tables...
-            if( yRef < prevRef )
-                break;
-            prevRef = yRef;
-            // if( y == 112675641563 ) BBDebugBreak();
+                // Test for now, since we're not getting all of the reference values in some tables...
+                if( yRef < prevRef )
+                    break;
+                prevRef = yRef;
+                // if( y == 112675641563 ) BBDebugBreak();
 
-            const uint32 y32    = bucketEntries[i];
-            const uint32 y32Ref = (uint32)yRef;
+                const uint32 y32    = bucketEntries[i];
+                const uint32 y32Ref = (uint32)yRef;
 
-            FatalIf( y != yRef, 
-                    "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
-                    " Expected %llu but got %llu",
-                     (int)table+1, bucket, i, (int64)( refReader - refEntries ), yRef, y );
+                FatalIf( y != yRef, 
+                        "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                        " Expected %llu but got %llu",
+                        (int)table+1, bucket, i, (int64)( refReader - refEntries ), yRef, y );
+            }
+        }
+        else
+        {
+            const uint32* refEnd = f7Reader + refEntryCount;
+            
+            for( int64 i = 0; i < entryCount && f7Reader < refEnd; i++, f7Reader++ )
+            {
+                const uint32 y      = bucketEntries[i];
+                const uint32 yRef   = *f7Reader;
+
+                FatalIf( y != yRef, 
+                        "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"
+                        " Expected %lu but got %lu",
+                        (int)table+1, bucket, i, (int64)( refReader - refEntries ), yRef, y );
+            }
         }
 
         Log::Line( "  Bucket %u validated successfully!", bucket );
