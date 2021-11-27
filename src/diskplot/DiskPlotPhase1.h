@@ -28,6 +28,7 @@ struct AdjacentBucketInfo
     uint32* y    ;
     uint64* metaA;
     uint64* metaB;
+    Pairs   pairs;
     uint32  groupCounts[2];
     uint32  matchCount;
 };
@@ -109,7 +110,10 @@ private:
     //                                    uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
 
     template<TableId tableId>
-    uint32 ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
+    uint32 ProcessAdjoiningBuckets( 
+        uint32 bucketIdx, Bucket& bucket, uint32 entryCount,
+        const uint32* curY, const uint64* curMetaA, const uint64* curMetaB
+    );
 
     template<TableId tableId, typename TMetaA, typename TMetaB>
     uint32 ProcessCrossBucketGroups(

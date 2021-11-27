@@ -280,9 +280,11 @@ void DiskPlotPhase1::ForwardPropagate()
         bucket.metaBOverflow.Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
 
         // #TODO: Remove these also. Testing the allocation here for now
-        bucket.crossBucketInfo.y     = bbcvirtalloc<uint32>(  kBC * 4 );
-        bucket.crossBucketInfo.metaA = bbcvirtalloc<uint64>(  kBC * 4 );
-        bucket.crossBucketInfo.metaB = bbcvirtalloc<uint64>(  kBC * 4 );
+        bucket.crossBucketInfo.y           = bbcvirtalloc<uint32>(  kBC * 6 );
+        bucket.crossBucketInfo.metaA       = bbcvirtalloc<uint64>(  kBC * 6 );
+        bucket.crossBucketInfo.metaB       = bbcvirtalloc<uint64>(  kBC * 6 );
+        bucket.crossBucketInfo.pairs.left  = bbcvirtalloc<uint32>(  kBC );
+        bucket.crossBucketInfo.pairs.right = bbcvirtalloc<uint16>(  kBC );
 
         bucket.fpBuffer = _cx.heapBuffer;
 
@@ -343,13 +345,14 @@ void DiskPlotPhase1::ForwardPropagate()
         const double tableElapsed = TimerEnd( tableTimer );
         Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
 
-        #if _DEBUG && BB_DP_DBG_VALIDATE_Y
+        // #if _DEBUG && BB_DP_DBG_VALIDATE_Y
+        // if( 0 )
         {
             Log::Line( "Validating table %d...", (int)table + 1 );
             const FileId fileId = isEven ? FileId::Y1 : FileId::Y0;
             Debug::ValidateYFileFromBuckets( fileId, *_cx.threadPool, *_diskQueue, table, _cx.bucketCounts[(int)table] );
         }
-        #endif
+        // #endif
 
     }
 }
@@ -517,7 +520,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     uint64* fxMetaOutB = bucket.metaB0;
 
     {
-        Log::Line( "  Sorting bucket." );
+        Log::Line( "  Sorting bucket y." );
         auto timer = TimerBegin();
 
         if constexpr ( tableId == TableId::Table2 )
@@ -551,59 +554,62 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         #if _DEBUG
             //ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
         #endif
-    
-        // Sort metadata with the key
-        if constexpr( tableId > TableId::Table2 )
-        {
-            // Ensure metadata A finished loading
-            // #TODO: Add fence here for meta A only as well, even if not the first bucket.
-            if( bucketIdx == 0 )
-                bucket.frontFence.Wait();
-
-            using TMetaA = typename TableMetaIn<tableId>::MetaA;
-
-            SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
-        
-            // #TEST
-            // #TODO: Remove me
-            #if _DEBUG
-            if( tableId > TableId::Table2 )
-            {
-                Debug::ValidateMetaFileFromBuckets( fxMetaInA, nullptr, tableId-(TableId)1, entryCount, bucketIdx, 
-                                                   _cx.bucketCounts[(int)tableId-1] );
-            }
-            #endif
-
-            if constexpr ( MetaInBSize > 0 )
-            {
-                // Ensure metadata B finished loading
-                bucket.metaBFence.Wait();
-
-                using TMetaB = typename TableMetaIn<tableId>::MetaB;
-                SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
-            }
-        }
 
         double elapsed = TimerEnd( timer );
-        Log::Line( "  Sorted bucket in %.2lf seconds.", elapsed );
-    }
-
-    ///
-    /// #TODO: Adjacent-bucket matching.
-    //          Now that the current bucket data is sorted, we can do matches
-    //          and generate entries with matches crossing bucket boundaries
-    /// 
-    if( bucketIdx > 0 )
-    {
-        // Generate matches that were 
-        ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount );
+        Log::Line( "  Sorted bucket y in %.2lf seconds.", elapsed );
     }
 
     ///
     /// Matching
     ///
     GroupInfo groupInfos[BB_MAX_JOBS];
-    uint32 matchCount = MatchBucket( bucketIdx, bucket, entryCount,  groupInfos );
+    uint32 matchCount = MatchBucket( bucketIdx, bucket, entryCount, groupInfos );
+
+    ///
+    /// Sort metadata with the key
+    /// NOTE: MatchBucket make use of the metaTmp buffer, so we have to sort this after.
+    ///       Plus it gives us extra time for the metadata to load since matching doesn't require it.
+    if constexpr( tableId > TableId::Table2 )
+    {
+        // Ensure metadata A finished loading
+        // #TODO: Add fence here for meta A only as well, even if not the first bucket.
+        if( bucketIdx == 0 )
+            bucket.frontFence.Wait();
+
+        using TMetaA = typename TableMetaIn<tableId>::MetaA;
+
+        SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
+    
+        // #TEST
+        // #TODO: Remove me
+        #if _DEBUG
+        // if( tableId > TableId::Table2 )
+        // {
+        //     Debug::ValidateMetaFileFromBuckets( fxMetaInA, nullptr, tableId-(TableId)1, entryCount, bucketIdx, 
+        //                                        _cx.bucketCounts[(int)tableId-1] );
+        // }
+        #endif
+
+        if constexpr ( MetaInBSize > 0 )
+        {
+            // Ensure metadata B finished loading
+            bucket.metaBFence.Wait();
+
+            using TMetaB = typename TableMetaIn<tableId>::MetaB;
+            SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
+        }
+    }
+
+    ///
+    /// Adjacent-bucket matching.
+    //   Now that the current bucket y & meta is sorted, we can do matches
+    //   and generate entries with matches crossing bucket boundaries
+    /// 
+    if( bucketIdx > 0 )
+    {
+        // Generate matches that were 
+        ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount, bucket.y0, fxMetaInA, fxMetaInB );
+    }
     
     ///
     /// FX
@@ -685,10 +691,12 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 ///
 //-----------------------------------------------------------
 template<TableId tableId>
-uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount )
+uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket, uint32 entryCount,
+                                                const uint32* curY, const uint64* curMetaA, const uint64* curMetaB )
 {
     using TMetaA = typename TableMetaIn<tableId>::MetaA;
     using TMetaB = typename TableMetaIn<tableId>::MetaB;
+
     constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
     constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
 
@@ -703,25 +711,25 @@ uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket
     const uint32* prevGroupY     = crossBucketInfo.y;
     const TMetaA* prevGroupMetaA = (TMetaA*)crossBucketInfo.metaA;
     const TMetaB* prevGroupMetaB = (TMetaB*)crossBucketInfo.metaB;
-    const uint32* curGroupY      = bucket.y0;
-    const TMetaA* curGroupMetaA  = (TMetaA*)bucket.metaA0;
-    const TMetaB* curGroupMetaB  = (TMetaB*)bucket.metaA1;
+    const uint32* curGroupY      = curY;
+    const TMetaA* curGroupMetaA  = (TMetaA*)curMetaA;
+    const TMetaB* curGroupMetaB  = (TMetaB*)curMetaB;
 
     byte*         bucketIndices  = (byte*)bucket.sortKey;   // #TODO: Use its own buffer, instead of sort key
-    Pairs         pairs          = bucket.pairs;
-    uint32*       yTmp           = bucket.yTmp;
-    TMetaA*       metaATmp       = (TMetaA*)bucket.metaATmp;
-    TMetaB*       metaBTmp       = (TMetaB*)bucket.metaBTmp;
-    uint32*       yOut           = bucket.yTmp     + kBC * 2;   // #TODO: Use proper buffer for this. Not temp, since it may not be big enough?
-    uint64*       metaAOut       = bucket.metaATmp + kBC * 2;   // #TODO: Use proper buffer for this. Not temp, since it may not be big enough?
-    uint64*       metaBOut       = bucket.metaBTmp + kBC * 2;   // #TODO: Use proper buffer for this. Not temp, since it may not be big enough?
+    Pairs         pairs          = bucket.crossBucketInfo.pairs;
+    uint32*       yTmp           = crossBucketInfo.y + kBC * 2;
+    TMetaA*       metaATmp       = (TMetaA*)( crossBucketInfo.metaA + kBC * 2 );
+    TMetaB*       metaBTmp       = (TMetaB*)( crossBucketInfo.metaB + kBC * 2 );
+    uint32*       yOut           = crossBucketInfo.y + kBC * 4;
+    uint64*       metaAOut       = (uint64*)( crossBucketInfo.metaA + kBC * 4 );
+    uint64*       metaBOut       = (uint64*)( crossBucketInfo.metaB + kBC * 4 );
 
     // Get matches between the adjoining groups
     uint32 curGroupCount    = 0;
     uint32 matchesSecndLast = 0;
     uint32 matchesLast      = 0;
     
-    uint32 yIndex = 0;
+    uint32 yIndex           = 0;
 
     // Process penultimate group from the previous bucket & 
     // the first group from the current bucket

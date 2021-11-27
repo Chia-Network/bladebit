@@ -167,7 +167,8 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
     blake3_hasher hasher;
 
     #if _DEBUG
-        uint64 prevY = bucket | yIn[pairs.left[0]];
+        uint64 prevY    = bucket | yIn[pairs.left[0]];
+        uint64 prevLeft = 0;
     #endif
 
     for( uint i = 0; i < entryCount; i++ )
@@ -180,7 +181,9 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         
         #if _DEBUG
             ASSERT( y >= prevY );
-            prevY = y;
+            ASSERT( left >= prevLeft );
+            prevY    = y;
+            prevLeft = left;
         #endif
 
         // Extract metadata
@@ -253,7 +256,6 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         if constexpr( metaKMultiplierOut == 2 && metaKMultiplierIn == 1 )
         {
             metaOutA[i] = l0 << 32 | r0;
-            // if( metaOutA[i] == 17265369914238941055 ) BBDebugBreak();
         }
         else if constexpr ( metaKMultiplierOut == 2 && metaKMultiplierIn == 3 )
         {
