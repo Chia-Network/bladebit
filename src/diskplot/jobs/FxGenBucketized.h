@@ -178,7 +178,7 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
         ASSERT( left < right );
 
         const uint64 y     = bucket | yIn[left];
-        // if( y == 213351921929 ) BBDebugBreak();
+        
         #if _DEBUG
             ASSERT( y >= prevY );
             ASSERT( left >= prevLeft );
@@ -237,9 +237,6 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
 
         uint64 fx = Swap64( *output ) >> yShift;
         yOut[i] = (uint32)fx;
-        
-        // if( l0 == 7987994178545208678 ) BBDebugBreak();
-        
 
         if constexpr( tableId != TableId::Table7 )
         {
@@ -265,7 +262,7 @@ void ComputeFxForTable( const uint64 bucket, uint32 entryCount, const Pairs pair
             const uint64 h0 = Swap64( output[0] );
             const uint64 h1 = Swap64( output[1] );
 
-            metaOutA[0] = h0 << ySize | h1 >> 26;
+            metaOutA[i] = h0 << ySize | h1 >> 26;
         }
         else if constexpr ( metaKMultiplierOut == 3 )
         {

@@ -347,6 +347,7 @@ void DiskPlotPhase1::ForwardPropagate()
 
         // #if _DEBUG && BB_DP_DBG_VALIDATE_Y
         // if( 0 )
+        if( table >= TableId::Table6 )
         {
             Log::Line( "Validating table %d...", (int)table + 1 );
             const FileId fileId = isEven ? FileId::Y1 : FileId::Y0;
@@ -832,6 +833,8 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     const size_t MetaOutASize = TableMetaOut<tableId>::SizeA;
     const size_t MetaOutBSize = TableMetaOut<tableId>::SizeB;
 
+    using TMetaOutA = typename TableMetaOut<tableId>::MetaA;
+    using TMetaOutB = typename TableMetaOut<tableId>::MetaB;
 
     ASSERT( MetaInASize );
 
@@ -910,17 +913,17 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
             pfxSum[i] += pfxSum[i-1];
 
         // Grab IO buffers
-        uint32* yBuckets     = nullptr;
-        uint64* metaABuckets = nullptr;
-        uint64* metaBBuckets = nullptr;
+        uint32*    yBuckets     = nullptr;
+        TMetaOutA* metaABuckets = nullptr;
+        TMetaOutB* metaBBuckets = nullptr;
 
         yBuckets = (uint32*)_diskQueue->GetBuffer( sizeof( uint32 ) * matches );
 
         if constexpr ( MetaOutASize )
-            metaABuckets = (uint64*)_diskQueue->GetBuffer( MetaOutASize * matches );
+            metaABuckets = (TMetaOutA*)_diskQueue->GetBuffer( MetaOutASize * matches );
 
         if constexpr ( MetaOutBSize )
-            metaBBuckets = (uint64*)_diskQueue->GetBuffer( MetaOutBSize * matches );
+            metaBBuckets = (TMetaOutB*)_diskQueue->GetBuffer( MetaOutBSize * matches );
 
         // Distribute entries into their respective buckets
         for( uint32 i = 0; i < matches; i++ )
@@ -930,10 +933,10 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
             yBuckets[dstIdx] = outY[i];
 
             if constexpr ( MetaInASize > 0 )
-                metaABuckets[dstIdx] = outMetaA[i];
+                metaABuckets[dstIdx] = reinterpret_cast<TMetaOutA*>( outMetaA )[i];
 
             if constexpr ( MetaOutBSize > 0 )
-                metaBBuckets[dstIdx] = outMetaB[i];
+                metaBBuckets[dstIdx] = reinterpret_cast<TMetaOutB*>( outMetaB )[i];
         }
 
         // Write to disk
