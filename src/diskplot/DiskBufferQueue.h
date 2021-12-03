@@ -5,6 +5,7 @@
 #include "threading/ThreadPool.h"
 #include "plotshared/MTJob.h"
 #include "plotshared/WorkHeap.h"
+#include "plotshared/Tables.h"
 
 class Thread;
 #define BB_DISK_QUEUE_MAX_CMDS 4096 //1024
@@ -16,12 +17,21 @@ enum class FileId
     META_A_0, META_B_0,
     META_A_1, META_B_1,
     X,
-    T2_L, T2_R,
-    T3_L, T3_R,
-    T4_L, T4_R,
-    T5_L, T5_R,
-    T6_L, T6_R,
-    T7_L, T7_R,
+
+    T2_L, T2_R, 
+    T3_L, T3_R, 
+    T4_L, T4_R, 
+    T5_L, T5_R, 
+    T6_L, T6_R, 
+    T7_L, T7_R, 
+
+    SORT_KEY2,
+    SORT_KEY3,
+    SORT_KEY4,
+    SORT_KEY5,
+    SORT_KEY6,
+    SORT_KEY7,
+    
     F7
 
     ,_COUNT
@@ -200,3 +210,24 @@ private:
 
 
 };
+
+//-----------------------------------------------------------
+inline FileId TableIdToSortKeyId( const TableId table )
+{
+    switch( table )
+    {
+        case TableId::Table2: return FileId::SORT_KEY2;
+        case TableId::Table3: return FileId::SORT_KEY3;
+        case TableId::Table4: return FileId::SORT_KEY4;
+        case TableId::Table5: return FileId::SORT_KEY5;
+        case TableId::Table6: return FileId::SORT_KEY6;
+        case TableId::Table7: return FileId::SORT_KEY7;
+    
+        default:
+            ASSERT( 0 );
+            break;
+    }
+    
+    ASSERT( 0 );
+    return FileId::None;
+}

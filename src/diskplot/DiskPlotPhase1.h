@@ -59,7 +59,7 @@ class DiskPlotPhase1
         uint32* groupBoundaries;
 
         byte*   bucketId;   // Used during fx gen
-
+        
         uint32* yTmp;
         uint64* metaATmp;
         uint64* metaBTmp;
@@ -68,14 +68,13 @@ class DiskPlotPhase1
         FileId  metaAFileId;
         FileId  metaBFileId;
 
-        uint32* yPrevBucket;  // Used storing the last 2 group's worth of y
-                              // to perform matching between groups that straddle 2 buckets.
-                              // There is enough space here to store 4 * kBC
+        uint32  tableEntryCount;        // Running entry count for the table being generated (accross all buckets)
 
         AutoResetSignal frontFence;
         AutoResetSignal backFence;
 
         AutoResetSignal metaBFence;
+        AutoResetSignal backPointersFence;
 
         // Used for overflows
         OverflowBuffer yOverflow;
@@ -100,7 +99,7 @@ private:
     uint32 ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
 
 
-    uint32 MatchBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] );
+    uint32 MatchBucket( TableId table, uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] );
 
     uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
 
@@ -135,7 +134,7 @@ private:
         uint32        curBucketIndex,
         Pairs         pairs,
         uint32        maxPairs,
-        uint32        yStartIndex,
+        uint32        sortKeyOffset,
         uint32&       outCurGroupCount
     );
 

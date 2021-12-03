@@ -78,6 +78,7 @@ struct FxGenBucketized
 
         const uint32     bucketIdx,
         const uint32     entryCount,
+        const uint32     sortKeyOffset,
         Pairs            pairs,
         byte*            bucketIndices,
 

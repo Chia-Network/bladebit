@@ -24,10 +24,10 @@
 /// DEBUG
 ///
 // #define BB_DP_DBG_READ_EXISTING_F1 1
+// #define BB_DP_DBG_VALIDATE_Y    1
 
 #define BB_DP_DBG_READ_BUCKET_COUNT_FNAME "bucket_count.tmp"
 
-// #define BB_DP_DBG_VALIDATE_Y    1
 #define BB_DP_DBG_TEST_DIR      "/mnt/p5510a/disk_dbg/"
 #define BB_DP_DBG_REF_DIR       "/mnt/p5510a/reference/"
 
