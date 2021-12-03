@@ -8,7 +8,6 @@
 #include "plotshared/Tables.h"
 
 class Thread;
-#define BB_DISK_QUEUE_MAX_CMDS 4096 //1024
 
 enum class FileId
 {

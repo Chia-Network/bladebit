@@ -169,7 +169,7 @@ inline void Array<T>::CheckCapacity( size_t count )
             newCapacity = 9223372036854775807;
         }
 
-        _elements = bbrealloc( _elements, newCapacity );
+        _elements = bbcrealloc( _elements, newCapacity );
         _capacity = newCapacity;
     }
 }

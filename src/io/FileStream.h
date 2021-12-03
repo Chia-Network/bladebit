@@ -76,6 +76,11 @@ public:
 
         return err;
     }
+
+    inline FileAccess GetFileAccess() const { return _access; }
+
+    inline FileFlags GetFlags() const { return _flags; }
+
 private:
     inline bool HasValidFD() const
     {

@@ -18,7 +18,7 @@
 #define BB_DP_MAX_BC_GROUP_PER_BUCKET 300000        // There's around 284,190 groups per bucket
 #define BB_DP_XTRA_MATCHES_PER_THREAD 1024
 
-
+#define BB_DISK_QUEUE_MAX_CMDS 4096 //1024
 
 /// 
 /// DEBUG

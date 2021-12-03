@@ -143,8 +143,8 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
                 prevRef = yRef;
                 // if( y == 112675641563 ) BBDebugBreak();
 
-                const uint32 y32    = bucketEntries[i];
-                const uint32 y32Ref = (uint32)yRef;
+                // const uint32 y32    = bucketEntries[i];
+                // const uint32 y32Ref = (uint32)yRef;
 
                 FatalIf( y != yRef, 
                         "Failed to validate entry on table %d at bucket position %u:%lld | Global position: %lld.\n"

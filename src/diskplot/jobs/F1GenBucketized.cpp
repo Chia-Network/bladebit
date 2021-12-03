@@ -232,7 +232,7 @@ void F1GenBucketized::GenerateF1Disk(
         job.key               = key;
         job.blockCount        = blocksPerThread;
         job.x                 = x;
-        
+
         job.blocks            = blocks;
         job.yBuckets          = nullptr;
         job.xBuckets          = nullptr;

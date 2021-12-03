@@ -119,15 +119,17 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment )
 }
 
 //-----------------------------------------------------------
-void WorkHeap::Release( byte* buffer )
+bool WorkHeap::Release( byte* buffer )
 {
     ASSERT( buffer );
     ASSERT( buffer >= _heap && buffer < _heap + _heapSize );
 
-    _pendingReleases.Enqueue( buffer );
+    bool queued = _pendingReleases.Enqueue( buffer );
+    ASSERT( queued );
 
     // _freeHeapSize.load( std::memory_order_acquire );
     _releaseSignal.Signal();
+    return queued;
 }
 
 //-----------------------------------------------------------
@@ -145,7 +147,7 @@ void WorkHeap::CompletePendingReleases()
         for( int i = 0; i < count; i++ )
         {
             byte* buffer = releases[i];
-            Log::Debug( "-? Need Free 0x%p", buffer );
+            Log::Debug( "-? Need Free %p", buffer );
 
             // Find the buffer in the allocation table
             #if _DEBUG
@@ -164,7 +166,7 @@ void WorkHeap::CompletePendingReleases()
 
                     _usedHeapSize -= allocation.size;
                     
-                    Log::Debug( "- Free 0x%p : %llu", buffer, allocation.size );
+                    Log::Debug( "- Free %p : %llu", buffer, allocation.size );
 
                     size_t insertIndex = 0;
 
@@ -219,7 +221,12 @@ void WorkHeap::CompletePendingReleases()
                 }
             }
 
-            ASSERT( foundAllocation );
+            #if _DEBUG
+                if( !foundAllocation )
+                    Log::Line( "Error: Could not release buffer %p", buffer );
+            #endif
+                
+            FatalIf( !foundAllocation, "Failed to find released buffer." );
         }
     }
 }

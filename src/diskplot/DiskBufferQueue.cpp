@@ -252,7 +252,7 @@ void DiskBufferQueue::CommandMain()
         _cmdReadySignal.Wait();
 
         int cmdCount;
-        while( cmdCount = _commands.Dequeue( commands, CMD_BUF_SIZE ) )
+        while( ( ( cmdCount = _commands.Dequeue( commands, CMD_BUF_SIZE ) ) ) )
         {
             _cmdConsumedSignal.Signal();
 
@@ -342,6 +342,7 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     const byte*  buffers     = cmd.buckets.buffers;
 
     FileSet&     fileBuckets = _files[(int)fileId];
+    ASSERT( IsFlagSet( fileBuckets.files[0].GetFileAccess(), FileAccess::ReadWrite ) );
 
     const uint   bucketCount = (uint)fileBuckets.files.length;
 
@@ -361,7 +362,7 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
                                  bufferSize / blockSize * blockSize;
 
         WriteToFile( fileBuckets.files[i], writeSize, buffer, _blockBuffer, fileBuckets.name, i );
-
+        ASSERT( IsFlagSet( fileBuckets.files[i].GetFileAccess(), FileAccess::ReadWrite ) );
         // Each bucket buffer must start at the next block-aligned boundary
         const size_t bufferOffset = _useDirectIO == false ? bufferSize :
                                     RoundUpToNextBoundaryT( bufferSize, blockSize );

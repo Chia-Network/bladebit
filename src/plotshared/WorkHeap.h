@@ -2,6 +2,7 @@
 #include "threading/AutoResetSignal.h"
 #include "SPCQueue.h"
 #include "util/Array.h"
+#include "diskplot/DiskPlotConfig.h"
 
 // A simple heap to be used as our working buffer provider
 // for doing plotting work in memory and I/O operations.
@@ -43,7 +44,7 @@ public:
     // The buffer won't actually be released until an allocation
     // attempt is called or an explicit call AddPendingReleases() to is made.
     // This is meant to be called by a producer thread.
-    void  Release( byte* buffer );
+    bool  Release( byte* buffer );
 
     // Makes pending released allocations available to the heap for allocation again.
     void CompletePendingReleases();
@@ -58,7 +59,8 @@ private:
     Array<HeapEntry>     _heapTable;            // Tracks unallocated space in our work heap
     Array<HeapEntry>     _allocationTable;      // Tracks sizes and for currently allocated buffers. Used when performing releases.
 
-    SPCQueue<byte*, 256> _pendingReleases;      // Released buffers waiting to be re-added to the heap table
+    // #TODO: Make SPCQueue dynamically allocated.
+    SPCQueue<byte*, BB_DISK_QUEUE_MAX_CMDS> _pendingReleases;      // Released buffers waiting to be re-added to the heap table
     AutoResetSignal      _releaseSignal;        // Used to signal that there's pending released buffers
 
     // std::atomic<size_t>  _freeHeapSize = 0;     // Current free heap size from the perspective of the consumer thread (the allocating thread)

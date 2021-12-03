@@ -41,9 +41,6 @@ public:
     int Count() const;
 
 private:
-    // #TODO: TEST, remove this 'public'
-    public:
-
     int              _writePosition  = 0;   // Current write position in our buffer.
     int              _pendingCount   = 0;   // Entries pending to be committed.
     std::atomic<int> _committedCount = 0;   // Current number of committed entries
