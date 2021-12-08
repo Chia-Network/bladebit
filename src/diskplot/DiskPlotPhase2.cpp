@@ -19,8 +19,7 @@ DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
     : _context( context )
 {
     // We need to reserve 2.5GiB of heap space for the bit arrays
-    // used for marking entries. The rest will be used to load
-    // the back pointers.
+    // used for marking entries. The rest will be used to load the back pointers.
 }
 
 //-----------------------------------------------------------
@@ -159,12 +158,43 @@ void MarkJob::Run()
         queue.CommitCommands();
     }
 
+    // We do this per bucket, because each bucket has an offset associated with it
+    for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+    {
+        // Ensure the bucket has been loaded
+        if( this->IsControlThread() )
+        {
+            this->LockThreads();
+
+            pairBuffers->Flip();
+
+            // Load next bucket if we need to
+            const uint32 nextBucket = bucket + 1;
+            if( nextBucket < BB_DP_BUCKET_COUNT )
+            {
+
+            }
+
+            this->ReleaseThreads();
+        }
+        else
+        {
+            this->WaitForRelease();
+
+            pairs = this->GetJob( 0 ).pairs;
+            pairs.left  += entriesPerChunk;
+            pairs.right += entriesPerChunk;
+        }
+    }
+
     for( uint chunk = 0; chunk < chunkCount; chunk++ )
     {
         // If it is the trailing chunk, adjust our entry count
         if( chunk == trailingChunk )
         {
             // #TODO: Adjust entry count and active threads
+
+            
         }
 
         // Ensure the buffer has been loaded & load the next one in the background, if we need to
