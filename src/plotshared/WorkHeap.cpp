@@ -222,11 +222,9 @@ void WorkHeap::CompletePendingReleases()
             }
 
             #if _DEBUG
-                if( !foundAllocation )
-                    Log::Line( "Error: Could not release buffer %p", buffer );
+                FatalIf( !foundAllocation, "Failed to find released buffer." );
             #endif
                 
-            FatalIf( !foundAllocation, "Failed to find released buffer." );
         }
     }
 }

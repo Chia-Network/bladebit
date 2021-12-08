@@ -1,7 +1,9 @@
 #pragma once
 #include "DiskPlotConfig.h"
+#include "DiskBufferQueue.h"
 #include "threading/ThreadPool.h"
 #include "plotshared/MTJob.h"
+#include "plotshared/PlotTypes.h"
 #include "ChiaConsts.h"
 
 // Write intervals are expressed in bytes
@@ -15,6 +17,8 @@ struct DiskPlotContext
 {
     const char*  tmpPath;           // Path in which to allocate temporary buffers
     ThreadPool*  threadPool;
+
+    DiskBufferQueue* ioQueue;
 
     size_t       heapSize;          // Size in bytes of our working heap. Some parts are preallocated.
     byte*        heapBuffer;        // Buffer allocated for in-memory work
@@ -35,9 +39,9 @@ struct DiskPlotContext
 
     const byte*  plotId;
     const byte*  plotMemo;
-    uint         plotMemoSize;
+    uint32       plotMemoSize;
 
-    uint         bucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];
-    
+    uint32       bucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];
+    uint64       entryCount  [(uint)TableId::_Count];
 };
 

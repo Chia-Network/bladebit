@@ -230,3 +230,25 @@ inline FileId TableIdToSortKeyId( const TableId table )
     ASSERT( 0 );
     return FileId::None;
 }
+
+//-----------------------------------------------------------
+inline FileId TableIdToBackPointerFileId( const TableId table )
+{
+    switch( table )
+    {
+        case TableId::Table2: return FileId::T2_L;
+        case TableId::Table3: return FileId::T3_L;
+        case TableId::Table4: return FileId::T4_L;
+        case TableId::Table5: return FileId::T5_L;
+        case TableId::Table6: return FileId::T6_L;
+        case TableId::Table7: return FileId::T7_L;
+    
+        default:
+            ASSERT( 0 );
+            break;
+    }
+    
+    ASSERT( 0 );
+    return FileId::None;
+}
+

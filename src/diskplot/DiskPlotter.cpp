@@ -12,7 +12,8 @@
 //-----------------------------------------------------------
 DiskPlotter::DiskPlotter()
 {
-
+    // Initialize tables for matching
+    LoadLTargets();
 }
 
 //-----------------------------------------------------------
@@ -59,8 +60,12 @@ DiskPlotter::DiskPlotter( const Config cfg )
     // _cx.ioHeap = (byte*)SysHost::VirtualAlloc( ioHeapFullSize );
     // FatalIf( !_cx.ioHeap, "Failed to allocated work buffer. Make sure you have enough free memory." );
 
+    // Initialize our Thread Pool and IO Queue
     _cx.threadPool = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
+    _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, allocationSize, _cx.ioThreadCount, _cx.useDirectIO );
+
     
+    // #TODO: Remove this (test)
     static byte plotId[32] = {
         22, 24, 11, 3, 1, 15, 11, 6, 
         23, 22, 22, 24, 11, 3, 1, 15,
@@ -71,7 +76,6 @@ DiskPlotter::DiskPlotter( const Config cfg )
     static const uint plotMemoSize     = 128;
     static byte plotMemo[plotMemoSize] = { 0 };
 
-    // #TODO: Remove this (test)
     {
         const char refPlotId  [] = "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835";
         const char refPlotMemo[] = "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef01b7bf8a22a9ac82a003e07b551c851ea683839f3e1beb8ac9ede57d2c020669";

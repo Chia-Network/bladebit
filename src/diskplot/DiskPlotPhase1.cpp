@@ -78,17 +78,16 @@ void DbgValidateFxBucket( const uint64 bucketIdx, uint32* entries, const uint64 
 //-----------------------------------------------------------
 DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     : _cx( cx )
-    //, _diskQueue( cx.workBuffer, cx.diskFlushSize, (uint)(cx.bufferSizeBytes / cx.diskFlushSize) - 1 )
+    , _diskQueue( cx.ioQueue )
 {
-    LoadLTargets();
-
     ASSERT( cx.tmpPath );
 
     // Use the whole allocation for F1
     byte*  heap     = cx.heapBuffer;
     size_t heapSize = cx.heapSize + cx.ioHeapSize;
 
-    _diskQueue = new DiskBufferQueue( cx.tmpPath, heap, heapSize, cx.ioThreadCount, cx.useDirectIO );
+    _diskQueue->ResetHeap( heapSize, heap );
+
 }
 
 //-----------------------------------------------------------
@@ -814,7 +813,6 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     if( rBucketGrp - lBucketGrp > 1 )
         return 0;
 
-
     byte* bucketIndices = (byte*)_bucket->sortKey;  // #TODO: Use a proper buffer for this
 
     // Find the length of the group
@@ -842,6 +840,29 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     // If we got matches, then complete processing them
     if( matches )
     {
+        // Write pairs for table
+        {
+            uint32* lPairs = (uint32*)_diskQueue->GetBuffer( sizeof( uint32 ) * matches );
+            uint16* rPairs = (uint16*)_diskQueue->GetBuffer( sizeof( uint16 ) * matches );
+
+            // Copy pairs, fixing L pairs with the offset in the previous bucket
+            for( uint i = 0; i < matches; i++ )
+                lPairs[i] = pairs.left[i] + sortKeyOffset;
+
+            bbmemcpy_t( rPairs, pairs.right, matches );
+
+            // Write to disk
+            const FileId leftId  = TableIdToBackPointerFileId( tableId );
+            const FileId rightId = (FileId)( (int)leftId + 1 );
+            
+            _diskQueue->WriteFile( leftId , 0, lPairs, sizeof( uint32 ) * matches );
+            _diskQueue->WriteFile( rightId, 0, rPairs, sizeof( uint16 ) * matches );
+            _diskQueue->ReleaseBuffer( lPairs );
+            _diskQueue->ReleaseBuffer( rPairs );
+            _diskQueue->CommitCommands();
+        }
+
+
         // Copy metadata
         bbmemcpy_t( tmpMetaA, prevBucketMetaA, prevBucketGroupCount );
         bbmemcpy_t( tmpMetaA + prevBucketGroupCount, curBucketMetaA, curBucketGroupCount );

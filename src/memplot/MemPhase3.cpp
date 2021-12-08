@@ -254,7 +254,7 @@ void PruneAndMapThread( LPJob* job )
     // Scan entries
     {
         uint64 newLength = 0;
-        
+
         for( uint64 i = srcOffset; i < end; i++ )
         {
             if( markedEntries[i] )
@@ -272,7 +272,7 @@ void PruneAndMapThread( LPJob* job )
     ///
     /// Prune to new buffer
     ///
-     
+
     // Get our new offset
     uint64 dstOffset = 0;
 
