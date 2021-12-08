@@ -1,9 +1,5 @@
 #pragma once
 #include "DiskPlotContext.h"
-#include "plotshared/MTJob.h"
-#include "plotshared/DoubleBuffer.h"
-#include "plotshared/PlotTypes.h"
-#include "DiskBufferQueue.h"
 #include "util/Log.h"
 #include "ChiaConsts.h"
 

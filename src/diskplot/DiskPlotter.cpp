@@ -3,6 +3,7 @@
 #include "Util.h"
 
 #include "DiskPlotPhase1.h"
+#include "DiskPlotPhase2.h"
 #include "SysHost.h"
 
 // #TEST
@@ -101,8 +102,25 @@ void DiskPlotter::Plot( const PlotRequest& req )
     auto plotTimer = TimerBegin();
 
     {
+        Log::Line( "Running Phase 1" );
+        const auto timer = TimerBegin();
+
         DiskPlotPhase1 phase1( _cx );
         phase1.Run();
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 1 in .2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+    }
+
+    {
+        Log::Line( "Running Phase 2" );
+        const auto timer = TimerBegin();
+
+        DiskPlotPhase2 phase2( _cx );
+        phase2.Run();
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 2 in .2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
     }
 
     double plotElapsed = TimerEnd( plotTimer );

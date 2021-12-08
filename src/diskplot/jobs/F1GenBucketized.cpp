@@ -1,8 +1,8 @@
 #include "F1GenBucketized.h"
 #include "diskplot/DiskBufferQueue.h"
+#include "plotshared/PlotTypes.h"
 #include "threading/ThreadPool.h"
 #include "pos/chacha8.h"
-#include "plotshared/DoubleBuffer.h"
 #include "Util.h"
 
 template<typename TJob>

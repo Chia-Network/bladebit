@@ -18,14 +18,12 @@ struct MarkJob : MTJob<MarkJob>
 DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
     : _context( context )
 {
-    // We need to reserve 2.5GiB of heap space for the bit arrays
-    // used for marking entries. The rest will be used to load the back pointers.
+
 }
 
 //-----------------------------------------------------------
 DiskPlotPhase2::~DiskPlotPhase2()
 {
-
 }
 
 //-----------------------------------------------------------
@@ -60,13 +58,13 @@ void DiskPlotPhase2::Run()
     DoubleBuffer bitFields;
     bitFields.front = context.heapBuffer;
     bitFields.back  = context.heapBuffer + bitFieldSize;
-    bitFields.fence.Signal();
+    // bitFields.fence.Signal();
 
     // Setup another double buffer for reading
     DoubleBuffer pairBuffers;
     pairBuffers.front = bitFields.back + bitFieldSize;
     pairBuffers.back  = pairBuffers.front + pairBufferSize;
-    pairBuffers.fence.Signal();
+    // pairBuffers.fence.Signal();
 
     for( int tableIdx = (int)TableId::Table2; tableIdx <= (int)TableId::Table7; tableIdx++ )
     {
@@ -96,61 +94,49 @@ void MarkJob::Run()
     DiskPlotContext& context      = *this->context;
     DiskBufferQueue& queue        = *context.ioQueue;
     const TableId    table        = this->table;
+    const uint32     jobId        = this->JobId();
+    const uint32     threadCount  = this->JobCount();
+    const size_t     entrySize    = sizeof( uint32 ) + sizeof( uint16 );
+    const uint64     maxEntries   = 1ull << _K;
 
-    // Calculate how many passes we have to make to process all the entries
-    const uint32 threadCount      = this->JobCount();
-    const uint64 maxEntries       = 1ull << _K;
-    const uint64 totalEntries     = context.entryCount[(int)this->table];
-    ASSERT( totalEntries <= maxEntries );
+    // const uint64     totalEntries = context.entryCount[(int)this->table];
+    // ASSERT( totalEntries <= maxEntries );
 
-    const size_t entrySize        = sizeof( uint32 ) + sizeof( uint16 );
-    const size_t rTableSize       = totalEntries * entrySize;
 
-    const size_t chunkSize        = this->pairBufferSize;
+    DoubleBuffer* pairBuffer = this->pairBuffers;
+    BitField      markedEntries( this->bitField );
 
-    uint32 chunkCount             = rTableSize <= chunkSize ? 1u : (uint32)( rTableSize / chunkSize );
-    uint64 entriesPerChunk        = chunkSize / entrySize;
-    uint64 trailingEntries        = totalEntries - entriesPerChunk * chunkCount;
-
-    uint64 entriesPerThread       = entriesPerChunk / threadCount;
-
-    DoubleBuffer* pairBuffer      = this->pairBuffers;
-
-    // Adjust trailing entrties to add the remainder from chunks
-    uint64 chunkRemainders = entriesPerChunk - entriesPerThread * threadCount;
-    trailingEntries += chunkRemainders;
-
-    uint32 trailingChunk = 0xFFFFFFFF;
-    if( trailingEntries >= entriesPerChunk )
     {
-        chunkCount++;
-        trailingEntries -= entriesPerChunk;
-    }
+        // Zero-out our portion of the bit field and sync
+        const size_t bitFieldSize = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
 
-    if( trailingEntries )
-    {
-        trailingChunk = chunkCount;
-        chunkCount++;
-    }
+              size_t sizePerThread = bitFieldSize / threadCount;
+        const size_t sizeRemainder = bitFieldSize - sizePerThread * threadCount;
 
-    // #TODO: Need to zero-out our portion of the bit field and sync
-    BitField markedEntries( this->bitField );
+        byte* buffer = ((byte*)this->bitField) + sizePerThread * jobId;
+
+        if( jobId == threadCount - 1 )
+            sizePerThread += sizeRemainder;
+
+        memset( buffer, 0, sizePerThread );
+    }
     
     const FileId lTableId = TableIdToBackPointerFileId( this->table );
     const FileId rTableId = (FileId)((int)lTableId + 1 );
 
     Pairs pairs;
-
-    uint64 offset = 0;
+    uint64 entryOffset = 0;
 
     // Load the first chunk
     if( this->IsControlThread() )
     {
-        const size_t lReadSize = sizeof( uint32 ) * entriesPerChunk;
-        const size_t rReadSize = sizeof( uint16 ) * entriesPerChunk;
+        const uint32 bucketEntryCount = context.bucketCounts[(int)table][0];
 
-        pairs.left  = (uint32*)pairBuffer->back;
-        pairs.right = (uint16*)( pairs.left + entriesPerChunk );
+        const size_t lReadSize = sizeof( uint32 ) * bucketEntryCount;
+        const size_t rReadSize = sizeof( uint16 ) * bucketEntryCount;
+
+        uint32* lBuffer = (uint32*)pairBuffer->back;
+        uint32* rBuffer = lBuffer + bucketEntryCount;
 
         queue.ReadFile( lTableId, 0, pairs.left , lReadSize );
         queue.ReadFile( rTableId, 0, pairs.right, rReadSize );
@@ -161,74 +147,42 @@ void MarkJob::Run()
     // We do this per bucket, because each bucket has an offset associated with it
     for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
     {
-        // Ensure the bucket has been loaded
+        const uint32 bucketEntryCount = context.bucketCounts[(int)table][bucket];
+        
+        uint32 entriesPerThread = bucketEntryCount / threadCount;
+
+        // Ensure the bucket has finished loading
         if( this->IsControlThread() )
         {
             this->LockThreads();
 
             pairBuffers->Flip();
+
+            // Assign the buffer as pairs
+            pairs.left  = (uint32*)pairBuffer->front;
+            pairs.right = (uint16*)(pairs.left + bucketEntryCount);
+            
+            this->pairs = pairs;
+
+            this->ReleaseThreads();
 
             // Load next bucket if we need to
             const uint32 nextBucket = bucket + 1;
+
             if( nextBucket < BB_DP_BUCKET_COUNT )
             {
+                const uint32 nextBucketEntryCount = context.bucketCounts[(int)table][nextBucket];
 
-            }
+                // #TODO: Change this to load as many buckets as we can in the background,
+                //        as long as there is heaps space for it.
+                const size_t lReadSize = sizeof( uint32 ) * nextBucketEntryCount;
+                const size_t rReadSize = sizeof( uint16 ) * nextBucketEntryCount;
 
-            this->ReleaseThreads();
-        }
-        else
-        {
-            this->WaitForRelease();
+                uint32* lBuffer = (uint32*)pairBuffer->back;
+                uint32* rBuffer = lBuffer + nextBucketEntryCount;
 
-            pairs = this->GetJob( 0 ).pairs;
-            pairs.left  += entriesPerChunk;
-            pairs.right += entriesPerChunk;
-        }
-    }
-
-    for( uint chunk = 0; chunk < chunkCount; chunk++ )
-    {
-        // If it is the trailing chunk, adjust our entry count
-        if( chunk == trailingChunk )
-        {
-            // #TODO: Adjust entry count and active threads
-
-            
-        }
-
-        // Ensure the buffer has been loaded & load the next one in the background, if we need to
-        if( this->IsControlThread() )
-        {
-            this->LockThreads();
-
-            pairBuffers->Flip();
-
-            pairs.left  = (uint32*)pairBuffer->back;
-            pairs.right = (uint16*)( pairs.left + entriesPerChunk );
-
-            this->pairs = pairs;
-            this->ReleaseThreads();
-
-            // Load the next buffer in the background
-            const uint32 nextChunk = chunk + 1;
-
-            if( nextChunk < chunkCount )
-            {
-                // Determine how many entries the next chunk has
-                uint32 entriesToLoad = entriesPerChunk;
-                if( nextChunk == trailingChunk )
-                    entriesToLoad = trailingEntries;
-
-                uint32* bgLeft  = (uint32*)pairBuffer->back;
-                uint32* bgRight = bgLeft + entriesToLoad;
-
-                const size_t lReadSize = sizeof( uint32 ) * entriesToLoad;
-                const size_t rReadSize = sizeof( uint16 ) * entriesToLoad;
-                
-                queue.ReadFile( lTableId, 0, bgLeft, lReadSize );
-                queue.ReadFile( rTableId, 0, bgRight, rReadSize );
-                queue.AddFence( pairBuffers->fence );
+                queue.ReadFile( lTableId, 0, lBuffer, lReadSize );
+                queue.ReadFile( rTableId, 0, rBuffer, rReadSize );
                 queue.CommitCommands();
             }
         }
@@ -237,33 +191,35 @@ void MarkJob::Run()
             this->WaitForRelease();
 
             pairs = this->GetJob( 0 ).pairs;
-            pairs.left  += entriesPerChunk;
-            pairs.right += entriesPerChunk;
+            pairs.left  += entriesPerThread;
+            pairs.right += entriesPerThread;
         }
 
-
-        // Start marking entries
-        for( uint64 i = offset, end = offset + entriesPerThread; i < entriesPerThread; i++ )
+        // Add any trailing entries to the last thread
+        // #NOTE: Ensure this is only updated after we get the pairs offset
+        if( this->JobId() == threadCount - 1 )
         {
-
+            const uint32 trailingEntries = bucketEntryCount - entriesPerThread * threadCount;
+            entriesPerThread += trailingEntries;
         }
 
-        offset += entriesPerChunk;
-    }
-
-
-    
-
-    uint64 remainingEntries = totalEntries;
-
-    // AutoResetSignal* fence = this->fence;
-
-    while( remainingEntries )
-    {
-        if( this->IsControlThread() )
+        // Mark used entries on the left table, given the right table back pointers
+        for( int64 i = 0; i < (int64)entriesPerThread; i++ )
         {
-            // Grab a buffer to load
+            // #TODO: Unroll this a bit if beneficial
+            const uint64 left  = pairs.left [i] + entryOffset;
+            const uint64 right = left + pairs.right[i];
+
+            markedEntries.Set( left  );
+            markedEntries.Set( right );
+
+            // #TODO: Divide this into 2 steps so that we ensure the previous thread does NOT
+            //        write to the same field at the same time as the current thread.
+            //        (May happen when the prev thread writes to the end entries & the current thread is writing to
+            //          its beginning entries)
         }
+
+        entryOffset += bucketEntryCount;
     }
 }
 
