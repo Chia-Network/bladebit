@@ -113,16 +113,16 @@ void DiskPlotter::Plot( const PlotRequest& req )
         Log::Line( "Finished Phase 1 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
     }
 
-    // {
-    //     Log::Line( "Running Phase 2" );
-    //     const auto timer = TimerBegin();
+    {
+        Log::Line( "Running Phase 2" );
+        const auto timer = TimerBegin();
 
-    //     DiskPlotPhase2 phase2( _cx );
-    //     phase2.Run();
+        DiskPlotPhase2 phase2( _cx );
+        phase2.Run();
 
-    //     const double elapsed = TimerEnd( timer );
-    //     Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
-    // }
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+    }
 
     double plotElapsed = TimerEnd( plotTimer );
     Log::Line( "Finished plotting in %.2lf seconds ( %.2lf minutes ).", plotElapsed, plotElapsed / 60 );

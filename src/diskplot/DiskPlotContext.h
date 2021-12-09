@@ -42,6 +42,6 @@ struct DiskPlotContext
     uint32       plotMemoSize;
 
     uint32       bucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];
-    uint64       entryCount  [(uint)TableId::_Count];
+    uint64       entryCounts [(uint)TableId::_Count];
 };
 

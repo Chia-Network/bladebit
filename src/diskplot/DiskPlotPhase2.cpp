@@ -62,11 +62,11 @@ void DiskPlotPhase2::Run()
 
     // Setup another double buffer for reading
     DoubleBuffer pairBuffers;
-    pairBuffers.front = bitFields.back + bitFieldSize;
+    pairBuffers.front = bitFields.back + bitFieldSize * 2;
     pairBuffers.back  = pairBuffers.front + pairBufferSize;
     // pairBuffers.fence.Signal();
 
-    for( int tableIdx = (int)TableId::Table2; tableIdx <= (int)TableId::Table7; tableIdx++ )
+    for( int tableIdx = (int)TableId::Table7; tableIdx >= (int)TableId::Table2; tableIdx-- )
     {
         MTJobRunner<MarkJob> jobs( *context.threadPool );
 
@@ -138,8 +138,8 @@ void MarkJob::Run()
         uint32* lBuffer = (uint32*)pairBuffer->back;
         uint32* rBuffer = lBuffer + bucketEntryCount;
 
-        queue.ReadFile( lTableId, 0, pairs.left , lReadSize );
-        queue.ReadFile( rTableId, 0, pairs.right, rReadSize );
+        queue.ReadFile( lTableId, 0, lBuffer , lReadSize );
+        queue.ReadFile( rTableId, 0, rBuffer, rReadSize );
         queue.AddFence( pairBuffers->fence );
         queue.CommitCommands();
     }
@@ -183,6 +183,7 @@ void MarkJob::Run()
 
                 queue.ReadFile( lTableId, 0, lBuffer, lReadSize );
                 queue.ReadFile( rTableId, 0, rBuffer, rReadSize );
+                queue.AddFence( pairBuffers->fence );
                 queue.CommitCommands();
             }
         }

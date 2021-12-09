@@ -92,14 +92,54 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 //-----------------------------------------------------------
 void DiskPlotPhase1::Run()
 {
+    DiskPlotContext& cx = _cx;
+
+    #if BB_DP_DBG_SKIP_PHASE_1
+    {
+        FileStream bucketCounts, tableCounts;
+
+        if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( bucketCounts.Read( cx.bucketCounts, sizeof( cx.bucketCounts ) ) != sizeof( cx.bucketCounts ) )
+            {
+                Log::Error( "Failed to read from bucket counts file." );
+                goto CONTINUE;
+            }
+        }
+        else
+        {
+            Log::Error( "Failed to open bucket counts file." );
+            goto CONTINUE;
+        }
+
+        if( tableCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_TABLE_COUNTS_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( tableCounts.Read( cx.entryCounts, sizeof( cx.entryCounts ) ) != sizeof( cx.entryCounts ) )
+            {
+                Log::Error( "Failed to read from table counts file." );
+                goto CONTINUE;
+            }
+        }
+        else
+        {
+            Log::Error( "Failed to open table counts file." );
+            goto CONTINUE;
+        }
+
+        return;
+
+    CONTINUE:;
+    }
+    #endif
+
 #if !BB_DP_DBG_READ_EXISTING_F1
     GenF1();
 #else
     {
-        size_t pathLen = strlen( _cx.tmpPath );
+        size_t pathLen = strlen( cx.tmpPath );
         pathLen += sizeof( BB_DP_DBG_READ_BUCKET_COUNT_FNAME );
 
-        std::string bucketsPath = _cx.tmpPath;
+        std::string bucketsPath = cx.tmpPath;
         if( bucketsPath[bucketsPath.length() - 1] != '/' && bucketsPath[bucketsPath.length() - 1] != '\\' )
             bucketsPath += "/";
 
@@ -111,7 +151,7 @@ void DiskPlotPhase1::Run()
         if( fBucketCounts.Open( bucketsPath.c_str(), FileMode::Open, FileAccess::Read ) )
         {
 
-            size_t sizeRead = fBucketCounts.Read( _cx.bucketCounts[0], bucketsCountSize );
+            size_t sizeRead = fBucketCounts.Read( cx.bucketCounts[0], bucketsCountSize );
             FatalIf( sizeRead != bucketsCountSize, "Invalid bucket counts." );
         }
         else
@@ -120,21 +160,55 @@ void DiskPlotPhase1::Run()
 
             fBucketCounts.Close();
             FatalIf( !fBucketCounts.Open( bucketsPath.c_str(), FileMode::Create, FileAccess::Write ), "File to open bucket counts file" );
-            FatalIf( fBucketCounts.Write( _cx.bucketCounts[0], bucketsCountSize ) != bucketsCountSize, "Failed to write bucket counts.");
+            FatalIf( fBucketCounts.Write( cx.bucketCounts[0], bucketsCountSize ) != bucketsCountSize, "Failed to write bucket counts.");
         }
     }
 #endif
 
     #if BB_DP_DBG_VALIDATE_Y
         if( 0 )
-            Debug::ValidateYFileFromBuckets( FileId::Y0, *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
+            Debug::ValidateYFileFromBuckets( FileId::Y0, *cx.threadPool, *_diskQueue, TableId::Table1, cx.bucketCounts[0] );
     #endif
 
     // Re-create the disk queue with the io buffer only (remove working heap section)
     // #TODO: Remove this, this is for now while testing.
-    _diskQueue->ResetHeap( _cx.ioHeapSize, _cx.ioHeap );
+    _diskQueue->ResetHeap( cx.ioHeapSize, cx.ioHeap );
 
     ForwardPropagate();
+
+    // Calculate all table counts
+    for( int table = (int)TableId::Table1; table <= (int)TableId::Table7; table++ )
+    {
+        uint64 entryCount = 0;
+
+        for( int bucket = 0; bucket < (int)BB_DP_BUCKET_COUNT; bucket++ )
+            entryCount += cx.bucketCounts[table][bucket];
+
+        cx.entryCounts[table] = entryCount;
+    }
+
+    #if _DEBUG
+    {
+        // Write bucket counts
+        FileStream bucketCounts, tableCounts;
+
+        if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
+        {
+            if( bucketCounts.Write( cx.bucketCounts, sizeof( cx.bucketCounts ) ) != sizeof( cx.bucketCounts ) )
+                Log::Error( "Failed to write to bucket counts file." );
+        }
+        else
+            Log::Error( "Failed to open bucket counts file." );
+
+        if( tableCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_TABLE_COUNTS_FNAME, FileMode::Create, FileAccess::Write ) )
+        {
+            if( tableCounts.Write( cx.entryCounts, sizeof( cx.entryCounts ) ) != sizeof( cx.entryCounts ) )
+                Log::Error( "Failed to write to table counts file." );
+        }
+        else
+            Log::Error( "Failed to open table counts file." );
+    }
+    #endif
 }
 
 
