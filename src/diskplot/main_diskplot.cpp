@@ -170,7 +170,7 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
             if( len == minSize )
             {
                 // Set the default value
-                fxDefaultWriteInterval = uvalue();
+                fxDefaultWriteInterval = ParseSize( "--fx", value() );
                 return true;
             }
             else
@@ -182,7 +182,7 @@ void ParseConfig( int argc, const char* argv[], GlobalConfig& gConfig, DiskPlott
                 if( intChar >= '2' && intChar <= '7' )
                 {
                     const int tableId = (int)intChar - '0';
-                    cfg.writeIntervals[tableId].fxGen = uvalue();
+                    cfg.writeIntervals[tableId].fxGen = ParseSize( "--fn", value() );
                     
                     return true;
                 }

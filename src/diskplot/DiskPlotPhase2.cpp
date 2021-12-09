@@ -211,6 +211,7 @@ void MarkJob::Run()
             const uint64 left  = pairs.left [i] + entryOffset;
             const uint64 right = left + pairs.right[i];
 
+            // #TODO: We need to ensure that the previous table also has this entry marked.
             markedEntries.Set( left  );
             markedEntries.Set( right );
 
