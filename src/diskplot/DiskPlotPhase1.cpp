@@ -87,7 +87,6 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     size_t heapSize = cx.heapSize + cx.ioHeapSize;
 
     _diskQueue->ResetHeap( heapSize, heap );
-
 }
 
 //-----------------------------------------------------------
@@ -809,7 +808,7 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     ASSERT( rBucketGrp > lBucketGrp );
     outCurGroupCount = 0;
 
-    // Ensure the groups are adjoining
+    // Ensure the groups are adjacent
     if( rBucketGrp - lBucketGrp > 1 )
         return 0;
 

@@ -26,7 +26,7 @@ public:
     };
 
 public:
-    DiskPlotter();
+    // DiskPlotter();
     DiskPlotter( const Config cfg );
 
     void Plot( const PlotRequest& req );

@@ -60,7 +60,7 @@ DiskBufferQueue::DiskBufferQueue(
     InitFileSet( FileId::SORT_KEY4, "table_4_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::SORT_KEY5, "table_5_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::SORT_KEY6, "table_6_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    // InitFileSet( FileId::SORT_KEY2, "table_7_key", 1,               pathBuffer, workDirLen );
+    InitFileSet( FileId::SORT_KEY7, "table_7_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
 
 //     InitFileSet( FileId::F7      , "f7"      , 1,                  pathBuffer, workDirLen );
     free( pathBuffer );
