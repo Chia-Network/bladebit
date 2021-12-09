@@ -62,6 +62,12 @@ DiskBufferQueue::DiskBufferQueue(
     InitFileSet( FileId::SORT_KEY6, "table_6_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::SORT_KEY7, "table_7_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
 
+    InitFileSet( FileId::MARKED_ENTRIES_2, "table_2_marks", 1, pathBuffer, workDirLen );
+    InitFileSet( FileId::MARKED_ENTRIES_3, "table_3_marks", 1, pathBuffer, workDirLen );
+    InitFileSet( FileId::MARKED_ENTRIES_4, "table_4_marks", 1, pathBuffer, workDirLen );
+    InitFileSet( FileId::MARKED_ENTRIES_5, "table_5_marks", 1, pathBuffer, workDirLen );
+    InitFileSet( FileId::MARKED_ENTRIES_6, "table_6_marks", 1, pathBuffer, workDirLen );
+
 //     InitFileSet( FileId::F7      , "f7"      , 1,                  pathBuffer, workDirLen );
     free( pathBuffer );
 
@@ -124,12 +130,6 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
                 Fatal( "Temporary work files have differing block sizes." );
         }
     }
-}
-
-//-----------------------------------------------------------
-byte* DiskBufferQueue::GetBuffer( size_t size )
-{
-    return _workHeap.Alloc( size, _blockSize );
 }
 
 //-----------------------------------------------------------

@@ -4,14 +4,21 @@
 struct MarkJob : MTJob<MarkJob>
 {
     DiskPlotContext* context;
-    uint64*          bitField;
-    DoubleBuffer*    pairBuffers;
-    size_t           pairBufferSize;
+    uint64*          lTableMarkedEntries;
+    uint64*          rTableMarkedEntries;
+    // DoubleBuffer*    pairBuffers;
+    // size_t           pairBufferSize;
     TableId          table;
 
-    Pairs            pairs; // Set by the control thread
+    // Set by the control thread
+    AutoResetSignal*  bucketFences;
+    byte**            bucketBuffers;
+    // Pairs            pairs; // Set by the control thread
 
     void Run() override;
+
+    template<TableId table>
+    void MarkEntries();
 };
 
 //-----------------------------------------------------------
@@ -46,54 +53,107 @@ void DiskPlotPhase2::Run()
     // Determine what size we can use to load
     const uint64 maxEntries       = 1ull << _K;
     const size_t bitFieldSize     = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
+    const size_t bitFieldBuffersSize = bitFieldSize * 2;
     // const size_t bitFieldQWordCount = bitFieldSize / sizeof( uint64 );
 
     const uint32 threadCount      = context.threadCount;
     const size_t fullHeapSize     = context.heapSize + context.ioHeapSize;
-    const size_t heapRemainder    = fullHeapSize - bitFieldSize * 2;
-    const size_t pairBufferSize   = heapRemainder / 2;
-    const size_t entrySize        = sizeof( uint32 ) + sizeof( uint16 );
+    const size_t heapRemainder    = fullHeapSize - bitFieldBuffersSize;
+    // const size_t pairBufferSize   = heapRemainder / 2;
+    // const size_t entrySize        = sizeof( uint32 ) + sizeof( uint16 );
 
     // Prepare 2 marking bitfields for dual-buffering
-    DoubleBuffer bitFields;
-    bitFields.front = context.heapBuffer;
-    bitFields.back  = context.heapBuffer + bitFieldSize;
-    // bitFields.fence.Signal();
+    AutoResetSignal bitFieldFence;
+    int             bitFieldIndex = 0;
 
-    // Setup another double buffer for reading
-    DoubleBuffer pairBuffers;
-    pairBuffers.front = bitFields.back + bitFieldSize * 2;
-    pairBuffers.back  = pairBuffers.front + pairBufferSize;
-    // pairBuffers.fence.Signal();
+    byte* bitFields[2];
+    bitFields[0] = context.heapBuffer;
+    bitFields[1] = bitFields[0] + bitFieldSize;
+    // bitFields[2] = bitFields[1] + bitFieldSize;
+    
 
-    for( int tableIdx = (int)TableId::Table7; tableIdx >= (int)TableId::Table2; tableIdx-- )
+    // Reserve the remainder of the heap for reading R table backpointers
+    queue.ResetHeap( heapRemainder, context.heapBuffer + bitFieldBuffersSize );
+
+    // #TODO: Use a single fence with a counter instead.
+    AutoResetSignal bucketFences[BB_DP_BUCKET_COUNT];
+
+    uint64* rTableBitField = nullptr;
+
+    FileId  lTableFileId   = FileId::MARKED_ENTRIES_6;
+
+    // Mark all tables
+    for( int tableIdx = (int)TableId::Table7; tableIdx > (int)TableId::Table2; tableIdx-- )
     {
+        const auto timer = TimerBegin();
+
         MTJobRunner<MarkJob> jobs( *context.threadPool );
+
+        uint64* lTableBitField = (uint64*)( bitFields[bitFieldIndex] );
 
         for( uint i = 0; i < threadCount; i++ )
         {
             MarkJob& job = jobs[i];
 
-            job.context          = &context;
-            job.bitField         = (uint64*)bitFields.front;
-            job.pairBuffers      = &pairBuffers;
-            job.pairBufferSize   = (uint32)pairBufferSize;
-            job.table            = (TableId)tableIdx;
-            job.pairs.left       = nullptr;
-            job.pairs.right      = nullptr;
+            job.context             = &context;
+            job.lTableMarkedEntries = lTableBitField;
+            job.rTableMarkedEntries = rTableBitField;
+            // job.pairBufferSize      = (uint32)pairBufferSize;
+            job.table               = (TableId)tableIdx;
+
+            job.bucketFences     = bucketFences;
+            job.bucketBuffers    = nullptr;
         }
 
         jobs.Run();
-    }
-}
 
+        rTableBitField = lTableBitField;
+        bitFieldIndex  = ( bitFieldIndex + 1 ) % 2;
+
+        // Ensure the last table finished writing to the bitfield
+        if( tableIdx < (int)TableId::Table7 )
+            bitFieldFence.Wait();
+
+        // Submit bitfield for writing
+        queue.WriteFile( lTableFileId, 0, lTableBitField, bitFieldSize );
+        queue.AddFence( bitFieldFence );
+        queue.CommitCommands();
+
+        lTableFileId = (FileId)( (int)lTableFileId - 1 );
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished marking table %d in %.2lf seconds.", tableIdx, elapsed );
+    }
+
+    bitFieldFence.Wait();
+}
 
 //-----------------------------------------------------------
 void MarkJob::Run()
 {
+    switch( this->table )
+    {
+        case TableId::Table7: this->MarkEntries<TableId::Table7>(); return;
+        case TableId::Table6: this->MarkEntries<TableId::Table6>(); return;
+        case TableId::Table5: this->MarkEntries<TableId::Table5>(); return;
+        case TableId::Table4: this->MarkEntries<TableId::Table4>(); return;
+        case TableId::Table3: this->MarkEntries<TableId::Table3>(); return;
+
+        default:
+            ASSERT( 0 );
+            return;
+    }
+
+    ASSERT( 0 );
+}
+
+//-----------------------------------------------------------
+template<TableId table>
+void MarkJob::MarkEntries()
+{
     DiskPlotContext& context      = *this->context;
     DiskBufferQueue& queue        = *context.ioQueue;
-    const TableId    table        = this->table;
+    // const TableId    table        = this->table;
     const uint32     jobId        = this->JobId();
     const uint32     threadCount  = this->JobCount();
     const size_t     entrySize    = sizeof( uint32 ) + sizeof( uint16 );
@@ -102,18 +162,25 @@ void MarkJob::Run()
     // const uint64     totalEntries = context.entryCount[(int)this->table];
     // ASSERT( totalEntries <= maxEntries );
 
+    // DoubleBuffer* pairBuffer = this->pairBuffers;
+    BitField      lTableMarkedEntries( this->lTableMarkedEntries );
+    BitField      rTableMarkedEntries( this->rTableMarkedEntries );
 
-    DoubleBuffer* pairBuffer = this->pairBuffers;
-    BitField      markedEntries( this->bitField );
+    byte* bucketBuffers[BB_DP_BUCKET_COUNT];
+    uint  bucketsLoaded = 0;
+
+    if( this->IsControlThread() )
+        this->bucketBuffers = bucketBuffers;
+
 
     {
         // Zero-out our portion of the bit field and sync
-        const size_t bitFieldSize = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
+        const size_t bitFieldSize  = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
 
               size_t sizePerThread = bitFieldSize / threadCount;
         const size_t sizeRemainder = bitFieldSize - sizePerThread * threadCount;
 
-        byte* buffer = ((byte*)this->bitField) + sizePerThread * jobId;
+        byte* buffer = ((byte*)this->lTableMarkedEntries) + sizePerThread * jobId;
 
         if( jobId == threadCount - 1 )
             sizePerThread += sizeRemainder;
@@ -127,23 +194,6 @@ void MarkJob::Run()
     Pairs pairs;
     uint64 entryOffset = 0;
 
-    // Load the first chunk
-    if( this->IsControlThread() )
-    {
-        const uint32 bucketEntryCount = context.bucketCounts[(int)table][0];
-
-        const size_t lReadSize = sizeof( uint32 ) * bucketEntryCount;
-        const size_t rReadSize = sizeof( uint16 ) * bucketEntryCount;
-
-        uint32* lBuffer = (uint32*)pairBuffer->back;
-        uint32* rBuffer = lBuffer + bucketEntryCount;
-
-        queue.ReadFile( lTableId, 0, lBuffer , lReadSize );
-        queue.ReadFile( rTableId, 0, rBuffer, rReadSize );
-        queue.AddFence( pairBuffers->fence );
-        queue.CommitCommands();
-    }
-
     // We do this per bucket, because each bucket has an offset associated with it
     for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
     {
@@ -151,50 +201,52 @@ void MarkJob::Run()
         
         uint32 entriesPerThread = bucketEntryCount / threadCount;
 
-        // Ensure the bucket has finished loading
+        // Ensure we have a bucket to read from
         if( this->IsControlThread() )
         {
-            this->LockThreads();
-
-            pairBuffers->Flip();
-
-            // Assign the buffer as pairs
-            pairs.left  = (uint32*)pairBuffer->front;
-            pairs.right = (uint16*)(pairs.left + bucketEntryCount);
-            
-            this->pairs = pairs;
-
-            this->ReleaseThreads();
-
-            // Load next bucket if we need to
-            const uint32 nextBucket = bucket + 1;
-
-            if( nextBucket < BB_DP_BUCKET_COUNT )
+            // Load as many buckets as we can in the background
+            while( bucketsLoaded < BB_DP_BUCKET_COUNT )
             {
-                const uint32 nextBucketEntryCount = context.bucketCounts[(int)table][nextBucket];
+                const uint32 bucketToLoadEntryCount = context.bucketCounts[(int)table][bucketsLoaded];
 
-                // #TODO: Change this to load as many buckets as we can in the background,
-                //        as long as there is heaps space for it.
-                const size_t lReadSize = sizeof( uint32 ) * nextBucketEntryCount;
-                const size_t rReadSize = sizeof( uint16 ) * nextBucketEntryCount;
+                const size_t lReadSize = sizeof( uint32 ) * bucketToLoadEntryCount;
+                const size_t rReadSize = sizeof( uint16 ) * bucketToLoadEntryCount;
 
-                uint32* lBuffer = (uint32*)pairBuffer->back;
-                uint32* rBuffer = lBuffer + nextBucketEntryCount;
+                byte* lBuffer = queue.GetBuffer( lReadSize + rReadSize, false );
+                if( !lBuffer )
+                {
+                    ASSERT( bucketsLoaded > bucket );
+                    break;
+                }
+
+                byte* rBuffer = lBuffer + lReadSize;
+                bucketBuffers[bucketsLoaded] = (byte*)lBuffer;  // Store the buffer for the other threads to use
 
                 queue.ReadFile( lTableId, 0, lBuffer, lReadSize );
                 queue.ReadFile( rTableId, 0, rBuffer, rReadSize );
-                queue.AddFence( pairBuffers->fence );
+                
+                // #TODO: Use a single fence with a counter. For now use multiple
+                queue.AddFence( this->bucketFences[bucketsLoaded] );
+
                 queue.CommitCommands();
+                bucketsLoaded ++;
             }
+
+            // Ensure the current bucket has been loaded already
+            this->LockThreads();
+            this->bucketFences[bucket].Wait();
+            this->ReleaseThreads();
         }
         else
         {
             this->WaitForRelease();
-
-            pairs = this->GetJob( 0 ).pairs;
-            pairs.left  += entriesPerThread;
-            pairs.right += entriesPerThread;
         }
+
+        pairs.left  = (uint32*)this->GetJob( 0 ).bucketBuffers[bucket];
+        pairs.right = (uint16*)( pairs.left + bucketEntryCount );
+
+        pairs.left  += entriesPerThread * jobId;
+        pairs.right += entriesPerThread * jobId;
 
         // Add any trailing entries to the last thread
         // #NOTE: Ensure this is only updated after we get the pairs offset
@@ -204,24 +256,66 @@ void MarkJob::Run()
             entriesPerThread += trailingEntries;
         }
 
-        // Mark used entries on the left table, given the right table back pointers
-        for( int64 i = 0; i < (int64)entriesPerThread; i++ )
+        //
+        // Mark used entries on the left table, given the right table's back pointers
+        //
+
+        // Divide this into 2 steps so that we ensure the previous thread does NOT
+        // write to the same field at the same time as the current thread.
+        // (May happen when the prev thread writes to the end entries & the 
+        //   current thread is writing to its beginning entries)
+        const int64 firstPassCount = (int64)entriesPerThread - kBC; 
+        
+        const int64 rTableOffset = (int64)entryOffset + entriesPerThread * jobId;
+        int64 i;
+
+        // First pass
+        for( i = 0; i < firstPassCount; i++ )
         {
-            // #TODO: Unroll this a bit if beneficial
-            const uint64 left  = pairs.left [i] + entryOffset;
+            if constexpr ( table < TableId::Table7 )
+            {
+                const uint64 rTableIdx = rTableOffset + (uint64)i;
+                if( !rTableMarkedEntries.Get( rTableIdx ) )
+                    continue;
+            }
+
+            const uint64 left  = pairs.left[i] + entryOffset;
             const uint64 right = left + pairs.right[i];
 
-            // #TODO: We need to ensure that the previous table also has this entry marked.
-            markedEntries.Set( left  );
-            markedEntries.Set( right );
+            lTableMarkedEntries.Set( left  );
+            lTableMarkedEntries.Set( right );
+        }
+        
+        this->SyncThreads();
 
-            // #TODO: Divide this into 2 steps so that we ensure the previous thread does NOT
-            //        write to the same field at the same time as the current thread.
-            //        (May happen when the prev thread writes to the end entries & the current thread is writing to
-            //          its beginning entries)
+        // Second pass
+        for( ; i < (int64)entriesPerThread; i++ )
+        {
+            if constexpr ( table < TableId::Table7 )
+            {
+                const uint64 rTableIdx = rTableOffset + (uint64)i;
+                if( !rTableMarkedEntries.Get( rTableIdx ) )
+                    continue;
+            }
+
+            const uint64 left  = pairs.left[i] + entryOffset;
+            const uint64 right = left + pairs.right[i];
+
+            lTableMarkedEntries.Set( left  );
+            lTableMarkedEntries.Set( right );   
         }
 
+        //
+        // Move on to the next bucket
+        //
         entryOffset += bucketEntryCount;
+
+        // Release the bucket buffer
+        if( this->IsControlThread() )
+        {
+            queue.ReleaseBuffer( bucketBuffers[bucket] );
+            queue.CommitCommands();
+        }
     }
 }
 

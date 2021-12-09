@@ -59,8 +59,9 @@
                 "program": "${workspaceFolder}/build/bladebit_disk"
                 ,"args": [
                     // "-t", "12",
-                    // "--f1", "256MB",
-                    "-b", "192",
+                    "--f1", "256MB",
+                    "--fx", "256MB",
+                    "-b", "64",
                     "/mnt/p5510a/disk_tmp"
                 ]
                 // ,"stopAtEntry": true

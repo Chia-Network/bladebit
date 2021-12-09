@@ -38,13 +38,15 @@ public:
     // Allocate a buffer on the heap.
     // If no space is available it will block until
     // some space has become available again.
-    byte* Alloc( size_t size, size_t alignment = sizeof( intptr_t ) );
+    byte* Alloc( size_t size, size_t alignment = sizeof( intptr_t ), bool blockUntilFreeBuffer = true );
 
     // Add a to the pending release list.
     // The buffer won't actually be released until an allocation
     // attempt is called or an explicit call AddPendingReleases() to is made.
     // This is meant to be called by a producer thread.
     bool  Release( byte* buffer );
+
+    inline size_t FreeSize() const { return _usedHeapSize - _heapSize; }
 
     // Makes pending released allocations available to the heap for allocation again.
     void CompletePendingReleases();

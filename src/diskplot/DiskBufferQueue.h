@@ -16,6 +16,7 @@ enum class FileId
     META_A_0, META_B_0,
     META_A_1, META_B_1,
     X,
+    F7,
 
     T2_L, T2_R, 
     T3_L, T3_R, 
@@ -31,7 +32,11 @@ enum class FileId
     SORT_KEY6,
     SORT_KEY7,
     
-    F7
+    MARKED_ENTRIES_2,
+    MARKED_ENTRIES_3,
+    MARKED_ENTRIES_4,
+    MARKED_ENTRIES_5,
+    MARKED_ENTRIES_6
 
     ,_COUNT
 };
@@ -145,7 +150,7 @@ public:
     // Obtain a buffer allocated from the work heap.
     // May block until there's a buffer available if there was none.
     // This assumes a single consumer.
-    byte* GetBuffer( size_t size );
+    inline byte* GetBuffer( size_t size, bool blockUntilFreeBuffer = true ) { return _workHeap.Alloc( size, _blockSize, blockUntilFreeBuffer ); }
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
     // These returns the buffer back to the queue so that it is in use.
@@ -161,8 +166,10 @@ public:
 
     void CompletePendingReleases();
 
-    inline size_t BlockSize() const { return _blockSize; }
-    inline bool UseDirectIO() const { return _useDirectIO; }
+    inline size_t BlockSize()   const { return _blockSize; }
+    inline bool   UseDirectIO() const { return _useDirectIO; }
+
+    inline const WorkHeap& Heap() const { return _workHeap; }
     
 private:
 
