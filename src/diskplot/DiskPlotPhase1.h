@@ -38,8 +38,22 @@ struct OverflowBuffer
     DoubleBuffer buffers[BB_DP_BUCKET_COUNT];
 };
 
+
 class DiskPlotPhase1
-{
+{   
+    // Fence Ids used when performing forward propagation
+    struct FPFenceId{
+        enum 
+        {
+            Start = 0,
+            YLoaded,
+            SortKeyLoaded,
+            MetaALoaded,
+            MetaBLoaded,            
+            BucketFinished,
+        };
+    };
+
     struct Bucket
     {
         byte*   fpBuffer; // Root allocation
@@ -47,6 +61,7 @@ class DiskPlotPhase1
         uint32* y0     ;
         uint32* y1     ;
         uint32* sortKey;
+        uint32* map    ;
         uint64* metaA0 ; 
         uint64* metaA1 ;
         uint64* metaB0 ;
@@ -55,7 +70,7 @@ class DiskPlotPhase1
         uint32* groupBoundaries;
 
         byte*   bucketId;   // Used during fx gen
-        
+
         uint32* yTmp;
         uint64* metaATmp;
         uint64* metaBTmp;
@@ -66,11 +81,9 @@ class DiskPlotPhase1
 
         uint32  tableEntryCount;        // Running entry count for the table being generated (accross all buckets)
 
-        AutoResetSignal frontFence;
-        AutoResetSignal backFence;
-
-        AutoResetSignal metaBFence;
-        AutoResetSignal backPointersFence;
+        Fence   fence;              // Used by us, signalled by the IO thread
+        Fence   ioFence;            // Signalled by us, used by the IO thread
+        Fence   mapFence;
 
         // Used for overflows
         OverflowBuffer yOverflow;
@@ -93,7 +106,6 @@ private:
 
     template<TableId tableId>
     uint32 ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
-
 
     uint32 MatchBucket( TableId table, uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] );
 
@@ -145,6 +157,9 @@ private:
 
     void GetWriteFileIdsForBucket( TableId table, FileId& outYId, 
                                    FileId& outMetaAId, FileId& outMetaBId );
+
+    // Write the sort key as a reverse lookup map (map target (sorted) position to original position)
+    void WriteReverseMap( const uint32 count, const uint32* sortKey );
 
 
 private:

@@ -262,7 +262,7 @@ void F1GenBucketized::GenerateF1Disk(
         if( remainders )
             diskQueue.ReleaseBuffer( remainders );
         
-        diskQueue.AddFence( fence );
+        diskQueue.SignalFence( fence );
         diskQueue.CommitCommands();
         fence.Wait();
         diskQueue.CompletePendingReleases();
@@ -495,7 +495,7 @@ void F1DiskBucketJob::Run()
 
         // Wait for our commands to finish
         AutoResetSignal fence;
-        diskQueue.AddFence( fence );
+        diskQueue.SignalFence( fence );
         diskQueue.CommitCommands();
         fence.Wait();
 
@@ -557,7 +557,7 @@ inline void F1DiskBucketJob::SaveBlockRemainders( uint32* yBuckets, uint32* xBuc
                 // Overflow buffer is full, submit it for writing
                 queue.WriteFile( FileId::Y0, i, yRemainder, fileBlockSize );
                 queue.WriteFile( FileId::X , i, xRemainder, fileBlockSize );
-                queue.AddFence( buf.fence );
+                queue.SignalFence( buf.fence );
                 queue.CommitCommands();
 
                 // Update new remainder size, if we overflowed our buffer

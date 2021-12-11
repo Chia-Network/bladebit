@@ -69,8 +69,8 @@ void AutoResetSignal::Signal()
 //-----------------------------------------------------------
 AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
 {
-    // #TODO: Check if the OS implementations fpin for a bit first,
-    //        if not, we should spin for a bit before suspending.
+    // #TODO: Check if pthread_mutext_t spins for a bit suspending, 
+    //if not, perhaps use std::mutex instead.
 
 #if PLATFORM_IS_WINDOWS
     if( timeoutMS == WaitInfinite )
@@ -91,6 +91,9 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
     }
     
 #else
+
+    if( _object.signaled )
+        return WaitResultOK;
 
     int r;
     int rc = 0;
@@ -125,7 +128,7 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
             rc = pthread_cond_timedwait( &_object.cond, &_object.mutex, &t );
 
         _object.signaled = false;
-        
+
         r = pthread_mutex_unlock( &_object.mutex );
         FatalIf( r, "AutoResetSignal::Wait pthread_mutex_unlock() failed with error %d.", r );
     }

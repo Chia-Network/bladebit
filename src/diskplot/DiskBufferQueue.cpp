@@ -190,10 +190,27 @@ void DiskBufferQueue::ReleaseBuffer( void* buffer )
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::AddFence( AutoResetSignal& signal )
+void DiskBufferQueue::SignalFence( Fence& fence )
 {
-    Command* cmd = GetCommandObject( Command::MemoryFence );
-    cmd->fence.signal = &signal;
+    Command* cmd = GetCommandObject( Command::SignalFence );
+    cmd->fence.signal = &fence;
+    cmd->fence.value  = -1;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::SignalFence( Fence& fence, uint32 value )
+{
+    Command* cmd = GetCommandObject( Command::SignalFence );
+    cmd->fence.signal = &fence;
+    cmd->fence.value  = (int64)value;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::WaitForFence( Fence& fence )
+{
+    Command* cmd = GetCommandObject( Command::WaitForFence );
+    cmd->fence.signal = &fence;
+    cmd->fence.value  = -1;
 }
 
 //-----------------------------------------------------------
@@ -319,12 +336,23 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             _workHeap.Release( cmd.releaseBuffer.buffer );
         break;
 
-        case Command::MemoryFence:
+        case Command::SignalFence:
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd MemoryFence" );
             #endif
             ASSERT( cmd.fence.signal );
-            cmd.fence.signal->Signal();
+            if( cmd.fence.value < 0 )
+                cmd.fence.signal->Signal();
+            else
+                cmd.fence.signal->Signal( (uint32)cmd.fence.value );
+        break;
+
+        case Command::WaitForFence:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd WaitForFence" );
+            #endif
+                ASSERT( cmd.fence.signal );
+            cmd.fence.signal->WaitForAnyValue();
         break;
 
 
@@ -539,8 +567,11 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
         case DiskBufferQueue::Command::SeekBucket:
             return "SeekBucket";
 
-        case DiskBufferQueue::Command::MemoryFence:
-            return "MemoryFence";
+        case DiskBufferQueue::Command::SignalFence:
+            return "SignalFence";
+
+        case DiskBufferQueue::Command::WaitForFence:
+            return "WaitForFence";
 
         default:
             ASSERT( 0 );

@@ -4,6 +4,7 @@
 
 #include "DiskPlotPhase1.h"
 #include "DiskPlotPhase2.h"
+#include "DiskPlotPhase3.h"
 #include "SysHost.h"
 
 // #TEST
@@ -124,6 +125,17 @@ void DiskPlotter::Plot( const PlotRequest& req )
         Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
     }
 
+    {
+        Log::Line( "Running Phase 3" );
+        const auto timer = TimerBegin();
+
+        DiskPlotPhase3 phase3( _cx );
+        phase3.Run();
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 3 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+    }
+
     double plotElapsed = TimerEnd( plotTimer );
     Log::Line( "Finished plotting in %.2lf seconds ( %.2lf minutes ).", plotElapsed, plotElapsed / 60 );
 }
@@ -136,22 +148,23 @@ size_t DiskPlotter::GetHeapRequiredSize( const size_t fileBlockSize, const uint 
     // We need to add extra space to retain 2 groups worth of y value as we need to retain the 
     // last 2 groups between bucket processing. This is because we may have to match the previous'
     // groups buckets against the new bucket.
-    const size_t yGroupExtra = RoundUpToNextBoundaryT( (size_t)kBC * sizeof( uint32 ) * 2, fileBlockSize );
+    // const size_t yGroupExtra = RoundUpToNextBoundaryT( (size_t)kBC * sizeof( uint32 ) * 2, fileBlockSize );
 
-    const size_t ySize       = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ) * 2, fileBlockSize ) + yGroupExtra * 2;  // x  2 because we need the extra space in both buffers
+    const size_t ySize       = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ) * 2, fileBlockSize );
     const size_t sortKeySize = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 )    , fileBlockSize );
+    const size_t mapSize     = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint64 )    , fileBlockSize );
     const size_t metaSize    = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint64 ) * 4, fileBlockSize );
 
     // Add tmp y and meta buffers for now too
     // 
     // #TODO: These need to be excluded and actually allocated whenever we are actually going to
     //        do matches so that we over commit but only use whatever pages are actually used when matching.
-    //        Otherwise our requirements will increase substantially.
+    //        Otherwise our requirements may increase substantially...
     const size_t pairsLSize  = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 )    , fileBlockSize );
     const size_t pairsRSize  = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint16 )    , fileBlockSize );
     const size_t groupsSize  = RoundUpToNextBoundaryT( ( maxBucketEntries + threadCount * 2 ) * sizeof( uint32), fileBlockSize );
 
-    const size_t totalSize   = ySize + sortKeySize + metaSize + pairsLSize + pairsRSize + groupsSize;
+    const size_t totalSize   = ySize + sortKeySize + mapSize + metaSize + pairsLSize + pairsRSize + groupsSize;
 
 
     return totalSize;

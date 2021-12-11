@@ -39,6 +39,12 @@ void DiskPlotPhase2::Run()
     DiskPlotContext& context = _context;
     DiskBufferQueue& queue   = *context.ioQueue;
 
+    #if BB_DP_DBG_SKIP_PHASE_2
+    {
+        return;
+    }
+    #endif
+
     // Seek the table files back to the beginning
     for( int tableIdx = (int)TableId::Table2; tableIdx <= (int)TableId::Table7; tableIdx++ )
     {
@@ -54,13 +60,10 @@ void DiskPlotPhase2::Run()
     const uint64 maxEntries       = 1ull << _K;
     const size_t bitFieldSize     = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
     const size_t bitFieldBuffersSize = bitFieldSize * 2;
-    // const size_t bitFieldQWordCount = bitFieldSize / sizeof( uint64 );
 
     const uint32 threadCount      = context.threadCount;
     const size_t fullHeapSize     = context.heapSize + context.ioHeapSize;
     const size_t heapRemainder    = fullHeapSize - bitFieldBuffersSize;
-    // const size_t pairBufferSize   = heapRemainder / 2;
-    // const size_t entrySize        = sizeof( uint32 ) + sizeof( uint16 );
 
     // Prepare 2 marking bitfields for dual-buffering
     AutoResetSignal bitFieldFence;
@@ -69,8 +72,6 @@ void DiskPlotPhase2::Run()
     byte* bitFields[2];
     bitFields[0] = context.heapBuffer;
     bitFields[1] = bitFields[0] + bitFieldSize;
-    // bitFields[2] = bitFields[1] + bitFieldSize;
-    
 
     // Reserve the remainder of the heap for reading R table backpointers
     queue.ResetHeap( heapRemainder, context.heapBuffer + bitFieldBuffersSize );
@@ -98,7 +99,6 @@ void DiskPlotPhase2::Run()
             job.context             = &context;
             job.lTableMarkedEntries = lTableBitField;
             job.rTableMarkedEntries = rTableBitField;
-            // job.pairBufferSize      = (uint32)pairBufferSize;
             job.table               = (TableId)tableIdx;
 
             job.bucketFences     = bucketFences;
@@ -116,7 +116,7 @@ void DiskPlotPhase2::Run()
 
         // Submit bitfield for writing
         queue.WriteFile( lTableFileId, 0, lTableBitField, bitFieldSize );
-        queue.AddFence( bitFieldFence );
+        queue.SignalFence( bitFieldFence );
         queue.CommitCommands();
 
         lTableFileId = (FileId)( (int)lTableFileId - 1 );
@@ -126,6 +126,7 @@ void DiskPlotPhase2::Run()
     }
 
     bitFieldFence.Wait();
+    queue.CompletePendingReleases();
 }
 
 //-----------------------------------------------------------
@@ -226,7 +227,7 @@ void MarkJob::MarkEntries()
                 queue.ReadFile( rTableId, 0, rBuffer, rReadSize );
                 
                 // #TODO: Use a single fence with a counter. For now use multiple
-                queue.AddFence( this->bucketFences[bucketsLoaded] );
+                queue.SignalFence( this->bucketFences[bucketsLoaded] );
 
                 queue.CommitCommands();
                 bucketsLoaded ++;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "io/FileStream.h"
-#include "threading/AutoResetSignal.h"
+#include "Fence.h"
 #include "threading/ThreadPool.h"
 #include "plotshared/MTJob.h"
 #include "plotshared/WorkHeap.h"
@@ -80,7 +80,8 @@ class DiskBufferQueue
             SeekFile,
             SeekBucket,
             ReleaseBuffer,
-            MemoryFence,
+            SignalFence,
+            WaitForFence
         };
 
         CommandType type;
@@ -119,7 +120,8 @@ class DiskBufferQueue
 
             struct
             {
-                AutoResetSignal* signal;    // #TODO: Should this be a manual reset signal?
+                Fence* signal;
+                int64  value;
             } fence;
         };
     };
@@ -162,12 +164,18 @@ public:
     // The signal will be set once this command is reached.
     // This ensures the caller that all commands before the 
     // fence have been processed.
-    void AddFence( AutoResetSignal& signal );
+    void SignalFence( Fence& fence );
+
+    void SignalFence( Fence& fence, uint32 value );
+
+    // Instructs the command dispatch thread to wait until the specified fence
+    // has been signalled
+    void WaitForFence( Fence& fence );
 
     void CompletePendingReleases();
 
-    inline size_t BlockSize()   const { return _blockSize; }
-    inline bool   UseDirectIO() const { return _useDirectIO; }
+    inline size_t BlockSize()     const { return _blockSize; }
+    inline bool   UseDirectIO()   const { return _useDirectIO; }
 
     inline const WorkHeap& Heap() const { return _workHeap; }
     
@@ -193,7 +201,6 @@ private:
 
 
 private:
-
     const char*      _workDir;              // Temporary directory in which we will store our temporary files
     WorkHeap         _workHeap;             // Reserved memory for performing plot work and I/O
     
@@ -249,7 +256,7 @@ inline FileId TableIdToBackPointerFileId( const TableId table )
         case TableId::Table5: return FileId::T5_L;
         case TableId::Table6: return FileId::T6_L;
         case TableId::Table7: return FileId::T7_L;
-    
+
         default:
             ASSERT( 0 );
             break;
@@ -258,4 +265,3 @@ inline FileId TableIdToBackPointerFileId( const TableId table )
     ASSERT( 0 );
     return FileId::None;
 }
-

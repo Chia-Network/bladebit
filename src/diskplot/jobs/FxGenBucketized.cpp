@@ -243,7 +243,7 @@ void GenFxBucketizedChunked(
 {
     const size_t outMetaSizeA = TableMetaOut<tableId>::SizeA;
     const size_t outMetaSizeB = TableMetaOut<tableId>::SizeB;
-    
+
     // Size: Y + sortKey + metadata (A + B)
     const size_t sizePerEntry = sizeof( uint32 ) * 2 + outMetaSizeA + outMetaSizeB;
 

@@ -90,7 +90,7 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
     // Load the first bucket
     queue.SeekBucket( yFileId, 0, SeekOrigin::Begin );
     queue.ReadFile( yFileId, 0, bucketEntries, bucketCounts[0] * sizeof( uint32 ) );
-    queue.AddFence( fence );
+    queue.SignalFence( fence );
     queue.CommitCommands();
 
     fence.Wait();
@@ -121,7 +121,7 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
         if( nextBucket < BB_DP_BUCKET_COUNT )
         {
             queue.ReadFile( yFileId, nextBucket, bucketSortTmp, bucketCounts[nextBucket] * sizeof( uint32 ) );
-            queue.AddFence( fence );
+            queue.SignalFence( fence );
             queue.CommitCommands();
         }
 
@@ -178,7 +178,7 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
 
     // Restore files to their position, just in case
     queue.SeekBucket( yFileId, 0, SeekOrigin::Begin );
-    queue.AddFence( fence );
+    queue.SignalFence( fence );
     queue.CommitCommands();
     fence.Wait();
 
