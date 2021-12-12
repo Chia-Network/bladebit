@@ -167,8 +167,16 @@ void DiskPlotPhase1::Run()
 #endif
 
     #if _DEBUG && BB_DP_DBG_VALIDATE_Y
-        if( 0 )
-            Debug::ValidateYFileFromBuckets( FileId::Y0, *cx.threadPool, *_diskQueue, TableId::Table1, cx.bucketCounts[0] );
+    {
+        const uint32* bucketCounts = cx.bucketCounts[0];
+        uint64 totalEntries = 0;
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            totalEntries += bucketCounts[i];
+            
+        ASSERT( totalEntries == 1ull << _K );
+
+        Debug::ValidateYFileFromBuckets( FileId::Y0, *cx.threadPool, *_diskQueue, TableId::Table1, cx.bucketCounts[0] );
+    }
     #endif
 
     // Re-create the disk queue with the io buffer only (remove working heap section)
