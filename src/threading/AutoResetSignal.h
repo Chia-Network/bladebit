@@ -19,6 +19,7 @@ public:
     AutoResetSignal();
     ~AutoResetSignal();
 
+    void Reset();
     void Signal();
 
     WaitResult Wait( int32 timeoutMS = WaitInfinite );

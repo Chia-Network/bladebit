@@ -41,6 +41,23 @@ AutoResetSignal::~AutoResetSignal()
         Log::Error( "AutoResetSignal::~AutoResetSignal() pthread_cond_destroy() failed." );
 #endif
 }
+//-----------------------------------------------------------
+void AutoResetSignal::Reset()
+{
+#if PLATFORM_IS_WINDOWS
+    #error Not Implemented
+#else
+    int r;
+
+    r = pthread_mutex_lock( &_object.mutex );
+    FatalIf( r, "AutoResetSignal::Signal pthread_mutex_lock() failed with error %d.", r );
+
+    _object.signaled = false;
+
+    r = pthread_mutex_unlock( &_object.mutex );
+    FatalIf( r, "AutoResetSignal::Signal pthread_mutex_unlock() failed with error %d.", r );
+#endif
+}
 
 //-----------------------------------------------------------
 void AutoResetSignal::Signal()

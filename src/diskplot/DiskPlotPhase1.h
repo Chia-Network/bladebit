@@ -42,10 +42,12 @@ struct OverflowBuffer
 class DiskPlotPhase1
 {   
     // Fence Ids used when performing forward propagation
-    struct FPFenceId{
+    struct FPFenceId 
+    {
         enum 
         {
             Start = 0,
+            
             YLoaded,
             SortKeyLoaded,
             MetaALoaded,

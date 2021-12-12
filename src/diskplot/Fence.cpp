@@ -32,7 +32,7 @@ void Fence::Reset( uint32 value )
 {
     // _value.store( value, std::memory_order_release );
     _value = value;
-    _signal.Signal();
+    _signal.Reset();
 }
 
 //-----------------------------------------------------------

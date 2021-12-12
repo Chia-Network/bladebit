@@ -166,8 +166,8 @@ void DiskPlotPhase1::Run()
     }
 #endif
 
-    #if _DEBUG && BB_DP_DBG_VALIDATE_Y
-    if( 0 )
+    #if _DEBUG && BB_DP_DBG_VALIDATE_F1
+    // if( 0 )
     {
         const uint32* bucketCounts = cx.bucketCounts[0];
         uint64 totalEntries = 0;
@@ -409,8 +409,8 @@ void DiskPlotPhase1::ForwardPropagate()
         const double tableElapsed = TimerEnd( tableTimer );
         Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
 
-        #if _DEBUG && BB_DP_DBG_VALIDATE_Y
-        if( 0 )
+        #if _DEBUG && BB_DP_DBG_VALIDATE_FX
+        // if( 0 )
         // if( table >= TableId::Table6 )
         {
             Log::Line( "Validating table %d...", (int)table + 1 );
@@ -418,8 +418,9 @@ void DiskPlotPhase1::ForwardPropagate()
             Debug::ValidateYFileFromBuckets( fileId, *_cx.threadPool, *_diskQueue, table, _cx.bucketCounts[(int)table] );
         }
         #endif
-
     }
+
+    // #TODO: Ensure last writes completed.
 }
 
 
@@ -470,40 +471,28 @@ void DiskPlotPhase1::ForwardPropagateTable()
     ioQueue.CommitCommands();
 
     // Read first bucket y & metadata values
+    bucket.fence.Reset( FPFenceId::Start );
+
+    ioQueue.ReadFile( bucket.yFileId, 0, bucket.y0, inputBucketCounts[0] * sizeof( uint32 ) );
+    ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded );
+    ioQueue.CommitCommands();
+
+    // if constexpr ( tableId > TableId::Table2 )
+    // {
+    //     ioQueue.ReadFile( sortKeyFileId, 0, bucket.sortKey, inputBucketCounts[0] * sizeof( uint32 ) );
+    //     ioQueue.SignalFence( bucket.fence, FPFenceId::FirstSortKeyLoaded );
+    // }
+
+    ioQueue.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, inputBucketCounts[0] * MetaInASize );
+    ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded );
+
+    if constexpr ( MetaInBSize > 0 )
     {
-        Log::Write( " Reading 1st bucket..." );
-        auto timer  = TimerBegin();
-
-        ioQueue.ReadFile( bucket.yFileId, 0, bucket.y0, inputBucketCounts[0] * sizeof( uint32 ) );
-        ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded );
-
-        // if constexpr ( tableId > TableId::Table2 )
-        // {
-        //     ioQueue.ReadFile( sortKeyFileId, 0, bucket.sortKey, inputBucketCounts[0] * sizeof( uint32 ) );
-        //     ioQueue.SignalFence( bucket.fence, FPFenceId::SortKeyLoaded );
-        // }
-
-        ioQueue.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, inputBucketCounts[0] * MetaInASize );
-        ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded );
-
-        if constexpr ( MetaInBSize > 0 )
-        {
-            ioQueue.ReadFile( bucket.metaBFileId, 0, bucket.metaB0, inputBucketCounts[0] * MetaInBSize );
-            ioQueue.SignalFence( bucket.fence, FPFenceId::MetaBLoaded );
-        }
-
-        ioQueue.CommitCommands();
-
-        // For table 2, we need to wait for the metadata (x) to be loaded,
-        // as there is no sort key for this one, just metadata.
-        if constexpr ( tableId == TableId::Table2 )
-            bucket.fence.Wait( FPFenceId::MetaALoaded );
-        else
-            bucket.fence.Wait( FPFenceId::YLoaded );
-
-        const double elapsed = TimerEnd( timer );
-        Log::Line( " Finished in %.2lf seconds.", elapsed );
+        ioQueue.ReadFile( bucket.metaBFileId, 0, bucket.metaB0, inputBucketCounts[0] * MetaInBSize );
+        ioQueue.SignalFence( bucket.fence, FPFenceId::MetaBLoaded );
     }
+
+    ioQueue.CommitCommands();
 
     for( uint bucketIdx = 0; bucketIdx < BB_DP_BUCKET_COUNT; bucketIdx++ )
     {
@@ -520,16 +509,16 @@ void DiskPlotPhase1::ForwardPropagateTable()
             const size_t nextBufferCount = inputBucketCounts[nextBucketIdx];
 
             ioQueue.ReadFile( bucket.yFileId, nextBucketIdx, bucket.y1, nextBufferCount * sizeof( uint32 ) );
-            ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded );
+            ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded + nextBucketIdx );
             ioQueue.ReadFile( bucket.metaAFileId, nextBucketIdx, bucket.metaA1, nextBufferCount * MetaInASize );
-            ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded );
+            ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded + nextBucketIdx );
 
             if constexpr ( MetaInBSize > 0 )
             {
                 // Don't load the metadata B yet, we will use the metadata B back buffer as our temporary buffer for sorting
                 ioQueue.WaitForFence( bucket.ioFence );
                 ioQueue.ReadFile( bucket.metaBFileId, nextBucketIdx, bucket.metaB1, nextBufferCount * MetaInBSize );
-                ioQueue.SignalFence( bucket.fence, FPFenceId::MetaBLoaded );
+                ioQueue.SignalFence( bucket.fence, FPFenceId::MetaBLoaded + nextBucketIdx );
 
                 // #TODO: Maybe we should just allocate .5 GiB more for the temp buffers?
                 //        for now, try it this way.
@@ -537,21 +526,11 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
             ioQueue.CommitCommands();
         }
-        // else
-        // {
-        //     // Make sure we don't wait at the end of the loop since we don't 
-        //     // have any background bucket loading.
-        //     bucket.fence.Signal();
-        // }
-        ioQueue.SignalFence( bucket.fence, FPFenceId::BucketFinished );
 
         // Forward propagate this bucket
         const uint32 bucketEntryCount = ForwardPropagateBucket<tableId>( bucketIdx, bucket, entryCount );
         bucket.tableEntryCount += bucketEntryCount;
 
-        // Ensure the next bucket has finished loading
-        bucket.fence.Wait( FPFenceId::BucketFinished );
-        // bucket.fence.Reset();
 
         // Swap are front/back buffers
         std::swap( bucket.y0    , bucket.y1     );
@@ -571,8 +550,6 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     DiskBufferQueue& ioQueue     = *_diskQueue;
     ThreadPool&      threadPool  = *cx.threadPool;
     const uint32     threadCount = cx.threadCount;
-
-    const uint nextBucketIdx = bucketIdx + 1;
 
     uint crossBucketMatches = 0;
 
@@ -600,11 +577,17 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             fxMetaInB  = bucket.metaB0;
             fxMetaOutA = bucket.metaATmp;
             fxMetaOutB = bucket.metaBTmp;
+
+            // Ensure Meta A has been loaded (which for table to is just x)
+            bucket.fence.Wait( FPFenceId::MetaALoaded );
         }
         else
         {
             // Generate a sort key
             SortKeyGen::Generate<BB_MAX_JOBS>( threadPool, entryCount, sortKey );
+
+            // Ensure Y as been loaded
+            bucket.fence.Wait( FPFenceId::YLoaded + bucketIdx );
         }
 
         uint32* yTemp       = (uint32*)bucket.metaB1;
@@ -629,17 +612,9 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     ///
     /// Matching
     ///
-    // #TODO: Remove this, debugging
-    const size_t pageSize    = SysHost::GetPageSize();
-    const size_t protectSize = (entryCount * sizeof( uint32 ) ) / pageSize * pageSize;
-    if( tableId > TableId::Table2 )
-        SysHost::VirtualProtect( bucket.y0, protectSize, VProtect::Read );
-        
     GroupInfo groupInfos[BB_MAX_JOBS];
     uint32 matchCount = MatchBucket( tableId, bucketIdx, bucket, entryCount, groupInfos );
-    
-    if( tableId > TableId::Table2 )
-        SysHost::VirtualProtect( bucket.y0, protectSize, VProtect::ReadWrite );
+
 
     ///
     /// Sort metadata with the key
@@ -649,19 +624,18 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     {
         using TMetaA = typename TableMetaIn<tableId>::MetaA;
 
-        bucket.fence.Wait( FPFenceId::MetaALoaded );
+        bucket.fence.Wait( FPFenceId::MetaALoaded + bucketIdx );
         SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
 
         if constexpr ( MetaInBSize > 0 )
         {
             using TMetaB = typename TableMetaIn<tableId>::MetaB;
 
-            bucket.fence.Wait( FPFenceId::MetaBLoaded );
+            bucket.fence.Wait( FPFenceId::MetaBLoaded + bucketIdx );
             SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
         }
 
-        // #TEST
-        // #TODO: Remove me
+        // #NOTE: For Debugging/Validation
         #if _DEBUG && BB_DP_DBG_VALIDATE_META
         if( tableId > TableId::Table2 )
         {
@@ -679,7 +653,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     if( bucketIdx > 0 )
     {
         // Generate matches that were 
-        // crossBucketMatches = ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount, bucket.y0, fxMetaInA, fxMetaInB );
+        crossBucketMatches = ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount, bucket.y0, fxMetaInA, fxMetaInB );
     }
 
     ///
@@ -1350,7 +1324,7 @@ void ScanGroupJob::Run()
     const uint32 maxGroups = this->maxGroups;
     
     uint32* groupBoundaries = this->groupBoundaries;
-    uint32  grouipCount     = 0;
+    uint32  groupCount      = 0;
 
     const uint32* yBuffer = this->yBuffer;
     const uint32  start   = this->startIndex;
