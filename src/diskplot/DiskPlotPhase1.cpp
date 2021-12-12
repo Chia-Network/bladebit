@@ -167,6 +167,7 @@ void DiskPlotPhase1::Run()
 #endif
 
     #if _DEBUG && BB_DP_DBG_VALIDATE_Y
+    if( 0 )
     {
         const uint32* bucketCounts = cx.bucketCounts[0];
         uint64 totalEntries = 0;
