@@ -79,11 +79,12 @@ class DiskPlotPhase1
         FileId  metaAFileId;
         FileId  metaBFileId;
 
-        uint32  tableEntryCount;        // Running entry count for the table being generated (accross all buckets)
+        uint32  tableEntryCount;    // Running entry count for the table being generated (accross all buckets)
 
         Fence   fence;              // Used by us, signalled by the IO thread
         Fence   ioFence;            // Signalled by us, used by the IO thread
         Fence   mapFence;
+        Fence   backPointersFence;  // Fence used for writing table backpointers
 
         // Used for overflows
         OverflowBuffer yOverflow;

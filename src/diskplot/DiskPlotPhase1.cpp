@@ -166,7 +166,7 @@ void DiskPlotPhase1::Run()
     }
 #endif
 
-    #if BB_DP_DBG_VALIDATE_Y
+    #if _DEBUG && BB_DP_DBG_VALIDATE_Y
         if( 0 )
             Debug::ValidateYFileFromBuckets( FileId::Y0, *cx.threadPool, *_diskQueue, TableId::Table1, cx.bucketCounts[0] );
     #endif
@@ -352,7 +352,17 @@ void DiskPlotPhase1::ForwardPropagate()
         bucket.pairs.right = (uint16*)ptr;
         ptr += pairsRSize;
 
-        bucket.groupBoundaries = (uint32*)ptr;
+        // bucket.groupBoundaries =  (uint32*)ptr;
+        // #TODO: Remove this, testing only
+        {
+            const size_t pageSize = SysHost::GetPageSize();
+
+            byte* groupBytes =  bbvirtalloc<byte>( groupsSize + pageSize * 2 );
+            bucket.groupBoundaries = (uint32*)( groupBytes + pageSize );
+
+            SysHost::VirtualProtect( groupBytes, pageSize );
+            SysHost::VirtualProtect( groupBytes + pageSize + groupsSize, pageSize );
+        }
 
         // The remainder for the work heap is used to write as fx disk write buffers 
     }
@@ -391,7 +401,7 @@ void DiskPlotPhase1::ForwardPropagate()
         Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
 
         #if _DEBUG && BB_DP_DBG_VALIDATE_Y
-        // if( 0 )
+        if( 0 )
         // if( table >= TableId::Table6 )
         {
             Log::Line( "Validating table %d...", (int)table + 1 );
@@ -417,10 +427,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
     const uint       threadCount       = _cx.threadCount;
     const uint32*    inputBucketCounts = cx.bucketCounts[(uint)tableId - 1];
 
-    // For matching entries in groups that cross bucket boundaries
-    AdjacentBucketInfo crossBucketInfo;
-
-    const FileId sortKeyFileId = TableIdToSortKeyId( (TableId)((int)tableId - 1) );
+    // const FileId sortKeyFileId = TableIdToSortKeyId( (TableId)((int)tableId - 1) );
 
     // Set the correct file id, given the table (we swap between them for each table)
     {
@@ -613,12 +620,21 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     ///
     /// Matching
     ///
+    // #TODO: Remove this, debugging
+    const size_t pageSize    = SysHost::GetPageSize();
+    const size_t protectSize = (entryCount * sizeof( uint32 ) ) / pageSize * pageSize;
+    if( tableId > TableId::Table2 )
+        SysHost::VirtualProtect( bucket.y0, protectSize, VProtect::Read );
+        
     GroupInfo groupInfos[BB_MAX_JOBS];
     uint32 matchCount = MatchBucket( tableId, bucketIdx, bucket, entryCount, groupInfos );
+    
+    if( tableId > TableId::Table2 )
+        SysHost::VirtualProtect( bucket.y0, protectSize, VProtect::ReadWrite );
 
     ///
     /// Sort metadata with the key
-    /// NOTE: MatchBucket make use of the metaTmp buffer, so we have to sort this after.
+    /// NOTE: MatchBucket make use of the metaATmp buffer, so we have to sort this after.
     ///       Plus it gives us extra time for the metadata to load since matching doesn't require it.
     if constexpr ( tableId > TableId::Table2 )
     {
@@ -631,17 +647,17 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         {
             using TMetaB = typename TableMetaIn<tableId>::MetaB;
 
-            bucket.fence.Wait( FPFenceId::FrontMetaBLoaded );
+            bucket.fence.Wait( FPFenceId::MetaBLoaded );
             SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
         }
 
         // #TEST
         // #TODO: Remove me
-        #if _DEBUG
-        if( tableId == TableId::Table4 )
+        #if _DEBUG && BB_DP_DBG_VALIDATE_META
+        if( tableId > TableId::Table2 )
         {
-            // Debug::ValidateMetaFileFromBuckets( fxMetaInA, fxMetaInB, tableId-(TableId)1, entryCount, bucketIdx, 
-            //                                    _cx.bucketCounts[(int)tableId-1] );
+            Debug::ValidateMetaFileFromBuckets( fxMetaInA, fxMetaInB, tableId-(TableId)1, entryCount, bucketIdx, 
+                                                _cx.bucketCounts[(int)tableId-1] );
         }
         #endif
     }
@@ -654,7 +670,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     if( bucketIdx > 0 )
     {
         // Generate matches that were 
-        crossBucketMatches = ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount, bucket.y0, fxMetaInA, fxMetaInB );
+        // crossBucketMatches = ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount, bucket.y0, fxMetaInA, fxMetaInB );
     }
 
     ///
@@ -755,7 +771,7 @@ uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket
     // #TODO: Get the current maximum entries of the previous bucket?
     uint32 maxEntries = BB_DP_MAX_ENTRIES_PER_BUCKET;
 
-    const uint32 prevBucket = bucketIdx - 1;
+    const uint32  prevBucket     = bucketIdx - 1;
 
     uint32        prevGroupCount = crossBucketInfo.groupCounts[0];
     const uint32* prevGroupY     = crossBucketInfo.y;
@@ -804,7 +820,6 @@ uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket
         maxEntries,
         sortKeyOffset,
         curGroupCount );
-
 
     // Process the last group from the previous bucket &
     // the second group from the current bucket
@@ -1082,8 +1097,8 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
     uint16* rPairs = (uint16*)( lPairs + BB_DP_MAX_ENTRIES_PER_BUCKET );
 
     // Match pairs
-    const uint32 entriesPerBucket  = (uint32)BB_DP_MAX_ENTRIES_PER_BUCKET;// - bucket.crossBucketInfo.matchCount; // We may have cross-bucket matches frowithm the last bucket, substract those
-    const uint32 maxPairsPerThread = entriesPerBucket / threadCount;                                              // but it should always be big enough to not drop any matches per bucket.
+    const uint32 entriesPerBucket  = (uint32)BB_DP_MAX_ENTRIES_PER_BUCKET;
+    const uint32 maxPairsPerThread = entriesPerBucket / threadCount;
 
     for( uint i = 0; i < threadCount; i++ )
     {
@@ -1114,7 +1129,7 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
         rPtr += group.entryCount;
     }
     
-    // #TODO: For now we write matches here, but later on we should write them at intervals
+    // #TODO: Should we write these at intervals?
     const FileId idLeft  = GetBackPointersFileIdForTable( table );
     const FileId idRight = (FileId)( (int)idLeft + 1 );
 

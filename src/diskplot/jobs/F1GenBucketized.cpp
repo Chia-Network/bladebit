@@ -255,7 +255,7 @@ void F1GenBucketized::GenerateF1Disk(
 
     // Release our buffers
     {
-        AutoResetSignal fence;
+        Fence fence;
 
         diskQueue.ReleaseBuffer( blocksRoot );
         
@@ -435,6 +435,8 @@ void F1DiskBucketJob::Run()
         {
             this->WaitForRelease();
 
+            // #TODO: Need to wait for buffer lock here, so the we can suspend in case there's no buffer available.
+
             yBuckets = GetJob( 0 ).yBuckets;
             xBuckets = GetJob( 0 ).xBuckets;
 
@@ -494,7 +496,7 @@ void F1DiskBucketJob::Run()
             this->WriteFinalBlockRemainders( remainders, remainderSizes );
 
         // Wait for our commands to finish
-        AutoResetSignal fence;
+        Fence fence;
         diskQueue.SignalFence( fence );
         diskQueue.CommitCommands();
         fence.Wait();

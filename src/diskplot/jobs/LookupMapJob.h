@@ -3,7 +3,7 @@
 #include "plotshared/MTJob.h"
 
 template<uint BucketCount>
-struct ReverseMapJob : MTJob<ReverseMapJob>
+struct ReverseMapJob : MTJob<ReverseMapJob<BucketCount>>
 {
     DiskBufferQueue* ioQueue;
     uint32           entryCount;
@@ -26,7 +26,7 @@ struct ReverseMapJob : MTJob<ReverseMapJob>
 
 //-----------------------------------------------------------
 template<uint BucketCount>
-void ReverseMapJob<BucketCount>::Run()
+inline void ReverseMapJob<BucketCount>::Run()
 {
     // #TODO: Determine bits needed bucket count statically.
     //        For now hard coded to 64 buckets.

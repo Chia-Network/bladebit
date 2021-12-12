@@ -11,9 +11,8 @@ struct MarkJob : MTJob<MarkJob>
     TableId          table;
 
     // Set by the control thread
-    AutoResetSignal*  bucketFences;
-    byte**            bucketBuffers;
-    // Pairs            pairs; // Set by the control thread
+    Fence*           bucketFence;
+    byte**           bucketBuffers;
 
     void Run() override;
 
@@ -66,8 +65,8 @@ void DiskPlotPhase2::Run()
     const size_t heapRemainder    = fullHeapSize - bitFieldBuffersSize;
 
     // Prepare 2 marking bitfields for dual-buffering
-    AutoResetSignal bitFieldFence;
-    int             bitFieldIndex = 0;
+    Fence bitFieldFence;
+    int   bitFieldIndex = 0;
 
     byte* bitFields[2];
     bitFields[0] = context.heapBuffer;
@@ -76,8 +75,7 @@ void DiskPlotPhase2::Run()
     // Reserve the remainder of the heap for reading R table backpointers
     queue.ResetHeap( heapRemainder, context.heapBuffer + bitFieldBuffersSize );
 
-    // #TODO: Use a single fence with a counter instead.
-    AutoResetSignal bucketFences[BB_DP_BUCKET_COUNT];
+    Fence bucketFence;
 
     uint64* rTableBitField = nullptr;
 
@@ -101,8 +99,8 @@ void DiskPlotPhase2::Run()
             job.rTableMarkedEntries = rTableBitField;
             job.table               = (TableId)tableIdx;
 
-            job.bucketFences     = bucketFences;
-            job.bucketBuffers    = nullptr;
+            job.bucketFence         = &bucketFence;
+            job.bucketBuffers       = nullptr;
         }
 
         jobs.Run();
@@ -202,7 +200,7 @@ void MarkJob::MarkEntries()
         
         uint32 entriesPerThread = bucketEntryCount / threadCount;
 
-        // Ensure we have a bucket to read from
+        // Ensure we have a bucket loaded from which to read
         if( this->IsControlThread() )
         {
             // Load as many buckets as we can in the background
@@ -226,16 +224,13 @@ void MarkJob::MarkEntries()
                 queue.ReadFile( lTableId, 0, lBuffer, lReadSize );
                 queue.ReadFile( rTableId, 0, rBuffer, rReadSize );
                 
-                // #TODO: Use a single fence with a counter. For now use multiple
-                queue.SignalFence( this->bucketFences[bucketsLoaded] );
-
+                queue.SignalFence( *this->bucketFence, bucketsLoaded++ );
                 queue.CommitCommands();
-                bucketsLoaded ++;
             }
 
             // Ensure the current bucket has been loaded already
             this->LockThreads();
-            this->bucketFences[bucket].Wait();
+            this->bucketFence->Wait( bucket );
             this->ReleaseThreads();
         }
         else

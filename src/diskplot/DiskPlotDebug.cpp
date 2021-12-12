@@ -85,7 +85,7 @@ void Debug::ValidateYFileFromBuckets( FileId yFileId, ThreadPool& pool, DiskBuff
     uint32* bucketEntries = bbvirtalloc<uint32>( bucketAllocSize );
     uint32* bucketSortTmp = bbvirtalloc<uint32>( bucketAllocSize );
 
-    AutoResetSignal fence;
+    Fence fence;
 
     // Load the first bucket
     queue.SeekBucket( yFileId, 0, SeekOrigin::Begin );
@@ -197,6 +197,8 @@ void Debug::ValidateMetaFileFromBuckets( const uint64* metaABucket, const uint64
     size_t  refMetaTableSize = 0;
     uint64  refEntryCount    = 0;
     uint64* refEntries       = nullptr;
+    
+    Log::Line( "Validating metadata for table %d...", (int)table+1 );
 
     switch( table )
     {

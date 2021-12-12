@@ -352,7 +352,7 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
                 Log::Debug( "[DiskBufferQueue] ^ Cmd WaitForFence" );
             #endif
                 ASSERT( cmd.fence.signal );
-            cmd.fence.signal->WaitForAnyValue();
+            cmd.fence.signal->Wait();
         break;
 
 

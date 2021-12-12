@@ -12,9 +12,9 @@ struct Pairs
 // the block size of the device we're writing to * 2 (one for y one for x)
 struct DoubleBuffer
 {
-    byte*           front;
-    byte*           back;
-    AutoResetSignal fence;
+    byte* front;
+    byte* back;
+    Fence fence;
 
     inline DoubleBuffer()
     {
