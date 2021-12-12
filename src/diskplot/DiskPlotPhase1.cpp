@@ -1148,34 +1148,33 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
     
     uint32 matchCount = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos, bucket.pairs );
 
+    // Ensure the previous's bucket writes finished
+    _bucket->backPointersFence.Wait();
+
     // #TODO: Make this multi-threaded... Testing for now
     // Copy matches to a contiguous buffer
     Pairs& pairs = bucket.pairs;
 
-    // uint32* lPtr = pairs.left;
-    // uint16* rPtr = pairs.right;
+    uint32* lPtr = pairs.left;
+    uint16* rPtr = pairs.right;
 
-    // for( uint i = 0; i < threadCount; i++ )
-    // {
-    //     GroupInfo& group = groupInfos[i];
-    //     bbmemcpy_t( lPtr, group.pairs.left, group.entryCount );
-    //     lPtr += group.entryCount;
-    // }
+    for( uint i = 0; i < threadCount; i++ )
+    {
+        GroupInfo& group = groupInfos[i];
+        bbmemcpy_t( lPtr, group.pairs.left, group.entryCount );
+        lPtr += group.entryCount;
+    }
 
-    // for( uint i = 0; i < threadCount; i++ )
-    // {
-    //     GroupInfo& group = groupInfos[i];
-    //     bbmemcpy_t( rPtr, group.pairs.right, group.entryCount );
-    //     rPtr += group.entryCount;
-    // }
+    for( uint i = 0; i < threadCount; i++ )
+    {
+        GroupInfo& group = groupInfos[i];
+        bbmemcpy_t( rPtr, group.pairs.right, group.entryCount );
+        rPtr += group.entryCount;
+    }
     
     // #TODO: Should we write these at intervals?
     const FileId idLeft  = GetBackPointersFileIdForTable( table );
     const FileId idRight = (FileId)( (int)idLeft + 1 );
-
-    // Ensure the previous's bucket writes finished
-    // #NOTE: This is checked now inside the Match job, as it needs to use the destination Pairs buffer
-    // _bucket->backPointersFence.Wait();
 
     _diskQueue->WriteFile( idLeft , 0, pairs.left , matchCount * sizeof( uint32 ) );
     _diskQueue->WriteFile( idRight, 0, pairs.right, matchCount * sizeof( uint16 ) );
@@ -1363,7 +1362,8 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
         job.groupInfo       = &groupInfos[i];
         job.copyLDst        = dstPairs.left;
         job.copyRDst        = dstPairs.right;
-        job.copyFence       = &_bucket->backPointersFence;
+        // job.copyFence       = &_bucket->backPointersFence;
+        job.copyFence = nullptr;
     }
 
     const double elapsed = jobs.Run();
@@ -1624,35 +1624,35 @@ RETURN:
     this->groupInfo->entryCount = pairCount;
 
     // Wait for our destination copy buffer to become free
-    if( this->IsControlThread() )
-    {
-        this->LockThreads();
+    // if( this->IsControlThread() )
+    // {
+    //     this->LockThreads();
 
-        // #TODO: Use a different type of fence here for multi-threaded wait,
-        //        so that all threads suspend when we the fence has not been signaled yet.
-        this->copyFence->Wait();
+    //     // #TODO: Use a different type of fence here for multi-threaded wait,
+    //     //        so that all threads suspend when we the fence has not been signaled yet.
+    //     this->copyFence->Wait();
         
-        this->ReleaseThreads();
-    }
-    else
-        this->WaitForRelease();
+    //     this->ReleaseThreads();
+    // }
+    // else
+    //     this->WaitForRelease();
 
 
     // Copy our matches to a contiguous buffer
     // Determine how many entries are before ours
-    const int32 jobId       = (int32)this->JobId();
-    uint32      entryOffset = 0;
+    // const int32 jobId       = (int32)this->JobId();
+    // uint32      entryOffset = 0;
 
-    const GroupInfo* grpInfoArray = GetJob( 0 ).groupInfo;
+    // const GroupInfo* grpInfoArray = GetJob( 0 ).groupInfo;
 
-    for( int32 i = 0; i < jobId; i++ )
-        entryOffset += grpInfoArray[i].entryCount;
+    // for( int32 i = 0; i < jobId; i++ )
+    //     entryOffset += grpInfoArray[i].entryCount;
     
-    uint32* dstL = this->copyLDst + entryOffset;
-    uint16* dstR = this->copyRDst + entryOffset;
+    // uint32* dstL = this->copyLDst + entryOffset;
+    // uint16* dstR = this->copyRDst + entryOffset;
 
-    bbmemcpy_t( dstL, pairs.left , pairCount );
-    bbmemcpy_t( dstR, pairs.right, pairCount );
+    // bbmemcpy_t( dstL, pairs.left , pairCount );
+    // bbmemcpy_t( dstR, pairs.right, pairCount );
 }
 
 
