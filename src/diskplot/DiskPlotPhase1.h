@@ -101,6 +101,9 @@ public:
 
 private:
     void GenF1();
+
+    void AllocateFPBuffers( Bucket& bucket );
+
     void ForwardPropagate();
 
     template<TableId tableId>
@@ -113,7 +116,7 @@ private:
 
     uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
 
-    uint32 Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS] );
+    uint32 Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], Pairs dstPairs );
 
     // uint32 MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
     //                                    uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
@@ -241,10 +244,13 @@ struct MatchJob : MTJob<MatchJob>
     GroupInfo*    groupInfo;
     uint          bucketIdx;
     uint          maxPairCount;
-    uint          pairCount;
 
-    uint32* copyLDst;             // Final contiguous pair buffer
-    uint16* copyRDst;
+    // Final destination contiguous pair buffer
+    uint32*       copyLDst;
+    uint16*       copyRDst;
+
+    // Fence ensures the copy destination buffer is not currently in-use
+    Fence*        copyFence;
 
     void Run() override;
 };

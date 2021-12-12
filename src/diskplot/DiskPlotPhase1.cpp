@@ -260,59 +260,76 @@ inline void DiskPlotPhase1::GetWriteFileIdsForBucket(
 }
 
 //-----------------------------------------------------------
-void DiskPlotPhase1::ForwardPropagate()
+#if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
+template<typename T>
+inline T* AllocProtect( size_t size )
 {
-    DiskBufferQueue& ioQueue     = *_diskQueue;
-    ThreadPool&      threadPool  = *_cx.threadPool;
-    const uint       threadCount = _cx.threadCount;
+    const size_t pageSize = SysHost::GetPageSize();
 
-    uint   maxBucketCount = 0;
-    size_t maxBucketSize  = 0;
-   
-    // Find the largest bucket so that we can reserve buffers of its size
-    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-        maxBucketCount = std::max( maxBucketCount, _cx.bucketCounts[0][i] );
+    size = RoundUpToNextBoundaryT( size, pageSize );
+    size += pageSize * 2;
+    byte* buffer = bbvirtalloc<byte>( size );
 
-    ASSERT( maxBucketCount <= BB_DP_MAX_ENTRIES_PER_BUCKET );
+    SysHost::VirtualProtect( buffer, pageSize, VProtect::NoAccess );
+    SysHost::VirtualProtect( buffer + size - pageSize, pageSize, VProtect::NoAccess );
 
-    maxBucketCount = BB_DP_MAX_ENTRIES_PER_BUCKET;
-    maxBucketSize   = maxBucketCount * sizeof( uint32 );
-    _maxBucketCount =  maxBucketCount;
+    return (T*)( buffer + pageSize );
+}
+#endif
 
-    // #TODO: We need to have a maximum size here, and just allocate that.
-    //        we don't want to allocate per-table as we might not be able to do
-    //        so due to fragmentation and the other buffers allocated after this big chunk.
-    //        Therefore, it's better to have a set size
-    // 
-    // #TODO: Create a separate heap... Grab the section out of the working heap we need, and then create
-    //        a new heap strictly with the space that will go to IO. No need to have these show up in the 
-    //        heap as it will slow down deallocation.
-    // 
-    // Allocate buffers we need for forward propagation
-//     DoubleBuffer bucketBuffers;
+void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
+{
+    const uint32 maxBucketCount = BB_DP_MAX_ENTRIES_PER_BUCKET;
+    const uint32 threadCount    = _cx.threadCount;
+    const size_t fileBlockSize  = _diskQueue->BlockSize();
 
-    Bucket bucket;
-    _bucket = &bucket;
+    // Extra space used to store the last 2 groups of y entries.
+    // const size_t yGroupExtra = RoundUpToNextBoundary( kBC * sizeof( uint32 ) * 2ull, (int)fileBlockSize );
+    const size_t ySize       = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 ) * 2, (int)fileBlockSize );
+    const size_t sortKeySize = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
+    const size_t mapSize     = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 )    , (int)fileBlockSize );
+    const size_t metaSize    = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 ) * 4, (int)fileBlockSize );
+    const size_t pairsLSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
+    const size_t pairsRSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint16 )    , (int)fileBlockSize );
+    const size_t groupsSize  = RoundUpToNextBoundary( ( maxBucketCount + threadCount * 2 ) * sizeof( uint32), (int)fileBlockSize );
 
+    const size_t totalSize = ySize + sortKeySize + mapSize + metaSize + pairsLSize + pairsRSize + groupsSize;
+
+    Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
+    
+    // These are already allocated as a single buffer, we assign the pointers to their regions here.
+    #if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
     {
-        const size_t fileBlockSize = ioQueue.BlockSize();
+        bucket.yTmp     = AllocProtect<uint32>( ySize / 2 );
+        bucket.metaATmp = AllocProtect<uint64>( metaSize / 2 );
+        bucket.metaBTmp = AllocProtect<uint64>( metaSize / 2 );
 
-        // Extra space used to store the last 2 groups of y entries.
-        // const size_t yGroupExtra = RoundUpToNextBoundary( kBC * sizeof( uint32 ) * 2ull, (int)fileBlockSize );
+        bucket.yOverflow    .Init( AllocProtect<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
+        bucket.metaAOverflow.Init( AllocProtect<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
+        bucket.metaBOverflow.Init( AllocProtect<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
 
-        const size_t ySize       = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 ) * 2, (int)fileBlockSize );
-        const size_t sortKeySize = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
-        const size_t mapSize     = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 )    , (int)fileBlockSize );
-        const size_t metaSize    = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 ) * 4, (int)fileBlockSize );
-        const size_t pairsLSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
-        const size_t pairsRSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint16 )    , (int)fileBlockSize );
-        const size_t groupsSize  = RoundUpToNextBoundary( ( maxBucketCount + threadCount * 2 ) * sizeof( uint32), (int)fileBlockSize );
+        bucket.crossBucketInfo.y           = AllocProtect<uint32>( kBC * 6 );
+        bucket.crossBucketInfo.metaA       = AllocProtect<uint64>( kBC * 6 );
+        bucket.crossBucketInfo.metaB       = AllocProtect<uint64>( kBC * 6 );
+        bucket.crossBucketInfo.pairs.left  = AllocProtect<uint32>( kBC );
+        bucket.crossBucketInfo.pairs.right = AllocProtect<uint16>( kBC );
 
-        const size_t totalSize = ySize + sortKeySize + mapSize + metaSize + pairsLSize + pairsRSize + groupsSize;
+        bucket.fpBuffer = nullptr;
 
-        Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
-
-
+        bucket.y0              = AllocProtect<uint32>( ySize / 2 );
+        bucket.y1              = AllocProtect<uint32>( ySize / 2 );
+        bucket.sortKey         = AllocProtect<uint32>( sortKeySize );
+        bucket.map             = AllocProtect<uint32>( mapSize );
+        bucket.metaA0          = AllocProtect<uint64>( metaSize / 4 );
+        bucket.metaA1          = AllocProtect<uint64>( metaSize / 4 );
+        bucket.metaB0          = AllocProtect<uint64>( metaSize / 4 );
+        bucket.metaB1          = AllocProtect<uint64>( metaSize / 4 );
+        bucket.pairs.left      = AllocProtect<uint32>( pairsLSize );
+        bucket.pairs.right     = AllocProtect<uint16>( pairsRSize );
+        bucket.groupBoundaries = AllocProtect<uint32>( groupsSize );
+    }
+    #else
+    {
         // #TODO: Remove this. Allocating here temporarily for testing.
         // Temp test:
         bucket.yTmp     = bbvirtalloc<uint32>( ySize    );
@@ -358,13 +375,52 @@ void DiskPlotPhase1::ForwardPropagate()
         bucket.pairs.left = (uint32*)ptr;
         ptr += pairsLSize;
 
-        bucket.pairs.right = (uint16*)ptr;
+        // bucket.pairs.right = (uint16*)ptr;
         ptr += pairsRSize;
 
         bucket.groupBoundaries =  (uint32*)ptr;
-
-        // The remainder for the work heap is used to write as fx disk write buffers 
     }
+    #endif
+
+     // The remainder for the work heap is used to write as fx disk write buffers 
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::ForwardPropagate()
+{
+    DiskBufferQueue& ioQueue     = *_diskQueue;
+    ThreadPool&      threadPool  = *_cx.threadPool;
+    const uint       threadCount = _cx.threadCount;
+
+    uint   maxBucketCount = 0;
+    size_t maxBucketSize  = 0;
+   
+    // Find the largest bucket so that we can reserve buffers of its size
+    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        maxBucketCount = std::max( maxBucketCount, _cx.bucketCounts[0][i] );
+
+    ASSERT( maxBucketCount <= BB_DP_MAX_ENTRIES_PER_BUCKET );
+
+    maxBucketCount = BB_DP_MAX_ENTRIES_PER_BUCKET;
+    maxBucketSize   = maxBucketCount * sizeof( uint32 );
+    _maxBucketCount =  maxBucketCount;
+
+    // #TODO: We need to have a maximum size here, and just allocate that.
+    //        we don't want to allocate per-table as we might not be able to do
+    //        so due to fragmentation and the other buffers allocated after this big chunk.
+    //        Therefore, it's better to have a set size
+    // 
+    // #TODO: Create a separate heap... Grab the section out of the working heap we need, and then create
+    //        a new heap strictly with the space that will go to IO. No need to have these show up in the 
+    //        heap as it will slow down deallocation.
+    // 
+    // Allocate buffers we need for forward propagation
+//     DoubleBuffer bucketBuffers;
+
+    Bucket bucket;
+    _bucket = &bucket;
+
+    AllocateFPBuffers( bucket );
 
     // Set back pointers fence initially
     bucket.backPointersFence.Signal();
@@ -1090,35 +1146,36 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
         groupInfos[i].pairs.right = rPairs + i * maxPairsPerThread;
     }
     
-    uint32 matchCount = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos );
+    uint32 matchCount = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos, bucket.pairs );
 
     // #TODO: Make this multi-threaded... Testing for now
     // Copy matches to a contiguous buffer
     Pairs& pairs = bucket.pairs;
 
-    uint32* lPtr = pairs.left;
-    uint16* rPtr = pairs.right;
+    // uint32* lPtr = pairs.left;
+    // uint16* rPtr = pairs.right;
 
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        GroupInfo& group = groupInfos[i];
-        bbmemcpy_t( lPtr, group.pairs.left, group.entryCount );
-        lPtr += group.entryCount;
-    }
+    // for( uint i = 0; i < threadCount; i++ )
+    // {
+    //     GroupInfo& group = groupInfos[i];
+    //     bbmemcpy_t( lPtr, group.pairs.left, group.entryCount );
+    //     lPtr += group.entryCount;
+    // }
 
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        GroupInfo& group = groupInfos[i];
-        bbmemcpy_t( rPtr, group.pairs.right, group.entryCount );
-        rPtr += group.entryCount;
-    }
+    // for( uint i = 0; i < threadCount; i++ )
+    // {
+    //     GroupInfo& group = groupInfos[i];
+    //     bbmemcpy_t( rPtr, group.pairs.right, group.entryCount );
+    //     rPtr += group.entryCount;
+    // }
     
     // #TODO: Should we write these at intervals?
     const FileId idLeft  = GetBackPointersFileIdForTable( table );
     const FileId idRight = (FileId)( (int)idLeft + 1 );
 
     // Ensure the previous's bucket writes finished
-    _bucket->backPointersFence.Wait();
+    // #NOTE: This is checked now inside the Match job, as it needs to use the destination Pairs buffer
+    // _bucket->backPointersFence.Wait();
 
     _diskQueue->WriteFile( idLeft , 0, pairs.left , matchCount * sizeof( uint32 ) );
     _diskQueue->WriteFile( idRight, 0, pairs.right, matchCount * sizeof( uint16 ) );
@@ -1287,7 +1344,7 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
 }
 
 //-----------------------------------------------------------
-uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS] )
+uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], Pairs dstPairs )
 {
     Log::Line( "  Matching groups." );
 
@@ -1303,17 +1360,17 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
         job.yBuffer         = yBuffer;
         job.bucketIdx       = bucketIdx;
         job.maxPairCount    = maxPairsPerThread;
-        job.pairCount       = 0;
         job.groupInfo       = &groupInfos[i];
-        job.copyLDst        = nullptr;
-        job.copyRDst        = nullptr;
+        job.copyLDst        = dstPairs.left;
+        job.copyRDst        = dstPairs.right;
+        job.copyFence       = &_bucket->backPointersFence;
     }
 
     const double elapsed = jobs.Run();
 
-    uint32 matches = jobs[0].pairCount;
+    uint32 matches = groupInfos[0].entryCount;
     for( uint i = 1; i < threadCount; i++ )
-        matches += jobs[i].pairCount;
+        matches += groupInfos[i].entryCount;
 
     Log::Line( "  Found %u matches in %.2lf seconds.", matches, elapsed );
     return matches;
@@ -1564,8 +1621,38 @@ void MatchJob::Run()
     }
 
 RETURN:
-    this->pairCount             = pairCount;
     this->groupInfo->entryCount = pairCount;
+
+    // Wait for our destination copy buffer to become free
+    if( this->IsControlThread() )
+    {
+        this->LockThreads();
+
+        // #TODO: Use a different type of fence here for multi-threaded wait,
+        //        so that all threads suspend when we the fence has not been signaled yet.
+        this->copyFence->Wait();
+        
+        this->ReleaseThreads();
+    }
+    else
+        this->WaitForRelease();
+
+
+    // Copy our matches to a contiguous buffer
+    // Determine how many entries are before ours
+    const int32 jobId       = (int32)this->JobId();
+    uint32      entryOffset = 0;
+
+    const GroupInfo* grpInfoArray = GetJob( 0 ).groupInfo;
+
+    for( int32 i = 0; i < jobId; i++ )
+        entryOffset += grpInfoArray[i].entryCount;
+    
+    uint32* dstL = this->copyLDst + entryOffset;
+    uint16* dstR = this->copyRDst + entryOffset;
+
+    bbmemcpy_t( dstL, pairs.left , pairCount );
+    bbmemcpy_t( dstR, pairs.right, pairCount );
 }
 
 

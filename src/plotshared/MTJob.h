@@ -53,6 +53,13 @@ struct MTJobSyncT
         return _jobs[index];
     };
 
+    inline const TJob& GetJob( int index )
+    {   
+        ASSERT( index >= 0 );
+        ASSERT( (uint)index < _jobCount );
+        return _jobs[index];
+    };
+
     // For debugging
     #if _DEBUG
         inline void Trace( const char* msg, ... );
