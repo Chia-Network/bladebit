@@ -369,7 +369,6 @@ void DiskPlotPhase1::ForwardPropagate()
     // Set back pointers fence initially
     bucket.backPointersFence.Signal();
 
-
     /// Propagate to each table
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
     {
@@ -410,7 +409,16 @@ void DiskPlotPhase1::ForwardPropagate()
         #endif
     }
 
-    // #TODO: Ensure last writes completed.
+    // Ensure last writes completed.
+    {
+        Fence fence;
+
+        ioQueue.SignalFence( fence );
+        ioQueue.CommitCommands();
+        
+        fence.Wait();
+        ioQueue.CompletePendingReleases();
+    }
 }
 
 
