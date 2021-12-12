@@ -109,9 +109,6 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
     
 #else
 
-    if( _object.signaled )
-        return WaitResultOK;
-
     int r;
     int rc = 0;
 

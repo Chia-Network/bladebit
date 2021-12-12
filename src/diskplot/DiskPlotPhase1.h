@@ -51,8 +51,7 @@ class DiskPlotPhase1
             YLoaded,
             SortKeyLoaded,
             MetaALoaded,
-            MetaBLoaded,            
-            BucketFinished,
+            MetaBLoaded
         };
     };
 

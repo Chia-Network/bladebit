@@ -361,17 +361,7 @@ void DiskPlotPhase1::ForwardPropagate()
         bucket.pairs.right = (uint16*)ptr;
         ptr += pairsRSize;
 
-        // bucket.groupBoundaries =  (uint32*)ptr;
-        // #TODO: Remove this, testing only
-        {
-            const size_t pageSize = SysHost::GetPageSize();
-
-            byte* groupBytes =  bbvirtalloc<byte>( groupsSize + pageSize * 2 );
-            bucket.groupBoundaries = (uint32*)( groupBytes + pageSize );
-
-            SysHost::VirtualProtect( groupBytes, pageSize );
-            SysHost::VirtualProtect( groupBytes + pageSize + groupsSize, pageSize );
-        }
+        bucket.groupBoundaries =  (uint32*)ptr;
 
         // The remainder for the work heap is used to write as fx disk write buffers 
     }
@@ -470,9 +460,11 @@ void DiskPlotPhase1::ForwardPropagateTable()
     }
     ioQueue.CommitCommands();
 
-    // Read first bucket y & metadata values
+    // Reset our fences
     bucket.fence.Reset( FPFenceId::Start );
+    bucket.ioFence.Reset();
 
+    // Read first bucket y & metadata values
     ioQueue.ReadFile( bucket.yFileId, 0, bucket.y0, inputBucketCounts[0] * sizeof( uint32 ) );
     ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded );
     ioQueue.CommitCommands();
@@ -602,7 +594,8 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             bucket.ioFence.Signal();
 
         #if _DEBUG
-            //ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
+            if( tableId > TableId::Table2 )
+                ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
         #endif
 
         double elapsed = TimerEnd( timer );
