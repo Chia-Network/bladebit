@@ -31,6 +31,12 @@ enum class FileId
     SORT_KEY5,
     SORT_KEY6,
     SORT_KEY7,
+
+    MAP2,
+    MAP3,
+    MAP4,
+    MAP5,
+    MAP6,
     
     MARKED_ENTRIES_2,
     MARKED_ENTRIES_3,

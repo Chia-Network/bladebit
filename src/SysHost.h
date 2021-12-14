@@ -2,11 +2,10 @@
 
 enum class VProtect : uint
 {
-    None = 0,                   // No protection / Clear protection
+    NoAccess = 0,               // No memory access allowed at all
 
     Read     = 1 << 0,          // Allow reads. (Make pages read-only.)
-    Write    = 1 << 1,          // Allow writes. (Make pages write-only.)
-    NoAccess = 1 << 2,          // No memory access allowed at all
+    Write    = 1 << 1,          // Allow writes. (Make pages write-only.) // NOTE: This is not guaranteed depending on implementation.
 
     ReadWrite = Read | Write    // Make pages read/writable
 };

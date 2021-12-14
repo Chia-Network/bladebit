@@ -106,7 +106,9 @@ void FileStream::Close()
     #endif
     close( _fd );
     
+    #if _DEBUG
     ASSERT( !r );
+    #endif
 
     _fd            = -1;
     _writePosition = 0;

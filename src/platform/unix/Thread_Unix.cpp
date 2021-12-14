@@ -141,8 +141,13 @@ void Thread::Sleep( long milliseconds )
         #if _DEBUG
         int r =
         #endif
+
         nanosleep( &req, NULL );
+
+        #if _DEBUG
         ASSERT( !r );
+        #endif
+
     #else
         #error Unimplemented
     #endif

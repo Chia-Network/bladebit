@@ -150,6 +150,9 @@ else()
     set(dev_c_opts 
         ${dev_c_opts})
 
+    set(link_opts -g -rdynamic
+        ${link_opts})
+
     # GCC
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     
@@ -331,14 +334,14 @@ macro(config_proj tgt)
     # endif()
 
     # Strip debug symbols to separate file
-    if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-        add_custom_command(
-            TARGET ${tgt}
-            POST_BUILD
-            COMMAND "/usr/bin/env" "bash" "strip-debug-symbols.sh" "build/${tgt}"
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        )
-    endif()
+    # if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    #     add_custom_command(
+    #         TARGET ${tgt}
+    #         POST_BUILD
+    #         COMMAND "/usr/bin/env" "bash" "strip-debug-symbols.sh" "build/${tgt}"
+    #         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    #     )
+    # endif()
 
 
     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})

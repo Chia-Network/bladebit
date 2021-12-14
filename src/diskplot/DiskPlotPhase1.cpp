@@ -260,7 +260,7 @@ inline void DiskPlotPhase1::GetWriteFileIdsForBucket(
 }
 
 //-----------------------------------------------------------
-#if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
+// #if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
 template<typename T>
 inline T* AllocProtect( size_t size )
 {
@@ -275,8 +275,9 @@ inline T* AllocProtect( size_t size )
 
     return (T*)( buffer + pageSize );
 }
-#endif
+// #endif
 
+//-----------------------------------------------------------
 void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
 {
     const uint32 maxBucketCount = BB_DP_MAX_ENTRIES_PER_BUCKET;
@@ -375,7 +376,7 @@ void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
         bucket.pairs.left = (uint32*)ptr;
         ptr += pairsLSize;
 
-        // bucket.pairs.right = (uint16*)ptr;
+        bucket.pairs.right = (uint16*)ptr;
         ptr += pairsRSize;
 
         bucket.groupBoundaries =  (uint32*)ptr;
@@ -562,19 +563,22 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
         if( nextBucketIdx < BB_DP_BUCKET_COUNT )
         {
+            // Add an offset to the fence index of at least the greatest fence index so that we are always increasing the index accross buckets
+            const uint fenceIdx = nextBucketIdx * 10;
+
             const size_t nextBufferCount = inputBucketCounts[nextBucketIdx];
 
             ioQueue.ReadFile( bucket.yFileId, nextBucketIdx, bucket.y1, nextBufferCount * sizeof( uint32 ) );
-            ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded + nextBucketIdx );
+            ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded + fenceIdx );
             ioQueue.ReadFile( bucket.metaAFileId, nextBucketIdx, bucket.metaA1, nextBufferCount * MetaInASize );
-            ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded + nextBucketIdx );
+            ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded + fenceIdx );
 
             if constexpr ( MetaInBSize > 0 )
             {
                 // Don't load the metadata B yet, we will use the metadata B back buffer as our temporary buffer for sorting
                 ioQueue.WaitForFence( bucket.ioFence );
                 ioQueue.ReadFile( bucket.metaBFileId, nextBucketIdx, bucket.metaB1, nextBufferCount * MetaInBSize );
-                ioQueue.SignalFence( bucket.fence, FPFenceId::MetaBLoaded + nextBucketIdx );
+                ioQueue.SignalFence( bucket.fence, FPFenceId::MetaBLoaded + fenceIdx );
 
                 // #TODO: Maybe we should just allocate .5 GiB more for the temp buffers?
                 //        for now, try it this way.
@@ -616,6 +620,9 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     uint64* fxMetaOutA = bucket.metaA0;
     uint64* fxMetaOutB = bucket.metaB0;
 
+    // Add an offset to the fence index of at least the greatest fence index so that we are always increasing the index accross buckets
+    const uint fenceIdx = bucketIdx * 10;
+
     ///
     /// Sort our current bucket
     ///
@@ -635,7 +642,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             fxMetaOutB = bucket.metaBTmp;
 
             // Ensure Meta A has been loaded (which for table to is just x)
-            bucket.fence.Wait( FPFenceId::MetaALoaded );
+            bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx );
         }
         else
         {
@@ -643,7 +650,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             SortKeyGen::Generate<BB_MAX_JOBS>( threadPool, entryCount, sortKey );
 
             // Ensure Y as been loaded
-            bucket.fence.Wait( FPFenceId::YLoaded + bucketIdx );
+            bucket.fence.Wait( FPFenceId::YLoaded + fenceIdx );
         }
 
         uint32* yTemp       = (uint32*)bucket.metaB1;
@@ -651,16 +658,16 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
         RadixSort256::SortWithKey<BB_MAX_JOBS>( threadPool, bucket.y0, yTemp, sortKey, sortKeyTemp, entryCount );
 
+        #if _DEBUG
+        // if( tableId > TableId::Table2 )
+            // ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
+        #endif
+
         // #TODO: Write sort key to disk as the previous table's sort key, so that we can do a quick sort of L/R later.
 
         // OK to load next (back) metadata B buffer now (see comment above in ForwardPropagateTable)
         if constexpr ( MetaInBSize > 0 )
             bucket.ioFence.Signal();
-
-        #if _DEBUG
-            if( tableId > TableId::Table2 )
-                ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
-        #endif
 
         double elapsed = TimerEnd( timer );
         Log::Line( "  Sorted bucket y in %.2lf seconds.", elapsed );
@@ -681,14 +688,14 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     {
         using TMetaA = typename TableMetaIn<tableId>::MetaA;
 
-        bucket.fence.Wait( FPFenceId::MetaALoaded + bucketIdx );
+        bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx );
         SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
 
         if constexpr ( MetaInBSize > 0 )
         {
             using TMetaB = typename TableMetaIn<tableId>::MetaB;
 
-            bucket.fence.Wait( FPFenceId::MetaBLoaded + bucketIdx );
+            bucket.fence.Wait( FPFenceId::MetaBLoaded + fenceIdx );
             SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
         }
 
@@ -1149,30 +1156,30 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
     uint32 matchCount = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos, bucket.pairs );
 
     // Ensure the previous's bucket writes finished
-    _bucket->backPointersFence.Wait();
+    // _bucket->backPointersFence.Wait();
 
-    // #TODO: Make this multi-threaded... Testing for now
-    // Copy matches to a contiguous buffer
+    // // #TODO: Make this multi-threaded... Testing for now
+    // // Copy matches to a contiguous buffer
     Pairs& pairs = bucket.pairs;
 
-    uint32* lPtr = pairs.left;
-    uint16* rPtr = pairs.right;
+    // uint32* lPtr = pairs.left;
+    // uint16* rPtr = pairs.right;
 
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        GroupInfo& group = groupInfos[i];
-        bbmemcpy_t( lPtr, group.pairs.left, group.entryCount );
-        lPtr += group.entryCount;
-    }
+    // for( uint i = 0; i < threadCount; i++ )
+    // {
+    //     GroupInfo& group = groupInfos[i];
+    //     bbmemcpy_t( lPtr, group.pairs.left, group.entryCount );
+    //     lPtr += group.entryCount;
+    // }
 
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        GroupInfo& group = groupInfos[i];
-        bbmemcpy_t( rPtr, group.pairs.right, group.entryCount );
-        rPtr += group.entryCount;
-    }
+    // for( uint i = 0; i < threadCount; i++ )
+    // {
+    //     GroupInfo& group = groupInfos[i];
+    //     bbmemcpy_t( rPtr, group.pairs.right, group.entryCount );
+    //     rPtr += group.entryCount;
+    // }
     
-    // #TODO: Should we write these at intervals?
+    // // #TODO: Should we write these at intervals?
     const FileId idLeft  = GetBackPointersFileIdForTable( table );
     const FileId idRight = (FileId)( (int)idLeft + 1 );
 
@@ -1286,7 +1293,9 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
                 }
             }
 
+            #if _DEBUG
             ASSERT( foundBoundary );
+            #endif
         }
 
         auto& lastJob = jobs[i-1];
@@ -1362,8 +1371,7 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
         job.groupInfo       = &groupInfos[i];
         job.copyLDst        = dstPairs.left;
         job.copyRDst        = dstPairs.right;
-        // job.copyFence       = &_bucket->backPointersFence;
-        job.copyFence = nullptr;
+        job.copyFence       = &_bucket->backPointersFence;
     }
 
     const double elapsed = jobs.Run();
@@ -1624,35 +1632,35 @@ RETURN:
     this->groupInfo->entryCount = pairCount;
 
     // Wait for our destination copy buffer to become free
-    // if( this->IsControlThread() )
-    // {
-    //     this->LockThreads();
+    if( this->IsControlThread() )
+    {
+        this->LockThreads();
 
-    //     // #TODO: Use a different type of fence here for multi-threaded wait,
-    //     //        so that all threads suspend when we the fence has not been signaled yet.
-    //     this->copyFence->Wait();
+        // #TODO: Use a different type of fence here for multi-threaded wait,
+        //        so that all threads suspend when we the fence has not been signaled yet.
+        this->copyFence->Wait();
         
-    //     this->ReleaseThreads();
-    // }
-    // else
-    //     this->WaitForRelease();
+        this->ReleaseThreads();
+    }
+    else
+        this->WaitForRelease();
 
 
     // Copy our matches to a contiguous buffer
     // Determine how many entries are before ours
-    // const int32 jobId       = (int32)this->JobId();
-    // uint32      entryOffset = 0;
+    const int32 jobId       = (int32)this->JobId();
+    uint32      entryOffset = 0;
 
-    // const GroupInfo* grpInfoArray = GetJob( 0 ).groupInfo;
+    const GroupInfo* grpInfoArray = GetJob( 0 ).groupInfo;
 
-    // for( int32 i = 0; i < jobId; i++ )
-    //     entryOffset += grpInfoArray[i].entryCount;
+    for( int32 i = 0; i < jobId; i++ )
+        entryOffset += grpInfoArray[i].entryCount;
     
-    // uint32* dstL = this->copyLDst + entryOffset;
-    // uint16* dstR = this->copyRDst + entryOffset;
+    uint32* dstL = this->copyLDst + entryOffset;
+    uint16* dstR = this->copyRDst + entryOffset;
 
-    // bbmemcpy_t( dstL, pairs.left , pairCount );
-    // bbmemcpy_t( dstR, pairs.right, pairCount );
+    bbmemcpy_t( dstL, pairs.left , pairCount );
+    bbmemcpy_t( dstR, pairs.right, pairCount );
 }
 
 

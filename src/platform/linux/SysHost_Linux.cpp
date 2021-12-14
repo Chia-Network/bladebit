@@ -110,19 +110,19 @@ bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
 {
     ASSERT( ptr );
 
-    int prot = 0;
+    int prot = PROT_NONE;
 
-    if( IsFlagSet( flags, VProtect::NoAccess ) )
-    {
-        prot = PROT_NONE;
-    }
-    else
-    {
+    // if( IsFlagSet( flags, VProtect::NoAccess ) )
+    // {
+    //     prot = PROT_NONE;
+    // }
+    // else
+    // {
         if( IsFlagSet( flags, VProtect::Read ) )
             prot |= PROT_READ;
         if( IsFlagSet( flags, VProtect::Write ) )
             prot |= PROT_WRITE;
-    }
+    // }
 
     int r = mprotect( ptr, size, prot );
     ASSERT( !r );
@@ -209,6 +209,9 @@ void CrashHandler( int signal )
     FILE* crashFile = fopen( "crash.log", "w" );
     if( crashFile )
     {
+        fprintf( stderr, "Dumping crash to crash.log\n" );
+        fflush( stderr );
+        
         backtrace_symbols_fd( stackTrace, traceSize, fileno( crashFile ) );
         fflush( crashFile );
         fclose( crashFile );
