@@ -1,3 +1,4 @@
+#pragma once
 #include "threading/AutoResetSignal.h"
 
 class Fence

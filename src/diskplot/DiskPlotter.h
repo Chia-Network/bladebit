@@ -31,10 +31,11 @@ public:
 
     void Plot( const PlotRequest& req );
 
-    static size_t GetHeapRequiredSize( const size_t fileBlockSize, const uint threadCount );
+    static void GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fileBlockSize, const uint threadCount );
     
 
 private:
-    DiskPlotContext _cx;
+    DiskPlotContext   _cx;
+    DiskFPBufferSizes _fpBufferSizes;
 };
 

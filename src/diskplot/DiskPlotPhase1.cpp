@@ -284,50 +284,41 @@ void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
     const uint32 threadCount    = _cx.threadCount;
     const size_t fileBlockSize  = _diskQueue->BlockSize();
 
-    // Extra space used to store the last 2 groups of y entries.
-    // const size_t yGroupExtra = RoundUpToNextBoundary( kBC * sizeof( uint32 ) * 2ull, (int)fileBlockSize );
-    const size_t ySize       = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 ) * 2, (int)fileBlockSize );
-    const size_t sortKeySize = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
-    const size_t mapSize     = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 )    , (int)fileBlockSize );
-    const size_t metaSize    = RoundUpToNextBoundary( maxBucketCount * sizeof( uint64 ) * 4, (int)fileBlockSize );
-    const size_t pairsLSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint32 )    , (int)fileBlockSize );
-    const size_t pairsRSize  = RoundUpToNextBoundary( maxBucketCount * sizeof( uint16 )    , (int)fileBlockSize );
-    const size_t groupsSize  = RoundUpToNextBoundary( ( maxBucketCount + threadCount * 2 ) * sizeof( uint32), (int)fileBlockSize );
+    DiskFPBufferSizes& sizes = *_cx.bufferSizes;
 
-    const size_t totalSize = ySize + sortKeySize + mapSize + metaSize + pairsLSize + pairsRSize + groupsSize;
-
-    Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)totalSize BtoMB );
+    Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)sizes.totalSize BtoMB );
     
     // These are already allocated as a single buffer, we assign the pointers to their regions here.
     #if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
     {
-        bucket.yTmp     = AllocProtect<uint32>( ySize / 2 );
-        bucket.metaATmp = AllocProtect<uint64>( metaSize / 2 );
-        bucket.metaBTmp = AllocProtect<uint64>( metaSize / 2 );
-
-        bucket.yOverflow    .Init( AllocProtect<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
-        bucket.metaAOverflow.Init( AllocProtect<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
-        bucket.metaBOverflow.Init( AllocProtect<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
-
-        bucket.crossBucketInfo.y           = AllocProtect<uint32>( kBC * 6 );
-        bucket.crossBucketInfo.metaA       = AllocProtect<uint64>( kBC * 6 );
-        bucket.crossBucketInfo.metaB       = AllocProtect<uint64>( kBC * 6 );
-        bucket.crossBucketInfo.pairs.left  = AllocProtect<uint32>( kBC );
-        bucket.crossBucketInfo.pairs.right = AllocProtect<uint16>( kBC );
-
         bucket.fpBuffer = nullptr;
 
-        bucket.y0              = AllocProtect<uint32>( ySize / 2 );
-        bucket.y1              = AllocProtect<uint32>( ySize / 2 );
-        bucket.sortKey         = AllocProtect<uint32>( sortKeySize );
-        bucket.map             = AllocProtect<uint32>( mapSize );
-        bucket.metaA0          = AllocProtect<uint64>( metaSize / 4 );
-        bucket.metaA1          = AllocProtect<uint64>( metaSize / 4 );
-        bucket.metaB0          = AllocProtect<uint64>( metaSize / 4 );
-        bucket.metaB1          = AllocProtect<uint64>( metaSize / 4 );
-        bucket.pairs.left      = AllocProtect<uint32>( pairsLSize );
-        bucket.pairs.right     = AllocProtect<uint16>( pairsRSize );
-        bucket.groupBoundaries = AllocProtect<uint32>( groupsSize );
+        bucket.y0                          = AllocProtect<uint32>( sizes.yIO / 2       );
+        bucket.y1                          = AllocProtect<uint32>( sizes.yIO / 2       );
+        bucket.sortKey                     = AllocProtect<uint32>( sizes.sortKeyIO     );
+        bucket.map                         = AllocProtect<uint32>( sizes.mapIO         );
+        bucket.metaA0                      = AllocProtect<uint64>( sizes.metaAIO / 2   );
+        bucket.metaA1                      = AllocProtect<uint64>( sizes.metaAIO / 2   );
+        bucket.metaB0                      = AllocProtect<uint64>( sizes.metaBIO / 2   );
+        bucket.metaB1                      = AllocProtect<uint64>( sizes.metaBIO / 2   );
+        bucket.pairs.left                  = AllocProtect<uint32>( sizes.pairsLeftIO   );
+        bucket.pairs.right                 = AllocProtect<uint16>( sizes.pairsRightIO  );
+        bucket.groupBoundaries             = nullptr;
+
+        bucket.yTmp                        = AllocProtect<uint32>( sizes.yTemp    );
+        bucket.metaATmp                    = AllocProtect<uint64>( sizes.metaATmp );
+        bucket.metaBTmp                    = AllocProtect<uint64>( sizes.metaBTmp );
+
+        bucket.crossBucketInfo.y           = AllocProtect<uint32>( sizes.crossBucketY          );
+        bucket.crossBucketInfo.metaA       = AllocProtect<uint64>( sizes.crossBucketMetaA      );
+        bucket.crossBucketInfo.metaB       = AllocProtect<uint64>( sizes.crossBucketMetaB      );
+        bucket.crossBucketInfo.pairs.left  = AllocProtect<uint32>( sizes.crossBucketPairsLeft  );
+        bucket.crossBucketInfo.pairs.right = AllocProtect<uint16>( sizes.crossBucketPairsRight );
+
+        bucket.yOverflow    .Init( AllocProtect<void>( sizes.yOverflow     ), fileBlockSize );
+        bucket.metaAOverflow.Init( AllocProtect<void>( sizes.metaAOverflow ), fileBlockSize );
+        bucket.metaBOverflow.Init( AllocProtect<void>( sizes.metaBOverflow ), fileBlockSize );
+
     }
     #else
     {
@@ -362,6 +353,9 @@ void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
 
         bucket.sortKey = (uint32*)ptr;
         ptr += sortKeySize;
+
+        // #TODO: Refactor all this
+        bucket.map = nullptr;
 
         bucket.map = (uint32*)ptr;
         ptr += mapSize;
@@ -423,8 +417,9 @@ void DiskPlotPhase1::ForwardPropagate()
 
     AllocateFPBuffers( bucket );
 
-    // Set back pointers fence initially
+    // Set these fences as signalled initially
     bucket.backPointersFence.Signal();
+    bucket.mapFence.Signal();
 
     /// Propagate to each table
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
@@ -492,7 +487,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
     const uint       threadCount       = _cx.threadCount;
     const uint32*    inputBucketCounts = cx.bucketCounts[(uint)tableId - 1];
 
-    // const FileId sortKeyFileId = TableIdToSortKeyId( (TableId)((int)tableId - 1) );
+    // const FileId sortKeyFileId = tableId > TableId::Table2 ? TableIdToSortKeyId( (TableId)((int)tableId - 1) ) : FileId::None;
 
     // Set the correct file id, given the table (we swap between them for each table)
     {
@@ -536,8 +531,8 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
     // if constexpr ( tableId > TableId::Table2 )
     // {
-    //     ioQueue.ReadFile( sortKeyFileId, 0, bucket.sortKey, inputBucketCounts[0] * sizeof( uint32 ) );
-    //     ioQueue.SignalFence( bucket.fence, FPFenceId::FirstSortKeyLoaded );
+    //     ioQueue.ReadFile( sortKeyFileId, 0, bucket.sortKey0, inputBucketCounts[0] * sizeof( uint32 ) );
+    //     ioQueue.SignalFence( bucket.fence, FPFenceId::SortKeyLoaded );
     // }
 
     ioQueue.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, inputBucketCounts[0] * MetaInASize );
@@ -570,6 +565,13 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
             ioQueue.ReadFile( bucket.yFileId, nextBucketIdx, bucket.y1, nextBufferCount * sizeof( uint32 ) );
             ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded + fenceIdx );
+
+            // if constexpr ( tableId > TableId::Table2 )
+            // {
+            //     ioQueue.ReadFile( sortKeyFileId, nextBucketIdx, bucket.sortKey1, nextBufferCount * sizeof( uint32 ) );
+            //     ioQueue.SignalFence( bucket.fence, FPFenceId::SortKeyLoaded + fenceIdx );
+            // }
+
             ioQueue.ReadFile( bucket.metaAFileId, nextBucketIdx, bucket.metaA1, nextBufferCount * MetaInASize );
             ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded + fenceIdx );
 
@@ -593,9 +595,9 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
 
         // Swap are front/back buffers
-        std::swap( bucket.y0    , bucket.y1     );
-        std::swap( bucket.metaA0, bucket.metaA1 );
-        std::swap( bucket.metaB0, bucket.metaB1 );
+        std::swap( bucket.y0      , bucket.y1       );
+        std::swap( bucket.metaA0  , bucket.metaA1   );
+        std::swap( bucket.metaB0  , bucket.metaB1   );
     }
 }
 
@@ -664,6 +666,11 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         #endif
 
         // #TODO: Write sort key to disk as the previous table's sort key, so that we can do a quick sort of L/R later.
+        if constexpr ( tableId > TableId::Table2 )
+        {
+            bucket.fence.Wait( FPFenceId::SortKeyLoaded + fenceIdx );
+            WriteReverseMap( tableId, entryCount, sortKey );
+        }
 
         // OK to load next (back) metadata B buffer now (see comment above in ForwardPropagateTable)
         if constexpr ( MetaInBSize > 0 )
@@ -791,11 +798,62 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 /// Write map from the sort key
 ///
 //-----------------------------------------------------------
-void DiskPlotPhase1::WriteReverseMap( const uint32 count, const uint32* sortKey )
+void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const uint32* sortKey )
 {
-    
+    DiskBufferQueue& ioQueue       = *_cx.ioQueue;
 
+    Bucket&       bucket           = *_bucket;
+    const uint32  threadCount      = _cx.threadCount;
+    const uint32  entriesPerThread = count / threadCount;
+
+    const uint32* threadSortKey    = sortKey;
+
+    uint32* originalPos   = _bucket->map;
+    uint32* targetPos     = originalPos + count;  // #TODO: Align this second buffer on block size
+
+    static uint32 bucketCounts[BB_DP_BUCKET_COUNT];
+    memset( bucketCounts, 0, sizeof( bucketCounts ) );
+
+    MTJobRunner<ReverseMapJob<BB_DP_BUCKET_COUNT>> jobs( *_cx.threadPool );
+
+    for( uint i = 0; i < threadCount; i++ )
+    {
+        auto& job = jobs[i];
+
+        job.ioQueue        = _cx.ioQueue;
+        job.entryCount     = entriesPerThread;
+        job.tgtIndexOffset = bucket.tableEntryCount;
+        job.sortKey        = threadSortKey;
+        job.originalPos    = originalPos;
+        job.targetPos      = targetPos;
+        job.bucketCounts   = bucketCounts;
+        job.counts         = nullptr;
+        
+        threadSortKey += entriesPerThread;
+    }
+
+    const uint32 remainder = count - entriesPerThread * threadCount;
+    if( remainder )
+        jobs[threadCount-1].entryCount += remainder;
+
+    // Ensure the previous bucket finished writing.
+    // #TODO: Should we double-buffer here?
+    bucket.mapFence.Wait();
+
+    jobs.Run( threadCount );
+
+    // Calculate sizes for each bucket to write.
+    // #NOTE: That because we write both buffers (origin and target)
+    //        together, we treat the entry size as uint64
+    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        bucketCounts[i] *= sizeof( uint64 );
+
+    // Write to disk
+    const FileId mapFileId = TableIdToMapFileId( tableId - (TableId)1 );
     
+    ioQueue.WriteBuckets( mapFileId, originalPos, bucketCounts );
+    ioQueue.SignalFence( bucket.mapFence );
+    ioQueue.CommitCommands();
 }
 
 
@@ -1134,6 +1192,9 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
 uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] )
 {
     const uint32 threadCount = _cx.threadCount;
+
+    // Use yTmp as group boundaries
+    bucket.groupBoundaries = bucket.yTmp;
 
     // Scan for group boundaries
     const uint32 groupCount = ScanGroups( bucketIdx, bucket.y0, entryCount, bucket.groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );

@@ -271,3 +271,24 @@ inline FileId TableIdToBackPointerFileId( const TableId table )
     ASSERT( 0 );
     return FileId::None;
 }
+
+
+//-----------------------------------------------------------
+inline FileId TableIdToMapFileId( const TableId table )
+{
+    switch( table )
+    {
+        case TableId::Table2: return FileId::MAP2;
+        case TableId::Table3: return FileId::MAP3;
+        case TableId::Table4: return FileId::MAP4;
+        case TableId::Table5: return FileId::MAP5;
+        case TableId::Table6: return FileId::MAP6;
+
+        default:
+            ASSERT( 0 );
+            break;
+    }
+    
+    ASSERT( 0 );
+    return FileId::None;
+}

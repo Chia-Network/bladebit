@@ -1,6 +1,7 @@
 #pragma once
 #include "diskplot/DiskPlotContext.h"
 #include "plotshared/MTJob.h"
+#include "diskplot/Fence.h"
 
 template<uint BucketCount>
 struct ReverseMapJob : MTJob<ReverseMapJob<BucketCount>>
@@ -12,9 +13,11 @@ struct ReverseMapJob : MTJob<ReverseMapJob<BucketCount>>
 
     uint32*          originalPos;
     uint32*          targetPos;
+    uint32*          bucketCounts;
+
+    // For internal use:
     const uint32*    counts;
-
-
+    
     void Run() override;
 
     void CalculatePrefixSum( 
@@ -30,18 +33,18 @@ inline void ReverseMapJob<BucketCount>::Run()
 {
     // #TODO: Determine bits needed bucket count statically.
     //        For now hard coded to 64 buckets.
-    const uint32  bitShift   = 32 - 6;
+    const uint32  bitShift = 32 - 6;
 
     const uint32  entryCount    = this->entryCount;
     const uint32* srcIndices    = this->sortKey;
     const uint32* end           = sortKey + entryCount;
 
-    uint32* originalPos         = this->originalPos;
-    uint32* targetPos           = this->targetPos;
+    // uint32* originalPos         = this->originalPos;
+    // uint32* targetPos           = this->targetPos;
 
     uint32 counts      [BucketCount];
     uint32 pfxSum      [BucketCount];
-    uint32 bucketCounts[BucketCount];
+    // uint32 bucketCounts[BucketCount];
 
     memset( counts, 0, sizeof( counts ) );
 
@@ -58,11 +61,12 @@ inline void ReverseMapJob<BucketCount>::Run()
     }
 
     // Calculate prefix sum
+    // #TODO: Allow block-aligned prefix sum here
     this->counts = counts;
-    this->CalculatePrefixSum( counts, pfxSum, bucketCounts );
+    this->CalculatePrefixSum( counts, pfxSum, this->bucketCounts, 0 );
 
     // Now distribute to the respective buckets
-    const uint32 tgtIndexOffset = this->tgtIndexOffset + this->JobId() * this->GetJob( 0 )->entryCount;
+    const uint32 tgtIndexOffset = this->tgtIndexOffset + this->JobId() * this->GetJob( 0 ).entryCount;
 
     uint32* dstOriginalPos = this->originalPos;
     uint32* dstTargetPos   = this->targetPos;
@@ -72,10 +76,110 @@ inline void ReverseMapJob<BucketCount>::Run()
         const uint32 originIndex = srcIndices[i];               // Original index of this entry before y sort
         const uint32 tgtIndex    = i + tgtIndexOffset;          // Index where this entry was placed after y sort
         const uint32 bucket      = originIndex >> bitShift;
-        
+
         const uint32 dstIndex = --pfxSum[bucket];
-        
+
         dstOriginalPos[dstIndex] = originIndex;
         dstTargetPos  [dstIndex] = tgtIndex;
     }
 }
+
+// #TODO: Avoud code duplication here
+//-----------------------------------------------------------
+template<uint BucketCount>
+inline void ReverseMapJob<BucketCount>::CalculatePrefixSum( 
+    uint32       counts      [BucketCount],
+    uint32       pfxSum      [BucketCount],
+    uint32       bucketCounts[BucketCount],
+    const size_t fileBlockSize )
+{
+    const uint32 jobId    = this->JobId();
+    const uint32 jobCount = this->JobCount();
+
+    // This holds the count of extra entries added per-bucket
+    // to align each bucket starting address to disk block size.
+    // Only used when fileBlockSize > 0
+    uint32 entryPadding[BB_DP_BUCKET_COUNT];
+
+    this->counts = counts;
+    this->SyncThreads();
+
+    // Add up all of the jobs counts
+    memset( pfxSum, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+
+    for( uint i = 0; i < jobCount; i++ )
+    {
+        const uint* tCounts = this->GetJob( i ).counts;
+
+        for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
+            pfxSum[j] += tCounts[j];
+    }
+
+    // If we're the control thread, retain the total bucket count
+    if( this->IsControlThread() )
+    {
+        memcpy( bucketCounts, pfxSum, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+    }
+
+    // Only do this if using Direct IO
+    // We need to align our bucket totals to the  file block size boundary
+    // so that each block buffer is properly aligned for direct io.
+    if( fileBlockSize )
+    {
+        #if _DEBUG
+            size_t bucketAddress = 0;
+        #endif
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT-1; i++ )
+        {
+            const uint32 count = pfxSum[i];
+
+            pfxSum[i]       = RoundUpToNextBoundary( count * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
+            entryPadding[i] = pfxSum[i] - count;
+
+            #if _DEBUG
+                bucketAddress += pfxSum[i] * sizeof( uint32 );
+                ASSERT( bucketAddress / fileBlockSize * fileBlockSize == bucketAddress );
+            #endif
+        }
+
+        #if _DEBUG
+        // if( this->IsControlThread() )
+        // {
+        //     size_t totalSize = 0;
+        //     for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        //         totalSize += pfxSum[i];
+
+        //     totalSize *= sizeof( uint32 );
+        //     Log::Line( "Total Size: %llu", totalSize );
+        // }   
+        #endif
+    }
+
+    // Calculate the prefix sum
+    for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
+        pfxSum[i] += pfxSum[i-1];
+
+    // Subtract the count from all threads after ours 
+    // to get the correct prefix sum for this thread
+    for( uint t = jobId+1; t < jobCount; t++ )
+    {
+        const uint* tCounts = this->GetJob( t ).counts;
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            pfxSum[i] -= tCounts[i];
+    }
+
+    if( fileBlockSize )
+    {
+        // Now that we have the starting addresses of the buckets
+        // at a block-aligned position, we need to substract
+        // the padding that we added to align them, so that
+        // the entries actually get writting to the starting
+        // point of the address
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT-1; i++ )
+            pfxSum[i] -= entryPadding[i];
+    }
+}
+

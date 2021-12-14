@@ -13,6 +13,38 @@ struct DiskWriteInterval
     size_t fxGen;       // Write interval during fx generation
 };
 
+struct DiskFPBufferSizes
+{
+    size_t fileBlockSize;
+
+    size_t yIO;
+    size_t sortKeyIO;
+    size_t mapIO;
+    size_t metaAIO;
+    size_t metaBIO;
+    size_t pairsLeftIO;
+    size_t pairsRightIO;
+
+    size_t yTemp;
+    size_t metaATmp;
+    size_t metaBTmp;
+
+    size_t yOverflow;
+    size_t mapOverflow;
+    size_t metaAOverflow;
+    size_t metaBOverflow;
+    size_t pairOverflow;
+
+    size_t crossBucketY;
+    size_t crossBucketMetaA;
+    size_t crossBucketMetaB;
+    size_t crossBucketPairsLeft;
+    size_t crossBucketPairsRight;
+    size_t crossBucketTotal;
+
+    size_t totalSize;
+};
+
 struct DiskPlotContext
 {
     const char*  tmpPath;           // Path in which to allocate temporary buffers
@@ -43,5 +75,7 @@ struct DiskPlotContext
 
     uint32       bucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];
     uint64       entryCounts [(uint)TableId::_Count];
+
+    DiskFPBufferSizes* bufferSizes;
 };
 

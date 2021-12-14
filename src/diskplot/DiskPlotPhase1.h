@@ -84,7 +84,7 @@ class DiskPlotPhase1
 
         Fence   fence;              // Used by us, signalled by the IO thread
         Fence   ioFence;            // Signalled by us, used by the IO thread
-        Fence   mapFence;
+        Fence   mapFence;           // Fence used for writing the lookup map generated from sort keys
         Fence   backPointersFence;  // Fence used for writing table backpointers
 
         // Used for overflows
@@ -164,7 +164,7 @@ private:
                                    FileId& outMetaAId, FileId& outMetaBId );
 
     // Write the sort key as a reverse lookup map (map target (sorted) position to original position)
-    void WriteReverseMap( const uint32 count, const uint32* sortKey );
+    void WriteReverseMap( TableId tableId, const uint32 count, const uint32* sortKey );
 
 
 private:
