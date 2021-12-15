@@ -167,7 +167,7 @@ void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fi
     sizes.metaBIO          = metaSize    * 2;
     sizes.pairsLeftIO      = pairsLSize;
     sizes.pairsRightIO     = pairsRSize;
-
+    sizes.groupsSize       = sizeof( uint32 ) * BB_DP_MAX_BC_GROUP_PER_BUCKET;
     sizes.yTemp            = ySize;
     sizes.metaATmp         = metaSize;
     sizes.metaBTmp         = metaSize;
@@ -198,6 +198,7 @@ void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fi
         sizes.metaBIO       +
         sizes.pairsLeftIO   +
         sizes.pairsRightIO  +
+        sizes.groupsSize    +
         sizes.yTemp         +
         sizes.metaATmp      +
         sizes.metaBTmp      +

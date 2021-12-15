@@ -25,6 +25,7 @@ struct DiskFPBufferSizes
     size_t pairsLeftIO;
     size_t pairsRightIO;
 
+    size_t groupsSize;
     size_t yTemp;
     size_t metaATmp;
     size_t metaBTmp;

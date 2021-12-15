@@ -593,7 +593,6 @@ void DiskPlotPhase1::ForwardPropagateTable()
         const uint32 bucketEntryCount = ForwardPropagateBucket<tableId>( bucketIdx, bucket, entryCount );
         bucket.tableEntryCount += bucketEntryCount;
 
-
         // Swap are front/back buffers
         std::swap( bucket.y0      , bucket.y1       );
         std::swap( bucket.metaA0  , bucket.metaA1   );
@@ -1193,11 +1192,12 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
 {
     const uint32 threadCount = _cx.threadCount;
 
-    // Use yTmp as group boundaries
-    bucket.groupBoundaries = bucket.yTmp;
+    // #TODO: Use yTmp as group boundaries
+    // bucket.groupBoundaries = bucket.yTemp;
 
     // Scan for group boundaries
     const uint32 groupCount = ScanGroups( bucketIdx, bucket.y0, entryCount, bucket.groupBoundaries, BB_DP_MAX_BC_GROUP_PER_BUCKET, groupInfos );
+    ASSERT( groupCount <= BB_DP_MAX_BC_GROUP_PER_BUCKET );
     
     // Produce per-thread matches in meta tmp. It has enough space to hold them.
     // Then move them over to a contiguous buffer.
@@ -1216,30 +1216,10 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
     
     uint32 matchCount = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos, bucket.pairs );
 
-    // Ensure the previous's bucket writes finished
-    // _bucket->backPointersFence.Wait();
-
     // // #TODO: Make this multi-threaded... Testing for now
-    // // Copy matches to a contiguous buffer
+    // Write pairs to file
     Pairs& pairs = bucket.pairs;
 
-    // uint32* lPtr = pairs.left;
-    // uint16* rPtr = pairs.right;
-
-    // for( uint i = 0; i < threadCount; i++ )
-    // {
-    //     GroupInfo& group = groupInfos[i];
-    //     bbmemcpy_t( lPtr, group.pairs.left, group.entryCount );
-    //     lPtr += group.entryCount;
-    // }
-
-    // for( uint i = 0; i < threadCount; i++ )
-    // {
-    //     GroupInfo& group = groupInfos[i];
-    //     bbmemcpy_t( rPtr, group.pairs.right, group.entryCount );
-    //     rPtr += group.entryCount;
-    // }
-    
     // // #TODO: Should we write these at intervals?
     const FileId idLeft  = GetBackPointersFileIdForTable( table );
     const FileId idRight = (FileId)( (int)idLeft + 1 );
