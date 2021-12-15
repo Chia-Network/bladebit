@@ -153,7 +153,7 @@ void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fi
 
     const size_t ySize       = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ), fileBlockSize );
     const size_t sortKeySize = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ), fileBlockSize );
-    const size_t mapSize     = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ), fileBlockSize );
+    const size_t mapSize     = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint64 ), fileBlockSize );
     const size_t metaSize    = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint64 ), fileBlockSize );
     const size_t pairsLSize  = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ), fileBlockSize );
     const size_t pairsRSize  = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint16 ), fileBlockSize );
@@ -161,12 +161,13 @@ void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fi
     const size_t blockAlignedOverflowSize = fileBlockSize * BB_DP_BUCKET_COUNT * 2;
 
     sizes.yIO              = ySize       * 2;
-    sizes.sortKeyIO        = sortKeySize;
-    sizes.mapIO            = mapSize     * 2;
+    sizes.sortKeyIO        = sortKeySize * 2;
+    sizes.mapIO            = mapSize;
     sizes.metaAIO          = metaSize    * 2;
     sizes.metaBIO          = metaSize    * 2;
     sizes.pairsLeftIO      = pairsLSize;
     sizes.pairsRightIO     = pairsRSize;
+
     sizes.groupsSize       = sizeof( uint32 ) * BB_DP_MAX_BC_GROUP_PER_BUCKET;
     sizes.yTemp            = ySize;
     sizes.metaATmp         = metaSize;
@@ -203,6 +204,8 @@ void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fi
         sizes.metaATmp      +
         sizes.metaBTmp      +
         sizes.yOverflow     +
+        sizes.mapOverflow   +
+        sizes.pairOverflow  +
         sizes.metaAOverflow +
         sizes.metaBOverflow +
         sizes.crossBucketTotal;

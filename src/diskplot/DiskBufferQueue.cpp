@@ -62,6 +62,12 @@ DiskBufferQueue::DiskBufferQueue(
     InitFileSet( FileId::SORT_KEY6, "table_6_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
     InitFileSet( FileId::SORT_KEY7, "table_7_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
 
+    InitFileSet( FileId::MAP2, "table_2_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
+    InitFileSet( FileId::MAP3, "table_3_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
+    InitFileSet( FileId::MAP4, "table_4_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
+    InitFileSet( FileId::MAP5, "table_5_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
+    InitFileSet( FileId::MAP6, "table_6_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
+
     InitFileSet( FileId::MARKED_ENTRIES_2, "table_2_marks", 1, pathBuffer, workDirLen );
     InitFileSet( FileId::MARKED_ENTRIES_3, "table_3_marks", 1, pathBuffer, workDirLen );
     InitFileSet( FileId::MARKED_ENTRIES_4, "table_4_marks", 1, pathBuffer, workDirLen );

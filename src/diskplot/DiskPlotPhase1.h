@@ -61,8 +61,9 @@ class DiskPlotPhase1
 
         uint32* y0     ;
         uint32* y1     ;
-        uint32* sortKey;
-        uint32* map    ;
+        uint32* sortKey0;
+        uint32* sortKey1;
+        uint64* map    ;
         uint64* metaA0 ; 
         uint64* metaA1 ;
         uint64* metaB0 ;
@@ -164,7 +165,7 @@ private:
                                    FileId& outMetaAId, FileId& outMetaBId );
 
     // Write the sort key as a reverse lookup map (map target (sorted) position to original position)
-    void WriteReverseMap( TableId tableId, const uint32 count, const uint32* sortKey );
+    void WriteReverseMap( TableId tableId, const uint32 count, const uint32* sortedLookupIndices );
 
 
 private:

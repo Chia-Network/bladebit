@@ -8,11 +8,10 @@ struct ReverseMapJob : MTJob<ReverseMapJob<BucketCount>>
 {
     DiskBufferQueue* ioQueue;
     uint32           entryCount;
-    uint32           tgtIndexOffset;
-    const uint32*    sortKey;
+    uint32           sortedIndexOffset;     // Offset of the index at which each sorted source index is stored
+    const uint32*    sortedSourceIndices;   // Read-only sorted final (absolute) position of the origin indices
+    uint64*          mappedIndices;         // Write to position for the buckets
 
-    uint32*          originalPos;
-    uint32*          targetPos;
     uint32*          bucketCounts;
 
     // For internal use:
@@ -36,11 +35,10 @@ inline void ReverseMapJob<BucketCount>::Run()
     const uint32  bitShift = 32 - 6;
 
     const uint32  entryCount    = this->entryCount;
-    const uint32* srcIndices    = this->sortKey;
-    const uint32* end           = sortKey + entryCount;
+    const uint32* sortedIndices = this->sortedSourceIndices;
+    const uint32* end           = sortedIndices + entryCount;
 
-    // uint32* originalPos         = this->originalPos;
-    // uint32* targetPos           = this->targetPos;
+    uint64* map                 = this->mappedIndices;
 
     uint32 counts      [BucketCount];
     uint32 pfxSum      [BucketCount];
@@ -50,7 +48,7 @@ inline void ReverseMapJob<BucketCount>::Run()
 
     // Count how many entries we have per bucket
     {
-        const uint32* index = srcIndices;
+        const uint32* index = sortedIndices;
 
         while( index < end )
         {
@@ -66,21 +64,18 @@ inline void ReverseMapJob<BucketCount>::Run()
     this->CalculatePrefixSum( counts, pfxSum, this->bucketCounts, 0 );
 
     // Now distribute to the respective buckets
-    const uint32 tgtIndexOffset = this->tgtIndexOffset + this->JobId() * this->GetJob( 0 ).entryCount;
-
-    uint32* dstOriginalPos = this->originalPos;
-    uint32* dstTargetPos   = this->targetPos;
+    const uint32 entriesPerThread  = this->GetJob( 0 ).entryCount;
+    const uint32 sortedIndexOffset = this->sortedIndexOffset + this->JobId() * entriesPerThread;
 
     for( uint32 i = 0; i < entryCount; i++ )
     {
-        const uint32 originIndex = srcIndices[i];               // Original index of this entry before y sort
-        const uint32 tgtIndex    = i + tgtIndexOffset;          // Index where this entry was placed after y sort
-        const uint32 bucket      = originIndex >> bitShift;
+        const uint64 originIndex = sortedIndices[i];            // Original index of this entry before y sort
+        const uint32 sortedIndex = i + sortedIndexOffset;       // Index where this entry was placed after y sort
+        const uint32 bucket      = (uint32)(originIndex >> bitShift);
 
         const uint32 dstIndex = --pfxSum[bucket];
 
-        dstOriginalPos[dstIndex] = originIndex;
-        dstTargetPos  [dstIndex] = tgtIndex;
+        map[dstIndex] = ( originIndex << 32 ) | sortedIndex;
     }
 }
 

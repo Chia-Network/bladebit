@@ -295,15 +295,16 @@ void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
 
         bucket.y0                          = AllocProtect<uint32>( sizes.yIO / 2       );
         bucket.y1                          = AllocProtect<uint32>( sizes.yIO / 2       );
-        bucket.sortKey                     = AllocProtect<uint32>( sizes.sortKeyIO     );
-        bucket.map                         = AllocProtect<uint32>( sizes.mapIO         );
+        bucket.sortKey0                    = AllocProtect<uint32>( sizes.sortKeyIO / 2 );
+        bucket.sortKey1                    = AllocProtect<uint32>( sizes.sortKeyIO / 2 );
+        bucket.map                         = AllocProtect<uint64>( sizes.mapIO         );
         bucket.metaA0                      = AllocProtect<uint64>( sizes.metaAIO / 2   );
         bucket.metaA1                      = AllocProtect<uint64>( sizes.metaAIO / 2   );
         bucket.metaB0                      = AllocProtect<uint64>( sizes.metaBIO / 2   );
         bucket.metaB1                      = AllocProtect<uint64>( sizes.metaBIO / 2   );
         bucket.pairs.left                  = AllocProtect<uint32>( sizes.pairsLeftIO   );
         bucket.pairs.right                 = AllocProtect<uint16>( sizes.pairsRightIO  );
-        bucket.groupBoundaries             = nullptr;
+        bucket.groupBoundaries             = AllocProtect<uint32>( sizes.groupsSize    );
 
         bucket.yTmp                        = AllocProtect<uint32>( sizes.yTemp    );
         bucket.metaATmp                    = AllocProtect<uint64>( sizes.metaATmp );
@@ -487,7 +488,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
     const uint       threadCount       = _cx.threadCount;
     const uint32*    inputBucketCounts = cx.bucketCounts[(uint)tableId - 1];
 
-    // const FileId sortKeyFileId = tableId > TableId::Table2 ? TableIdToSortKeyId( (TableId)((int)tableId - 1) ) : FileId::None;
+    const FileId sortKeyFileId = tableId > TableId::Table2 ? TableIdToSortKeyId( (TableId)((int)tableId - 1) ) : FileId::None;
 
     // Set the correct file id, given the table (we swap between them for each table)
     {
@@ -513,6 +514,8 @@ void DiskPlotPhase1::ForwardPropagateTable()
     }
     else
     {
+        ioQueue.SeekBucket( sortKeyFileId,    0, SeekOrigin::Begin );
+
         ioQueue.SeekBucket( FileId::META_A_0, 0, SeekOrigin::Begin );
         ioQueue.SeekBucket( FileId::META_A_1, 0, SeekOrigin::Begin );
         ioQueue.SeekBucket( FileId::META_B_0, 0, SeekOrigin::Begin );
@@ -529,11 +532,11 @@ void DiskPlotPhase1::ForwardPropagateTable()
     ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded );
     ioQueue.CommitCommands();
 
-    // if constexpr ( tableId > TableId::Table2 )
-    // {
-    //     ioQueue.ReadFile( sortKeyFileId, 0, bucket.sortKey0, inputBucketCounts[0] * sizeof( uint32 ) );
-    //     ioQueue.SignalFence( bucket.fence, FPFenceId::SortKeyLoaded );
-    // }
+    if constexpr ( tableId > TableId::Table2 )
+    {
+        ioQueue.ReadFile( sortKeyFileId, 0, bucket.sortKey0, inputBucketCounts[0] * sizeof( uint32 ) );
+        ioQueue.SignalFence( bucket.fence, FPFenceId::SortKeyLoaded );
+    }
 
     ioQueue.ReadFile( bucket.metaAFileId, 0, bucket.metaA0, inputBucketCounts[0] * MetaInASize );
     ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded );
@@ -566,11 +569,11 @@ void DiskPlotPhase1::ForwardPropagateTable()
             ioQueue.ReadFile( bucket.yFileId, nextBucketIdx, bucket.y1, nextBufferCount * sizeof( uint32 ) );
             ioQueue.SignalFence( bucket.fence, FPFenceId::YLoaded + fenceIdx );
 
-            // if constexpr ( tableId > TableId::Table2 )
-            // {
-            //     ioQueue.ReadFile( sortKeyFileId, nextBucketIdx, bucket.sortKey1, nextBufferCount * sizeof( uint32 ) );
-            //     ioQueue.SignalFence( bucket.fence, FPFenceId::SortKeyLoaded + fenceIdx );
-            // }
+            if constexpr ( tableId > TableId::Table2 )
+            {
+                ioQueue.ReadFile( sortKeyFileId, nextBucketIdx, bucket.sortKey1, nextBufferCount * sizeof( uint32 ) );
+                ioQueue.SignalFence( bucket.fence, FPFenceId::SortKeyLoaded + fenceIdx );
+            }
 
             ioQueue.ReadFile( bucket.metaAFileId, nextBucketIdx, bucket.metaA1, nextBufferCount * MetaInASize );
             ioQueue.SignalFence( bucket.fence, FPFenceId::MetaALoaded + fenceIdx );
@@ -627,7 +630,8 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     ///
     /// Sort our current bucket
     ///
-    uint32* sortKey = bucket.sortKey;
+    // uint32* sortKey = bucket.sortKey;
+    uint32* sortKey = bucket.yTmp;
     {
         Log::Line( "  Sorting bucket y." );
         auto timer = TimerBegin();
@@ -664,11 +668,20 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             // ASSERT( DbgVerifyGreater( entryCount, bucket.y0 ) );
         #endif
 
-        // #TODO: Write sort key to disk as the previous table's sort key, so that we can do a quick sort of L/R later.
+        // Write reverse lookup map back to disk as a direct lookup to its final index
         if constexpr ( tableId > TableId::Table2 )
         {
             bucket.fence.Wait( FPFenceId::SortKeyLoaded + fenceIdx );
-            WriteReverseMap( tableId, entryCount, sortKey );
+
+            // Use meta tmp for the temp lookup index buffer
+            const uint32* lookupIdx    = bucket.sortKey0;
+                  uint32* sortedLookup = (uint32*)bucket.metaATmp;
+
+            // Sort the lookup index to its final position
+            SortKeyGen::Sort<BB_MAX_JOBS>( threadPool, (int64)entryCount, sortKey, lookupIdx, sortedLookup );
+
+            // Write the reverse lookup back into its original buckets as a forward lookup map
+            WriteReverseMap( tableId, entryCount, sortedLookup );
         }
 
         // OK to load next (back) metadata B buffer now (see comment above in ForwardPropagateTable)
@@ -745,7 +758,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             matchCount,
             sortKeyOffset,
             bucket.pairs,
-            (byte*)bucket.sortKey,                   // #TODO: Change this, for now use sort key buffer
+            (byte*)bucket.sortKey0,                   // #TODO: Change this, for now use sort key buffer
             bucket.y0  , fxMetaInA , fxMetaInB,
             bucket.yTmp, fxMetaOutA, fxMetaOutB,
             cx.bucketCounts[(uint)tableId]
@@ -797,18 +810,14 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 /// Write map from the sort key
 ///
 //-----------------------------------------------------------
-void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const uint32* sortKey )
+void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const uint32* sortedSourceIndices )
 {
     DiskBufferQueue& ioQueue       = *_cx.ioQueue;
 
     Bucket&       bucket           = *_bucket;
     const uint32  threadCount      = _cx.threadCount;
     const uint32  entriesPerThread = count / threadCount;
-
-    const uint32* threadSortKey    = sortKey;
-
-    uint32* originalPos   = _bucket->map;
-    uint32* targetPos     = originalPos + count;  // #TODO: Align this second buffer on block size
+    uint64*       map              = _bucket->map;
 
     static uint32 bucketCounts[BB_DP_BUCKET_COUNT];
     memset( bucketCounts, 0, sizeof( bucketCounts ) );
@@ -819,16 +828,15 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const
     {
         auto& job = jobs[i];
 
-        job.ioQueue        = _cx.ioQueue;
-        job.entryCount     = entriesPerThread;
-        job.tgtIndexOffset = bucket.tableEntryCount;
-        job.sortKey        = threadSortKey;
-        job.originalPos    = originalPos;
-        job.targetPos      = targetPos;
-        job.bucketCounts   = bucketCounts;
-        job.counts         = nullptr;
+        job.ioQueue             = _cx.ioQueue;
+        job.entryCount          = entriesPerThread;
+        job.sortedIndexOffset   = bucket.tableEntryCount;
+        job.sortedSourceIndices = sortedSourceIndices;
+        job.mappedIndices       = map;
+        job.bucketCounts        = bucketCounts;
+        job.counts              = nullptr;
         
-        threadSortKey += entriesPerThread;
+        sortedSourceIndices += entriesPerThread;
     }
 
     const uint32 remainder = count - entriesPerThread * threadCount;
@@ -850,7 +858,7 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const
     // Write to disk
     const FileId mapFileId = TableIdToMapFileId( tableId - (TableId)1 );
     
-    ioQueue.WriteBuckets( mapFileId, originalPos, bucketCounts );
+    ioQueue.WriteBuckets( mapFileId, map, bucketCounts );
     ioQueue.SignalFence( bucket.mapFence );
     ioQueue.CommitCommands();
 }
@@ -885,7 +893,7 @@ uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket
     const TMetaA* curGroupMetaA  = (TMetaA*)curMetaA;
     const TMetaB* curGroupMetaB  = (TMetaB*)curMetaB;
 
-    byte*         bucketIndices  = (byte*)bucket.sortKey;   // #TODO: Use its own buffer, instead of sort key
+    byte*         bucketIndices  = (byte*)bucket.sortKey0;   // #TODO: Use its own buffer, instead of sort key
     Pairs         pairs          = bucket.crossBucketInfo.pairs;
     uint32*       yTmp           = crossBucketInfo.y + kBC * 2;
     TMetaA*       metaATmp       = (TMetaA*)( crossBucketInfo.metaA + kBC * 2 );
@@ -1018,7 +1026,7 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     if( rBucketGrp - lBucketGrp > 1 )
         return 0;
 
-    byte* bucketIndices = (byte*)_bucket->sortKey;  // #TODO: Use a proper buffer for this
+    byte* bucketIndices = (byte*)_bucket->sortKey0;  // #TODO: Use a proper buffer for this
 
     // Find the length of the group
     uint32 curBucketGroupCount = 0;
@@ -1192,7 +1200,7 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
 {
     const uint32 threadCount = _cx.threadCount;
 
-    // #TODO: Use yTmp as group boundaries
+    // #TODO: Can we use yTmp as group boundaries?
     // bucket.groupBoundaries = bucket.yTemp;
 
     // Scan for group boundaries
