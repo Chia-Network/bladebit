@@ -49,6 +49,7 @@ enum class FileId
 
 struct FileSet
 {
+    const char*      path;
     const char*      name;
     Span<FileStream> files;
 };
@@ -85,9 +86,11 @@ class DiskBufferQueue
             ReadFile,
             SeekFile,
             SeekBucket,
+            DeleteFile,
+            DeleteBucket,
             ReleaseBuffer,
             SignalFence,
-            WaitForFence
+            WaitForFence,
         };
 
         CommandType type;
@@ -123,12 +126,17 @@ class DiskBufferQueue
                 byte* buffer;
             } releaseBuffer;
 
-
             struct
             {
                 Fence* signal;
                 int64  value;
             } fence;
+
+            struct
+            {
+                FileId fileId;
+                uint   bucket;
+            } deleteFile;
         };
     };
 
@@ -142,16 +150,19 @@ public:
 
     void ResetHeap( const size_t heapSize, void* heapBuffer );
 
-
     void WriteBuckets( FileId id, const void* buckets, const uint* sizes );
-    
+
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
     void ReadFile( FileId id, uint bucket, void* dstBuffer, size_t readSize );
 
     void SeekFile( FileId id, uint bucket, int64 offset, SeekOrigin origin );
-    
+
     void SeekBucket( FileId id, int64 offset, SeekOrigin origin );
+
+    void DeleteFile( FileId id, uint bucket );
+
+    void DeleteBucket( FileId id );
 
     void CommitCommands();
 
@@ -202,6 +213,9 @@ private:
 
     void WriteToFile( FileStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
     void ReadFromFile( FileStream& file, size_t size, byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
+
+    void CmdDeleteFile( const Command& cmd );
+    void CmdDeleteBucket( const Command& cmd );
 
     static const char* DbgGetCommandName( Command::CommandType type );
 

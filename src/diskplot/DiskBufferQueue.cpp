@@ -84,6 +84,7 @@ DiskBufferQueue::DiskBufferQueue(
 //-----------------------------------------------------------
 DiskBufferQueue::~DiskBufferQueue()
 {
+    // #TODO: Delete our file sets
 }
 
 //-----------------------------------------------------------
@@ -106,13 +107,15 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     fileSet.name         = name;
     fileSet.files.values = new FileStream[bucketCount];
     fileSet.files.length = bucketCount;
+    fileSet.path         = bbmalloc<char>( workDirLength + 65 );
+    memcpy( (void*)fileSet.path, pathBuffer, workDirLength + 1 );
 
     for( uint i = 0; i < bucketCount; i++ )
     {
         FileStream& file = fileSet.files[i];
 
         constexpr FileMode fileMode =
-        #if ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 )
+        #if _DEUBG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 )
             FileMode::OpenOrCreate;
         #else
             FileMode::Create;
@@ -217,6 +220,21 @@ void DiskBufferQueue::WaitForFence( Fence& fence )
     Command* cmd = GetCommandObject( Command::WaitForFence );
     cmd->fence.signal = &fence;
     cmd->fence.value  = -1;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::DeleteFile( FileId id, uint bucket )
+{
+    Command* cmd = GetCommandObject( Command::DeleteFile );
+    cmd->deleteFile.fileId = id;
+    cmd->deleteFile.bucket = bucket;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::DeleteBucket( FileId id )
+{
+    Command* cmd = GetCommandObject( Command::DeleteBucket );
+    cmd->deleteFile.fileId = id;
 }
 
 //-----------------------------------------------------------
@@ -359,6 +377,18 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             #endif
                 ASSERT( cmd.fence.signal );
             cmd.fence.signal->Wait();
+        break;
+
+        case Command::DeleteFile:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd DeleteFile" );
+            #endif
+        break;
+
+        case Command::DeleteBucket:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd DeleteBucket" );
+            #endif
         break;
 
 
@@ -550,6 +580,53 @@ void DiskBufferQueue::ReadFromFile( FileStream& file, size_t size, byte* buffer,
 //     }
 }
 
+//----------------------------------------------------------
+void DiskBufferQueue::CmdDeleteFile( const Command& cmd )
+{
+    FileSet&    fileBuckets = _files[(int)cmd.deleteFile.fileId];
+    FileStream& file        = fileBuckets.files[cmd.deleteFile.bucket];
+    file.Close();
+
+    // #NOTE: The path buffer has enough space in it to store the file name as well 
+    const size_t pathLen = strlen( fileBuckets.path );
+    sprintf( (char*)fileBuckets.path + pathLen, "%s_%u", fileBuckets.name, cmd.deleteFile.bucket );
+    
+    const int r = remove( fileBuckets.path );
+
+    if( r )
+        Log::Error( "Error: Failed to delete file %s.", fileBuckets.path );
+
+    ASSERT( !r );
+    ((char*)fileBuckets.path)[pathLen] = '\0';
+
+}
+
+//----------------------------------------------------------
+void DiskBufferQueue::CmdDeleteBucket( const Command& cmd )
+{
+    FileSet& fileBuckets = _files[(int)cmd.deleteFile.fileId];
+
+    // #NOTE: The path buffer has enough space in it to store the file name as well 
+    const size_t pathLen = strlen( fileBuckets.path );
+
+    for( size_t i = 0; i < fileBuckets.files.length; i++ )
+    {
+        FileStream& file = fileBuckets.files[i];
+        file.Close();
+
+        sprintf( (char*)fileBuckets.path + pathLen, "%s_%u", fileBuckets.name, cmd.deleteFile.bucket );
+    
+        const int r = remove( fileBuckets.path );
+
+        if( r )
+            Log::Error( "Error: Failed to delete file %s.", fileBuckets.path );
+
+        ASSERT( !r );
+    }
+
+    ((char*)fileBuckets.path)[pathLen] = '\0';
+}
+
 //-----------------------------------------------------------
 inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type )
 {
@@ -578,6 +655,12 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
 
         case DiskBufferQueue::Command::WaitForFence:
             return "WaitForFence";
+
+        case DiskBufferQueue::Command::DeleteFile:
+            return "DeleteFile";
+
+        case DiskBufferQueue::Command::DeleteBucket:
+            return "DeleteBucket";
 
         default:
             ASSERT( 0 );
