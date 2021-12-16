@@ -381,4 +381,85 @@ void Debug::ValidateMetaFileFromBuckets( const uint64* metaABucket, const uint64
     SysHost::VirtualFree( refEntries );
 }
 
+// Ensure we have an ordered lookup index
+//-----------------------------------------------------------
+void Debug::ValidateLookupIndex( TableId table, ThreadPool& pool, DiskBufferQueue& queue, const uint32 bucketCounts[BB_DP_BUCKET_COUNT] )
+{
+    uint64 totalEntries = 0;
+    for( uint32 i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        totalEntries += bucketCounts[i];
+
+    // Lod buckets into a single contiguous bucket
+    uint32* indices = bbcvirtalloc<uint32>( RoundUpToNextBoundary( totalEntries, (int)queue.BlockSize() ) * 2 );
+
+    Log::Line( "Loading table %d lookup indices...", (int)table );
+    {
+        const FileId fileId = TableIdToSortKeyId( table );
+
+        uint32* readPtr = indices;
+
+        queue.SeekBucket( fileId, 0, SeekOrigin::Begin );
+        queue.CommitCommands();
+
+        for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+        {
+            queue.ReadFile( fileId, bucket, readPtr, bucketCounts[bucket] * sizeof( uint32 ) );
+            readPtr += bucketCounts[bucket];
+        }
+
+        Fence fence;
+        queue.SignalFence( fence );
+        queue.SeekBucket( fileId, 0, SeekOrigin::Begin );
+        queue.CommitCommands();
+        fence.Wait();
+    }
+
+    // Check counts per bucket, before sort
+    uint32 bcounts[BB_DP_BUCKET_COUNT];
+    {
+        memset( bcounts, 0, sizeof( bcounts ) );
+
+        const uint32* reader = indices;
+
+        for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+        {
+            const uint32 bucketEntryCount = bucketCounts[bucket];
+
+            for( uint32 i = 0; i < bucketEntryCount; i++ )
+            {
+                const uint b = reader[i] >> ( 32 - kExtraBits );
+                ASSERT( b < BB_DP_BUCKET_COUNT );
+                bcounts[b]++;
+            }
+
+            reader += bucketEntryCount;
+        }
+    }
+
+    // Sort the entries
+    Log::Line( "Sorting indices..." );
+    RadixSort256::Sort<BB_MAX_JOBS>( pool, indices, indices + totalEntries, totalEntries );
+
+    // Ensure all indices are ordered
+    Log::Line( "Validating indices..." );
+    for( uint64 i = 0; i < totalEntries; i++ )
+    {
+        ASSERT( indices[i] == i );
+    }
+    Log::Line( "** Validation success **" );
+
+    // Check distribution into buckets
+    uint32 counts[BB_DP_BUCKET_COUNT];
+    memset( counts, 0, sizeof( counts ) );
+
+    for( uint64 i = 0; i < totalEntries; i++ )
+    {
+        const uint bucket = indices[i] >> ( 32 - kExtraBits );
+        ASSERT( bucket < BB_DP_BUCKET_COUNT );
+        counts[bucket]++;
+    }
+
+    // Cleanup
+    SysHost::VirtualFree( indices );
+}
 

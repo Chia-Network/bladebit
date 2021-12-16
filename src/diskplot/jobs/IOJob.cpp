@@ -120,15 +120,15 @@ void IOWriteJob::WriteToFile( FileStream& file, const byte* buffer, const size_t
 }
 
 //-----------------------------------------------------------
-void IOWriteJob::ReadFromFile( FileStream& file, byte* buffer, const size_t size,
+bool IOWriteJob::ReadFromFile( FileStream& file, byte* buffer, const size_t size,
                                byte* blockBuffer, const size_t blockSize, int& error )
 {
     /// #NOTE: All our buffers should be block aligned so we should be able to freely read all blocks to them...
     ///       Only implement remainder block reading if we really need to.
-//     size_t       sizeToRead = size / blockSize * blockSize;
-//     const size_t remainder  = size - sizeToRead;
+    size_t       sizeToRead = size / blockSize * blockSize;
+    const size_t remainder  = size - sizeToRead;
 
-    size_t sizeToRead = CDivT( size, blockSize ) * blockSize;
+    // size_t sizeToRead = CDivT( size, blockSize ) * blockSize;
 
     while( sizeToRead )
     {
@@ -136,7 +136,7 @@ void IOWriteJob::ReadFromFile( FileStream& file, byte* buffer, const size_t size
         if( sizeRead < 1 )
         {
             error = file.GetError();
-            return;
+            return false;
         }
 
         ASSERT( sizeRead <= (ssize_t)sizeToRead );
@@ -144,4 +144,19 @@ void IOWriteJob::ReadFromFile( FileStream& file, byte* buffer, const size_t size
         sizeToRead -= (size_t)sizeRead;
         buffer     += sizeRead;
     }
+
+    if( remainder )
+    {
+        ssize_t sizeRead = file.Read( blockBuffer, blockSize );
+
+        if( sizeRead != (ssize_t)remainder )
+        {
+            error = file.GetError();
+            return false;
+        }
+
+        memcpy( buffer, blockBuffer, remainder );
+    }
+
+    return true;
 }

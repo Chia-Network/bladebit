@@ -496,6 +496,8 @@ void FxBucketJob::RunForTable()
             pairs = this->GetJob( 0 ).pairs;
             pairs.left  += chunkOffset;
             pairs.right += chunkOffset;
+
+            sortKeyOffset = this->GetJob( 0 ).sortKeyOffset + chunkOffset;
         }
 
         // Grab a buffer
@@ -614,8 +616,9 @@ void FxBucketJob::RunForTable()
         }
 
         // Go to next chunk
-        pairs.left  += entriesPerChunk;
-        pairs.right += entriesPerChunk;
+        pairs.left    += entriesPerChunk;
+        pairs.right   += entriesPerChunk;
+        sortKeyOffset += entriesPerChunk;
     }
 }
 
@@ -654,7 +657,7 @@ void FxBucketJob::DistributeIntoBuckets(
 
     // #TODO: We may need an overflow sort key for when we have more
     //        entries than the k range can hold.
-    uint32 key = sortKeyOffset;
+    // uint32 key = sortKeyOffset;
 
     // #TODO: Unroll this a bit?
     // #TODO: Should this be done per output type (copy the pfxSum and reset it)?
@@ -665,7 +668,7 @@ void FxBucketJob::DistributeIntoBuckets(
         const uint32 dstIdx = --pfxSum[bucketIndices[i]];
 
         yBuckets[dstIdx] = y[i];
-        sortKey [dstIdx] = key++;
+        sortKey [dstIdx] = sortKeyOffset + i;
 
         if constexpr ( metaSizeA > 0 )
             metaABuckets[dstIdx] = metaA[i];

@@ -114,8 +114,8 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     {
         FileStream& file = fileSet.files[i];
 
-        constexpr FileMode fileMode =
-        #if _DEUBG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 )
+        const FileMode fileMode =
+        #if _DEBUG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 )
             FileMode::OpenOrCreate;
         #else
             FileMode::Create;

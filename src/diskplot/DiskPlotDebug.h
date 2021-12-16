@@ -14,4 +14,7 @@ namespace Debug
     void ValidateMetaFileFromBuckets( const uint64* metaA, const uint64* metaB,
                                       TableId table, uint32 entryCount, uint32 bucketIdx, 
                                       uint32 bucketCounts[BB_DP_BUCKET_COUNT] );
+
+
+    void ValidateLookupIndex( TableId table, ThreadPool& pool, DiskBufferQueue& queue, const uint32 bucketCounts[BB_DP_BUCKET_COUNT] );
 }

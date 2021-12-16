@@ -460,6 +460,11 @@ void DiskPlotPhase1::ForwardPropagate()
             Debug::ValidateYFileFromBuckets( fileId, *_cx.threadPool, *_diskQueue, table, _cx.bucketCounts[(int)table] );
         }
         #endif
+
+        // #if _DEBUG
+        // if( 0 )
+        //     Debug::ValidateLookupIndex( table, *_cx.threadPool, *_diskQueue, _cx.bucketCounts[(int)table] );
+        // #endif
     }
 
     // Ensure last writes completed.
@@ -600,6 +605,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
         std::swap( bucket.y0      , bucket.y1       );
         std::swap( bucket.metaA0  , bucket.metaA1   );
         std::swap( bucket.metaB0  , bucket.metaB1   );
+        std::swap( bucket.sortKey0, bucket.sortKey1 );
     }
 }
 

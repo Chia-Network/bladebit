@@ -28,6 +28,6 @@ struct IOWriteJob : MTJob<IOWriteJob>
     static void WriteToFile( FileStream& file, const byte* buffer, const size_t size,
                              byte* blockBuffer, const size_t blockSize, int& error );
 
-    static void ReadFromFile( FileStream& file, byte* buffer, const size_t size,
+    static bool ReadFromFile( FileStream& file, byte* buffer, const size_t size,
                               byte* blockBuffer, const size_t blockSize, int& error );
 };

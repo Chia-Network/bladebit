@@ -24,7 +24,7 @@
 ///
 // #define BB_DP_DBG_READ_EXISTING_F1 1
 // #defube BB_DP_DBG_VALIDATE_F1   1
-#define BB_DP_DBG_VALIDATE_FX    1
+// #define BB_DP_DBG_VALIDATE_FX    1
 // #define BB_DP_DBG_VALIDATE_META 1
 #define BB_DP_DBG_PROTECT_FP_BUFFERS 1
 
