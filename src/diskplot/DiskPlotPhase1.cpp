@@ -825,6 +825,10 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const
     const uint32  entriesPerThread = count / threadCount;
     uint64*       map              = _bucket->map;
 
+    // Ensure the previous bucket finished writing.
+    // #TODO: Should we double-buffer here?
+    bucket.mapFence.Wait();
+
     static uint32 bucketCounts[BB_DP_BUCKET_COUNT];
     memset( bucketCounts, 0, sizeof( bucketCounts ) );
 
@@ -848,10 +852,6 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const
     const uint32 remainder = count - entriesPerThread * threadCount;
     if( remainder )
         jobs[threadCount-1].entryCount += remainder;
-
-    // Ensure the previous bucket finished writing.
-    // #TODO: Should we double-buffer here?
-    bucket.mapFence.Wait();
 
     jobs.Run( threadCount );
 

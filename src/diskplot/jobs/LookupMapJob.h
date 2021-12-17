@@ -32,7 +32,7 @@ inline void ReverseMapJob<BucketCount>::Run()
 {
     // #TODO: Determine bits needed bucket count statically.
     //        For now hard coded to 64 buckets.
-    const uint32  bitShift = 32 - 6;
+    const uint32  bitShift = 32 - kExtraBits;
 
     const uint32  entryCount    = this->entryCount;
     const uint32* sortedIndices = this->sortedSourceIndices;
