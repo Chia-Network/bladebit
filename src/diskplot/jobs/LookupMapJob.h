@@ -42,7 +42,6 @@ inline void ReverseMapJob<BucketCount>::Run()
 
     uint32 counts      [BucketCount];
     uint32 pfxSum      [BucketCount];
-    // uint32 bucketCounts[BucketCount];
 
     memset( counts, 0, sizeof( counts ) );
 
@@ -60,7 +59,6 @@ inline void ReverseMapJob<BucketCount>::Run()
 
     // Calculate prefix sum
     // #TODO: Allow block-aligned prefix sum here
-    this->counts = counts;
     this->CalculatePrefixSum( counts, pfxSum, this->bucketCounts, 0 );
 
     // Now distribute to the respective buckets
@@ -77,6 +75,9 @@ inline void ReverseMapJob<BucketCount>::Run()
 
         map[dstIndex] = ( originIndex << 32 ) | sortedIndex;
     }
+
+    // Ensure all threads end at the same time (so that counts doesn't go out of scope) 
+    this->SyncThreads();
 }
 
 // #TODO: Avoud code duplication here

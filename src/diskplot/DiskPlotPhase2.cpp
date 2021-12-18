@@ -213,9 +213,16 @@ void MarkJob::MarkEntries()
 
                 byte* lBuffer = queue.GetBuffer( lReadSize + rReadSize, false );
                 if( !lBuffer )
-                {
-                    ASSERT( bucketsLoaded > bucket );
-                    break;
+                {   
+                    // ASSERT( bucketsLoaded > bucket );
+                    if( bucketsLoaded <= bucket )
+                    {
+                        // Force-load a bucket (block until we can load one)
+                        lBuffer = queue.GetBuffer( lReadSize + rReadSize, true );
+                        ASSERT( lBuffer );
+                    }
+                    else
+                        break;
                 }
 
                 byte* rBuffer = lBuffer + lReadSize;
