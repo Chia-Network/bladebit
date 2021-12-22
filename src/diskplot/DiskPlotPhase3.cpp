@@ -1,10 +1,77 @@
 #include "DiskPlotPhase3.h"
+#include "util/BitField.h"
+#include "algorithm/RadixSort.h"
+
+/**
+ * Algorithm:
+ * 
+ * Let rTable be a table in a set {table2, table3, ..., table7}
+ * Let lTable be rTable - 1. Such that if rTable is table2, then lTable is table1
+ * 
+ * For each rTable perform 2 passes:
+ *
+ * Pass 1. Process each bucket as follows]:
+ * - Load L/R back pointers for rTable.
+ * - Load y index map for rTable.
+ * - Load marked entries from Phase 2 for rTable.
+ * - Load lTable, which for rTable==1 is the x buckets, otherwise it is the output of map of 
+ *      the previous iteration's rTable.
+ * - If rTable > table2:
+ *      - Sort the lTable map on its origin (y) index, and then discard the origin index,
+ *          keeping only the destination index (final position of an entry after LP sort).
+ * - Sort the rTable map on its origin index.
+ * - Generate LinePoints (LPs) from the rTable pointers and the lTable x or map values,
+ *      while excluding each entry that is not marked in the marked entries table.
+ * - Distribute the LPs to their respective buckets along with the rTable (y) map 
+ *      and write them to disk.
+ *      (The r table (y) map represents the origin index before sorting.)
+ * 
+ * Pass 2. Process each LP bucket as follows:
+ * - Load the rTable LP output and map.
+ * - Sort the LP bucket and map on LP.
+ * - Compress the LP bucket and write it to disk.
+ * - Convert the sorted map into a reverse lookup by extending them with its origin index (its current value)
+ *      and its destination index (its current index after sort). Then distribute
+ *      them to buckets given its origin value. Write the buckets to disk.
+ * 
+ * Go to next table.
+ */
+struct P3FenceId
+{
+    enum 
+    {
+        Start = 0,
+
+        RTableLoaded,
+        RMapLoaded,
+
+        FENCE_COUNT
+    };
+};
+
+const uint32 P3LTableEntriesPerChunk = (uint32)( (1ull << _K ) / BB_DP_BUCKET_COUNT / 16 );
+
+struct LPPass1Job : MTJob<LPPass1Job>
+{
+    DiskPlotContext* _context;
+    TableId          _rTable;
+    
+    size_t  _markedEntriesSize;
+    uint64* _markedEntries;
+    uint64* _lMap       [3];
+    uint64* _rMap       [2];
+    Pairs   _rTablePairs[2];
+    uint64* _linePoints;        // Buffer for line points
+    
+
+    void Run() override;
+};
 
 //-----------------------------------------------------------
 DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context )
     : _context( context )
 {
-
+    memset( _tableEntryCount, 0, sizeof( _tableEntryCount ) );
 }
 
 //-----------------------------------------------------------
@@ -15,10 +82,393 @@ DiskPlotPhase3::~DiskPlotPhase3()
 
 //-----------------------------------------------------------
 void DiskPlotPhase3::Run()
-{
-    // Load sort keys
-    // And add reverse
+{   
+    DiskPlotContext& context = _context;
+    DiskBufferQueue& ioQueue = *context.ioQueue;
 
-    // Load l map/x
+    // Init our buffers
+    {
+        const uint64 maxEntries           = 1ull << _K;
+        const size_t fileBlockSize        = ioQueue.BlockSize();
+        
+        const size_t markedEntriesSize    = RoundUpToNextBoundary( RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 ), fileBlockSize );  // Round up to 64-bit boundary, then to block size boundary
+        const uint64 bucketEntryCount     = maxEntries / BB_DP_BUCKET_COUNT;
+
+        const size_t rTableMapBucketSize  = RoundUpToNextBoundary( bucketEntryCount * sizeof( uint64 ), fileBlockSize );
+        const size_t rTableLPtrBucketSize = RoundUpToNextBoundary( bucketEntryCount * sizeof( uint32 ), fileBlockSize );
+        const size_t rTableRPtrBucketSize = RoundUpToNextBoundary( bucketEntryCount * sizeof( uint16 ), fileBlockSize );
+        
+        const size_t lTableBucketSize     = RoundUpToNextBoundary( BB_DP_MAX_ENTRIES_PER_BUCKET * sizeof( uint64 ), fileBlockSize );
+
+        byte* heap = context.heapBuffer;
+        
+        _markedEntries     = (uint64*)heap;
+        _markedEntriesSize = markedEntriesSize;
+        heap += markedEntriesSize;
+
+        _rMap[0] = (uint64*)heap; heap += rTableMapBucketSize;
+        _rMap[1] = (uint64*)heap; heap += rTableMapBucketSize;
+
+        _rTablePairs[0].left = (uint32*)heap; heap += rTableLPtrBucketSize;
+        _rTablePairs[1].left = (uint32*)heap; heap += rTableLPtrBucketSize;
+
+        _rTablePairs[0].right = (uint16*)heap; heap += rTableRPtrBucketSize;
+        _rTablePairs[1].right = (uint16*)heap; heap += rTableRPtrBucketSize;
+
+        _lMap[0] = (uint64*)heap; heap += lTableBucketSize;
+        _lMap[1] = (uint64*)heap; heap += lTableBucketSize;
+        _lMap[2] = (uint64*)heap;
+    }
+
+    for( TableId table = TableId::Table2; table < TableId::Table7; table++ )
+    {
+        ProcessTable( table );
+    }
 }
 
+//-----------------------------------------------------------
+void DiskPlotPhase3::ProcessTable( const TableId rTable )
+{
+    DiskPlotContext& context = _context;
+    DiskBufferQueue& ioQueue = *context.ioQueue;
+
+    // Reset Fence
+    _rTableFence.Reset( P3FenceId::Start );
+    _lTableFence.Reset( 0 );
+
+    _lTableChunksLoaded  = 0;
+    _lTableEntriesLoaded = 0;
+
+    TableFirstPass( rTable  );
+    TableSecondPass( rTable );
+    
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase3::TableFirstPass( const TableId rTable )
+{
+    DiskPlotContext& context     = _context;
+    DiskBufferQueue& ioQueue     = *context.ioQueue;
+    Fence&           lTableFence = _lTableFence;
+    Fence&           rTableFence = _rTableFence;
+
+    const size_t markedEntriesSize = _markedEntriesSize;
+    const uint64 maxEntries        = 1ull << _K;
+
+    const TableId lTable = rTable - 1;
+
+    const FileId markedEntriesFileId = TableIdToMarkedEntriesFileId( rTable );
+    const FileId lMapId              = rTable == TableId::Table2 ? FileId::X : TableIdToMapFileId( lTable );
+    const FileId rMapId              = TableIdToMapFileId( rTable );
+    const FileId rPtrsRId            = TableIdToBackPointerFileId( rTable ); 
+    const FileId rPtrsLId            = rPtrsRId + 1;
+
+    // Read the first bucket's worth of data required and the rTable's marked entries (the whole thing)
+    ioQueue.SeekBucket( markedEntriesFileId, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( lMapId             , 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( rMapId             , 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( rPtrsRId           , 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( rPtrsLId           , 0, SeekOrigin::Begin );
+    ioQueue.CommitCommands();
+
+    // Load marked entries, rPtrs, rMap and lMap (or x, if lTable is 1)
+    ioQueue.ReadFile( markedEntriesFileId, 0, _markedEntries, markedEntriesSize );
+
+    
+    const uint64 rBucketEntryCount = maxEntries / BB_DP_BUCKET_COUNT;
+    ioQueue.ReadFile( rPtrsRId, 0, _rTablePairs[0].left , rBucketEntryCount * sizeof( uint32 ) );
+    ioQueue.ReadFile( rPtrsLId, 0, _rTablePairs[0].right, rBucketEntryCount * sizeof( uint16 ) );
+    ioQueue.ReadFile( rMapId  , 0, _rMap[0]             , rBucketEntryCount * sizeof( uint64 ) );
+
+
+    const uint32 lBucket0EntryCount = context.bucketCounts[(int)lTable][0];
+    const size_t lMapEntrySize      = rTable == TableId::Table2 ? sizeof( uint32 ) : sizeof( uint64 );
+
+    // Set the initial chunks loaded count to the first bucket's chunk count
+    _lTableChunksLoaded = lBucket0EntryCount / P3LTableEntriesPerChunk;
+
+    ioQueue.ReadFile( lMapId, 0, _lMap[0], _lTableChunksLoaded );
+    ioQueue.SignalFence( lTableFence, lBucket0EntryCount / P3LTableEntriesPerChunk );
+    ioQueue.CommitCommands();
+
+    // Commit commands and wait for the first bucket to be loaded
+    lTableFence.Wait();
+
+
+    // Start processing buckets
+    for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+    {
+        // Load the next bucket on the background
+        const uint32 nextBucket = bucket + 1;
+
+        if( nextBucket < BB_DP_BUCKET_COUNT )
+        {
+            const bool isLastBucket = nextBucket == BB_DP_BUCKET_COUNT - 1;
+
+            // The L table buckets are loaded in chunks so that we can gain 
+            // early access any entries addressed by the current R table pointers
+            // that are not in the current L table bucket, but are found in the next one.
+            // #NOTE: A partial chunk is not considered a fully loaded chunk. So 
+            //        when a bucket has entries that don't fill-up a whole chunk,
+            //        those entries are loaded, but the partial chunk is not counted
+            //        until the next bucket loads those entries.
+            {
+                uint32 lTableBucketEntryCount = context.bucketCounts[(int)lTable][nextBucket];
+                ASSERT( (uint64)lTableBucketEntryCount <= BB_DP_MAX_ENTRIES_PER_BUCKET );
+
+                // Check if this bucket needs to complete a partial chunk from the previous
+                const uint32 prevBucketEntryCount          = context.bucketCounts[(int)lTable][bucket];
+                const uint32 prevBucketPartialEntries      = prevBucketEntryCount - ( prevBucketEntryCount / P3LTableEntriesPerChunk ) * P3LTableEntriesPerChunk;
+                const uint32 pendingEntriesToCompleteChunk = P3LTableEntriesPerChunk - prevBucketPartialEntries;
+
+                uint32 chunksLoaded = _lTableChunksLoaded;
+                
+                byte* lTableBackBuffer = (byte*)_lMap[1];
+
+                if( pendingEntriesToCompleteChunk )
+                {
+                    ASSERT( lTableBucketEntryCount >= pendingEntriesToCompleteChunk );
+
+                    lTableBucketEntryCount -= pendingEntriesToCompleteChunk;
+
+                    const size_t sizeToLoad = pendingEntriesToCompleteChunk * lMapEntrySize;
+
+                    ioQueue.ReadFile( lMapId, nextBucket, lTableBackBuffer, sizeToLoad );
+                    ioQueue.SignalFence( lTableFence, ++chunksLoaded );
+                    ioQueue.CommitCommands();
+
+                    lTableBackBuffer += sizeToLoad;
+                }
+
+                // Now load all the remaining entries full chunks
+                const uint32 chunkCount          = lTableBucketEntryCount / P3LTableEntriesPerChunk;
+                const uint32 partialChunkEntries = lTableBucketEntryCount - P3LTableEntriesPerChunk * chunkCount;
+                const size_t chunkSize           = P3LTableEntriesPerChunk * lMapEntrySize;
+
+                for( uint32 i = 0; i < chunkCount; i++ )
+                {
+                    ioQueue.ReadFile( lMapId, nextBucket, lTableBackBuffer, chunkSize );
+                    ioQueue.SignalFence( lTableFence, ++chunksLoaded );
+                    lTableBackBuffer += chunkSize;
+                }
+
+                // Finally, load a partial chunk if any
+                if( partialChunkEntries )
+                {
+                    ioQueue.ReadFile( lMapId, nextBucket, lTableBackBuffer, partialChunkEntries * lMapEntrySize );
+
+                    // Need to mark the chunk as loaded if it is the last chunk
+                    if( isLastBucket )
+                        ioQueue.SignalFence( lTableFence, ++chunksLoaded );
+                }
+
+                ioQueue.CommitCommands();
+                _lTableChunksLoaded = chunksLoaded;
+            }
+
+            // Load the R buckets
+            uint64 rEntriesToLoad = rBucketEntryCount;
+
+            // The last bucket may have less entries (or more, in the case of overflows) than the previous buckets
+            if( isLastBucket )
+            {
+                const uint64 rEntriesRead      = bucket * (uint64)rBucketEntryCount;
+                const uint64 rTableEntryCount  = context.entryCounts[(int)rTable];
+                const uint64 remainingREntries = rTableEntryCount - rEntriesRead;
+
+                FatalIf( remainingREntries > rBucketEntryCount, "Overflow entries are not supported yet." );
+                    
+                rEntriesToLoad = std::min( rBucketEntryCount, remainingREntries );
+            }
+    
+            const uint32 nextRFenceIdx = nextBucket * P3FenceId::FENCE_COUNT;
+
+            ioQueue.ReadFile( rPtrsRId, 0, _rTablePairs[1].left , rEntriesToLoad * sizeof( uint32 ) );
+            ioQueue.ReadFile( rPtrsLId, 0, _rTablePairs[1].right, rEntriesToLoad * sizeof( uint16 ) );
+            ioQueue.SignalFence( rTableFence, P3FenceId::RTableLoaded + nextRFenceIdx );
+            
+            ioQueue.ReadFile( rMapId, 0, _rMap[1], rEntriesToLoad * sizeof( uint64 ) );
+            ioQueue.SignalFence( rTableFence, P3FenceId::RMapLoaded + nextRFenceIdx );
+
+            ioQueue.CommitCommands();
+        }
+
+        // Process the bucket
+        BucketFirstPass( rTable, bucket );
+
+        // Swap buffers
+        std::swap( _lMap[0]       , _lMap[1] );
+        std::swap( _rTablePairs[0], _rTablePairs[1] );
+        std::swap( _rMap[0]       , _rMap[1] );
+    }
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase3::BucketFirstPass( const TableId rTable, const uint32 bucket )
+{   
+    DiskPlotContext& context     = _context;
+    DiskBufferQueue& ioQueue     = *context.ioQueue;
+    ThreadPool&      threadPool  = *context.threadPool;
+    Fence&           lTableFence = _lTableFence;
+    Fence&           rTableFence = _rTableFence;
+
+    const bool   isLastBucket        = bucket + 1 == BB_DP_BUCKET_COUNT;
+    const uint32 fenceIdx            = bucket * P3FenceId::FENCE_COUNT;
+
+    const uint64 maxEntries          = 1ull << _K;
+    const uint64 rTableEntryCount    = context.entryCounts[(int)rTable];
+    const uint32 rEntriesPerBucket   = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+
+    // Check how many entries we have for the rBucket
+    uint32 rtEntryCount = rEntriesPerBucket;
+
+    if( isLastBucket )
+    {
+        const uint64 numberOfReadEntries   = (uint64)rEntriesPerBucket * bucket;
+        const uint64 remainingTableEntries = rTableEntryCount - numberOfReadEntries;
+
+        FatalIf( remainingTableEntries > rEntriesPerBucket, "Overflow entries are not yet supported." );
+
+        rtEntryCount = (uint32)std::min( rtEntryCount, (uint32)remainingTableEntries );
+    }
+
+    // Ensure our R table pointers are loaded
+    rTableFence.Wait( P3FenceId::RTableLoaded + fenceIdx );
+
+    const Pairs rTablePtrs = 
+    { 
+        .left  = _rTablePairs[0].left, 
+        .right = _rTablePairs[0].right 
+    };
+
+    const uint64 maxLEntryAddress     = (uint64)rTablePtrs.left[rtEntryCount-1] + rTablePtrs.right[rtEntryCount-1];
+    const uint32 expectedMaximumChunk = (uint32)CDivT( maxLEntryAddress, (uint64)P3LTableEntriesPerChunk );
+    
+    // Ensure we have the highestchunk loaded we need
+    lTableFence.Wait( expectedMaximumChunk );
+
+
+    const uint32* lTable = (uint32*)_lMap[0];
+
+    if( rTable > TableId::Table2 )
+    {
+        // Process L table map
+        uint64* lMap = (uint64*)lTable;
+    }
+
+    // Convert line points 
+    uint64* linePoints = _linePoints;
+    uint32  entryCount = PointersToLinePoints( entryCount, _markedEntries, _rTablePairs[0], lTable, linePoints );
+
+    // Split RMap into 2 seprate 32-bit buffers containing the origin and destination (y-sorted) index.
+    // #TODO: Just have these be 2 files to begin with, no need to split them then.
+    // #TODO: Do this without treating this as 64-bit. For testing, for now its ok.
+    // #TODO: Limit the sort to 3 passes, we don't need to do the final pass since we know
+    //          all entries have the same MSByte since they are in the same bucket.
+    //        NOTE: This may NOT be the case if we start writing them without the MSByte
+    //        since we may have to at some point given that we can store these relative to its
+    //        bucket so that we can have > 2^K entries (no dropped entries).
+    // {
+    //     uint64* rMap
+        rTableFence.Wait( P3FenceId::RMapLoaded + fenceIdx );
+    //     RadixSort256::SortWithKey<BB_MAX_JOBS>( pool, _rMap
+
+    // }
+
+    /// #TODO: Distribute LPs and sorted rMap into buckets
+}
+
+//-----------------------------------------------------------
+uint32 DiskPlotPhase3::PointersToLinePoints( 
+    const uint32 entryCount, const uint64* markedEntries, 
+    const Pairs pairs, const uint32* lTable, uint64* outLinePoints )
+{
+    return 0;
+}
+
+//-----------------------------------------------------------
+// void LPJob::Run()
+// {
+//     FirstPass();
+//     SyncThreads();
+//     SecondPass();
+// }
+
+
+// //-----------------------------------------------------------
+// void LPJob::FirstPass()
+// {
+//     DiskPlotContext& context = *this->_context;
+//     DiskBufferQueue& ioQueue = *context.ioQueue;
+
+//     const TableId rTable = this->_rTable;
+//     const TableId lTable = rTable - 1;
+//     ASSERT( rTable >= TableId::Table2 );
+
+//     BitField markedEntries( this->_markedEntries );
+
+//     // #TODO: Suspend the other threads hard here, don't just spin
+//     if( this->IsControlThread() )
+//     {
+//         this->LockThreads();
+
+//         Fence& fence = *_readFence;
+
+//         fence.Reset( P3FenceId::Start );
+
+//         const FileId lMapId  = rTable == TableId::Table2 ? FileId::X : TableIdToMapFileId( lTable );
+//         const FileId rPtrId  = TableIdToBackPointerFileId( rTable );
+//         const FileId rMapId  = TableIdToMapFileId( rTable );
+//         const FileId rPtrsId = TableIdToBackPointerFileId( rTable );
+
+//          // Load rPtrs and rMap and lMap (or x, if lTable is 1)
+//         ioQueue.ReadFile( TableIdToMarkedEntriesFileId( rTable ), 0, _markedEntries, _markedEntriesSize );
+//         ioQueue.SignalFence( fence, P3FenceId::MarkedEntriesLoaded );
+        
+//         ioQueue.ReadFile( rPtrId    , 0, _rTablePairs[0].left, rBucketEntryCount * sizeof( uint32 ) );
+//         ioQueue.ReadFile( rPtrId + 1, 0, _rTablePairs[0].left, rBucketEntryCount * sizeof( uint16 ) );
+//         ioQueue.SignalFence( fence, P3FenceId::RTableLoaded );
+
+//         ioQueue.ReadFile( rMapId, 0, _rMap[0], rBucketEntryCount * sizeof( uint64 ) );
+//         ioQueue.SignalFence( fence, P3FenceId::RMapLoaded );
+
+
+//         // We always need 2 L table buckets loaded at a time to ensure that our
+//         // R ptrs have the entries they expect, since the R entries are offset by BC groups size
+//         const uint32 lBucket0EntryCount = context.bucketCounts[(int)lTable][0];
+//         const uint32 lBucket1EntryCount = context.bucketCounts[(int)lTable][1];
+
+//         const size_t lMapEntrySize = rTable == TableId::Table2 ? sizeof( uint32 ) : sizeof( uint64 );
+
+//         ioQueue.ReadFile( lMapId, 0, _lMap[0], lBucket0EntryCount * lMapEntrySize );
+//         ioQueue.SignalFence( fence, P3FenceId::RTableLoaded );
+//         ioQueue.ReadFile( lMapId, 1, _lMap[1], lBucket0EntryCount * lMapEntrySize );
+//         ioQueue.SignalFence( fence, P3FenceId::RTableLoaded + P3FenceId::FENCE_COUNT );
+//         ioQueue.CommitCommands();
+
+//         fence.Wait( P3FenceId::RTableLoaded + P3FenceId::FENCE_COUNT );
+
+//         ioQueue.SeekBucket( lMapId , 0, SeekOrigin::Begin );
+//         ioQueue.SeekBucket( rMapId , 0, SeekOrigin::Begin );
+//         ioQueue.SeekBucket( rPtrsId, 0, SeekOrigin::Begin );
+//         ioQueue.CommitCommands();
+
+//         this->ReleaseThreads();
+//     }
+//     else
+//     {
+//         this->WaitForRelease();
+//     }
+
+
+//     for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+//     {
+        
+//     }
+// }
+
+// //-----------------------------------------------------------
+// void LPJob::FirstPassBucket( const uint32 bucket )
+// {
+
+// }

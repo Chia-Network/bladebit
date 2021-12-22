@@ -115,14 +115,23 @@ inline EnumType operator+( EnumType lhs, EnumType rhs )             \
     return static_cast<EnumType>( static_cast<BaseT>( lhs ) +       \
                                   static_cast<BaseT>( rhs ) );      \
 }                                                                   \
+inline EnumType operator+( EnumType lhs, int rhs )                  \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    return static_cast<EnumType>( static_cast<BaseT>( lhs ) + rhs); \
+}                                                                   \
                                                                     \
 inline EnumType operator-( EnumType lhs, EnumType rhs )             \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     return static_cast<EnumType>( static_cast<BaseT>( lhs ) -       \
                                   static_cast<BaseT>( rhs ) );      \
-}                                                                   
-
+}                                                                   \
+inline EnumType operator-( EnumType lhs, int rhs )                  \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    return static_cast<EnumType>( static_cast<BaseT>( lhs ) - rhs );\
+}
 
 template< typename T>
 inline bool IsFlagSet( T flags, T flag )

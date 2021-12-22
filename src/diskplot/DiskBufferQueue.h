@@ -45,7 +45,7 @@ enum class FileId
     MARKED_ENTRIES_6
 
     ,_COUNT
-};
+}; ImplementArithmeticOps( FileId );
 
 struct FileSet
 {
@@ -286,7 +286,6 @@ inline FileId TableIdToBackPointerFileId( const TableId table )
     return FileId::None;
 }
 
-
 //-----------------------------------------------------------
 inline FileId TableIdToMapFileId( const TableId table )
 {
@@ -297,6 +296,26 @@ inline FileId TableIdToMapFileId( const TableId table )
         case TableId::Table4: return FileId::MAP4;
         case TableId::Table5: return FileId::MAP5;
         case TableId::Table6: return FileId::MAP6;
+
+        default:
+            ASSERT( 0 );
+            break;
+    }
+    
+    ASSERT( 0 );
+    return FileId::None;
+}
+
+//-----------------------------------------------------------
+inline FileId TableIdToMarkedEntriesFileId( const TableId table )
+{
+    switch( table )
+    {
+        case TableId::Table2: return FileId::MARKED_ENTRIES_2;
+        case TableId::Table3: return FileId::MARKED_ENTRIES_3;
+        case TableId::Table4: return FileId::MARKED_ENTRIES_4;
+        case TableId::Table5: return FileId::MARKED_ENTRIES_5;
+        case TableId::Table6: return FileId::MARKED_ENTRIES_6;
 
         default:
             ASSERT( 0 );
