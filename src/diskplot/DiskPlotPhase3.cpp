@@ -257,26 +257,30 @@ void DiskPlotPhase3::BucketFirstPass( const TableId rTable, const uint32 bucket 
     Fence&           lTableFence = _lTableFence;
     Fence&           rTableFence = _rTableFence;
 
-    const bool   isLastBucket        = bucket + 1 == BB_DP_BUCKET_COUNT;
-    const uint32 fenceIdx            = bucket * P3FenceId::FENCE_COUNT;
+    const bool   isLastBucket      = bucket + 1 == BB_DP_BUCKET_COUNT;
+    const uint32 fenceIdx          = bucket * P3FenceId::FENCE_COUNT;
 
-    const uint64 maxEntries          = 1ull << _K;
-    const uint64 rTableEntryCount    = context.entryCounts[(int)rTable];
-    const uint32 entriesPerBucket   = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+    const uint64 rTableEntryCount  = context.entryCounts[(int)rTable];
+
+    const uint64 maxEntries        = 1ull << _K;
+    const uint32 lEntriesPerBucket = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+    const uint32 rEntriesPerBucket = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );   // #NOTE: For now they're the same, but L bucket count might be changed
 
     // Current offset offset of the entries. That is, the absolute entry index
-    const uint64 entryOffset = (uint64)entriesPerBucket * bucket;
+    const uint64 lEntryOffset = (uint64)lEntriesPerBucket * _lBucketsConsumed;
+    const uint64 rEntryOffset = (uint64)rEntriesPerBucket * bucket;
+
+    uint32 rBucketEntries = rEntriesPerBucket;
 
     BitField markedEntries( _markedEntries );
 
 
     // Check how many entries we have for the rBucket
-    uint32 rEntryCount = entriesPerBucket;
+    uint32 rEntryCount = rEntriesPerBucket;
 
     if( isLastBucket )
     {
-        const uint64 numberOfReadEntries   = (uint64)entriesPerBucket * bucket;
-        const uint64 remainingTableEntries = rTableEntryCount - numberOfReadEntries;
+        const uint64 remainingTableEntries = rTableEntryCount - rEntryOffset;
 
         FatalIf( remainingTableEntries > entriesPerBucket, "Overflow entries are not yet supported." );
 
@@ -292,37 +296,43 @@ void DiskPlotPhase3::BucketFirstPass( const TableId rTable, const uint32 bucket 
         .right = _rTablePairs[0].right 
     };
 
-    // Find which is the greatest marked R entry and what address on the L table it needs
-    const uint64 maxLAddress       = entryOffset + entriesPerBucket;
-    uint32       remainderREntries = 0;
-
-    // #TODO: Do NOT do this on the last bucket
-    for( int64 i = entryOffset + (int64)rEntryCount-1; i >= (int64)entryOffset; i-- )
-    {
-        if( !markedEntries[i] )
-            continue;
-
-        const uint64 lAddress = (uint64)rTablePtrs.left[i] + rTablePtrs.right[i];
-
-        ASSERT( lAddress >= entryOffset );
-
-        // Do we have this L table index loaded?
-        if( lAddress <= maxLAddress )
-        {
-            const uint64 newEntryCount = (uint64)( i - entryOffset );
-            
-            remainderREntries = rEntryCount - newEntryCount;
-            rEntryCount       = newEntryCount;
-
-            break;
-        }
-    }
-
+    /**
+     * @brief #TODO: Continue work in this function when we come back.
+     * 
+     */
     // Process R table entries until we have finished them
     for( uint32 rEntriesProcessed = 0 ; rEntriesProcessed < rEntryCount; rEntriesProcessed += rEntryCount )
     {
+        // Find which is the greatest marked R entry and what address on the L table it needs
+        const uint64 maxLAddress       = entryOffset + entriesPerBucket;
+        uint32       remainderREntries = 0;
+
+        // #TODO: Do NOT do this on the last bucket
+        for( int64 i = entryOffset + (int64)rEntryCount-1; i >= (int64)entryOffset; i-- )
+        {
+            if( !markedEntries[i] )
+                continue;
+
+            const uint64 lAddress = (uint64)rTablePtrs.left[i] + rTablePtrs.right[i];
+
+            ASSERT( lAddress >= entryOffset );
+
+            // Do we have this L table index loaded?
+            if( lAddress <= maxLAddress )
+            {
+                const uint64 newEntryCount = (uint64)( i - entryOffset );
+                
+                remainderREntries = rEntryCount - newEntryCount;
+                rEntryCount       = newEntryCount;
+
+                break;
+            }
+        }
+
         // Ensure the L table is loaded
         lTableFence.Wait( _lBucketsConsumed );
+
+        ASSERT( (uint64)rTablePtrs.left + rTablePtrs.right <= _lMap )
 
         const uint32* lTable = (uint32*)_lMap[0];
 
@@ -339,7 +349,11 @@ void DiskPlotPhase3::BucketFirstPass( const TableId rTable, const uint32 bucket 
         // Mark this L bucket as consumed, and load next L bucket
         _lBucketsConsumed++;
         std::swap( _lMap[0], _lMap[1] );
-        LoadNextLTableMap( rTable - 1 );
+
+        if( rEntriesProcessed < rBucketEntries )
+        {
+            LoadNextLTableMap( rTable - 1 );
+        }
     }
 
 
