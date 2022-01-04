@@ -26,7 +26,8 @@ struct AdjacentBucketInfo
     uint64* metaB;
     Pairs   pairs;
     uint32  groupCounts[2];
-    uint32  matchCount;
+    uint32  groupOffset;        // Index in the previous table where the y
+                                // of the groups copied here starts.
 };
 
 
@@ -149,10 +150,11 @@ private:
         Pairs         pairs,
         uint32        maxPairs,
         uint32        sortKeyOffset,
-        uint32&       outCurGroupCount
+        uint32&       outCurGroupCount,
+        uint32        pairsOffsetL,
+        uint32        pairsOffsetR
     );
 
-    void GenFx( TableId tableId, uint bucketIndex, Pairs pairs, uint pairCount );
     
     template<TableId tableId>
     void GenFxForTable( uint bucketIdx, uint entryCount, const Pairs pairs, 

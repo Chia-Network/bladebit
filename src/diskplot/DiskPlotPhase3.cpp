@@ -81,7 +81,8 @@ DiskPlotPhase3::~DiskPlotPhase3()
 
 //-----------------------------------------------------------
 void DiskPlotPhase3::Run()
-{   
+{
+    return;
     DiskPlotContext& context = _context;
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
@@ -146,7 +147,7 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     _lBucketsConsumed    = 0;
 
     TableFirstPass( rTable  );
-    TableSecondPass( rTable );
+//    TableSecondPass( rTable );
     
 }
 
@@ -251,128 +252,128 @@ void DiskPlotPhase3::TableFirstPass( const TableId rTable )
 //-----------------------------------------------------------
 void DiskPlotPhase3::BucketFirstPass( const TableId rTable, const uint32 bucket )
 {   
-    DiskPlotContext& context     = _context;
-    DiskBufferQueue& ioQueue     = *context.ioQueue;
-    ThreadPool&      threadPool  = *context.threadPool;
-    Fence&           lTableFence = _lTableFence;
-    Fence&           rTableFence = _rTableFence;
-
-    const bool   isLastBucket      = bucket + 1 == BB_DP_BUCKET_COUNT;
-    const uint32 fenceIdx          = bucket * P3FenceId::FENCE_COUNT;
-
-    const uint64 rTableEntryCount  = context.entryCounts[(int)rTable];
-
-    const uint64 maxEntries        = 1ull << _K;
-    const uint32 lEntriesPerBucket = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
-    const uint32 rEntriesPerBucket = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );   // #NOTE: For now they're the same, but L bucket count might be changed
-
-    // Current offset of the entries. That is, the absolute entry index
-    const uint64 lEntryOffset = (uint64)lEntriesPerBucket * _lBucketsConsumed;
-    const uint64 rEntryOffset = (uint64)rEntriesPerBucket * bucket;
-
-    uint32 rBucketEntries = rEntriesPerBucket;
-
-    BitField markedEntries( _markedEntries );
-
-
-    // Check how many entries we have for the rBucket
-    uint32 rEntryCount = rEntriesPerBucket;
-
-    if( isLastBucket )
-    {
-        const uint64 remainingTableEntries = rTableEntryCount - rEntryOffset;
-
-        FatalIf( remainingTableEntries > entriesPerBucket, "Overflow entries are not yet supported." );
-
-        rEntryCount = (uint32)std::min( rEntryCount, (uint32)remainingTableEntries );
-    }
-
-    // Ensure our R table pointers are loaded
-    rTableFence.Wait( P3FenceId::RTableLoaded + fenceIdx );
-
-    const Pairs rTablePtrs = 
-    { 
-        .left  = _rTablePairs[0].left, 
-        .right = _rTablePairs[0].right 
-    };
-
-    /**
-     * @brief #TODO: Continue work in this function when we come back.
-     * 
-     */
-    // Process R table entries until we have finished them
-    for( uint32 rEntriesProcessed = 0 ; rEntriesProcessed < rEntryCount; rEntriesProcessed += rEntryCount )
-    {
-        // Find which is the greatest marked R entry and what address on the L table it needs
-        const uint64 maxLAddress       = entryOffset + entriesPerBucket;
-        uint32       remainderREntries = 0;
-
-        // #TODO: Do NOT do this on the last bucket
-        for( int64 i = entryOffset + (int64)rEntryCount-1; i >= (int64)entryOffset; i-- )
-        {
-            if( !markedEntries[i] )
-                continue;
-
-            const uint64 lAddress = (uint64)rTablePtrs.left[i] + rTablePtrs.right[i];
-
-            ASSERT( lAddress >= entryOffset );
-
-            // Do we have this L table index loaded?
-            if( lAddress <= maxLAddress )
-            {
-                const uint64 newEntryCount = (uint64)( i - entryOffset );
-                
-                remainderREntries = rEntryCount - newEntryCount;
-                rEntryCount       = newEntryCount;
-
-                break;
-            }
-        }
-
-        // Ensure the L table is loaded
-        lTableFence.Wait( _lBucketsConsumed );
-
-        ASSERT( (uint64)rTablePtrs.left + rTablePtrs.right <= _lMap )
-
-        const uint32* lTable = (uint32*)_lMap[0];
-
-        if( rTable > TableId::Table2 )
-        {
-            // #TODO: Process L table map
-            uint64* lMap = (uint64*)lTable;
-        }
-
-        // Convert line points 
-        uint64* linePoints = _linePoints;
-        uint32  lpCount    = PointersToLinePoints( rEntryCount, _markedEntries, rTablePtrs, lTable, linePoints );
-
-        // Mark this L bucket as consumed, and load next L bucket
-        _lBucketsConsumed++;
-        std::swap( _lMap[0], _lMap[1] );
-
-        if( rEntriesProcessed < rBucketEntries )
-        {
-            LoadNextLTableMap( rTable - 1 );
-        }
-    }
-
-
-    // Split RMap into 2 separate 32-bit buffers containing the origin and destination (y-sorted) index.
-    // #TODO: Just have these be 2 files to begin with, no need to split them then.
-    // #TODO: Do this without treating this as 64-bit. For testing, for now its ok.
-    // #TODO: Limit the sort to 3 passes, we don't need to do the final pass since we know
-    //          all entries have the same MSByte since they are in the same bucket.
-    //        NOTE: This may NOT be the case if we start writing them without the MSByte
-    //        since we may have to at some point given that we can store these relative to its
-    //        bucket so that we can have > 2^K entries (no dropped entries).
-    // {
-    //     uint64* rMap
-        rTableFence.Wait( P3FenceId::RMapLoaded + fenceIdx );
-    //     RadixSort256::SortWithKey<BB_MAX_JOBS>( pool, _rMap
-
-    // }
-
-    /// #TODO: Distribute LPs and sorted rMap into buckets
+//    DiskPlotContext& context     = _context;
+//    DiskBufferQueue& ioQueue     = *context.ioQueue;
+//    ThreadPool&      threadPool  = *context.threadPool;
+//    Fence&           lTableFence = _lTableFence;
+//    Fence&           rTableFence = _rTableFence;
+//
+//    const bool   isLastBucket      = bucket + 1 == BB_DP_BUCKET_COUNT;
+//    const uint32 fenceIdx          = bucket * P3FenceId::FENCE_COUNT;
+//
+//    const uint64 rTableEntryCount  = context.entryCounts[(int)rTable];
+//
+//    const uint64 maxEntries        = 1ull << _K;
+//    const uint32 lEntriesPerBucket = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+//    const uint32 rEntriesPerBucket = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );   // #NOTE: For now they're the same, but L bucket count might be changed
+//
+//    // Current offset of the entries. That is, the absolute entry index
+//    const uint64 lEntryOffset = (uint64)lEntriesPerBucket * _lBucketsConsumed;
+//    const uint64 rEntryOffset = (uint64)rEntriesPerBucket * bucket;
+//
+//    uint32 rBucketEntries = rEntriesPerBucket;
+//
+//    BitField markedEntries( _markedEntries );
+//
+//
+//    // Check how many entries we have for the rBucket
+//    uint32 rEntryCount = rEntriesPerBucket;
+//
+//    if( isLastBucket )
+//    {
+//        const uint64 remainingTableEntries = rTableEntryCount - rEntryOffset;
+//
+//        FatalIf( remainingTableEntries > entriesPerBucket, "Overflow entries are not yet supported." );
+//
+//        rEntryCount = (uint32)std::min( rEntryCount, (uint32)remainingTableEntries );
+//    }
+//
+//    // Ensure our R table pointers are loaded
+//    rTableFence.Wait( P3FenceId::RTableLoaded + fenceIdx );
+//
+//    const Pairs rTablePtrs =
+//    {
+//        .left  = _rTablePairs[0].left,
+//        .right = _rTablePairs[0].right
+//    };
+//
+//    /**
+//     * @brief #TODO: Continue work in this function when we come back.
+//     *
+//     */
+//    // Process R table entries until we have finished them
+//    for( uint32 rEntriesProcessed = 0 ; rEntriesProcessed < rEntryCount; rEntriesProcessed += rEntryCount )
+//    {
+//        // Find which is the greatest marked R entry and what address on the L table it needs
+//        const uint64 maxLAddress       = entryOffset + entriesPerBucket;
+//        uint32       remainderREntries = 0;
+//
+//        // #TODO: Do NOT do this on the last bucket
+//        for( int64 i = entryOffset + (int64)rEntryCount-1; i >= (int64)entryOffset; i-- )
+//        {
+//            if( !markedEntries[i] )
+//                continue;
+//
+//            const uint64 lAddress = (uint64)rTablePtrs.left[i] + rTablePtrs.right[i];
+//
+//            ASSERT( lAddress >= entryOffset );
+//
+//            // Do we have this L table index loaded?
+//            if( lAddress <= maxLAddress )
+//            {
+//                const uint64 newEntryCount = (uint64)( i - entryOffset );
+//
+//                remainderREntries = rEntryCount - newEntryCount;
+//                rEntryCount       = newEntryCount;
+//
+//                break;
+//            }
+//        }
+//
+//        // Ensure the L table is loaded
+//        lTableFence.Wait( _lBucketsConsumed );
+//
+//        ASSERT( (uint64)rTablePtrs.left + rTablePtrs.right <= _lMap )
+//
+//        const uint32* lTable = (uint32*)_lMap[0];
+//
+//        if( rTable > TableId::Table2 )
+//        {
+//            // #TODO: Process L table map
+//            uint64* lMap = (uint64*)lTable;
+//        }
+//
+//        // Convert line points
+//        uint64* linePoints = _linePoints;
+//        uint32  lpCount    = PointersToLinePoints( rEntryCount, _markedEntries, rTablePtrs, lTable, linePoints );
+//
+//        // Mark this L bucket as consumed, and load next L bucket
+//        _lBucketsConsumed++;
+//        std::swap( _lMap[0], _lMap[1] );
+//
+//        if( rEntriesProcessed < rBucketEntries )
+//        {
+//            LoadNextLTableMap( rTable - 1 );
+//        }
+//    }
+//
+//
+//    // Split RMap into 2 separate 32-bit buffers containing the origin and destination (y-sorted) index.
+//    // #TODO: Just have these be 2 files to begin with, no need to split them then.
+//    // #TODO: Do this without treating this as 64-bit. For testing, for now its ok.
+//    // #TODO: Limit the sort to 3 passes, we don't need to do the final pass since we know
+//    //          all entries have the same MSByte since they are in the same bucket.
+//    //        NOTE: This may NOT be the case if we start writing them without the MSByte
+//    //        since we may have to at some point given that we can store these relative to its
+//    //        bucket so that we can have > 2^K entries (no dropped entries).
+//    // {
+//    //     uint64* rMap
+//        rTableFence.Wait( P3FenceId::RMapLoaded + fenceIdx );
+//    //     RadixSort256::SortWithKey<BB_MAX_JOBS>( pool, _rMap
+//
+//    // }
+//
+//    /// #TODO: Distribute LPs and sorted rMap into buckets
 }
 
 //-----------------------------------------------------------

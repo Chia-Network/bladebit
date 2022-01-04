@@ -5,16 +5,27 @@
     <option name="openedFilesInfos">
       <list>
         <OpenedFileInfo>
-          <option name="caretOffset" value="0" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/README.md" />
+          <option name="caretOffset" value="36576" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotPhase1.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="13092" />
+          <option name="caretOffset" value="4480" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotPhase1.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="5401" />
           <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotPhase3.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="46790" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotPhase1.cpp" />
+          <option name="caretOffset" value="285" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotConfig.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="1168" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotContext.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="fileUrl" value="mock:///DiffPreview" />
         </OpenedFileInfo>
       </list>
     </option>

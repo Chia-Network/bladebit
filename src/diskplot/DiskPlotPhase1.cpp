@@ -200,7 +200,7 @@ void DiskPlotPhase1::Run()
     #if _DEBUG
     {
         // Write bucket counts
-        FileStream bucketCounts, tableCounts;
+        FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 
         if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
         {
@@ -217,6 +217,14 @@ void DiskPlotPhase1::Run()
         }
         else
             Log::Error( "Failed to open table counts file." );
+
+        if( backPtrBucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_PTR_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
+        {
+            if( backPtrBucketCounts.Write( cx.ptrTableBucketCounts, sizeof( cx.ptrTableBucketCounts ) ) != sizeof( cx.ptrTableBucketCounts ) )
+                Log::Error( "Failed to write to back pointer bucket counts file." );
+        }
+        else
+            Log::Error( "Failed to open back pointer bucket counts file." );
     }
     #endif
 }
@@ -704,6 +712,8 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     GroupInfo groupInfos[BB_MAX_JOBS];
     uint32 matchCount = MatchBucket( tableId, bucketIdx, bucket, entryCount, groupInfos );
 
+    cx.ptrTableBucketCounts[(int)tableId][bucketIdx] = matchCount; // Store how many entries generated (used for L/R pointers,
+                                                                   // since we don't sort them yet).
 
     ///
     /// Sort metadata with the key
@@ -743,6 +753,9 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     {
         // Generate matches that were 
         crossBucketMatches = ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount, bucket.y0, fxMetaInA, fxMetaInB );
+
+        // Add these matches to the previous bucket
+        cx.ptrTableBucketCounts[(int)tableId][bucketIdx-1] += crossBucketMatches;
     }
 
     ///
@@ -788,6 +801,8 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
         const uint32 penultimateGroupIdx = lastThreadGrp.groupBoundaries[lastThreadGrp.groupCount-2];
         const uint32 lastGroupIdx        = lastThreadGrp.groupBoundaries[lastThreadGrp.groupCount-1];
+
+        crossBucketInfo.groupOffset = penultimateGroupIdx;
 
         crossBucketInfo.groupCounts[0]   = lastGroupIdx - penultimateGroupIdx;
         crossBucketInfo.groupCounts[1]   = entryCount - lastGroupIdx;
@@ -914,32 +929,40 @@ uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket
     
     uint32 sortKeyOffset     = bucket.tableEntryCount;
 
+    uint32 pairsOffsetL      = crossBucketInfo.groupOffset;
+    uint32 pairsOffsetR      = crossBucketInfo.groupCounts[1];  // Add the missing group so that the offset is corrected
+
     // Process penultimate group from the previous bucket & 
     // the first group from the current bucket
     matchesSecondLast = ProcessCrossBucketGroups<tableId>(
-        prevGroupY, 
-        prevGroupMetaA, 
-        prevGroupMetaB,
-        curGroupY, 
-        curGroupMetaA, 
-        curGroupMetaB,
-        yTmp, 
-        metaATmp, 
-        metaBTmp,
-        yOut,
-        metaAOut,
-        metaBOut,
-        prevGroupCount, 
-        entryCount,
-        prevBucket, 
-        bucketIdx,
-        pairs, 
-        maxEntries,
-        sortKeyOffset,
-        curGroupCount );
+            prevGroupY,
+            prevGroupMetaA,
+            prevGroupMetaB,
+            curGroupY,
+            curGroupMetaA,
+            curGroupMetaB,
+            yTmp,
+            metaATmp,
+            metaBTmp,
+            yOut,
+            metaAOut,
+            metaBOut,
+            prevGroupCount,
+            entryCount,
+            prevBucket,
+            bucketIdx,
+            pairs,
+            maxEntries,
+            sortKeyOffset,
+            curGroupCount,
+            pairsOffsetL,
+            pairsOffsetR );
 
     // Process the last group from the previous bucket &
     // the second group from the current bucket
+
+    pairsOffsetL   += prevGroupCount;
+    pairsOffsetR   =  curGroupCount;
 
     prevGroupY     += prevGroupCount;
     prevGroupMetaA += prevGroupCount;
@@ -956,26 +979,28 @@ uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket
     prevGroupCount = crossBucketInfo.groupCounts[1];
 
     matchesLast = ProcessCrossBucketGroups<tableId>(
-        prevGroupY,
-        prevGroupMetaA,
-        prevGroupMetaB,
-        curGroupY,
-        curGroupMetaA,
-        curGroupMetaB,
-        yTmp,
-        metaATmp,
-        metaBTmp,
-        yOut,
-        metaAOut,
-        metaBOut,
-        prevGroupCount,
-        entryCount,
-        prevBucket,
-        bucketIdx,
-        pairs,
-        maxEntries,
-        sortKeyOffset,
-        curGroupCount );
+            prevGroupY,
+            prevGroupMetaA,
+            prevGroupMetaB,
+            curGroupY,
+            curGroupMetaA,
+            curGroupMetaB,
+            yTmp,
+            metaATmp,
+            metaBTmp,
+            yOut,
+            metaAOut,
+            metaBOut,
+            prevGroupCount,
+            entryCount,
+            prevBucket,
+            bucketIdx,
+            pairs,
+            maxEntries,
+            sortKeyOffset,
+            curGroupCount,
+            pairsOffsetL,
+            pairsOffsetR );
 
 
     const uint32 crossMatches = matchesSecondLast + matchesLast;
@@ -985,28 +1010,15 @@ uint32 DiskPlotPhase1::ProcessAdjoiningBuckets( uint32 bucketIdx, Bucket& bucket
 
 //-----------------------------------------------------------
 template<TableId tableId, typename TMetaA, typename TMetaB>
-uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
-    const uint32* prevBucketY,
-    const TMetaA* prevBucketMetaA,
-    const TMetaB* prevBucketMetaB,
-    const uint32* curBucketY,
-    const TMetaA* curBucketMetaA,
-    const TMetaB* curBucketMetaB,
-    uint32*       tmpY,
-    TMetaA*       tmpMetaA,
-    TMetaB*       tmpMetaB,
-    uint32*       outY,
-    uint64*       outMetaA,
-    uint64*       outMetaB,
-    uint32        prevBucketGroupCount,
-    uint32        curBucketEntryCount,
-    uint32        prevBucketIndex,
-    uint32        curBucketIndex,
-    Pairs         pairs,
-    uint32        maxPairs,
-    uint32        sortKeyOffset,
-    uint32&       outCurGroupCount
-)
+uint32 DiskPlotPhase1::ProcessCrossBucketGroups( const uint32 *prevBucketY, const TMetaA *prevBucketMetaA,
+                                                 const TMetaB *prevBucketMetaB, const uint32 *curBucketY,
+                                                 const TMetaA *curBucketMetaA, const TMetaB *curBucketMetaB,
+                                                 uint32 *tmpY, TMetaA *tmpMetaA, TMetaB *tmpMetaB, uint32 *outY,
+                                                 uint64 *outMetaA, uint64 *outMetaB, uint32 prevBucketGroupCount,
+                                                 uint32 curBucketEntryCount, uint32 prevBucketIndex,
+                                                 uint32 curBucketIndex, Pairs pairs, uint32 maxPairs,
+                                                 uint32 sortKeyOffset, uint32 &outCurGroupCount,
+                                                 uint32 pairsOffsetL, uint32 pairsOffsetR )
 {
     const size_t MetaInASize  = TableMetaIn<tableId>::SizeA;
     const size_t MetaInBSize  = TableMetaIn<tableId>::SizeB;
@@ -1060,18 +1072,18 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     {
         // Write pairs for table
         {
-            // Get previous bucket count and use it as our offset, then update it
-            const uint32 pairsOffset = _cx.bucketCounts[(int)tableId][prevBucketIndex];
-            _cx.bucketCounts[(int)tableId][prevBucketIndex] += matches;
-
             uint32* lPairs = (uint32*)_diskQueue->GetBuffer( sizeof( uint32 ) * matches );
             uint16* rPairs = (uint16*)_diskQueue->GetBuffer( sizeof( uint16 ) * matches );
 
             // Copy pairs, fixing L pairs with the offset in the previous bucket
             for( uint i = 0; i < matches; i++ )
-                lPairs[i] = pairs.left[i] + pairsOffset;
+                lPairs[i] = pairs.left[i] + pairsOffsetL;
 
-            bbmemcpy_t( rPairs, pairs.right, matches );
+            // Also fix R pairs with the proper offset. Required since groups are excluded
+            // when doing matches, this makes up for the missing group entries so that the offset is corrected.
+            for( uint i = 0; i < matches; i++ )
+                rPairs[i] = pairs.right[i] + pairsOffsetR;
+
 
             // Write to disk
             const FileId leftId  = TableIdToBackPointerFileId( tableId );

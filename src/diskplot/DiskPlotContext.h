@@ -77,6 +77,15 @@ struct DiskPlotContext
     uint32       bucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];
     uint64       entryCounts [(uint)TableId::_Count];
 
+    // Since back pointer table entries are not sorted along with y,
+    // (instead we use a mapping table), and since their values are stored
+    // in local-to-bucket coordinates, we need to know how many entries
+    // were generated given an L table bucket.
+    // This stores how many R entries were generated given an L table bucket,
+    // including the cross-bucket entries.
+    uint32       ptrTableBucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];;
+
+
     DiskFPBufferSizes* bufferSizes;
 };
 
