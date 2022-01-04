@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
+  <component name="UnattendedHostPersistenceState">
+    <option name="openedFilesInfos">
+      <list>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="0" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/README.md" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="13092" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotPhase3.cpp" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="46790" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotPhase1.cpp" />
+        </OpenedFileInfo>
+      </list>
+    </option>
+  </component>
+</project>

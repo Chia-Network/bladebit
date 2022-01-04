@@ -777,7 +777,6 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     ///
     /// Save the last 2 groups worth of data for this bucket.
     ///
-     // If not the last group, save info to match adjacent bucket groups (cross-bucket matches)
     if( bucketIdx + 1 < BB_DP_BUCKET_COUNT )
     {
         // Copy over the last 2 groups worth of y values to 
@@ -793,7 +792,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         crossBucketInfo.groupCounts[0]   = lastGroupIdx - penultimateGroupIdx;
         crossBucketInfo.groupCounts[1]   = entryCount - lastGroupIdx;
 
-        // // Copy over the last 2 groups worth of entries to the reserved area of our current bucket
+        // Copy over the last 2 groups worth of entries to the reserved area of our current bucket
         const uint32 last2GroupEntryCount = crossBucketInfo.groupCounts[0] + crossBucketInfo.groupCounts[1];
         ASSERT( last2GroupEntryCount <= kBC * 2 );
 
@@ -1061,12 +1060,16 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups(
     {
         // Write pairs for table
         {
+            // Get previous bucket count and use it as our offset, then update it
+            const uint32 pairsOffset = _cx.bucketCounts[(int)tableId][prevBucketIndex];
+            _cx.bucketCounts[(int)tableId][prevBucketIndex] += matches;
+
             uint32* lPairs = (uint32*)_diskQueue->GetBuffer( sizeof( uint32 ) * matches );
             uint16* rPairs = (uint16*)_diskQueue->GetBuffer( sizeof( uint16 ) * matches );
 
             // Copy pairs, fixing L pairs with the offset in the previous bucket
             for( uint i = 0; i < matches; i++ )
-                lPairs[i] = pairs.left[i] + sortKeyOffset;
+                lPairs[i] = pairs.left[i] + pairsOffset;
 
             bbmemcpy_t( rPairs, pairs.right, matches );
 
@@ -1230,7 +1233,6 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
     
     uint32 matchCount = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos, bucket.pairs );
 
-    // // #TODO: Make this multi-threaded... Testing for now
     // Write pairs to file
     Pairs& pairs = bucket.pairs;
 
@@ -1349,7 +1351,7 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
             }
 
             #if _DEBUG
-            ASSERT( foundBoundary );
+                ASSERT( foundBoundary );
             #endif
         }
 

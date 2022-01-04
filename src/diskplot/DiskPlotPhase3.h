@@ -44,7 +44,7 @@ private:
     uint64  _lTableEntriesLoaded = 0;
     uint32  _lBucketsLoading     = 0;
     uint32  _lBucketsConsumed    = 0;
-    
+    uint32  _lBucketPrefixCount  = 0;
     // uint64  _lTableOffset       = 0;    // The starting offset of the lowest bucket currently loaded on the l table
     // int32   _tableBufferIdx     = 0;    // Current entry offset from the l table buckets
 };

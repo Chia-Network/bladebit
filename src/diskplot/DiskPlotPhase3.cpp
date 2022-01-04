@@ -266,7 +266,7 @@ void DiskPlotPhase3::BucketFirstPass( const TableId rTable, const uint32 bucket 
     const uint32 lEntriesPerBucket = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
     const uint32 rEntriesPerBucket = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );   // #NOTE: For now they're the same, but L bucket count might be changed
 
-    // Current offset offset of the entries. That is, the absolute entry index
+    // Current offset of the entries. That is, the absolute entry index
     const uint64 lEntryOffset = (uint64)lEntriesPerBucket * _lBucketsConsumed;
     const uint64 rEntryOffset = (uint64)rEntriesPerBucket * bucket;
 
@@ -357,7 +357,7 @@ void DiskPlotPhase3::BucketFirstPass( const TableId rTable, const uint32 bucket 
     }
 
 
-    // Split RMap into 2 seprate 32-bit buffers containing the origin and destination (y-sorted) index.
+    // Split RMap into 2 separate 32-bit buffers containing the origin and destination (y-sorted) index.
     // #TODO: Just have these be 2 files to begin with, no need to split them then.
     // #TODO: Do this without treating this as 64-bit. For testing, for now its ok.
     // #TODO: Limit the sort to 3 passes, we don't need to do the final pass since we know

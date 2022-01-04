@@ -11,9 +11,11 @@ _[tT]mp/
 .keys/
 dist/
 
+
 .DS_Store
 *.log
 park*_hash.txt
 
 lib/*
 build/
+cmake-build*/
