@@ -8,6 +8,9 @@
 #include "diskplot/jobs/IOJob.h"
 #include "threading/ThreadPool.h"
 
+// TEST:
+void TestDiskBackPointers();
+
 struct GlobalConfig
 {
 
@@ -99,6 +102,7 @@ int main( int argc, const char* argv[] )
         Log::Line( "NDEBUG: OFF" );
     #endif
 
+    // TestDiskBackPointers(); return 0;
 
     argc--;
     argv++;

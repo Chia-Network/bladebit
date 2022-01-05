@@ -97,7 +97,7 @@ void DiskPlotPhase1::Run()
 
     #if BB_DP_DBG_SKIP_PHASE_1
     {
-        FileStream bucketCounts, tableCounts;
+        FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 
         if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
         {
@@ -125,6 +125,18 @@ void DiskPlotPhase1::Run()
         {
             Log::Error( "Failed to open table counts file." );
             goto CONTINUE;
+        }
+
+        if( backPtrBucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_PTR_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( backPtrBucketCounts.Read( cx.ptrTableBucketCounts, sizeof( cx.ptrTableBucketCounts ) ) != sizeof( cx.ptrTableBucketCounts ) )
+            {
+                Fatal( "Failed to read from pointer bucket counts file." );
+            }
+        }
+        else
+        {
+            Fatal( "Failed to open pointer bucket counts file." );
         }
 
         return;
@@ -756,6 +768,9 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
         // Add these matches to the previous bucket
         cx.ptrTableBucketCounts[(int)tableId][bucketIdx-1] += crossBucketMatches;
+
+        // Write the pending matches from this bucket now that we've written the cross-bucket entries
+        WritePendingBackPointers( bucket.pairs, tableId, bucketIdx, matchCount );
     }
 
     ///
@@ -1245,19 +1260,24 @@ uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& buc
     
     uint32 matchCount = Match( bucketIdx, maxPairsPerThread, bucket.y0, groupInfos, bucket.pairs );
 
-    // Write pairs to file
-    Pairs& pairs = bucket.pairs;
+    // Only write to file now if we're at bucket 0.
+    // Otherwise we might have to wait for cross-bucket entries to be written first.
+    if( bucketIdx == 0 )
+        WritePendingBackPointers( bucket.pairs, table, bucketIdx, matchCount );
 
-    // // #TODO: Should we write these at intervals?
+    return matchCount;
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::WritePendingBackPointers( const Pairs& pairs, TableId table, uint32 bucketIdx, uint32 entryCount )
+{
     const FileId idLeft  = GetBackPointersFileIdForTable( table );
     const FileId idRight = (FileId)( (int)idLeft + 1 );
 
-    _diskQueue->WriteFile( idLeft , 0, pairs.left , matchCount * sizeof( uint32 ) );
-    _diskQueue->WriteFile( idRight, 0, pairs.right, matchCount * sizeof( uint16 ) );
+    _diskQueue->WriteFile( idLeft , 0, pairs.left , entryCount * sizeof( uint32 ) );
+    _diskQueue->WriteFile( idRight, 0, pairs.right, entryCount * sizeof( uint16 ) );
     _diskQueue->SignalFence( _bucket->backPointersFence );
     _diskQueue->CommitCommands();
-
-    return matchCount;
 }
 
 //-----------------------------------------------------------
