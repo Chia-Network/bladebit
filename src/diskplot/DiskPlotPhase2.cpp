@@ -105,71 +105,104 @@ void DiskPlotPhase2::Run()
             job.bucketBuffers       = nullptr;
         }
 
+        //
         // #TEST
         //
-        if( 0 )
+        // if( 0 )
         {
-            const uint64 rEntryCount = context.entryCounts[(int)TableId::Table7];
-            const uint64 lEntryCount = context.entryCounts[(int)TableId::Table6];
+            uint32* lPtrBuf = bbcvirtalloc<uint32>( 1ull << _K );
+            uint16* rPtrBuf = bbcvirtalloc<uint16>( 1ull << _K );
 
-            uint32* lPtr = bbcvirtalloc<uint32>( rEntryCount );
-            uint16* rPtr = bbcvirtalloc<uint16>( rEntryCount );
-
-            byte* markedEntries = bbcvirtalloc<byte>( 1ull << _K );
-            BitField bitField( (uint64*)markedEntries );
-
+            byte* rMarkedBuffer = bbcvirtalloc<byte>( 1ull << _K );
+            byte* lMarkedBuffer = bbcvirtalloc<byte>( 1ull << _K );
+            
+            for( TableId rTable = TableId::Table7; rTable > TableId::Table1; rTable = rTable-1 )
             {
-                Log::Line( "Reading table." );
-                Fence fence;
-                queue.ReadFile( FileId::T7_L, 0, lPtr, sizeof( uint32 ) * rEntryCount );
-                queue.ReadFile( FileId::T7_R, 0, rPtr, sizeof( uint16 ) * rEntryCount );
-                queue.SignalFence( fence );
-                queue.CommitCommands();
-                fence.Wait();
-            }
+                const TableId lTable = rTable-1;
 
-            uint64 entryOffset = 0;
+                const uint64 rEntryCount = context.entryCounts[(int)rTable];
+                const uint64 lEntryCount = context.entryCounts[(int)lTable];
 
-            Log::Line( "Marking entries..." );
-            for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
-            {
-                const uint32 rBucketCount = context.ptrTableBucketCounts[(int)TableId::Table7][bucket];
+                // BitField rMarkedEntries( (uint64*)rMarkedBuffer );
+                // BitField lMarkedEntries( (uint64*)lMarkedBuffer );
 
-                for( uint e = 0; e < rBucketCount; e++ )
+                Log::Line( "Reading R table %u...", rTable+1 );
                 {
-                    uint64 l = (uint64)lPtr[e] + entryOffset;
-                    uint64 r = (uint64)rPtr[e] + l;
+                    const FileId rTableIdL = TableIdToBackPointerFileId( rTable );
+                    const FileId rTableIdR = (FileId)((int)rTableIdL + 1 );
 
-                    ASSERT( l < ( 1ull << _K ) );
-                    ASSERT( r < ( 1ull << _K ) );
-
-                    // markedEntries[l] = 1;
-                    // markedEntries[r] = 1;
-                    bitField.Set( l );
-                    bitField.Set( r );
+                    Fence fence;
+                    queue.ReadFile( rTableIdL, 0, lPtrBuf, sizeof( uint32 ) * rEntryCount );
+                    queue.ReadFile( rTableIdR, 0, rPtrBuf, sizeof( uint16 ) * rEntryCount );
+                    queue.SignalFence( fence );
+                    queue.CommitCommands();
+                    fence.Wait();
                 }
 
 
-                lPtr += rBucketCount;
-                rPtr += rBucketCount;
+                uint32* lPtr = lPtrBuf;
+                uint16* rPtr = rPtrBuf;
+                
+                uint64 lEntryOffset = 0;
+                uint64 rTableOffset = 0;
 
-                const uint32 lTableBucketCount = context.bucketCounts[(int)TableId::Table6][bucket];
-                entryOffset += lTableBucketCount;
+                Log::Line( "Marking entries..." );
+                for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+                {
+                    const uint32 rBucketCount = context.ptrTableBucketCounts[(int)rTable][bucket];
+                    const uint32 lBucketCount = context.bucketCounts[(int)lTable][bucket];
+
+                    for( uint e = 0; e < rBucketCount; e++ )
+                    {
+                        // #NOTE: The bug is related to this.
+                        //        Somehow the entries we get from the R table
+                        //        are not filtering properly...
+                        //        We tested without this and got the exact same
+                        //        results from the reference implementation
+                        // if( rTable < TableId::Table7 )
+                        // {
+                        //     const uint64 rIdx = rTableOffset + e;
+                        //     // if( !rMarkedEntries.Get( rIdx ) )
+                        //     if( !rMarkedBuffer[rIdx] )
+                        //         continue;
+                        // }
+
+                        uint64 l = (uint64)lPtr[e] + lEntryOffset;
+                        uint64 r = (uint64)rPtr[e] + l;
+
+                        ASSERT( l < ( 1ull << _K ) );
+                        ASSERT( r < ( 1ull << _K ) );
+
+                        lMarkedBuffer[l] = 1;
+                        lMarkedBuffer[r] = 1;
+                        // lMarkedEntries.Set( l );
+                        // lMarkedEntries.Set( r );
+                    }
+
+                    lPtr += rBucketCount;
+                    rPtr += rBucketCount;
+
+                    lEntryOffset += lBucketCount;
+                    rTableOffset += rBucketCount;
+                }
+
+                uint64 prunedEntryCount = 0;
+                Log::Line( "Counting entries." );
+                for( uint64 e = 0; e < lEntryCount; e++ )
+                {
+                    if( lMarkedBuffer[e] )
+                        prunedEntryCount++;
+                    // if( lMarkedEntries.Get( e ) )
+                }
+
+                Log::Line( " %llu/%llu (%.2lf%%)", prunedEntryCount, lEntryCount,
+                    ((double)prunedEntryCount / lEntryCount) * 100.0 );
+                Log::Line("");
+
+                // Swap marking tables and zero-out the left one.
+                std::swap( lMarkedBuffer, rMarkedBuffer );
+                memset( lMarkedBuffer, 0, 1ull << _K );
             }
-
-            uint64 prunedEntryCount = 0;
-            Log::Line( "Counting entries." );
-            for( uint64 e = 0; e < lEntryCount; e++ )
-            {
-                // if( markedEntries[e] )
-                if( bitField.Get( e ) )
-                    prunedEntryCount++;
-            }
-
-            Log::Line( " %llu/%llu (%.2lf%%)", prunedEntryCount, lEntryCount,
-                ((double)prunedEntryCount / lEntryCount) * 100.0 );
-            Log::Line("");
-            
         }
 
         jobs.Run( threadCount );
