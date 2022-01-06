@@ -46,19 +46,22 @@ struct MTJobSyncT
     inline uint JobCount() const { return _jobCount; }
 
     inline bool IsControlThread() const { return _jobId == 0; }
+    inline bool IsLastThread()    const { return _jobId == _jobCount-1; }
 
-    inline const TJob& GetJob( uint index )
+    inline const TJob& GetJob( uint index ) const
     {
         ASSERT( index < _jobCount );
         return _jobs[index];
     };
 
-    inline const TJob& GetJob( int index )
+    inline const TJob& GetJob( int index ) const
     {   
         ASSERT( index >= 0 );
         ASSERT( (uint)index < _jobCount );
         return _jobs[index];
     };
+
+    inline const TJob& LastJob() const { return _jobs[_jobCount-1]; }
 
     // For debugging
     #if _DEBUG

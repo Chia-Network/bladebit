@@ -6,14 +6,20 @@ struct MarkJob : MTJob<MarkJob>
     DiskPlotContext* context;
     uint64*          lTableMarkedEntries;
     uint64*          rTableMarkedEntries;
-    // DoubleBuffer*    pairBuffers;
-    // size_t           pairBufferSize;
     TableId          table;
-
-    // Set by the control thread
     Fence*           bucketFence;
-    byte**           bucketBuffers;
+    byte**           bucketBuffers;     // Set by the control thread
+    
+    // For sorting the lookup map
+    uint64* tmpMap;
 
+private:
+
+    // For sorting the lookup map
+    uint32* counts;
+    uint32* prefixSum;
+
+public:
     void Run() override;
 
     template<TableId table>
@@ -21,6 +27,7 @@ struct MarkJob : MTJob<MarkJob>
 
     void SortLookupMap( uint64* unsortedMap, const uint32 entryCount );
 
+    // Fence ids used when loading buckets
     enum FenceId
     {
         None = 0,
@@ -29,6 +36,8 @@ struct MarkJob : MTJob<MarkJob>
 
         FenceCount
     };
+
+    
 };
 
 //-----------------------------------------------------------
@@ -447,7 +456,7 @@ void MarkJob::MarkEntries()
         // on the pairs buffer. Since they have different starting offsets after each
         // L table bucket length that generated its pairs, we need to update that offset
         // after we reach the boundary of the buckets that generated the pairs.
-        uint32 passCount = 0;
+        uint32 bucketPassCount = 0;
 
         //
         // Mark used entries on the left table, given the right table's back pointers
@@ -512,6 +521,107 @@ void MarkJob::MarkEntries()
             queue.CommitCommands();
         }
     }
+
 }
 
+//-----------------------------------------------------------
+void MarkJob::SortLookupMap( uint64* input, const uint32 entryCount )
+{
+    // #TODO: We should instead use the radix sort function here, instead of
+    //        repeating the code again.
+    // #TODO: Use 2 separate buffers?
+    constexpr uint32 Radix      = 256;   
+    constexpr uint32 shiftBase  = 8;
+    
+    uint32 shift = 0;
 
+    uint32 counts[Radix];
+    uint32 pfxSum[Radix];
+
+    this->counts    = counts;
+    this->prefixSum = pfxSum;
+    
+    uint64* tmp = this->tmpMap;
+
+    const uint32 offset = entryCount / this->JobCount();
+    
+    uint32 length = offset;
+
+    if( this->IsLastThread() )
+        length += entryCount - length * this->JobCount();
+
+    for( uint32 iter = 0; iter < 4 ; iter++, shift += shiftBase )
+    {
+        // Zero-out the counts
+        memset( counts, 0, sizeof( counts ) );
+
+        // Grab our scan region from the input
+        const uint64* src = input + offset;
+        
+        // Store the occurrences of the current 'digit' 
+        for( uint64 i = 0; i < length; i++ )
+            counts[(src[i] >> shift) & 0xFF]++;
+
+        // Prefix sum
+        if( this->IsControlThread() )
+        {
+            this->LockThreads();
+
+            // Use the last thread's prefix sum buffer
+            // as it does not require a second pass
+            uint32* prefixSumBuffer = this->LastJob().prefixSum;
+
+            // First sum all the counts. Start by copying ours to initialize the buffer.
+            memcpy( prefixSumBuffer, counts, sizeof( counts ) );
+
+            // Now add the rest of the thread's counts
+            const uint32 threadCount = this->JobCount();
+            for( uint i = 1; i < threadCount; i++ )
+            {
+                const uint32* tCounts = GetJob( i ).counts;
+
+                for( uint32 j = 0; j < Radix; j++ )
+                    prefixSumBuffer[j] += tCounts[j];
+            }
+
+            // Calculate prefix sum for last thread
+            for( uint32 j = 1; j < Radix; j++ )
+                prefixSumBuffer[j] += prefixSumBuffer[j-1];
+            
+            // Calculate prefix sum for all threads before the last thread
+            for( int i = (int)threadCount-2; i >= 0; i-- )
+            {
+                const auto& nextThread = this->GetJob( i+1 );
+
+                const uint32* nextThreadCounts = nextThread.counts;
+                const uint32* nextThreadPfxSum = nextThread.prefixSum;
+
+                uint32* curThreadPrefixSum = this->GetJob( i ).prefixSum;
+
+                for( uint32 j = 0; j < Radix; j++ )
+                    curThreadPrefixSum[j] = nextThreadPfxSum[j] - nextThreadCounts[j];
+            }
+
+            this->ReleaseThreads();
+        }
+        else
+        {
+            this->WaitForRelease();
+        }
+        
+        // Distribute values to their location
+        for( uint64 i = length; i > 0; )
+        {
+            const uint64 value = src[--i];
+
+            const uint64 idx = (value >> shift) & 0xFF;
+
+            const uint64 dstIdx = --prefixSum[idx];
+            tmp[dstIdx] = value;
+        }
+
+        std::swap( input, tmp );
+    }
+
+    // Now we need to copy the sorted destination values.
+}
