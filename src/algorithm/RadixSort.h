@@ -37,7 +37,7 @@ class RadixSort256
     };
 
 public:
-    template<uint32 ThreadCount, typename T1>
+    template<uint32 ThreadCount, typename T1, int MaxIter=sizeof( T1 )/8>
     static void Sort( ThreadPool& pool, T1* input, T1* tmp, uint64 length );
 
     template<uint32 ThreadCount, typename T1, typename TK>

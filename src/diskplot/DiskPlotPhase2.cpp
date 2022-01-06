@@ -1,34 +1,11 @@
 #include "DiskPlotPhase2.h"
 #include "util/BitField.h"
+#include "algorithm/RadixSort.h"
 
-struct MarkJob : MTJob<MarkJob>
+// Fence ids used when loading buckets
+struct FenceId
 {
-    DiskPlotContext* context;
-    uint64*          lTableMarkedEntries;
-    uint64*          rTableMarkedEntries;
-    TableId          table;
-    Fence*           bucketFence;
-    byte**           bucketBuffers;     // Set by the control thread
-    
-    // For sorting the lookup map
-    uint64* tmpMap;
-
-private:
-
-    // For sorting the lookup map
-    uint32* counts;
-    uint32* prefixSum;
-
-public:
-    void Run() override;
-
-    template<TableId table>
-    void MarkEntries();
-
-    void SortLookupMap( uint64* unsortedMap, const uint32 entryCount );
-
-    // Fence ids used when loading buckets
-    enum FenceId
+    enum
     {
         None = 0,
         MapLoaded,
@@ -36,8 +13,32 @@ public:
 
         FenceCount
     };
+};
 
+struct MarkJob : MTJob<MarkJob>
+{
+    TableId          table;
+    uint32           entryCount;
+
+    DiskPlotContext* context;
     
+    uint64*          lTableMarkedEntries;
+    uint64*          rTableMarkedEntries;
+
+    uint64           mapEntryOffset;
+    uint64           rTableOffset;
+    Pairs            pairs;
+    const uint32*    map;
+
+public:
+    void Run() override;
+
+    template<TableId table>
+    void MarkEntries();
+
+    template<TableId table>
+    inline void Step( int64 i, const int64 entryCount, BitField lTable, const BitField rTable,
+                      const Pairs& pairs, const uint32* map );
 };
 
 //-----------------------------------------------------------
@@ -67,8 +68,8 @@ void DiskPlotPhase2::Run()
     // Seek the table files back to the beginning
     for( int tableIdx = (int)TableId::Table2; tableIdx <= (int)TableId::Table7; tableIdx++ )
     {
-        const FileId leftId  = TableIdToBackPointerFileId( (TableId)tableIdx );
-        const FileId rightId = (FileId)( (int)leftId + 1 );
+        const FileId pairsIdL = TableIdToBackPointerFileId( (TableId)tableIdx );
+        const FileId pairsIdR = (FileId)( (int)pairsIdL + 1 );
         
         queue.SeekFile( leftId , 0, 0, SeekOrigin::Begin );
         queue.SeekFile( rightId, 0, 0, SeekOrigin::Begin );
@@ -128,7 +129,7 @@ void DiskPlotPhase2::Run()
         //
         // #TEST
         //
-        // if( 0 )
+        if( 0 )
         {
             uint32* lPtrBuf = bbcvirtalloc<uint32>( 1ull << _K );
             uint16* rPtrBuf = bbcvirtalloc<uint16>( 1ull << _K );
@@ -274,6 +275,174 @@ void DiskPlotPhase2::Run()
     queue.CompletePendingReleases();
 }
 
+
+//-----------------------------------------------------------
+void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTableMarks )
+{
+    DiskPlotContext& context = _context;
+    DiskBufferQueue& queue   = *context.ioQueue;
+
+    const FileId rMapId       = TableIdToMapFileId( table );
+    const FileId rTableLPtrId = TableIdToBackPointerFileId( table );
+    const FileId rTableRPtrId = (FileId)((int)rTableLPtrId + 1 );
+
+    // Seek the table files back to the beginning
+    for( int tableIdx = (int)TableId::Table2; tableIdx <= (int)TableId::Table7; tableIdx++ )
+    {
+        queue.SeekFile( rTableLPtrId, 0, 0, SeekOrigin::Begin );
+        queue.SeekFile( rTableRPtrId, 0, 0, SeekOrigin::Begin );
+        queue.CommitCommands();
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            queue.SeekFile( rMapId, i, 0, SeekOrigin::Begin );
+
+        queue.CommitCommands();
+    }
+
+    const uint64 maxEntries          = 1ull << _K;
+    const uint32 maxEntriesPerBucket = (uint32)( maxEntries / (uint64)BB_DP_BUCKET_COUNT );
+    const uint64 tableEntryCount     = context.entryCounts[(int)table];
+
+    int          bitFieldIndex  = 0;
+    uint64**     markingBuffers = _markingBuffers;
+
+    
+    _bucketsLoaded = 0;
+    _bucketReadFence->Reset( 0 );
+
+    const uint32 threadCount = 1;// context.threadCount;
+
+    uint64 rTableEntryOffset = 0;
+
+    for( uint32 bucket = 0; bucket - BB_DP_BUCKET_COUNT; bucket++ )
+    {
+        const uint64 mapEntryOffet    = maxEntriesPerBucket * bucket;
+
+        const uint32 bucketEntryCount = _bucketsLoaded < BB_DP_BUCKET_COUNT - 1 ?
+                                            maxEntriesPerBucket :
+                                            (uint32)( maxEntries - mapEntryOffet ); // For the last bucket
+
+        uint64* unsortedMapBuffer;
+        Pairs pairs;
+
+        // Load as many buckets as we can in the background
+        LoadNextBuckets( table, bucket, unsortedMapBuffer, pairs );
+
+        // Wait for the map to finish loading
+        const uint32 waitFenceId = bucket * FenceId::FenceCount;
+        _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
+
+        // Sort the lookup map and strip out the origin index
+        uint32* map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
+
+        // Wait for the pairs to finish loading
+        _bucketReadFence->Wait( FenceId::PairsLoaded + waitFenceId );
+
+        // Mark the entries on this bucket
+        MTJobRunner<MarkJob> jobs( *context.threadPool );
+
+        for( uint i = 0; i < threadCount; i++ )
+        {
+            MarkJob& job = jobs[i];
+
+            job.table               = (TableId)table;
+            job.entryCount          = bucketEntryCount;
+            job.context             = &context;
+
+            job.lTableMarkedEntries = lTableMarks;
+            job.rTableMarkedEntries = rTableMarks;
+            
+            job.mapEntryOffset      = mapEntryOffet;
+            job.rTableOffset        = rTableEntryOffset;
+
+            job.pairs               = pairs;
+            job.map                 = map;
+        }
+
+        jobs.Run( threadCount );
+
+        rTableEntryOffset = jobs[0].rTableOffset;
+    }
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& outMapBuffer, Pairs& outPairsBuffer )
+{
+    DiskPlotContext& context = _context;
+    DiskBufferQueue& queue   = *context.ioQueue;
+
+    const FileId rMapId              = TableIdToMapFileId( table );
+    const FileId rTableLPtrId        = TableIdToBackPointerFileId( table );
+    const FileId rTableRPtrId        = (FileId)((int)rTableLPtrId + 1 );
+
+    const uint64 maxEntries          = 1ull << _K;
+    const uint32 maxEntriesPerBucket = (uint32)( maxEntries / (uint64)BB_DP_BUCKET_COUNT );
+    const uint64 tableEntryCount     = context.entryCounts[(int)table];
+
+    // Load as many buckets as we're able to
+    while( _bucketsLoaded < BB_DP_BUCKET_COUNT )
+    {
+        const uint32 bucketToLoadEntryCount = _bucketsLoaded < BB_DP_BUCKET_COUNT - 1 ?
+                                              maxEntriesPerBucket :
+                                              (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
+
+        // Reserve a buffer to load both a map bucket and the same amount of entries worth of pairs.
+        const size_t mapReadSize = sizeof( uint64 ) * bucketToLoadEntryCount;
+        const size_t lReadSize   = sizeof( uint32 ) * bucketToLoadEntryCount;
+        const size_t rReadSize   = sizeof( uint16 ) * bucketToLoadEntryCount;
+
+        // #TODO: Load map and pairs buffers separately since we then can
+        //        release the map buffer as soon as we finished sorting and stripping it?
+        byte* buffer = queue.GetBuffer( mapReadSize + lReadSize + rReadSize, false );
+        if( !buffer )
+        {   
+            if( _bucketsLoaded <= bucket )
+            {
+                // Force-load a bucket (block until we can load one)
+                buffer = queue.GetBuffer( lReadSize + rReadSize, true );
+                ASSERT( buffer );
+            }
+            else
+                return;
+        }
+
+        byte* pairsLBuffer = buffer       + mapReadSize; 
+        byte* pairsRBuffer = pairsLBuffer + lReadSize;
+
+        _bucketBuffers[_bucketsLoaded++] = buffer;  // Store the buffer for the other threads to use
+
+        const uint32 loadFenceId = _bucketsLoaded * FenceId::FenceCount;
+
+        queue.ReadFile( rMapId, 0, buffer, mapReadSize );
+        queue.SignalFence( *_bucketReadFence, FenceId::MapLoaded + loadFenceId );
+
+        queue.ReadFile( rTableLPtrId, 0, pairsLBuffer, lReadSize   );
+        queue.ReadFile( rTableRPtrId, 0, pairsRBuffer, rReadSize   );
+        queue.SignalFence( *_bucketReadFence, FenceId::PairsLoaded + loadFenceId );
+
+        queue.CommitCommands();
+
+        outMapBuffer         = (uint64*)buffer;
+        outPairsBuffer.left  = (uint32*)pairsLBuffer;
+        outPairsBuffer.right = (uint16*)pairsRBuffer;
+    }
+}
+
+//-----------------------------------------------------------
+uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
+{
+    RadixSort256::Sort<BB_MAX_JOBS, uint64, 4>( *_context.threadPool, map, _tmpMap, entryCount );
+
+    // #TODO: Strip the data in a multi-threaded job
+    const uint64* end = map + entryCount;
+    uint32* dst = (uint32*)_tmpMap;
+
+    do {
+        *dst++ = (uint32)*map;
+    } while( ++map < end );
+}
+
+
 //-----------------------------------------------------------
 void MarkJob::Run()
 {
@@ -302,7 +471,6 @@ void MarkJob::MarkEntries()
 
     const uint32 jobId               = this->JobId();
     const uint32 threadCount         = this->JobCount();
-    const size_t entrySize           = sizeof( uint32 ) + sizeof( uint16 );
     const uint64 maxEntries          = 1ull << _K;
     const uint32 maxEntriesPerBucket = (uint32)( maxEntries / (uint64)BB_DP_BUCKET_COUNT );
     const uint64 tableEntryCount     = context.entryCounts[(int)table];
@@ -310,16 +478,11 @@ void MarkJob::MarkEntries()
     BitField lTableMarkedEntries( this->lTableMarkedEntries );
     BitField rTableMarkedEntries( this->rTableMarkedEntries );
 
-    uint32 bucketsLoaded     = 0;
-    uint32 currentPairBucket = 0;   // For tracking the current offset needed to use with the pairs
-    uint64 entryOffset       = 0;   // Entry offset given the current pair bucket region
-    uint64 mapOffset         = 0;
+    uint64 rTableOffset = this->rTableOffset;   // Entry offset given the current pair bucket region
+    uint64 mapOffset    = this->mapEntryOffset;
 
-    byte* bucketBuffers[BB_DP_BUCKET_COUNT];    // Contains pointers to all the buckets that we've loaded so far.
-
-
-    if( this->IsControlThread() )
-        this->bucketBuffers = bucketBuffers;
+    const Pairs   pairs = this->pairs;
+    const uint32* map   = this->map;
 
     // Zero-out our portion of the bit field and sync (we sync when grabbing the buckets)
     {
@@ -336,292 +499,101 @@ void MarkJob::MarkEntries()
         memset( buffer, 0, sizePerThread );
     }
 
-    Pairs   pairs;
-    uint32* map;
+    uint32  bucketEntryCount = this->entryCount;
 
-    // We do this per bucket, because each bucket has an offset associated with it
-    for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+    // Bucket has been loaded, we can now use it
+    uint32 entriesPerThread = bucketEntryCount / threadCount;
+
+    pairs.left  += entriesPerThread * jobId;
+    pairs.right += entriesPerThread * jobId;
+
+    // Add any trailing entries to the last thread
+    // #NOTE: Ensure this is only updated after we get the pairs offset
+    if( this->JobId() == threadCount - 1 )
     {
-        const uint32 bucketEntryCount = bucket < BB_DP_BUCKET_COUNT - 1 ?
-                                        maxEntriesPerBucket :
-                                        (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
-
-        // Ensure we have a bucket loaded from which to read
-        if( this->IsControlThread() )
-        {
-            // Load as many buckets as we can in the background
-            while( bucketsLoaded < BB_DP_BUCKET_COUNT )
-            {
-                const uint32 bucketToLoadEntryCount = bucketsLoaded < BB_DP_BUCKET_COUNT - 1 ?
-                                                      maxEntriesPerBucket :
-                                                      (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
-
-                // Reserve a buffer to load both a map bucket 
-                // and the same amount of entries worth of pairs.
-                const size_t mapReadSize = sizeof( uint64 ) * bucketToLoadEntryCount;
-                const size_t lReadSize   = sizeof( uint32 ) * bucketToLoadEntryCount;
-                const size_t rReadSize   = sizeof( uint16 ) * bucketToLoadEntryCount;
-
-                byte* buffer = queue.GetBuffer( mapReadSize + lReadSize + rReadSize, false );
-                if( !buffer )
-                {   
-                    if( bucketsLoaded <= bucket )
-                    {
-                        // Force-load a bucket (block until we can load one)
-                        buffer = queue.GetBuffer( lReadSize + rReadSize, true );
-                        ASSERT( buffer );
-                    }
-                    else
-                        break;
-                }
-
-                byte* pairsLBuffer = buffer       + mapReadSize; 
-                byte* pairsRBuffer = pairsLBuffer + lReadSize;
-
-                bucketBuffers[bucketsLoaded] = buffer;  // Store the buffer for the other threads to use
-
-                const FileId rMapId       = TableIdToMapFileId( table );
-                const FileId rTableLPtrId = TableIdToBackPointerFileId( table );
-                const FileId rTableRPtrId = (FileId)((int)rTableLPtrId + 1 );
-
-                const uint32 loadFenceId = bucketsLoaded++ * FenceCount;
-
-                queue.ReadFile( rMapId, 0, buffer, mapReadSize );
-                queue.SignalFence( *this->bucketFence, MapLoaded + loadFenceId );
-
-                queue.ReadFile( rTableLPtrId, 0, pairsLBuffer, lReadSize   );
-                queue.ReadFile( rTableRPtrId, 0, pairsRBuffer, rReadSize   );
-                queue.SignalFence( *this->bucketFence, PairsLoaded + loadFenceId );
-
-                queue.CommitCommands();
-            }
-
-            {
-                const uint32 waitFenceId = bucket * FenceCount;
-
-                // #TODO: Allow wait to suspend other threads
-                this->LockThreads();
-                
-                // Wait for the map to finish loading
-                this->bucketFence->Wait( MapLoaded + waitFenceId );
-                this->ReleaseThreads();
-
-                // Sort the map on its origin index
-                auto* lookupMapUnsorted = (uint64*)this->GetJob( 0 ).bucketBuffers[bucket];
-                this->SortLookupMap( lookupMapUnsorted, bucketEntryCount );
-
-                // Wait for the pairs to finish loading
-                this->LockThreads();
-                this->bucketFence->Wait( PairsLoaded + waitFenceId );
-                this->ReleaseThreads();
-            }
-        }
-        else
-        {
-            // Wait for the map to finish loading
-            this->WaitForRelease();
-
-            // Sort the map on its origin index
-            auto* lookupMapUnsorted = (uint64*)this->GetJob( 0 ).bucketBuffers[bucket];
-            this->SortLookupMap( lookupMapUnsorted, bucketEntryCount );
-
-            // Wait for the pairs to finish loading
-            this->WaitForRelease();
-        }
-
-
-        // Bucket has been loaded, we can now use it
-        uint32 entriesPerThread = bucketEntryCount / threadCount;
-
-        {
-            uint64* mapBuffer = this->GetJob( 0 ).bucketBuffers[bucket];
-
-            pairs.left  = (uint32*)( mapBuffer  + bucketEntryCount ); 
-            pairs.right = (uint16*)( pairs.left + bucketEntryCount );
-
-            pairs.left  += entriesPerThread * jobId;
-            pairs.right += entriesPerThread * jobId;
-        }
-
-        // Add any trailing entries to the last thread
-        // #NOTE: Ensure this is only updated after we get the pairs offset
-        if( this->JobId() == threadCount - 1 )
-        {
-            const uint32 trailingEntries = bucketEntryCount - entriesPerThread * threadCount;
-            entriesPerThread += trailingEntries;
-        }
-
-        // Determine how many passes we need to run for this bucket.
-        // Passes are determined depending on the range were currently processing
-        // on the pairs buffer. Since they have different starting offsets after each
-        // L table bucket length that generated its pairs, we need to update that offset
-        // after we reach the boundary of the buckets that generated the pairs.
-        uint32 bucketPassCount = 0;
-
-        //
-        // Mark used entries on the left table, given the right table's back pointers
-        //
-
-        // Divide this into 2 steps so that we ensure the previous thread does NOT
-        // write to the same field at the same time as the current thread.
-        // (May happen when the prev thread writes to the end entries & the 
-        //   current thread is writing to its beginning entries)
-        const int64 firstPassCount = (int64)entriesPerThread / 2;
-
-        const int64 rTableOffset = (int64)entryOffset + entriesPerThread * jobId;
-        int64 i;
-
-        // First pass
-        for( i = 0; i < firstPassCount; i++ )
-        {
-            if constexpr ( table < TableId::Table7 )
-            {
-                const uint64 rTableIdx = rTableOffset + (uint64)i;
-                if( !rTableMarkedEntries.Get( rTableIdx ) )
-                    continue;
-            }
-
-            const uint64 left  = pairs.left[i] + entryOffset;
-            const uint64 right = left + pairs.right[i];
-
-            lTableMarkedEntries.Set( left  );
-            lTableMarkedEntries.Set( right );
-        }
-
-        this->SyncThreads();
-
-        // Second pass
-        for( ; i < (int64)entriesPerThread; i++ )
-        {
-            if constexpr ( table < TableId::Table7 )
-            {
-                const uint64 rTableIdx = rTableOffset + (uint64)i;
-                if( !rTableMarkedEntries.Get( rTableIdx ) )
-                    continue;
-            }
-
-            const uint64 left  = pairs.left[i] + entryOffset;
-            const uint64 right = left + pairs.right[i];
-
-            lTableMarkedEntries.Set( left  );
-            lTableMarkedEntries.Set( right );
-        }
-
-        //
-        // Move on to the next bucket,
-        // updating our offset by the entry count of the L table
-        // bucket which generated our R table entries.
-        //
-        entryOffset += context.bucketCounts[(int)table-1][bucket];
-
-        // Release the bucket buffer
-        if( this->IsControlThread() )
-        {
-            queue.ReleaseBuffer( bucketBuffers[bucket] );
-            queue.CommitCommands();
-        }
+        const uint32 trailingEntries = bucketEntryCount - entriesPerThread * threadCount;
+        entriesPerThread += trailingEntries;
     }
 
+    // Determine how many passes we need to run for this bucket.
+    // Passes are determined depending on the range were currently processing
+    // on the pairs buffer. Since they have different starting offsets after each
+    // L table bucket length that generated its pairs, we need to update that offset
+    // after we reach the boundary of the buckets that generated the pairs.
+    uint32 bucketPassCount = 0;
+
+    //
+    // Mark used entries on the left table, given the right table's back pointers
+    //
+
+
+    // #TODO: Here. Figure out passes
+
+    // Divide this into 2 steps so that we ensure the previous thread does NOT
+    // write to the same field at the same time as the current thread.
+    // (May happen when the prev thread writes to the end entries & the 
+    //   current thread is writing to its beginning entries)
+    const int64 firstPassCount = (int64)entriesPerThread / 2;
+
+    const int64 rTableOffset = (int64)entryOffset + entriesPerThread * jobId;
+    int64 i;
+
+    // First pass
+    for( i = 0; i < firstPassCount; i++ )
+    {
+        if constexpr ( table < TableId::Table7 )
+        {
+            const uint64 rTableIdx = rTableOffset + (uint64)i;
+            if( !rTableMarkedEntries.Get( rTableIdx ) )
+                continue;
+        }
+
+        const uint64 left  = pairs.left[i] + entryOffset;
+        const uint64 right = left + pairs.right[i];
+
+        lTableMarkedEntries.Set( left  );
+        lTableMarkedEntries.Set( right );
+    }
+
+    this->SyncThreads();
+
+    // Second pass
+    for( ; i < (int64)entriesPerThread; i++ )
+    {
+        if constexpr ( table < TableId::Table7 )
+        {
+            const uint64 rTableIdx = rTableOffset + (uint64)i;
+            if( !rTableMarkedEntries.Get( rTableIdx ) )
+                continue;
+        }
+
+        const uint64 left  = pairs.left[i] + entryOffset;
+        const uint64 right = left + pairs.right[i];
+
+        lTableMarkedEntries.Set( left  );
+        lTableMarkedEntries.Set( right );
+    }
 }
 
 //-----------------------------------------------------------
-void MarkJob::SortLookupMap( uint64* input, const uint32 entryCount )
+template<TableId table>
+inline void MarkJob::Step( int64 i, const int64 entryCount, BitField lTable, const BitField rTable,
+                           const Pairs& pairs, const uint32* map )
 {
-    // #TODO: We should instead use the radix sort function here, instead of
-    //        repeating the code again.
-    // #TODO: Use 2 separate buffers?
-    constexpr uint32 Radix      = 256;   
-    constexpr uint32 shiftBase  = 8;
-    
-    uint32 shift = 0;
+    // for( ; i < entryCount; i++ )
+    // {
+    //     if constexpr ( table < TableId::Table7 )
+    //     {
+    //         const uint64 rTableIdx = rTableOffset + (uint64)i;
+    //         if( !rTableMarkedEntries.Get( rTableIdx ) )
+    //             continue;
+    //     }
 
-    uint32 counts[Radix];
-    uint32 pfxSum[Radix];
+    //     const uint64 left  = pairs.left[i] + entryOffset;
+    //     const uint64 right = left + pairs.right[i];
 
-    this->counts    = counts;
-    this->prefixSum = pfxSum;
-    
-    uint64* tmp = this->tmpMap;
-
-    const uint32 offset = entryCount / this->JobCount();
-    
-    uint32 length = offset;
-
-    if( this->IsLastThread() )
-        length += entryCount - length * this->JobCount();
-
-    for( uint32 iter = 0; iter < 4 ; iter++, shift += shiftBase )
-    {
-        // Zero-out the counts
-        memset( counts, 0, sizeof( counts ) );
-
-        // Grab our scan region from the input
-        const uint64* src = input + offset;
-        
-        // Store the occurrences of the current 'digit' 
-        for( uint64 i = 0; i < length; i++ )
-            counts[(src[i] >> shift) & 0xFF]++;
-
-        // Prefix sum
-        if( this->IsControlThread() )
-        {
-            this->LockThreads();
-
-            // Use the last thread's prefix sum buffer
-            // as it does not require a second pass
-            uint32* prefixSumBuffer = this->LastJob().prefixSum;
-
-            // First sum all the counts. Start by copying ours to initialize the buffer.
-            memcpy( prefixSumBuffer, counts, sizeof( counts ) );
-
-            // Now add the rest of the thread's counts
-            const uint32 threadCount = this->JobCount();
-            for( uint i = 1; i < threadCount; i++ )
-            {
-                const uint32* tCounts = GetJob( i ).counts;
-
-                for( uint32 j = 0; j < Radix; j++ )
-                    prefixSumBuffer[j] += tCounts[j];
-            }
-
-            // Calculate prefix sum for last thread
-            for( uint32 j = 1; j < Radix; j++ )
-                prefixSumBuffer[j] += prefixSumBuffer[j-1];
-            
-            // Calculate prefix sum for all threads before the last thread
-            for( int i = (int)threadCount-2; i >= 0; i-- )
-            {
-                const auto& nextThread = this->GetJob( i+1 );
-
-                const uint32* nextThreadCounts = nextThread.counts;
-                const uint32* nextThreadPfxSum = nextThread.prefixSum;
-
-                uint32* curThreadPrefixSum = this->GetJob( i ).prefixSum;
-
-                for( uint32 j = 0; j < Radix; j++ )
-                    curThreadPrefixSum[j] = nextThreadPfxSum[j] - nextThreadCounts[j];
-            }
-
-            this->ReleaseThreads();
-        }
-        else
-        {
-            this->WaitForRelease();
-        }
-        
-        // Distribute values to their location
-        for( uint64 i = length; i > 0; )
-        {
-            const uint64 value = src[--i];
-
-            const uint64 idx = (value >> shift) & 0xFF;
-
-            const uint64 dstIdx = --prefixSum[idx];
-            tmp[dstIdx] = value;
-        }
-
-        std::swap( input, tmp );
-    }
-
-    // Now we need to copy the sorted destination values.
+    //     lTableMarkedEntries.Set( left  );
+    //     lTableMarkedEntries.Set( right );
+    // }
 }
+
