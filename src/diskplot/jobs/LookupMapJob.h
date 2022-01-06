@@ -40,8 +40,8 @@ inline void ReverseMapJob<BucketCount>::Run()
 
     uint64* map                 = this->mappedIndices;
 
-    uint32 counts      [BucketCount];
-    uint32 pfxSum      [BucketCount];
+    uint32 counts[BucketCount];
+    uint32 pfxSum[BucketCount];
 
     memset( counts, 0, sizeof( counts ) );
 
