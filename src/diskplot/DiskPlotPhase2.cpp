@@ -25,8 +25,9 @@ struct MarkJob : MTJob<MarkJob>
     uint64*          lTableMarkedEntries;
     uint64*          rTableMarkedEntries;
 
-    uint64           mapEntryOffset;
-    uint64           rTableOffset;
+    uint64           lTableOffset;
+    uint32           pairBucket;
+    uint32           pairBucketOffset;
     Pairs            pairs;
     const uint32*    map;
 
@@ -37,8 +38,8 @@ public:
     void MarkEntries();
 
     template<TableId table>
-    inline void Step( int64 i, const int64 entryCount, BitField lTable, const BitField rTable,
-                      const Pairs& pairs, const uint32* map );
+    inline int32 MarkStep( int32 i, const int32 entryCount, BitField lTable, const BitField rTable,
+                            uint32 lTableOffset, const Pairs& pairs, const uint32* map );
 };
 
 //-----------------------------------------------------------
@@ -478,12 +479,6 @@ void MarkJob::MarkEntries()
     BitField lTableMarkedEntries( this->lTableMarkedEntries );
     BitField rTableMarkedEntries( this->rTableMarkedEntries );
 
-    uint64 rTableOffset = this->rTableOffset;   // Entry offset given the current pair bucket region
-    uint64 mapOffset    = this->mapEntryOffset;
-
-    const Pairs   pairs = this->pairs;
-    const uint32* map   = this->map;
-
     // Zero-out our portion of the bit field and sync (we sync when grabbing the buckets)
     {
         const size_t bitFieldSize  = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
@@ -499,101 +494,132 @@ void MarkJob::MarkEntries()
         memset( buffer, 0, sizePerThread );
     }
 
-    uint32  bucketEntryCount = this->entryCount;
 
-    // Bucket has been loaded, we can now use it
-    uint32 entriesPerThread = bucketEntryCount / threadCount;
+    const uint32* map   = this->map;
+    Pairs         pairs = this->pairs;
+    
+    uint32 bucketEntryCount = this->entryCount;
 
-    pairs.left  += entriesPerThread * jobId;
-    pairs.right += entriesPerThread * jobId;
-
-    // Add any trailing entries to the last thread
-    // #NOTE: Ensure this is only updated after we get the pairs offset
-    if( this->JobId() == threadCount - 1 )
-    {
-        const uint32 trailingEntries = bucketEntryCount - entriesPerThread * threadCount;
-        entriesPerThread += trailingEntries;
-    }
 
     // Determine how many passes we need to run for this bucket.
     // Passes are determined depending on the range were currently processing
     // on the pairs buffer. Since they have different starting offsets after each
     // L table bucket length that generated its pairs, we need to update that offset
     // after we reach the boundary of the buckets that generated the pairs.
-    uint32 bucketPassCount = 0;
-
-    //
-    // Mark used entries on the left table, given the right table's back pointers
-    //
-
-
-    // #TODO: Here. Figure out passes
-
-    // Divide this into 2 steps so that we ensure the previous thread does NOT
-    // write to the same field at the same time as the current thread.
-    // (May happen when the prev thread writes to the end entries & the 
-    //   current thread is writing to its beginning entries)
-    const int64 firstPassCount = (int64)entriesPerThread / 2;
-
-    const int64 rTableOffset = (int64)entryOffset + entriesPerThread * jobId;
-    int64 i;
-
-    // First pass
-    for( i = 0; i < firstPassCount; i++ )
+    while( bucketEntryCount )
     {
-        if constexpr ( table < TableId::Table7 )
+        uint32 pairBucket           = this->pairBucket;
+        uint32 pairBucketOffset     = this->pairBucketOffset;
+        uint64 lTableOffset         = this->lTableOffset;
+
+        uint32 pairBucketEntryCount = context.ptrTableBucketCounts[(int)table][pairBucket];
+
+        uint32 passEntryCount       = std::min( pairBucketEntryCount - pairBucketOffset, bucketEntryCount );
+
+        // Prune the table
         {
-            const uint64 rTableIdx = rTableOffset + (uint64)i;
-            if( !rTableMarkedEntries.Get( rTableIdx ) )
-                continue;
+            // We need a minimum number of entries per thread to ensure that we don't,
+            // write to the same qword in the bit field. So let's ensure that each thread
+            // has at least more than 2 groups worth of entries.
+            // There's an average of 284,190 entries per bucket, which means each group
+            // has an about 236.1 entries. We round up to 280 entries.
+            // We use minimum 3 groups and round up to 896 entries per thread which gives us
+            // 14 QWords worth of area each threads can reference.
+            const uint32 minEntriesPerThread = 896;
+            
+            uint32 threadsToRun     = threadCount;
+            uint32 entriesPerThread = passEntryCount / threadsToRun;
+            
+            while( entriesPerThread < minEntriesPerThread )
+                entriesPerThread = passEntryCount / --threadsToRun;
+
+            // Only run with as many threads as we have filtered
+            if( jobId < threadsToRun )
+            {
+                const uint32* jobMap   = map; 
+                const Pairs   jobPairs = pairs;
+
+                jobMap         += entriesPerThread * jobId;
+                jobPairs.left  += entriesPerThread * jobId;
+                jobPairs.right += entriesPerThread * jobId;
+
+                // Add any trailing entries to the last thread
+                // #NOTE: Ensure this is only updated after we get the pairs offset
+                uint32 trailingEntries = passEntryCount - entriesPerThread * threadsToRun;
+                uint32 lastThreadId    = threadsToRun - 1;
+                if( jobId == lastThreadId )
+                    entriesPerThread += trailingEntries;
+
+                // Mark entries in 2 steps to ensure the previous thread does NOT
+                // write to the same QWord at the same time as the current thread.
+                // (May happen when the prev thread writes to the end entries & the 
+                //   current thread is writing to its beginning entries)
+                const int32 fistStepEntryCount = (int32)( entriesPerThread / 2 );
+                int32 i = 0;
+
+                // 1st step
+                i = this->MarkStep<table>( i, fistStepEntryCount, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, jobPairs, jobMap );
+                this->SyncThreads();
+
+                // 2nd step
+                this->MarkStep<table>( i, fistStepEntryCount, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, jobPairs, jobMap );
+            }
+            else
+            {
+                this->SyncThreads();    // Sync for 2nd step
+            }
+
+            this->SyncThreads();    // Sync after marking finished
         }
 
-        const uint64 left  = pairs.left[i] + entryOffset;
-        const uint64 right = left + pairs.right[i];
 
-        lTableMarkedEntries.Set( left  );
-        lTableMarkedEntries.Set( right );
-    }
+        // Update our position on the pairs table
+        bucketEntryCount -= passEntryCount;
+        pairBucketOffset += passEntryCount;
 
-    this->SyncThreads();
+        map         += passEntryCount;
+        pairs.left  += passEntryCount;
+        pairs.right += passEntryCount;
 
-    // Second pass
-    for( ; i < (int64)entriesPerThread; i++ )
-    {
-        if constexpr ( table < TableId::Table7 )
+        if( pairBucketOffset == pairBucketEntryCount )
         {
-            const uint64 rTableIdx = rTableOffset + (uint64)i;
-            if( !rTableMarkedEntries.Get( rTableIdx ) )
-                continue;
+            this->pairBucketOffset = pairBucketOffset;
         }
+        else
+        {
+            // Update our left entry offset by adding the number of entries in the
+            // l table bucket index that matches our paid bucket index
+            this->lTableOffset += context.bucketCounts[(int)table][pairBucket];
 
-        const uint64 left  = pairs.left[i] + entryOffset;
-        const uint64 right = left + pairs.right[i];
-
-        lTableMarkedEntries.Set( left  );
-        lTableMarkedEntries.Set( right );
+            // Move to next pairs bucket
+            this->pairBucket ++;
+            this->pairBucketOffset = 0;
+        }
     }
 }
 
 //-----------------------------------------------------------
 template<TableId table>
-inline void MarkJob::Step( int64 i, const int64 entryCount, BitField lTable, const BitField rTable,
-                           const Pairs& pairs, const uint32* map )
+inline int32 MarkJob::MarkStep( int32 i, const int32 entryCount, BitField lTable, const BitField rTable,
+                                uint32 lTableOffset, const Pairs& pairs, const uint32* map )
 {
-    // for( ; i < entryCount; i++ )
-    // {
-    //     if constexpr ( table < TableId::Table7 )
-    //     {
-    //         const uint64 rTableIdx = rTableOffset + (uint64)i;
-    //         if( !rTableMarkedEntries.Get( rTableIdx ) )
-    //             continue;
-    //     }
+    for( ; i < entryCount; i++ )
+    {
+        if constexpr ( table < TableId::Table7 )
+        {
+            // #TODO: This map needs to support overflow addresses...
+            const uint64 rTableIdx = map[i];
+            if( !rTableMarkedEntries.Get( rTableIdx ) )
+                continue;
+        }
 
-    //     const uint64 left  = pairs.left[i] + entryOffset;
-    //     const uint64 right = left + pairs.right[i];
+        const uint64 left  = pairs.left[i] + lTableOffset;
+        const uint64 right = left + pairs.right[i];
 
-    //     lTableMarkedEntries.Set( left  );
-    //     lTableMarkedEntries.Set( right );
-    // }
+        lTableMarkedEntries.Set( left  );
+        lTableMarkedEntries.Set( right );
+    }
+
+    return i;
 }
 
