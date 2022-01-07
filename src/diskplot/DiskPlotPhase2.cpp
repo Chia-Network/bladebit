@@ -19,6 +19,8 @@ struct MarkJob : MTJob<MarkJob>
 {
     TableId          table;
     uint32           entryCount;
+    Pairs            pairs;
+    const uint32*    map;
 
     DiskPlotContext* context;
     
@@ -28,8 +30,7 @@ struct MarkJob : MTJob<MarkJob>
     uint64           lTableOffset;
     uint32           pairBucket;
     uint32           pairBucketOffset;
-    Pairs            pairs;
-    const uint32*    map;
+    
 
 public:
     void Run() override;
@@ -66,70 +67,59 @@ void DiskPlotPhase2::Run()
     }
     #endif
 
-    // Seek the table files back to the beginning
-    for( int tableIdx = (int)TableId::Table2; tableIdx <= (int)TableId::Table7; tableIdx++ )
-    {
-        const FileId pairsIdL = TableIdToBackPointerFileId( (TableId)tableIdx );
-        const FileId pairsIdR = (FileId)( (int)pairsIdL + 1 );
-        
-        queue.SeekFile( leftId , 0, 0, SeekOrigin::Begin );
-        queue.SeekFile( rightId, 0, 0, SeekOrigin::Begin );
-    }
-    queue.CommitCommands();
+    uint64 largestTableLength = 1;
+    for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
+        largestTableLength = std::max( largestTableLength, context.entryCounts[(int)table] );
+    
 
     // Determine what size we can use to load
-    const uint64 maxEntries       = 1ull << _K;
-    const size_t bitFieldSize     = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
+    // #TODO: Support overflow entries.
+    const uint64 maxEntries          = 1ull << _K;
+    const size_t bitFieldSize        = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
     const size_t bitFieldBuffersSize = bitFieldSize * 2;
+    
+    const uint32 mapBucketEvenSize   = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+    const uint32 mapBucketMaxSize    = std::max( mapBucketEvenSize, (uint32)( maxEntries - mapBucketEvenSize * (BB_DP_BUCKET_COUNT-1) ) );
+    const size_t tmpMapBufferSize    = mapBucketMaxSize * sizeof( uint64 );
 
-    const uint32 threadCount      = 1;// context.threadCount;
-    const size_t fullHeapSize     = context.heapSize + context.ioHeapSize;
-    const size_t heapRemainder    = fullHeapSize - bitFieldBuffersSize;
-
-    // Prepare 2 marking bitfields for dual-buffering
-    Fence bitFieldFence;
-    int   bitFieldIndex = 0;
-
-    byte* bitFields[2];
-    bitFields[0] =  context.heapBuffer;
-    bitFields[1] =  bitFields[0] + bitFieldSize;
-    // bbvirtalloc<byte>( 1ull << _K );
-    // bbvirtalloc<byte>( 1ull << _K );
+    const size_t fullHeapSize        = context.heapSize + context.ioHeapSize;
+    const size_t heapRemainder       = fullHeapSize - bitFieldBuffersSize - tmpMapBufferSize;
 
     // Reserve the remainder of the heap for reading R table backpointers
-    queue.ResetHeap( heapRemainder, context.heapBuffer + bitFieldBuffersSize );
+    queue.ResetHeap( heapRemainder, context.heapBuffer + bitFieldBuffersSize + tmpMapBufferSize );
+    
+    // Prepare 2 marking bitfields for dual-buffering
+    uint64* bitFields[2];
+    bitFields[0] = (uint64*)context.heapBuffer;
+    bitFields[1] = (uint64*)( context.heapBuffer + bitFieldSize );
+    // bbvirtalloc<byte>( 1ull << _K );
+    // bbvirtalloc<byte>( 1ull << _K );
 
-    Fence bucketFence;
+    // Prepare map buffer
+    _tmpMap = (uint64*)( context.heapBuffer + bitFieldSize*2 );
 
-    uint64* rTableBitField = nullptr;
+    // Prepare our fences
+    Fence bitFieldFence, bucketLoadFence, mapWriteFence;
+    _bucketReadFence = &bucketLoadFence;
+    _mapWriteFence   = &mapWriteFence;
 
-    FileId  lTableFileId   = FileId::MARKED_ENTRIES_6;
 
     // Mark all tables
-    for( int tableIdx = (int)TableId::Table7; tableIdx > (int)TableId::Table2; tableIdx-- )
+    FileId lTableFileId = FileId::MARKED_ENTRIES_6;
+
+    for( TableId table = TableId::Table7; table > TableId::Table2; table = table-1 )
     {
         const auto timer = TimerBegin();
 
-        MTJobRunner<MarkJob> jobs( *context.threadPool );
+        uint64* lMarkingTable = bitFields[0];
+        uint64* rMarkingTable = bitFields[1];
 
-        uint64* lTableBitField = (uint64*)( bitFields[bitFieldIndex] );
-
-        for( uint i = 0; i < threadCount; i++ )
-        {
-            MarkJob& job = jobs[i];
-
-            job.context             = &context;
-            job.lTableMarkedEntries = lTableBitField;
-            job.rTableMarkedEntries = rTableBitField;
-            job.table               = (TableId)tableIdx;
-
-            job.bucketFence         = &bucketFence;
-            job.bucketBuffers       = nullptr;
-        }
+        MarkTable( table, lMarkingTable, rMarkingTable );
 
         //
         // #TEST
         //
+        #if 0
         if( 0 )
         {
             uint32* lPtrBuf = bbcvirtalloc<uint32>( 1ull << _K );
@@ -226,28 +216,27 @@ void DiskPlotPhase2::Run()
                 memset( lMarkedBuffer, 0, 1ull << _K );
             }
         }
-
-        jobs.Run( threadCount );
-
-        rTableBitField = lTableBitField;
-        bitFieldIndex  = ( bitFieldIndex + 1 ) % 2;
+        #endif
 
         // Ensure the last table finished writing to the bitfield
-        if( tableIdx < (int)TableId::Table7 )
+        if( table < TableId::Table7 )
             bitFieldFence.Wait();
 
-        // Submit bitfield for writing
-        queue.WriteFile( lTableFileId, 0, lTableBitField, bitFieldSize );
+        // Submit l marking table for writing
+        queue.WriteFile( lTableFileId, 0, lMarkingTable, bitFieldSize );
         queue.SignalFence( bitFieldFence );
         queue.CommitCommands();
 
+        // Swap marking tables
+        std::swap( bitFields[0], bitFields[1] );
         lTableFileId = (FileId)( (int)lTableFileId - 1 );
 
         const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished marking table %d in %.2lf seconds.", tableIdx, elapsed );
+        Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
 
         // #TEST:
         // if( 0 )
+        #if 0
         {
             BitField markedEntries( lTableBitField );
             uint64 lTableEntries = context.entryCounts[(int)tableIdx-1];
@@ -270,6 +259,7 @@ void DiskPlotPhase2::Run()
                        lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
 
         }
+        #endif
     }
 
     bitFieldFence.Wait();
@@ -303,17 +293,15 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
     const uint64 maxEntries          = 1ull << _K;
     const uint32 maxEntriesPerBucket = (uint32)( maxEntries / (uint64)BB_DP_BUCKET_COUNT );
     const uint64 tableEntryCount     = context.entryCounts[(int)table];
-
-    int          bitFieldIndex  = 0;
-    uint64**     markingBuffers = _markingBuffers;
-
     
     _bucketsLoaded = 0;
     _bucketReadFence->Reset( 0 );
 
     const uint32 threadCount = 1;// context.threadCount;
 
-    uint64 rTableEntryOffset = 0;
+    uint64 lTableEntryOffset     = 0;
+    uint32 pairBucket            = 0;   // Pair bucket we are processing (may be different than 'bucket' which refers to the map bucket)
+    uint32 pairBucketEntryOffset = 0;   // Offset in the current pair bucket 
 
     for( uint32 bucket = 0; bucket - BB_DP_BUCKET_COUNT; bucket++ )
     {
@@ -348,21 +336,24 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
             job.table               = (TableId)table;
             job.entryCount          = bucketEntryCount;
+            job.pairs               = pairs;
+            job.map                 = map;
             job.context             = &context;
 
             job.lTableMarkedEntries = lTableMarks;
             job.rTableMarkedEntries = rTableMarks;
             
-            job.mapEntryOffset      = mapEntryOffet;
-            job.rTableOffset        = rTableEntryOffset;
-
-            job.pairs               = pairs;
-            job.map                 = map;
+            job.lTableOffset        = lTableEntryOffset;
+            job.pairBucket          = pairBucket;
+            job.pairBucketOffset    = pairBucketEntryOffset;
         }
 
         jobs.Run( threadCount );
 
-        rTableEntryOffset = jobs[0].rTableOffset;
+        // Update our offsets
+        lTableEntryOffset     = jobs[0].lTableOffset;
+        pairBucket            = jobs[0].pairBucket;
+        pairBucketEntryOffset = jobs[0].pairBucketOffset;
     }
 }
 

@@ -67,13 +67,13 @@ inline void ReverseMapJob<BucketCount>::Run()
 
     for( uint32 i = 0; i < entryCount; i++ )
     {
-        const uint64 originIndex = sortedIndices[i];            // Original index of this entry before y sort
-        const uint32 sortedIndex = i + sortedIndexOffset;       // Index where this entry was placed after y sort
+        const uint32 originIndex = sortedIndices[i];            // Original index of this entry before y sort
+        const uint64 sortedIndex = i + sortedIndexOffset;       // Index where this entry was placed after y sort
         const uint32 bucket      = (uint32)(originIndex >> bitShift);
 
         const uint32 dstIndex = --pfxSum[bucket];
 
-        map[dstIndex] = ( originIndex << 32 ) | sortedIndex;
+        map[dstIndex] = ( sortedIndex << 32 ) | originIndex;
     }
 
     // Ensure all threads end at the same time (so that counts doesn't go out of scope) 

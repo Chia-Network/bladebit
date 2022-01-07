@@ -17,9 +17,8 @@ public:
 private:
     DiskPlotContext& _context;
 
-    uint64* _markingBuffers[2];
+    // uint64* _markingBuffers[2];
     uint64* _tmpMap;
-    Fence*  _marksWriteFence;
     Fence*  _bucketReadFence;
     Fence*  _mapWriteFence;
 
