@@ -79,7 +79,7 @@ void DiskPlotPhase2::Run()
     const size_t bitFieldBuffersSize = bitFieldSize * 2;
     
     const uint32 mapBucketEvenSize   = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
-    const uint32 mapBucketMaxSize    = std::max( mapBucketEvenSize, (uint32)( maxEntries - mapBucketEvenSize * (BB_DP_BUCKET_COUNT-1) ) );
+    const uint32 mapBucketMaxSize    = std::max( mapBucketEvenSize, (uint32)( largestTableLength - mapBucketEvenSize * (BB_DP_BUCKET_COUNT-1) ) );
     const size_t tmpMapBufferSize    = mapBucketMaxSize * sizeof( uint64 );
 
     const size_t fullHeapSize        = context.heapSize + context.ioHeapSize;
@@ -102,7 +102,6 @@ void DiskPlotPhase2::Run()
     Fence bitFieldFence, bucketLoadFence, mapWriteFence;
     _bucketReadFence = &bucketLoadFence;
     _mapWriteFence   = &mapWriteFence;
-
 
     // Mark all tables
     FileId lTableFileId = FileId::MARKED_ENTRIES_6;
@@ -236,14 +235,13 @@ void DiskPlotPhase2::Run()
 
         // #TEST:
         // if( 0 )
-        #if 0
         {
-            BitField markedEntries( lTableBitField );
-            uint64 lTableEntries = context.entryCounts[(int)tableIdx-1];
+            BitField markedEntries( bitFields[1] );
+            uint64 lTableEntries = context.entryCounts[(int)table-1];
 
             uint64 bucketsTotalCount = 0;
             for( uint64 e = 0; e < BB_DP_BUCKET_COUNT; ++e )
-                bucketsTotalCount += context.ptrTableBucketCounts[(int)tableIdx-1][e];
+                bucketsTotalCount += context.ptrTableBucketCounts[(int)table-1][e];
 
             ASSERT( bucketsTotalCount == lTableEntries );
 
@@ -255,11 +253,10 @@ void DiskPlotPhase2::Run()
                     lTablePrunedEntries++;
             }
 
-            Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", tableIdx,
+            Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", table,
                        lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
 
         }
-        #endif
     }
 
     bitFieldFence.Wait();
@@ -273,20 +270,20 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
     DiskPlotContext& context = _context;
     DiskBufferQueue& queue   = *context.ioQueue;
 
-    const FileId rMapId       = TableIdToMapFileId( table );
+    const FileId rMapId       = table < TableId::Table7 ? TableIdToMapFileId( table ) : FileId::None;
     const FileId rTableLPtrId = TableIdToBackPointerFileId( table );
     const FileId rTableRPtrId = (FileId)((int)rTableLPtrId + 1 );
 
     // Seek the table files back to the beginning
-    for( int tableIdx = (int)TableId::Table2; tableIdx <= (int)TableId::Table7; tableIdx++ )
-    {
-        queue.SeekFile( rTableLPtrId, 0, 0, SeekOrigin::Begin );
-        queue.SeekFile( rTableRPtrId, 0, 0, SeekOrigin::Begin );
-        queue.CommitCommands();
+    queue.SeekFile( rTableLPtrId, 0, 0, SeekOrigin::Begin );
+    queue.SeekFile( rTableRPtrId, 0, 0, SeekOrigin::Begin );
+    queue.CommitCommands();
 
+    if( rMapId != FileId::None )
+    {
         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
             queue.SeekFile( rMapId, i, 0, SeekOrigin::Begin );
-
+        
         queue.CommitCommands();
     }
 
@@ -297,7 +294,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
     _bucketsLoaded = 0;
     _bucketReadFence->Reset( 0 );
 
-    const uint32 threadCount = 1;// context.threadCount;
+    const uint32 threadCount = 1;//context.threadCount;
 
     uint64 lTableEntryOffset     = 0;
     uint32 pairBucket            = 0;   // Pair bucket we are processing (may be different than 'bucket' which refers to the map bucket)
@@ -307,7 +304,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
     {
         const uint64 mapEntryOffet    = maxEntriesPerBucket * bucket;
 
-        const uint32 bucketEntryCount = _bucketsLoaded < BB_DP_BUCKET_COUNT - 1 ?
+        const uint32 bucketEntryCount = bucket < BB_DP_BUCKET_COUNT - 1 ?
                                             maxEntriesPerBucket :
                                             (uint32)( maxEntries - mapEntryOffet ); // For the last bucket
 
@@ -317,12 +314,17 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
         // Load as many buckets as we can in the background
         LoadNextBuckets( table, bucket, unsortedMapBuffer, pairs );
 
-        // Wait for the map to finish loading
+        uint32* map = nullptr;
         const uint32 waitFenceId = bucket * FenceId::FenceCount;
-        _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
+        
+        if( rMapId != FileId::None )
+        {
+            // Wait for the map to finish loading
+            _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
 
-        // Sort the lookup map and strip out the origin index
-        uint32* map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
+            // Sort the lookup map and strip out the origin index
+            SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
+        }
 
         // Wait for the pairs to finish loading
         _bucketReadFence->Wait( FenceId::PairsLoaded + waitFenceId );
@@ -350,6 +352,10 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
         jobs.Run( threadCount );
 
+        // Release the buffer we just used
+        queue.ReleaseBuffer( _bucketBuffers[bucket] );
+        queue.CommitCommands();
+
         // Update our offsets
         lTableEntryOffset     = jobs[0].lTableOffset;
         pairBucket            = jobs[0].pairBucket;
@@ -363,7 +369,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
     DiskPlotContext& context = _context;
     DiskBufferQueue& queue   = *context.ioQueue;
 
-    const FileId rMapId              = TableIdToMapFileId( table );
+    const FileId rMapId              = table < TableId::Table7 ? TableIdToMapFileId( table ) : FileId::None;
     const FileId rTableLPtrId        = TableIdToBackPointerFileId( table );
     const FileId rTableRPtrId        = (FileId)((int)rTableLPtrId + 1 );
 
@@ -379,7 +385,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
                                               (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
 
         // Reserve a buffer to load both a map bucket and the same amount of entries worth of pairs.
-        const size_t mapReadSize = sizeof( uint64 ) * bucketToLoadEntryCount;
+        const size_t mapReadSize = rMapId != FileId::None ? sizeof( uint64 ) * bucketToLoadEntryCount : 0;
         const size_t lReadSize   = sizeof( uint32 ) * bucketToLoadEntryCount;
         const size_t rReadSize   = sizeof( uint16 ) * bucketToLoadEntryCount;
 
@@ -391,7 +397,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
             if( _bucketsLoaded <= bucket )
             {
                 // Force-load a bucket (block until we can load one)
-                buffer = queue.GetBuffer( lReadSize + rReadSize, true );
+                buffer = queue.GetBuffer( mapReadSize + lReadSize + rReadSize, true );
                 ASSERT( buffer );
             }
             else
@@ -401,22 +407,30 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
         byte* pairsLBuffer = buffer       + mapReadSize; 
         byte* pairsRBuffer = pairsLBuffer + lReadSize;
 
-        _bucketBuffers[_bucketsLoaded++] = buffer;  // Store the buffer for the other threads to use
+        _bucketBuffers[_bucketsLoaded] = buffer;  // Store the buffer for the other threads to use
 
         const uint32 loadFenceId = _bucketsLoaded * FenceId::FenceCount;
 
-        queue.ReadFile( rMapId, 0, buffer, mapReadSize );
-        queue.SignalFence( *_bucketReadFence, FenceId::MapLoaded + loadFenceId );
+        if( rMapId != FileId::None )
+        {
+            queue.ReadFile( rMapId, 0, buffer, mapReadSize );
+            queue.SignalFence( *_bucketReadFence, FenceId::MapLoaded + loadFenceId );
+        }
 
         queue.ReadFile( rTableLPtrId, 0, pairsLBuffer, lReadSize   );
         queue.ReadFile( rTableRPtrId, 0, pairsRBuffer, rReadSize   );
         queue.SignalFence( *_bucketReadFence, FenceId::PairsLoaded + loadFenceId );
 
         queue.CommitCommands();
+        
+        if( bucket == _bucketsLoaded )
+        {
+            outMapBuffer         = rMapId != FileId::None ? (uint64*)buffer : nullptr;
+            outPairsBuffer.left  = (uint32*)pairsLBuffer;
+            outPairsBuffer.right = (uint16*)pairsRBuffer;
+        }
 
-        outMapBuffer         = (uint64*)buffer;
-        outPairsBuffer.left  = (uint32*)pairsLBuffer;
-        outPairsBuffer.right = (uint16*)pairsRBuffer;
+        _bucketsLoaded++;
     }
 }
 
@@ -432,6 +446,8 @@ uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
     do {
         *dst++ = (uint32)*map;
     } while( ++map < end );
+
+    return (uint32*)_tmpMap;
 }
 
 
@@ -521,14 +537,14 @@ void MarkJob::MarkEntries()
             uint32 threadsToRun     = threadCount;
             uint32 entriesPerThread = passEntryCount / threadsToRun;
             
-            while( entriesPerThread < minEntriesPerThread )
+            while( entriesPerThread < minEntriesPerThread && threadsToRun > 1 )
                 entriesPerThread = passEntryCount / --threadsToRun;
 
             // Only run with as many threads as we have filtered
             if( jobId < threadsToRun )
             {
                 const uint32* jobMap   = map; 
-                const Pairs   jobPairs = pairs;
+                Pairs         jobPairs = pairs;
 
                 jobMap         += entriesPerThread * jobId;
                 jobPairs.left  += entriesPerThread * jobId;
@@ -572,7 +588,7 @@ void MarkJob::MarkEntries()
         pairs.left  += passEntryCount;
         pairs.right += passEntryCount;
 
-        if( pairBucketOffset == pairBucketEntryCount )
+        if( pairBucketOffset < pairBucketEntryCount )
         {
             this->pairBucketOffset = pairBucketOffset;
         }
@@ -600,15 +616,15 @@ inline int32 MarkJob::MarkStep( int32 i, const int32 entryCount, BitField lTable
         {
             // #TODO: This map needs to support overflow addresses...
             const uint64 rTableIdx = map[i];
-            if( !rTableMarkedEntries.Get( rTableIdx ) )
+            if( !rTable.Get( rTableIdx ) )
                 continue;
         }
 
         const uint64 left  = pairs.left[i] + lTableOffset;
         const uint64 right = left + pairs.right[i];
 
-        lTableMarkedEntries.Set( left  );
-        lTableMarkedEntries.Set( right );
+        lTable.Set( left  );
+        lTable.Set( right );
     }
 
     return i;

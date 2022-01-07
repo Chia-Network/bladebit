@@ -60,10 +60,10 @@ private:
 
 
 //-----------------------------------------------------------
-template<uint32 ThreadCount, typename T1>
+template<uint32 ThreadCount, typename T1, int MaxIter>
 inline void RadixSort256::Sort( ThreadPool& pool, T1* input, T1* tmp, uint64 length )
 {
-    DoSort<ThreadCount, ModeSingle, T1, void>( pool, input, tmp, nullptr, nullptr, length );
+    DoSort<ThreadCount, ModeSingle, T1, void, MaxIter>( pool, input, tmp, nullptr, nullptr, length );
 }
 
 //-----------------------------------------------------------
