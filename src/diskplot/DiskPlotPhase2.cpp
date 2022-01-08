@@ -40,7 +40,7 @@ public:
 
     template<TableId table>
     inline int32 MarkStep( int32 i, const int32 entryCount, BitField lTable, const BitField rTable,
-                            uint32 lTableOffset, const Pairs& pairs, const uint32* map );
+                           uint64 lTableOffset, const Pairs& pairs, const uint32* map );
 };
 
 //-----------------------------------------------------------
@@ -234,7 +234,7 @@ void DiskPlotPhase2::Run()
         Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
 
         // #TEST:
-        // if( 0 )
+        if( table < TableId::Table7 )
         {
             BitField markedEntries( bitFields[1] );
             uint64 lTableEntries = context.entryCounts[(int)table-1];
@@ -255,6 +255,7 @@ void DiskPlotPhase2::Run()
 
             Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", table,
                        lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
+            Log::Line( "" );
 
         }
     }
@@ -294,7 +295,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
     _bucketsLoaded = 0;
     _bucketReadFence->Reset( 0 );
 
-    const uint32 threadCount = 1;//context.threadCount;
+    const uint32 threadCount = context.threadCount;
 
     uint64 lTableEntryOffset     = 0;
     uint32 pairBucket            = 0;   // Pair bucket we are processing (may be different than 'bucket' which refers to the map bucket)
@@ -323,7 +324,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
             _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
 
             // Sort the lookup map and strip out the origin index
-            SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
+            map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
         }
 
         // Wait for the pairs to finish loading
@@ -401,7 +402,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
                 ASSERT( buffer );
             }
             else
-                return;
+                break;
         }
 
         byte* pairsLBuffer = buffer       + mapReadSize; 
@@ -413,7 +414,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
 
         if( rMapId != FileId::None )
         {
-            queue.ReadFile( rMapId, 0, buffer, mapReadSize );
+            queue.ReadFile( rMapId, _bucketsLoaded, buffer, mapReadSize );
             queue.SignalFence( *_bucketReadFence, FenceId::MapLoaded + loadFenceId );
         }
 
@@ -422,15 +423,30 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
         queue.SignalFence( *_bucketReadFence, FenceId::PairsLoaded + loadFenceId );
 
         queue.CommitCommands();
-        
-        if( bucket == _bucketsLoaded )
-        {
-            outMapBuffer         = rMapId != FileId::None ? (uint64*)buffer : nullptr;
-            outPairsBuffer.left  = (uint32*)pairsLBuffer;
-            outPairsBuffer.right = (uint16*)pairsRBuffer;
-        }
-
         _bucketsLoaded++;
+    }
+
+
+    {
+        ASSERT( _bucketsLoaded > bucket );
+        
+        const uint32 entryCount = bucket < BB_DP_BUCKET_COUNT - 1 ?
+                                    maxEntriesPerBucket :
+                                    (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
+
+        // Reserve a buffer to load both a map bucket and the same amount of entries worth of pairs.
+        const size_t mapReadSize = rMapId != FileId::None ? sizeof( uint64 ) * entryCount : 0;
+        const size_t lReadSize   = sizeof( uint32 ) * entryCount;
+        const size_t rReadSize   = sizeof( uint16 ) * entryCount;
+
+        byte* buffer = _bucketBuffers[bucket];
+
+        byte* pairsLBuffer = buffer       + mapReadSize; 
+        byte* pairsRBuffer = pairsLBuffer + lReadSize;
+
+        outMapBuffer         = rMapId != FileId::None ? (uint64*)buffer : nullptr;
+        outPairsBuffer.left  = (uint32*)pairsLBuffer;
+        outPairsBuffer.right = (uint16*)pairsRBuffer;
     }
 }
 
@@ -441,10 +457,10 @@ uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
 
     // #TODO: Strip the data in a multi-threaded job
     const uint64* end = map + entryCount;
-    uint32* dst = (uint32*)_tmpMap;
+    uint32* dst = (uint32*)map;
 
     do {
-        *dst++ = (uint32)*map;
+        *dst++ = (uint32)((*map) >> 32);
     } while( ++map < end );
 
     return (uint32*)_tmpMap;
@@ -486,7 +502,8 @@ void MarkJob::MarkEntries()
     BitField lTableMarkedEntries( this->lTableMarkedEntries );
     BitField rTableMarkedEntries( this->rTableMarkedEntries );
 
-    // Zero-out our portion of the bit field and sync (we sync when grabbing the buckets)
+    // Zero-out our portion of the bit field and sync, do this only on the first run
+    if( this->pairBucket == 0 && this->pairBucketOffset == 0 )
     {
         const size_t bitFieldSize  = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
 
@@ -499,6 +516,7 @@ void MarkJob::MarkEntries()
             sizePerThread += sizeRemainder;
 
         memset( buffer, 0, sizePerThread );
+        this->SyncThreads();
     }
 
 
@@ -569,7 +587,7 @@ void MarkJob::MarkEntries()
                 this->SyncThreads();
 
                 // 2nd step
-                this->MarkStep<table>( i, fistStepEntryCount, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, jobPairs, jobMap );
+                this->MarkStep<table>( i, entriesPerThread, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, jobPairs, jobMap );
             }
             else
             {
@@ -596,7 +614,7 @@ void MarkJob::MarkEntries()
         {
             // Update our left entry offset by adding the number of entries in the
             // l table bucket index that matches our paid bucket index
-            this->lTableOffset += context.bucketCounts[(int)table][pairBucket];
+            this->lTableOffset += context.bucketCounts[(int)table-1][pairBucket];
 
             // Move to next pairs bucket
             this->pairBucket ++;
@@ -608,7 +626,7 @@ void MarkJob::MarkEntries()
 //-----------------------------------------------------------
 template<TableId table>
 inline int32 MarkJob::MarkStep( int32 i, const int32 entryCount, BitField lTable, const BitField rTable,
-                                uint32 lTableOffset, const Pairs& pairs, const uint32* map )
+                                uint64 lTableOffset, const Pairs& pairs, const uint32* map )
 {
     for( ; i < entryCount; i++ )
     {
@@ -620,7 +638,7 @@ inline int32 MarkJob::MarkStep( int32 i, const int32 entryCount, BitField lTable
                 continue;
         }
 
-        const uint64 left  = pairs.left[i] + lTableOffset;
+        const uint64 left  = (uint64)pairs.left[i] + lTableOffset;
         const uint64 right = left + pairs.right[i];
 
         lTable.Set( left  );
