@@ -47,7 +47,7 @@ public:
 DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
     : _context( context )
 {
-
+    memset( _bucketBuffers, 0, sizeof( _bucketBuffers ) );
 }
 
 //-----------------------------------------------------------
@@ -106,7 +106,7 @@ void DiskPlotPhase2::Run()
     // Mark all tables
     FileId lTableFileId = FileId::MARKED_ENTRIES_6;
 
-    for( TableId table = TableId::Table7; table > TableId::Table2; table = table-1 )
+    for( TableId table = TableId::Table6; table > TableId::Table2; table = table-1 )
     {
         const auto timer = TimerBegin();
 
@@ -418,8 +418,8 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
             queue.SignalFence( *_bucketReadFence, FenceId::MapLoaded + loadFenceId );
         }
 
-        queue.ReadFile( rTableLPtrId, 0, pairsLBuffer, lReadSize   );
-        queue.ReadFile( rTableRPtrId, 0, pairsRBuffer, rReadSize   );
+        queue.ReadFile( rTableLPtrId, 0, pairsLBuffer, lReadSize );
+        queue.ReadFile( rTableRPtrId, 0, pairsRBuffer, rReadSize );
         queue.SignalFence( *_bucketReadFence, FenceId::PairsLoaded + loadFenceId );
 
         queue.CommitCommands();
@@ -458,12 +458,13 @@ uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
     // #TODO: Strip the data in a multi-threaded job
     const uint64* end = map + entryCount;
     uint32* dst = (uint32*)map;
+    uint32* out = dst;
 
     do {
         *dst++ = (uint32)((*map) >> 32);
     } while( ++map < end );
 
-    return (uint32*)_tmpMap;
+    return out;
 }
 
 
@@ -630,13 +631,13 @@ inline int32 MarkJob::MarkStep( int32 i, const int32 entryCount, BitField lTable
 {
     for( ; i < entryCount; i++ )
     {
-        if constexpr ( table < TableId::Table7 )
-        {
-            // #TODO: This map needs to support overflow addresses...
-            const uint64 rTableIdx = map[i];
-            if( !rTable.Get( rTableIdx ) )
-                continue;
-        }
+        // if constexpr ( table < TableId::Table7 )
+        // {
+        //     // #TODO: This map needs to support overflow addresses...
+        //     const uint64 rTableIdx = map[i];
+        //     if( !rTable.Get( rTableIdx ) )
+        //         continue;
+        // }
 
         const uint64 left  = (uint64)pairs.left[i] + lTableOffset;
         const uint64 right = left + pairs.right[i];

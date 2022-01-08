@@ -10,6 +10,7 @@
 
 // TEST:
 void TestDiskBackPointers();
+void TestLookupMaps();
 
 struct GlobalConfig
 {
@@ -103,6 +104,7 @@ int main( int argc, const char* argv[] )
     #endif
 
     // TestDiskBackPointers(); return 0;
+    TestLookupMaps(); return 0;
 
     argc--;
     argv++;

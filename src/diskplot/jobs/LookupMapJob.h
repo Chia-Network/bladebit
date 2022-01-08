@@ -34,9 +34,9 @@ inline void ReverseMapJob<BucketCount>::Run()
     //        For now hard coded to 64 buckets.
     const uint32  bitShift = 32 - kExtraBits;
 
-    const uint32  entryCount    = this->entryCount;
-    const uint32* sortedIndices = this->sortedSourceIndices;
-    const uint32* end           = sortedIndices + entryCount;
+    const uint32  entryCount          = this->entryCount;
+    const uint32* sortedOriginIndices = this->sortedSourceIndices;
+    const uint32* end                 = sortedOriginIndices + entryCount;
 
     uint64* map                 = this->mappedIndices;
 
@@ -47,7 +47,7 @@ inline void ReverseMapJob<BucketCount>::Run()
 
     // Count how many entries we have per bucket
     {
-        const uint32* index = sortedIndices;
+        const uint32* index = sortedOriginIndices;
 
         while( index < end )
         {
@@ -67,7 +67,7 @@ inline void ReverseMapJob<BucketCount>::Run()
 
     for( uint32 i = 0; i < entryCount; i++ )
     {
-        const uint32 originIndex = sortedIndices[i];            // Original index of this entry before y sort
+        const uint32 originIndex = sortedOriginIndices[i];      // Original index of this entry before y sort
         const uint64 sortedIndex = i + sortedIndexOffset;       // Index where this entry was placed after y sort
         const uint32 bucket      = (uint32)(originIndex >> bitShift);
 
