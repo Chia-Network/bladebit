@@ -106,7 +106,7 @@ void DiskPlotPhase2::Run()
     // Mark all tables
     FileId lTableFileId = FileId::MARKED_ENTRIES_6;
 
-    for( TableId table = TableId::Table6; table > TableId::Table2; table = table-1 )
+    for( TableId table = TableId::Table7; table > TableId::Table2; table = table-1 )
     {
         const auto timer = TimerBegin();
 
@@ -234,7 +234,7 @@ void DiskPlotPhase2::Run()
         Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
 
         // #TEST:
-        if( table < TableId::Table7 )
+        // if( table < TableId::Table7 )
         {
             BitField markedEntries( bitFields[1] );
             uint64 lTableEntries = context.entryCounts[(int)table-1];
@@ -295,7 +295,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
     _bucketsLoaded = 0;
     _bucketReadFence->Reset( 0 );
 
-    const uint32 threadCount = context.threadCount;
+    const uint32 threadCount = 1;//context.threadCount;
 
     uint64 lTableEntryOffset     = 0;
     uint32 pairBucket            = 0;   // Pair bucket we are processing (may be different than 'bucket' which refers to the map bucket)
@@ -318,14 +318,14 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
         uint32* map = nullptr;
         const uint32 waitFenceId = bucket * FenceId::FenceCount;
         
-        if( rMapId != FileId::None )
-        {
-            // Wait for the map to finish loading
-            _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
+        // if( rMapId != FileId::None )
+        // {
+        //     // Wait for the map to finish loading
+        //     _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
 
-            // Sort the lookup map and strip out the origin index
-            map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
-        }
+        //     // Sort the lookup map and strip out the origin index
+        //     map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
+        // }
 
         // Wait for the pairs to finish loading
         _bucketReadFence->Wait( FenceId::PairsLoaded + waitFenceId );
@@ -405,7 +405,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
                 break;
         }
 
-        byte* pairsLBuffer = buffer       + mapReadSize; 
+        byte* pairsLBuffer = buffer       + mapReadSize;
         byte* pairsRBuffer = pairsLBuffer + lReadSize;
 
         _bucketBuffers[_bucketsLoaded] = buffer;  // Store the buffer for the other threads to use
