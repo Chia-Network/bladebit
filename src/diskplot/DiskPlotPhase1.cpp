@@ -707,7 +707,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             SortKeyGen::Sort<BB_MAX_JOBS>( threadPool, (int64)entryCount, sortKey, lookupIdx, sortedLookup );
 
             // Write the reverse lookup back into its original buckets as a forward lookup map
-            WriteReverseMap( tableId, entryCount, sortedLookup );
+            WriteReverseMap( tableId, bucketIdx, entryCount, sortedLookup );
         }
 
         // OK to load next (back) metadata B buffer now (see comment above in ForwardPropagateTable)
@@ -845,14 +845,20 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 /// Write map from the sort key
 ///
 //-----------------------------------------------------------
-void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const uint32* sortedSourceIndices )
+void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, const uint32 count, const uint32* sortedSourceIndices )
 {
     DiskBufferQueue& ioQueue       = *_cx.ioQueue;
 
     Bucket&       bucket           = *_bucket;
     const uint32  threadCount      = _cx.threadCount;
     const uint32  entriesPerThread = count / threadCount;
-    uint64*       map              = _bucket->map;
+    uint64*       map              = bucket.map;
+
+    // This offset must be based on the previous table as these
+    // entries come from the previous table
+    uint32 sortKeyOffset = 0;
+    for( uint32 i = 0; i < bucketIdx; i++ )
+        sortKeyOffset += _cx.bucketCounts[(int)tableId-1][i];
 
     // Ensure the previous bucket finished writing.
     // #TODO: Should we double-buffer here?
@@ -867,9 +873,9 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 count, const
     {
         auto& job = jobs[i];
 
-        job.ioQueue             = _cx.ioQueue;
+        job.ioQueue             = &ioQueue;
         job.entryCount          = entriesPerThread;
-        job.sortedIndexOffset   = bucket.tableEntryCount;
+        job.sortedIndexOffset   = sortKeyOffset;
         job.sortedSourceIndices = sortedSourceIndices;
         job.mappedIndices       = map;
         job.bucketCounts        = bucketCounts;

@@ -70,7 +70,7 @@ inline void ReverseMapJob<BucketCount>::Run()
         const uint32 originIndex = sortedOriginIndices[i];      // Original index of this entry before y sort
         const uint64 sortedIndex = i + sortedIndexOffset;       // Index where this entry was placed after y sort
         const uint32 bucket      = (uint32)(originIndex >> bitShift);
-
+        
         const uint32 dstIndex = --pfxSum[bucket];
 
         map[dstIndex] = ( sortedIndex << 32 ) | originIndex;
