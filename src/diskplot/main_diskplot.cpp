@@ -104,7 +104,7 @@ int main( int argc, const char* argv[] )
     #endif
 
     // TestDiskBackPointers(); return 0;
-    TestLookupMaps(); return 0;
+    // TestLookupMaps(); return 0;
 
     argc--;
     argv++;

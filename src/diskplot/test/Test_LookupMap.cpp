@@ -1,6 +1,7 @@
 #include "io/FileStream.h"
 #include "diskplot/DiskPlotConfig.h"
 #include "diskplot/jobs/IOJob.h"
+#include "plotshared/GenSortKey.h"
 #include "algorithm/RadixSort.h"
 #include "util/BitField.h"
 
@@ -8,73 +9,8 @@ static uint32 bucketCounts[7][BB_DP_BUCKET_COUNT];
 static uint32 ptrTableBucketCounts[7][BB_DP_BUCKET_COUNT];
 static uint64 tableEntryCounts[7];
 
-uint64* LoadLookupMap( TableId table, uint32 bucket, uint64& outEntryCount, uint64* map = nullptr )
-{
-    char path[512];
-    snprintf( path, sizeof( path ), "/mnt/p5510a/disk_tmp/table_%d_map_%d.tmp", table+1, bucket );
+void TestBackPointersWithReference();
 
-    const uint64 tableLength = tableEntryCounts[(int)table];
-    uint64 entryCount  = ( 1ull << _K ) / BB_DP_BUCKET_COUNT;
-    
-    if( bucket == BB_DP_BUCKET_COUNT-1 )
-        entryCount = tableLength - ( entryCount * (BB_DP_BUCKET_COUNT-1));
-
-    outEntryCount = entryCount;
-
-    FileStream file;
-
-    FatalIf( !file.Open( path, FileMode::Open,  FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering ), "Failed to open map table." );
-
-    if( map == nullptr )
-        map = bbcvirtalloc<uint64>( RoundUpToNextBoundaryT( (size_t)entryCount * sizeof( uint64 ), file.BlockSize() ) );
-
-    byte* blockBuffer = bbvirtalloc<byte>( file.BlockSize() );
-
-    int err = 0;
-    FatalIf( !IOWriteJob::ReadFromFile( file, (byte*)map, entryCount * sizeof( uint64 ), blockBuffer, file.BlockSize(), err ), "Failed to read map table." );
-
-    SysHost::VirtualFree( blockBuffer );
-    return map;
-}
-
-void StripLookupMap( ThreadPool& pool, uint64 entryCount, uint64* map, uint64* tmp, uint32* outMap )
-{
-    RadixSort256::Sort<64, uint64, 4>( pool, map, tmp, entryCount );
-
-    const uint64* end = map + entryCount;
-    
-    do {
-        *outMap++ = (uint32)( (*map++) >> 32);
-
-    } while( map < end );
-}
-
-void LoadPairsTable( TableId table, uint32*& lPtr, uint16*& rPtr )
-{
-    const uint64 entryCount = tableEntryCounts[(int)table];
-
-    char lPath[512];
-    char rPath[512];
-    snprintf( lPath, sizeof( lPath ), "/mnt/p5510a/disk_tmp/table_%u_l_0.tmp", table+1 );
-    snprintf( rPath, sizeof( rPath ), "/mnt/p5510a/disk_tmp/table_%u_r_0.tmp", table+1 );
-
-    FileStream lFile, rFile;
-        
-    FatalIf( !lFile.Open( lPath, FileMode::Open,  FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering ), "Failed to open L table." );
-    FatalIf( !rFile.Open( rPath, FileMode::Open,  FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering ), "Failed to open R table." );
-
-    lPtr = bbcvirtalloc<uint32>( RoundUpToNextBoundaryT( (size_t)entryCount * sizeof( uint32 ), lFile.BlockSize() ) );
-    rPtr = bbcvirtalloc<uint16>( RoundUpToNextBoundaryT( (size_t)entryCount * sizeof( uint16 ), rFile.BlockSize() ) );
-
-    ASSERT( lFile.BlockSize() == rFile.BlockSize() );
-    byte* blockBuffer = bbvirtalloc<byte>( lFile.BlockSize() );
-
-    int err = 0;
-    FatalIf( !IOWriteJob::ReadFromFile( lFile, (byte*)lPtr, entryCount * sizeof( uint32 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read L table." );
-    FatalIf( !IOWriteJob::ReadFromFile( rFile, (byte*)rPtr, entryCount * sizeof( uint16 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read R table." );
-
-    SysHost::VirtualFree( blockBuffer );
-}
 
 void ReadEntryCounts()
 {
@@ -112,6 +48,92 @@ void ReadEntryCounts()
     }
 }
 
+uint64* LoadLookupMap( TableId table, uint32 bucket, uint64& outEntryCount, uint64* map = nullptr )
+{
+    char path[512];
+    snprintf( path, sizeof( path ), "/mnt/p5510a/disk_tmp/table_%d_map_%d.tmp", table+1, bucket );
+
+    const uint64 tableLength = tableEntryCounts[(int)table];
+    uint64 entryCount  = ( 1ull << _K ) / BB_DP_BUCKET_COUNT;
+    
+    if( bucket == BB_DP_BUCKET_COUNT-1 )
+        entryCount = tableLength - ( entryCount * (BB_DP_BUCKET_COUNT-1));
+
+    outEntryCount = entryCount;
+
+    FileStream file;
+
+    FatalIf( !file.Open( path, FileMode::Open,  FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering ), "Failed to open map table." );
+
+    if( map == nullptr )
+        map = bbcvirtalloc<uint64>( RoundUpToNextBoundaryT( (size_t)entryCount * sizeof( uint64 ), file.BlockSize() ) );
+
+    byte* blockBuffer = bbvirtalloc<byte>( file.BlockSize() );
+
+    int err = 0;
+    FatalIf( !IOWriteJob::ReadFromFile( file, (byte*)map, entryCount * sizeof( uint64 ), blockBuffer, file.BlockSize(), err ), "Failed to read map table." );
+
+    SysHost::VirtualFree( blockBuffer );
+    return map;
+}
+
+void StripLookupMap( ThreadPool& pool, uint64 entryCount, uint64* map, uint64* tmp, uint32* outMap )
+{
+    // STRIP IT FIRST
+    {
+        const uint64* end = map + entryCount;
+
+        uint32* src = (uint32*)tmp;
+        // uint32* dst = src + entryCount;
+
+        for( int64 i = 0; i < (int64)entryCount; i++ )
+        {
+            src[i]    = (uint32)map[i];
+            outMap[i] = (uint32)(map[i] >> 32);
+        }
+
+        uint32* srcTmp = src + entryCount;
+        
+        RadixSort256::SortWithKey<64>( pool, src, srcTmp, outMap, (uint32*)map, entryCount );
+    }
+    // RadixSort256::Sort<64, uint64, 4>( pool, map, tmp, entryCount );
+
+    // const uint64* end = map + entryCount;
+    
+    // do {
+    //     *outMap++ = (uint32)( (*map++) >> 32);
+
+    // } while( map < end );
+}
+
+void LoadPairsTable( TableId table, uint32*& lPtr, uint16*& rPtr )
+{
+    const uint64 entryCount = tableEntryCounts[(int)table];
+
+    char lPath[512];
+    char rPath[512];
+    snprintf( lPath, sizeof( lPath ), "/mnt/p5510a/disk_tmp/table_%u_l_0.tmp", table+1 );
+    snprintf( rPath, sizeof( rPath ), "/mnt/p5510a/disk_tmp/table_%u_r_0.tmp", table+1 );
+
+    FileStream lFile, rFile;
+
+    FatalIf( !lFile.Open( lPath, FileMode::Open, FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering ), "Failed to open L table." );
+    FatalIf( !rFile.Open( rPath, FileMode::Open, FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering ), "Failed to open R table." );
+
+    lPtr = bbcvirtalloc<uint32>( RoundUpToNextBoundaryT( (size_t)entryCount * sizeof( uint32 ), lFile.BlockSize() ) );
+    rPtr = bbcvirtalloc<uint16>( RoundUpToNextBoundaryT( (size_t)entryCount * sizeof( uint16 ), rFile.BlockSize() ) );
+
+    ASSERT( lFile.BlockSize() == rFile.BlockSize() );
+    byte* blockBuffer = bbvirtalloc<byte>( lFile.BlockSize() );
+
+    int err = 0;
+    FatalIf( !IOWriteJob::ReadFromFile( lFile, (byte*)lPtr, entryCount * sizeof( uint32 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read L table." );
+    FatalIf( !IOWriteJob::ReadFromFile( rFile, (byte*)rPtr, entryCount * sizeof( uint16 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read R table." );
+
+    SysHost::VirtualFree( blockBuffer );
+}
+
+
 void PruneTablesMemory()
 {
     const size_t bitFieldSize = 1 GB + 100 MB;
@@ -119,15 +141,15 @@ void PruneTablesMemory()
     uint64* bitFields[2];
     bitFields[0] = bbvirtalloc<uint64>( bitFieldSize );
     bitFields[1] = bbvirtalloc<uint64>( bitFieldSize );
-    
+
     uint64 bucketLength64 = ( 1ull << _K ) / BB_DP_BUCKET_COUNT;
 
     uint64* mapBuffer = bbcvirtalloc<uint64>( bucketLength64 * (BB_DP_BUCKET_COUNT + 1) );
     uint64* tmpMap    = bbcvirtalloc<uint64>( bucketLength64 * 2 );
     uint32* sortedMap = bbcvirtalloc<uint32>( bucketLength64 * (BB_DP_BUCKET_COUNT + 1) );
-    
+
     ThreadPool pool( 64 );
-    
+
     for( TableId table = TableId::Table7; table > TableId::Table2; table = table-1 )
     {
         Log::Line( "[Prunning table %u]", table );
@@ -154,7 +176,7 @@ void PruneTablesMemory()
             {
                 uint64 bucketEntryCount;
                 LoadLookupMap( table, bucket, bucketEntryCount, mapRead );
-                
+
                 StripLookupMap( pool, bucketEntryCount, mapRead, tmpMap, rSortedMap );
 
                 mapRead       += bucketEntryCount;
@@ -261,18 +283,24 @@ void PruneTablesMemory()
     }
 }
 
+
+
+/// Entry Points
 void TestLookupMaps()
 {
     ReadEntryCounts();
+
+    // TestBackPointersWithReference(); return;
+
     PruneTablesMemory();
     return;
-    PruneTablesMemory();
+    
     
     Log::Line( "Loading table..." );
     const TableId table       = TableId::Table6;
     const uint32 targetBucket = 1;
 
-    uint64 entryCount;
+    uint64  entryCount;
     uint64* entries = LoadLookupMap( table, targetBucket, entryCount );
 
     uint64* tmpTable  = bbcvirtalloc<uint64>( entryCount );
@@ -311,3 +339,148 @@ void TestLookupMaps()
     Log::Line( "Done." );
     
 }
+
+
+void TestBackPointersWithReference()
+{
+    uint64 maxTableCount = tableEntryCounts[0];
+    for( TableId table = TableId::Table2; table <= TableId::Table7; table = table + 1 )
+        maxTableCount = std::max( maxTableCount, tableEntryCounts[(int)table] );
+
+    struct RefPair
+    {
+        uint32 left;
+        uint32 right;
+    };
+
+    RefPair* refTableBuf = bbcvirtalloc<RefPair>( RoundUpToNextBoundaryT( maxTableCount, 4096ull ) );
+    RefPair* pairs       = bbcvirtalloc<RefPair>( RoundUpToNextBoundaryT( maxTableCount, 4096ull ) );
+    byte*    blockBuffer = bbvirtalloc<byte>( 4096 );
+
+    uint64 bucketLength64 = ( 1ull << _K ) / BB_DP_BUCKET_COUNT;
+
+    uint64* mapBuffer = bbcvirtalloc<uint64>( bucketLength64 * (BB_DP_BUCKET_COUNT + 1) );
+    uint64* tmpMap    = bbcvirtalloc<uint64>( bucketLength64 * 2 );
+    uint32* sortedMap = bbcvirtalloc<uint32>( bucketLength64 * (BB_DP_BUCKET_COUNT + 1) );
+    
+    ThreadPool pool( 64 );
+
+    for( TableId table = TableId::Table2; table <= TableId::Table7; table = table + 1 )
+    {
+        Log::Line( "Testing table %u", table+1 );
+        const uint64 tableEntryCount = tableEntryCounts[(int)table];
+
+        // Load back pointers
+        Log::Line( "  Loading back pointers..." );
+        uint32* left ;
+        uint16* right;
+
+        LoadPairsTable( table, left, right );
+
+        // Load map
+        uint32* map = nullptr;
+        if( table < TableId::Table7 )
+        {
+            Log::Line( "  Loading map..." );
+
+            uint64* mapRead = mapBuffer;
+            uint64* tmp     = tmpMap;
+
+            uint32* rSortedMap = map = sortedMap;
+
+            uint64 mapEntryCount = 0;
+
+            for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+            {
+                uint64 bucketEntryCount;
+
+                LoadLookupMap( table, bucket, bucketEntryCount, mapRead );
+                StripLookupMap( pool, bucketEntryCount, mapRead, tmpMap, rSortedMap );
+
+                mapRead       += bucketEntryCount;
+                rSortedMap    += bucketEntryCount;
+                mapEntryCount += bucketEntryCount;
+            }
+
+            ASSERT( mapEntryCount = tableEntryCount );
+        }
+
+        // Load reference table
+        Log::Line( "  Loading reference table..." );
+        {
+            FileStream file;
+
+            char path[512];
+            snprintf( path, sizeof( path ), "/mnt/p5510a/reference/p1.t%u.tmp", table+1 );
+
+            FatalIf( !file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::NoBuffering ),
+                    "Failed to open reference table file." );
+
+            // Read the length, which is encoded first
+            uint64 length = 0;
+            FatalIf( !file.Read( blockBuffer, file.BlockSize() ), "Could not read ref table file." );
+            length = *(uint64*)blockBuffer;
+            ASSERT( length == tableEntryCount );
+
+            ASSERT( file.BlockSize() == 4096 );
+            int err = 0;
+            if( !IOWriteJob::ReadFromFile( file, (byte*)refTableBuf, tableEntryCount * sizeof( RefPair ),
+                                           blockBuffer, file.BlockSize(), err ) )
+            {
+                Fatal( "Failed to read reference table file with error %d", err );
+            }
+        }
+
+        // Convert back pointers to sorted, and absolute
+        Log::Line( "  Validating..." );
+        {
+            int64 passCount = (int64)tableEntryCount;
+
+            uint64 lTableOffset = 0;
+            int64  i = 0;
+            for( int32 bucket = 0; bucket < (int32)BB_DP_BUCKET_COUNT; bucket++ )
+            {
+                const int64 pairBucketLength = (int64)ptrTableBucketCounts[(int)table][bucket];
+
+                for( const int64 end = i+pairBucketLength; i < end; i++ )
+                {
+                    const uint64 l = (uint64)left[i] + lTableOffset;
+                    const uint64 r = l + right[i];
+
+                    ASSERT( l <= 0xFFFFFFFF );
+                    ASSERT( r <= 0xFFFFFFFF );
+
+                    RefPair ref = refTableBuf[map[i]];
+                    if( (uint32)l != ref.left || (uint32)r != ref.right )
+                    {
+                        ref = refTableBuf[map[i-1]];
+
+                        if( (uint32)l != ref.left || (uint32)r != ref.right )
+                        {
+                            ref = refTableBuf[map[i+1]];
+
+                            if( (uint32)l != ref.left || (uint32)r != ref.right )
+                                passCount--;
+                        }
+                    }
+                }
+
+                lTableOffset += bucketCounts[(int)table-1][bucket];
+            }
+            Log::Line( " : %lld / %llu ( %.2lf%% ) passed.", passCount, tableEntryCount,
+                        ( passCount / (double)tableEntryCount ) * 100 );
+
+            // Delete unneeded buffers
+            SysHost::VirtualFree( left  );
+            SysHost::VirtualFree( right );
+
+            // Sort
+            // SortKeyGen::Sort<BB_MAX_JOBS>( pool, (int64)tableEntryCount, map, refTableBuf, pairs );
+        }
+
+        
+
+    }
+}
+
+

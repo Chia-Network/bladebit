@@ -23,14 +23,14 @@ struct MarkJob : MTJob<MarkJob>
     const uint32*    map;
 
     DiskPlotContext* context;
-    
+
     uint64*          lTableMarkedEntries;
     uint64*          rTableMarkedEntries;
 
     uint64           lTableOffset;
     uint32           pairBucket;
     uint32           pairBucketOffset;
-    
+
 
 public:
     void Run() override;
@@ -92,8 +92,6 @@ void DiskPlotPhase2::Run()
     uint64* bitFields[2];
     bitFields[0] = (uint64*)context.heapBuffer;
     bitFields[1] = (uint64*)( context.heapBuffer + bitFieldSize );
-    // bbvirtalloc<byte>( 1ull << _K );
-    // bbvirtalloc<byte>( 1ull << _K );
 
     // Prepare map buffer
     _tmpMap = (uint64*)( context.heapBuffer + bitFieldSize*2 );
@@ -295,7 +293,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
     _bucketsLoaded = 0;
     _bucketReadFence->Reset( 0 );
 
-    const uint32 threadCount = 1;//context.threadCount;
+    const uint32 threadCount = context.threadCount;
 
     uint64 lTableEntryOffset     = 0;
     uint32 pairBucket            = 0;   // Pair bucket we are processing (may be different than 'bucket' which refers to the map bucket)
@@ -303,29 +301,26 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
     for( uint32 bucket = 0; bucket - BB_DP_BUCKET_COUNT; bucket++ )
     {
-        const uint64 mapEntryOffet    = maxEntriesPerBucket * bucket;
+        const uint64 mapEntryOffet = maxEntriesPerBucket * bucket;
 
-        const uint32 bucketEntryCount = bucket < BB_DP_BUCKET_COUNT - 1 ?
-                                            maxEntriesPerBucket :
-                                            (uint32)( maxEntries - mapEntryOffet ); // For the last bucket
-
+        uint32 bucketEntryCount;
         uint64* unsortedMapBuffer;
         Pairs pairs;
 
         // Load as many buckets as we can in the background
-        LoadNextBuckets( table, bucket, unsortedMapBuffer, pairs );
+        LoadNextBuckets( table, bucket, unsortedMapBuffer, pairs, bucketEntryCount );
 
         uint32* map = nullptr;
         const uint32 waitFenceId = bucket * FenceId::FenceCount;
         
-        // if( rMapId != FileId::None )
-        // {
-        //     // Wait for the map to finish loading
-        //     _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
+        if( rMapId != FileId::None )
+        {
+            // Wait for the map to finish loading
+            _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
 
-        //     // Sort the lookup map and strip out the origin index
-        //     map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
-        // }
+            // Sort the lookup map and strip out the origin index
+            map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
+        }
 
         // Wait for the pairs to finish loading
         _bucketReadFence->Wait( FenceId::PairsLoaded + waitFenceId );
@@ -365,7 +360,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 }
 
 //-----------------------------------------------------------
-void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& outMapBuffer, Pairs& outPairsBuffer )
+void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& outMapBuffer, Pairs& outPairsBuffer, uint32& outBucketEntryCount )
 {
     DiskPlotContext& context = _context;
     DiskBufferQueue& queue   = *context.ioQueue;
@@ -447,22 +442,28 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
         outMapBuffer         = rMapId != FileId::None ? (uint64*)buffer : nullptr;
         outPairsBuffer.left  = (uint32*)pairsLBuffer;
         outPairsBuffer.right = (uint16*)pairsRBuffer;
+        outBucketEntryCount  = entryCount;
     }
 }
 
 //-----------------------------------------------------------
 uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
 {
-    RadixSort256::Sort<BB_MAX_JOBS, uint64, 4>( *_context.threadPool, map, _tmpMap, entryCount );
+    uint32* src = (uint32*)_tmpMap;
+    uint32* out = (uint32*)map;
 
-    // #TODO: Strip the data in a multi-threaded job
-    const uint64* end = map + entryCount;
-    uint32* dst = (uint32*)map;
-    uint32* out = dst;
+    for( int64 i = 0; i < (int64)entryCount; i++ )
+    {
+        const uint64 m = map[i];
 
-    do {
-        *dst++ = (uint32)((*map) >> 32);
-    } while( ++map < end );
+        src[i] = (uint32)m;
+        out[i] = (uint32)(m >> 32);
+    }
+
+    uint32* srcTmp = src + entryCount;
+    uint32* outTmp = out + entryCount;
+    
+    RadixSort256::SortWithKey<BB_MAX_JOBS>( *_context.threadPool, src, srcTmp, out, outTmp, entryCount );
 
     return out;
 }
@@ -520,12 +521,10 @@ void MarkJob::MarkEntries()
         this->SyncThreads();
     }
 
-
     const uint32* map   = this->map;
     Pairs         pairs = this->pairs;
     
     uint32 bucketEntryCount = this->entryCount;
-
 
     // Determine how many passes we need to run for this bucket.
     // Passes are determined depending on the range were currently processing
@@ -631,16 +630,16 @@ inline int32 MarkJob::MarkStep( int32 i, const int32 entryCount, BitField lTable
 {
     for( ; i < entryCount; i++ )
     {
-        // if constexpr ( table < TableId::Table7 )
-        // {
-        //     // #TODO: This map needs to support overflow addresses...
-        //     const uint64 rTableIdx = map[i];
-        //     if( !rTable.Get( rTableIdx ) )
-        //         continue;
-        // }
+        if constexpr ( table < TableId::Table7 )
+        {
+            // #TODO: This map needs to support overflow addresses...
+            const uint64 rTableIdx = map[i];
+            if( !rTable.Get( rTableIdx ) )
+                continue;
+        }
 
-        const uint64 left  = (uint64)pairs.left[i] + lTableOffset;
-        const uint64 right = left + pairs.right[i];
+        const uint64 left  = lTableOffset + pairs.left [i];
+        const uint64 right = left         + pairs.right[i];
 
         lTable.Set( left  );
         lTable.Set( right );

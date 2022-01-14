@@ -149,7 +149,7 @@ bool IOWriteJob::ReadFromFile( FileStream& file, byte* buffer, const size_t size
     {
         ssize_t sizeRead = file.Read( blockBuffer, blockSize );
 
-        if( sizeRead != (ssize_t)remainder )
+        if( sizeRead < (ssize_t)remainder )
         {
             error = file.GetError();
             return false;
