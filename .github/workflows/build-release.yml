@@ -65,6 +65,11 @@ jobs:
 
   build-ubuntu-arm64:
     runs-on: [ARM64]
+    container:
+      image: ubuntu:20.04
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
@@ -72,6 +77,12 @@ jobs:
       - name: Get Version Number
         id: version_number
         run: .github/actions/get-version.sh ubuntu arm64
+
+      - name: Install Prerequisites
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt update
+          apt install -y build-essential git cmake libgmp-dev libnuma-dev
 
       - name: Build
         env:
