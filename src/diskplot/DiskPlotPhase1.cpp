@@ -487,7 +487,16 @@ void DiskPlotPhase1::ForwardPropagate()
         // #endif
     }
 
-    // Ensure last writes completed.
+    // Delete files we don't need anymore
+    ioQueue.DeleteBucket( FileId::Y0       );
+    ioQueue.DeleteBucket( FileId::Y1       );
+    ioQueue.DeleteBucket( FileId::META_A_0 );
+    ioQueue.DeleteBucket( FileId::META_A_1 );
+    ioQueue.DeleteBucket( FileId::META_B_0 );
+    ioQueue.DeleteBucket( FileId::META_B_1 );
+    ioQueue.CommitCommands();
+
+    // Ensure all commands IO completed.
     {
         Fence fence;
 
@@ -712,6 +721,11 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
             // Write the reverse lookup back into its original buckets as a forward lookup map
             WriteReverseMap( tableId, bucketIdx, entryCount, sortedLookup );
+
+            // OK to delete key file bucket
+            const FileId sortKeyFileId = TableIdToSortKeyId( (TableId)((int)tableId - 1) );
+            ioQueue.DeleteFile( sortKeyFileId, bucket );
+            ioQueue.CommitCommands();
         }
         else
         {
@@ -805,7 +819,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             matchCount,
             sortKeyOffset,
             bucket.pairs,
-            (byte*)bucket.sortKey0,                   // #TODO: Change this, for now use sort key buffer
+            (byte*)bucket.sortKey0,                   // #TODO: Change this? for now use sort key buffer
             bucket.y0  , fxMetaInA , fxMetaInB,
             bucket.yTmp, fxMetaOutA, fxMetaOutB,
             cx.bucketCounts[(uint)tableId]
@@ -813,6 +827,11 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "  Finished generating fx in %.2lf seconds.", elapsed );
+    }
+
+    if( tableId == TableId::Table7 )
+    {
+        // #TODO: Write f7 values to disk.
     }
 
     ///
