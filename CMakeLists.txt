@@ -37,7 +37,7 @@ include(FetchContent)
 
 FetchContent_Declare(
   bls
-  GIT_REPOSITORY https://github.com/Chia-Network/bls-signatures.git
+  GIT_REPOSITORY https://github.com/Chinilla-Network/bls-signatures.git
   GIT_TAG        1.0.6
 )
 

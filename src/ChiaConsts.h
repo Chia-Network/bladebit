@@ -19,8 +19,8 @@ enum class TableId
 };
 
 ///
-/// These are extracted from chiapos.
-/// Comments are taken directly from chiapos unless otherwise specified.
+/// These are extracted from chinillapos.
+/// Comments are taken directly from chinillapos unless otherwise specified.
 ///
 
 // F1 evaluations are done in batches of 2^kBatchSizes
@@ -45,7 +45,7 @@ enum class TableId
 
 // This (times k) is the length of the metadata that must be kept for each entry. For example,
 // for a table 4 entry, we must keep 4k additional bits for each entry, which is used to compute f5.
-// @Harold: Not that we changed this from 1-indexing in the chiapos implementation
+// @Harold: Not that we changed this from 1-indexing in the chinillapos implementation
 //          to use 0-indexing. So index 0 == table 1.
 const byte kVectorLens[] = { 0, 1, 2, 4, 4, 3, 2 };
 

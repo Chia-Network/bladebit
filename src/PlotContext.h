@@ -1,6 +1,6 @@
 #pragma once
 #include "Config.h"
-#include "ChiaConsts.h"
+#include "ChinillaConsts.h"
 #include "threading/ThreadPool.h"
 #include "PlotWriter.h"
 

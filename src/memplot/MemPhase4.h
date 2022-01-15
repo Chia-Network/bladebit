@@ -164,7 +164,7 @@ inline void WriteP7Entries( const uint64 length, const uint32* indices, byte* pa
 {
     uint64* fieldWriter = (uint64*)parkBuffer;
     
-    // chiapos requires this to have an extra bit for some odd reason.
+    // chinillapos requires this to have an extra bit for some odd reason.
     // Otherwise we could have copied the buffer as-is.
     const uint32 bitsPerEntry = _K + 1;
 
@@ -267,19 +267,19 @@ inline size_t WriteC12Parallel( ThreadPool& pool, const uint64 length,
 
     if constexpr ( CInterval == kCheckpoint1Interval * kCheckpoint2Interval )
     {
-        // #NOTE: Unfortunately, chiapos infers the size of the C2 table by substracting
+        // #NOTE: Unfortunately, chinillapos infers the size of the C2 table by substracting
         //  the C3 pointer by the C2 pointer. This does not work for us
         //  because since we do block-aligned writes we, our C2 size disk-occupied size
         //  will most likely be greater than the actual C2 size. 
         //  To work around this, we can add a trailing entry with the maximum k32 value size.
-        //  This will force chiapos to stop at that point as the f7 is lesser than max k32 value.
+        //  This will force chinillapos to stop at that point as the f7 is lesser than max k32 value.
         //  #IMPORTANT: This means that we can't have any f7's that are 0xFFFFFFFF!.
         parkWriter[trailingEntries] = 0xFFFFFFFF;
     }
     else
     {
         
-        // Write an empty one at the end (compatibility with chiapos)
+        // Write an empty one at the end (compatibility with chinillapos)
         parkWriter[trailingEntries] = 0;
     }
 

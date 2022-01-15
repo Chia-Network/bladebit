@@ -1,8 +1,8 @@
-# BladeBit Chia Plotter
+# BladeBit Chinilla Plotter
 
-[![Release Builds](https://github.com/Chia-Network/bladebit/actions/workflows/build-release.yml/badge.svg?branch=master&event=push)](https://github.com/Chia-Network/bladebit/actions/workflows/build-release.yml)
+[![Release Builds](https://github.com/Chinilla-Network/bladebit/actions/workflows/build-release.yml/badge.svg?branch=master&event=push)](https://github.com/Chinilla-Network/bladebit/actions/workflows/build-release.yml)
 
-A fast **RAM-only**, **k32-only**, Chia plotter.
+A fast **RAM-only**, **k32-only**, Chinilla plotter.
 
 ## Requirements
 **416 GiB of RAM are required** to run it, plus a few more megabytes for stack space and small allocations.
@@ -33,7 +33,7 @@ Must have [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its bu
 ```bash
 
 # Clone the repo & its submodules
-git clone https://github.com/Chia-Network/bladebit.git && cd bladebit
+git clone https://github.com/Chinilla-Network/bladebit.git && cd bladebit
 
 # Create a build directory for cmake and cd into it
 mkdir build
@@ -70,7 +70,7 @@ Writes to disk only occur to the final plot file, and it is done sequentially, u
 
 
 ## Pool Plots
-Pool plots are fully supported and tested against the chia-blockchain implementation. The community has also verified that pool plots are working properly and winning proofs with them.
+Pool plots are fully supported and tested against the chinilla-blockchain implementation. The community has also verified that pool plots are working properly and winning proofs with them.
 
 ## NUMA systems
 Memory is bound on interleaved mode for NUMA systems which currently gives the best performance on systems with several nodes. This is the default behavior on NUMA systems, it can be disabled with with the `-m or --no-numa` switch.
@@ -83,5 +83,5 @@ This is not supported yet. Some folks have reported some gains when using huge p
 This implementation is highly memory-bound so optimizing your system towards fast memory access is essential. CPUs with large caches will benefit as well.
 
 
-Copyright 2021 Harold Brenes, Chia Network Inc
+Copyright 2021 Harold Brenes, Chinilla Network Inc
 

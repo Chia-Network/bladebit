@@ -515,7 +515,7 @@ void F1JobThread( F1GenJob* job )
     chacha8_keysetup( &chacha, job->key, 256, NULL );
     chacha8_get_keystream( &chacha, blockIdx, blockCount, (byte*)blocks );
 
-    // chacha output is treated as big endian, therefore swap, as required by chiapos
+    // chacha output is treated as big endian, therefore swap, as required by chinillapos
     for( uint64 i = 0; i < entryCount; i++ )
     {
         const uint64 y = Swap32( blocks[i] );
@@ -597,7 +597,7 @@ void F1JobThread( F1GenJob* job )
 
 //         for( uint64 i = 0; i < entriesPerPage32; i++ )
 //         {
-//             // chacha output is treated as big endian, therefore swap, as required by chiapos
+//             // chacha output is treated as big endian, therefore swap, as required by chinillapos
 //             const uint64 y = Swap32( blocks[i] );
 //             yBuffer[i] = ( y << kExtraBits ) | ( (curX+i) >> (_K - kExtraBits) );
 //         }

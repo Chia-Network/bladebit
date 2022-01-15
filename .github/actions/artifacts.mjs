@@ -4,7 +4,7 @@ import * as Path from 'path';
 
 const log = console.log;
 
-const OWNER    = 'Chia-Network';
+const OWNER    = 'Chinilla-Network';
 const REPO     = 'bladebit';
 const API_BASE = `/repos/${OWNER}/${REPO}`;
 
