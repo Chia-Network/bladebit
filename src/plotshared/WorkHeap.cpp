@@ -136,6 +136,22 @@ bool WorkHeap::Release( byte* buffer )
 }
 
 //-----------------------------------------------------------
+bool WorkHeap::CanAllocate( size_t size, size_t alignment  ) const
+{
+    size = alignment * CDivT( size, alignment );
+
+    for( size_t i = 0; i < _heapTable.Length(); i++ )
+    {
+        HeapEntry& entry = _heapTable[i];
+
+        if( entry.CanAllocate( size, alignment ) )
+            return true;
+    }
+
+    return false;
+}
+
+//-----------------------------------------------------------
 void WorkHeap::CompletePendingReleases()
 {
     const int BUFFER_SIZE = 128;

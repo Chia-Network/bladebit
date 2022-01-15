@@ -46,7 +46,10 @@ public:
     // This is meant to be called by a producer thread.
     bool  Release( byte* buffer );
 
+    bool CanAllocate( size_t size, size_t alignment = sizeof( intptr_t ) ) const;
+
     inline size_t FreeSize() const { return _usedHeapSize - _heapSize; }
+
 
     // Makes pending released allocations available to the heap for allocation again.
     void CompletePendingReleases();

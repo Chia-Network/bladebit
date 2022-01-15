@@ -43,6 +43,16 @@ public:
                            uint64 lTableOffset, const Pairs& pairs, const uint32* map );
 };
 
+struct StripMapJob : MTJob<StripMapJob>
+{
+    uint32        entryCount;
+    const uint64* inMap;
+    uint32*       outKey;
+    uint32*       outMap;
+
+    void Run() override;
+};
+
 //-----------------------------------------------------------
 DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
     : _context( context )
@@ -100,6 +110,9 @@ void DiskPlotPhase2::Run()
     Fence bitFieldFence, bucketLoadFence, mapWriteFence;
     _bucketReadFence = &bucketLoadFence;
     _mapWriteFence   = &mapWriteFence;
+
+    // Set write fence as signalled initially
+    _mapWriteFence->Signal();
 
     // Mark all tables
     FileId lTableFileId = FileId::MARKED_ENTRIES_6;
@@ -301,11 +314,9 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
     for( uint32 bucket = 0; bucket - BB_DP_BUCKET_COUNT; bucket++ )
     {
-        const uint64 mapEntryOffet = maxEntriesPerBucket * bucket;
-
-        uint32 bucketEntryCount;
+        uint32  bucketEntryCount;
         uint64* unsortedMapBuffer;
-        Pairs pairs;
+        Pairs   pairs;
 
         // Load as many buckets as we can in the background
         LoadNextBuckets( table, bucket, unsortedMapBuffer, pairs, bucketEntryCount );
@@ -318,8 +329,17 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
             // Wait for the map to finish loading
             _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
 
+            // Ensure the map buffer isn't being used anymore (we use the tmp map buffer for this)
+            _mapWriteFence->Wait();
+
             // Sort the lookup map and strip out the origin index
             map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
+
+            // Write the map back to disk & release the buffer
+            queue.ReleaseBuffer( _bucketBuffers[bucket].map );
+            queue.WriteFile( rMapId, 0, map, bucketEntryCount * sizeof( uint32 ) );
+            queue.SignalFence( *_mapWriteFence );
+            queue.CommitCommands();
         }
 
         // Wait for the pairs to finish loading
@@ -340,7 +360,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
             job.lTableMarkedEntries = lTableMarks;
             job.rTableMarkedEntries = rTableMarks;
-            
+
             job.lTableOffset        = lTableEntryOffset;
             job.pairBucket          = pairBucket;
             job.pairBucketOffset    = pairBucketEntryOffset;
@@ -348,8 +368,8 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
         jobs.Run( threadCount );
 
-        // Release the buffer we just used
-        queue.ReleaseBuffer( _bucketBuffers[bucket] );
+        // Release the paiors buffer we just used
+        queue.ReleaseBuffer( _bucketBuffers[bucket].pairs.left );
         queue.CommitCommands();
 
         // Update our offsets
@@ -374,53 +394,61 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
     const uint64 tableEntryCount     = context.entryCounts[(int)table];
 
     // Load as many buckets as we're able to
+    const uint32 maxBucketsToLoad = _bucketsLoaded + 2;   // Only load 2 buckets per pass max for now (Need to allow space for map and table writes as well)
+
     while( _bucketsLoaded < BB_DP_BUCKET_COUNT )
     {
         const uint32 bucketToLoadEntryCount = _bucketsLoaded < BB_DP_BUCKET_COUNT - 1 ?
                                               maxEntriesPerBucket :
                                               (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
 
+        // #TODO: Block-align size?
         // Reserve a buffer to load both a map bucket and the same amount of entries worth of pairs.
-        const size_t mapReadSize = rMapId != FileId::None ? sizeof( uint64 ) * bucketToLoadEntryCount : 0;
-        const size_t lReadSize   = sizeof( uint32 ) * bucketToLoadEntryCount;
-        const size_t rReadSize   = sizeof( uint16 ) * bucketToLoadEntryCount;
+        const size_t mapReadSize  = rMapId != FileId::None ? sizeof( uint64 ) * bucketToLoadEntryCount : 0;
+        const size_t lReadSize    = sizeof( uint32 ) * bucketToLoadEntryCount;
+        const size_t rReadSize    = sizeof( uint16 ) * bucketToLoadEntryCount;
+        const size_t pairReadSize = lReadSize + rReadSize;
+        const size_t totalSize    = mapReadSize + pairReadSize;
 
-        // #TODO: Load map and pairs buffers separately since we then can
-        //        release the map buffer as soon as we finished sorting and stripping it?
-        byte* buffer = queue.GetBuffer( mapReadSize + lReadSize + rReadSize, false );
-        if( !buffer )
-        {   
-            if( _bucketsLoaded <= bucket )
-            {
-                // Force-load a bucket (block until we can load one)
-                buffer = queue.GetBuffer( mapReadSize + lReadSize + rReadSize, true );
-                ASSERT( buffer );
-            }
-            else
-                break;
-        }
+        // Break out if a buffer isn't available, and we don't actually require one
+        if( !queue.Heap().CanAllocate( totalSize ) && _bucketsLoaded > bucket )
+            break;
+        
+        PairAndMap& buffer = _bucketBuffers[_bucketsLoaded];  // Store the buffer for the other threads to use
+        ZeroMem( &buffer );
+        
+        if( mapReadSize > 0 )
+            buffer.map = (uint64*)queue.GetBuffer( mapReadSize , true );
 
-        byte* pairsLBuffer = buffer       + mapReadSize;
-        byte* pairsRBuffer = pairsLBuffer + lReadSize;
-
-        _bucketBuffers[_bucketsLoaded] = buffer;  // Store the buffer for the other threads to use
+        buffer.pairs.left  = (uint32*)queue.GetBuffer( pairReadSize, true );
+        buffer.pairs.right = (uint16*)( buffer.pairs.left + bucketToLoadEntryCount );
 
         const uint32 loadFenceId = _bucketsLoaded * FenceId::FenceCount;
 
-        if( rMapId != FileId::None )
+        if( mapReadSize > 0 )
         {
-            queue.ReadFile( rMapId, _bucketsLoaded, buffer, mapReadSize );
+            queue.ReadFile( rMapId, _bucketsLoaded, buffer.map, mapReadSize );
             queue.SignalFence( *_bucketReadFence, FenceId::MapLoaded + loadFenceId );
+
+            // Seek the file back to origin, and over-write it.
+            // If it's not the origin bucket, then just delete the file, don't need it anymore
+            if( _bucketsLoaded == 0 )
+                queue.SeekFile( rMapId, 0, 0, SeekOrigin::Begin );
+            else
+                queue.DeleteFile( rMapId, _bucketsLoaded );
         }
 
-        queue.ReadFile( rTableLPtrId, 0, pairsLBuffer, lReadSize );
-        queue.ReadFile( rTableRPtrId, 0, pairsRBuffer, rReadSize );
+        queue.ReadFile( rTableLPtrId, 0, buffer.pairs.left , lReadSize );
+        queue.ReadFile( rTableRPtrId, 0, buffer.pairs.right, rReadSize );
         queue.SignalFence( *_bucketReadFence, FenceId::PairsLoaded + loadFenceId );
 
         queue.CommitCommands();
         _bucketsLoaded++;
-    }
 
+        if( _bucketsLoaded >= maxBucketsToLoad )
+            break;
+    }
+    
 
     {
         ASSERT( _bucketsLoaded > bucket );
@@ -429,45 +457,64 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
                                     maxEntriesPerBucket :
                                     (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
 
-        // Reserve a buffer to load both a map bucket and the same amount of entries worth of pairs.
-        const size_t mapReadSize = rMapId != FileId::None ? sizeof( uint64 ) * entryCount : 0;
-        const size_t lReadSize   = sizeof( uint32 ) * entryCount;
-        const size_t rReadSize   = sizeof( uint16 ) * entryCount;
+        const PairAndMap& buffer = _bucketBuffers[bucket];
 
-        byte* buffer = _bucketBuffers[bucket];
-
-        byte* pairsLBuffer = buffer       + mapReadSize; 
-        byte* pairsRBuffer = pairsLBuffer + lReadSize;
-
-        outMapBuffer         = rMapId != FileId::None ? (uint64*)buffer : nullptr;
-        outPairsBuffer.left  = (uint32*)pairsLBuffer;
-        outPairsBuffer.right = (uint16*)pairsRBuffer;
-        outBucketEntryCount  = entryCount;
+        outMapBuffer        = rMapId != FileId::None ? buffer.map : nullptr;
+        outPairsBuffer      = buffer.pairs;
+        outBucketEntryCount = entryCount;
     }
 }
 
 //-----------------------------------------------------------
 uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
 {
-    uint32* src = (uint32*)_tmpMap;
-    uint32* out = (uint32*)map;
+    MTJobRunner<StripMapJob> jobs( *_context.threadPool );
 
-    for( int64 i = 0; i < (int64)entryCount; i++ )
+    const uint32 threadCount      = _context.threadCount;
+    const uint32 entriesPerThread = entryCount / threadCount;
+
+    uint32* outMap = (uint32*)_tmpMap;
+    uint32* key    = outMap + entryCount;
+
+    for( uint32 i = 0; i < threadCount; i++ )
     {
-        const uint64 m = map[i];
+        auto& job = jobs[i];
 
-        src[i] = (uint32)m;
-        out[i] = (uint32)(m >> 32);
+        job.entryCount = entriesPerThread;
+        job.inMap      = map    + entriesPerThread * i;
+        job.outKey     = key    + entriesPerThread * i;
+        job.outMap     = outMap + entriesPerThread * i;
     }
 
-    uint32* srcTmp = src + entryCount;
-    uint32* outTmp = out + entryCount;
-    
-    RadixSort256::SortWithKey<BB_MAX_JOBS>( *_context.threadPool, src, srcTmp, out, outTmp, entryCount );
+    const uint32 trailingEntries = entryCount - entriesPerThread * threadCount;
+    jobs[threadCount-1].entryCount += trailingEntries;
 
-    return out;
+    jobs.Run( threadCount );
+
+    // Now sort it
+    uint32* tmpKey = (uint32*)map;
+    uint32* tmpMap = tmpKey + entryCount;
+    
+    RadixSort256::SortWithKey<BB_MAX_JOBS>( *_context.threadPool, key, tmpKey, outMap, tmpMap, entryCount );
+
+    return outMap;
 }
 
+//-----------------------------------------------------------
+void StripMapJob::Run()
+{
+    const int64   entryCount = (int64)this->entryCount;
+    const uint64* inMap      = this->inMap;
+    uint32*       key        = this->outKey;
+    uint32*       map        = this->outMap;
+
+    for( int64 i = 0; i < entryCount; i++ )
+    {
+        const uint64 m = inMap[i];
+        key[i] = (uint32)m;
+        map[i] = (uint32)(m >> 32);
+    }
+}
 
 //-----------------------------------------------------------
 void MarkJob::Run()

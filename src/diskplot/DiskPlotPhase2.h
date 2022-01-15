@@ -4,6 +4,12 @@
 
 class DiskPlotPhase2
 {
+    struct PairAndMap
+    {
+        Pairs   pairs;
+        uint64* map;
+    };
+
 public:
     DiskPlotPhase2( DiskPlotContext& context );
     ~DiskPlotPhase2();
@@ -17,13 +23,11 @@ public:
 private:
     DiskPlotContext& _context;
 
-    // uint64* _markingBuffers[2];
     uint64* _tmpMap;
     Fence*  _bucketReadFence;
     Fence*  _mapWriteFence;
 
-    byte*   _bucketBuffers[BB_DP_BUCKET_COUNT]; 
-    // byte*  _pairsBuffers[BB_DP_BUCKET_COUNT]; 
+    PairAndMap  _bucketBuffers[BB_DP_BUCKET_COUNT]; 
+    uint32      _bucketsLoaded;
 
-    uint32 _bucketsLoaded;
 };
