@@ -14,7 +14,8 @@
 DiskBufferQueue::DiskBufferQueue( 
     const char* workDir, byte* workBuffer, 
     size_t workBufferSize, uint ioThreadCount,
-    bool useDirectIO )
+    bool useDirectIO
+)
     : _workDir       ( workDir     )
     , _workHeap      ( workBufferSize, workBuffer )
     , _useDirectIO   ( useDirectIO )
@@ -24,58 +25,55 @@ DiskBufferQueue::DiskBufferQueue(
     ASSERT( workDir );
 
     // Initialize Files
-    size_t workDirLen = strlen( workDir );
-    char*  pathBuffer = bbmalloc<char>( workDirLen + 64 );
+    const size_t workDirLen = _workDir.length();
 
-    memcpy( pathBuffer, workDir, workDirLen + 1 );
+    _filePathBuffer = bbmalloc<char>( workDirLen + 64 );  // Should be enough for all our file names
 
-    if( pathBuffer[workDirLen - 1] != '/' && pathBuffer[workDirLen - 1] != '\\' )
+    memcpy( _filePathBuffer, workDir, workDirLen + 1 );
+
+    if( _filePathBuffer[workDirLen-1] != '/' && _filePathBuffer[workDirLen-1] != '\\' )
     {
-        pathBuffer[workDirLen]   = '/';
-        pathBuffer[++workDirLen] = '\0';
+        _filePathBuffer[workDirLen]   = '/';
+        _filePathBuffer[workDirLen+1] = '\0';
+        _workDir += "/";
     }
 
-    InitFileSet( FileId::Y0      , "y0"       , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::Y1      , "y1"       , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::META_A_0, "meta_a0"  , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::META_A_1, "meta_a1"  , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::META_B_0, "meta_b0"  , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::META_B_1, "meta_b1"  , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::X       , "x"        , BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::T2_L    , "table_2_l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T2_R    , "table_2_r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T3_L    , "table_3_l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T3_R    , "table_3_r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T4_L    , "table_4_l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T4_R    , "table_4_r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T5_L    , "table_5_l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T5_R    , "table_5_r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T6_L    , "table_6_l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T6_R    , "table_6_r", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T7_L    , "table_7_l", 1,                  pathBuffer, workDirLen );
-    InitFileSet( FileId::T7_R    , "table_7_r", 1,                  pathBuffer, workDirLen );
-
-    InitFileSet( FileId::SORT_KEY2, "table_2_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::SORT_KEY3, "table_3_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::SORT_KEY4, "table_4_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::SORT_KEY5, "table_5_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::SORT_KEY6, "table_6_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::SORT_KEY7, "table_7_key", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-
-    InitFileSet( FileId::MAP2, "table_2_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::MAP3, "table_3_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::MAP4, "table_4_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::MAP5, "table_5_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-    InitFileSet( FileId::MAP6, "table_6_map", BB_DP_BUCKET_COUNT, pathBuffer, workDirLen );
-
-    InitFileSet( FileId::MARKED_ENTRIES_2, "table_2_marks", 1, pathBuffer, workDirLen );
-    InitFileSet( FileId::MARKED_ENTRIES_3, "table_3_marks", 1, pathBuffer, workDirLen );
-    InitFileSet( FileId::MARKED_ENTRIES_4, "table_4_marks", 1, pathBuffer, workDirLen );
-    InitFileSet( FileId::MARKED_ENTRIES_5, "table_5_marks", 1, pathBuffer, workDirLen );
-    InitFileSet( FileId::MARKED_ENTRIES_6, "table_6_marks", 1, pathBuffer, workDirLen );
-
-//     InitFileSet( FileId::F7      , "f7"      , 1,                  pathBuffer, workDirLen );
-    free( pathBuffer );
+    InitFileSet( FileId::Y0              , "y0"           , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::Y1              , "y1"           , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::META_A_0        , "meta_a0"      , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::META_A_1        , "meta_a1"      , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::META_B_0        , "meta_b0"      , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::META_B_1        , "meta_b1"      , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::X               , "x"            , BB_DP_BUCKET_COUNT );
+    // InitFileSet( FileId::F7              , "f7"           , 1               );
+    InitFileSet( FileId::T2_L            , "table_2_l"    , 1                  );
+    InitFileSet( FileId::T2_R            , "table_2_r"    , 1                  );
+    InitFileSet( FileId::T3_L            , "table_3_l"    , 1                  );
+    InitFileSet( FileId::T3_R            , "table_3_r"    , 1                  );
+    InitFileSet( FileId::T4_L            , "table_4_l"    , 1                  );
+    InitFileSet( FileId::T4_R            , "table_4_r"    , 1                  );
+    InitFileSet( FileId::T5_L            , "table_5_l"    , 1                  );
+    InitFileSet( FileId::T5_R            , "table_5_r"    , 1                  );
+    InitFileSet( FileId::T6_L            , "table_6_l"    , 1                  );
+    InitFileSet( FileId::T6_R            , "table_6_r"    , 1                  );
+    InitFileSet( FileId::T7_L            , "table_7_l"    , 1                  );
+    InitFileSet( FileId::T7_R            , "table_7_r"    , 1                  );
+    InitFileSet( FileId::SORT_KEY2       , "table_2_key"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::SORT_KEY3       , "table_3_key"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::SORT_KEY4       , "table_4_key"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::SORT_KEY5       , "table_5_key"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::SORT_KEY6       , "table_6_key"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::SORT_KEY7       , "table_7_key"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::MAP2            , "table_2_map"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::MAP3            , "table_3_map"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::MAP4            , "table_4_map"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::MAP5            , "table_5_map"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::MAP6            , "table_6_map"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::MARKED_ENTRIES_2, "table_2_marks", 1                  );
+    InitFileSet( FileId::MARKED_ENTRIES_3, "table_3_marks", 1                  );
+    InitFileSet( FileId::MARKED_ENTRIES_4, "table_4_marks", 1                  );
+    InitFileSet( FileId::MARKED_ENTRIES_5, "table_5_marks", 1                  );
+    InitFileSet( FileId::MARKED_ENTRIES_6, "table_6_marks", 1                  );
 
     // Initialize I/O thread
     _dispatchThread.Run( CommandThreadMain, this );
@@ -85,6 +83,7 @@ DiskBufferQueue::DiskBufferQueue(
 DiskBufferQueue::~DiskBufferQueue()
 {
     // #TODO: Delete our file sets
+    free( _filePathBuffer );
 }
 
 //-----------------------------------------------------------
@@ -94,8 +93,11 @@ void DiskBufferQueue::ResetHeap( const size_t heapSize, void* heapBuffer )
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketCount, char* pathBuffer, size_t workDirLength )
+void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketCount )
 {
+    char*        pathBuffer    = _filePathBuffer;
+    const size_t workDirLength = _workDir.length();
+
     char* baseName = pathBuffer + workDirLength;
 
     FileFlags flags = FileFlags::LargeFile;
@@ -107,8 +109,6 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     fileSet.name         = name;
     fileSet.files.values = new FileStream[bucketCount];
     fileSet.files.length = bucketCount;
-    fileSet.path         = bbmalloc<char>( workDirLength + 65 );
-    memcpy( (void*)fileSet.path, pathBuffer, workDirLength + 1 );
 
     for( uint i = 0; i < bucketCount; i++ )
     {
@@ -383,12 +383,14 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd DeleteFile" );
             #endif
+            CmdDeleteFile( cmd );
         break;
 
         case Command::DeleteBucket:
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd DeleteBucket" );
             #endif
+            CmdDeleteBucket( cmd );
         break;
 
 
@@ -587,18 +589,13 @@ void DiskBufferQueue::CmdDeleteFile( const Command& cmd )
     FileStream& file        = fileBuckets.files[cmd.deleteFile.bucket];
     file.Close();
 
-    // #NOTE: The path buffer has enough space in it to store the file name as well 
-    const size_t pathLen = strlen( fileBuckets.path );
-    sprintf( (char*)fileBuckets.path + pathLen, "%s_%u", fileBuckets.name, cmd.deleteFile.bucket );
+    char* basePath = _filePathBuffer + _workDir.length();
+    sprintf( basePath, "%s_%u.tmp", fileBuckets.name, cmd.deleteFile.bucket );
     
-    const int r = remove( fileBuckets.path );
+    const int r = remove( _filePathBuffer );
 
     if( r )
-        Log::Error( "Error: Failed to delete file %s.", fileBuckets.path );
-
-    ASSERT( !r );
-    ((char*)fileBuckets.path)[pathLen] = '\0';
-
+        Log::Error( "Error: Failed to delete file %s.", _filePathBuffer );
 }
 
 //----------------------------------------------------------
@@ -606,25 +603,20 @@ void DiskBufferQueue::CmdDeleteBucket( const Command& cmd )
 {
     FileSet& fileBuckets = _files[(int)cmd.deleteFile.fileId];
 
-    // #NOTE: The path buffer has enough space in it to store the file name as well 
-    const size_t pathLen = strlen( fileBuckets.path );
+    char* basePath = _filePathBuffer + _workDir.length();
 
     for( size_t i = 0; i < fileBuckets.files.length; i++ )
     {
         FileStream& file = fileBuckets.files[i];
         file.Close();
 
-        sprintf( (char*)fileBuckets.path + pathLen, "%s_%u", fileBuckets.name, cmd.deleteFile.bucket );
+        sprintf( basePath, "%s_%u.tmp", fileBuckets.name, (uint)i );
     
-        const int r = remove( fileBuckets.path );
+        const int r = remove( _filePathBuffer );
 
         if( r )
-            Log::Error( "Error: Failed to delete file %s.", fileBuckets.path );
-
-        ASSERT( !r );
+            Log::Error( "Error: Failed to delete file %s.", _filePathBuffer );
     }
-
-    ((char*)fileBuckets.path)[pathLen] = '\0';
 }
 
 //-----------------------------------------------------------

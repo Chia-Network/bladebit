@@ -86,7 +86,7 @@ class DiskPlotPhase1
 
         Fence   fence;              // Used by us, signalled by the IO thread
         Fence   ioFence;            // Signalled by us, used by the IO thread
-        Fence   mapFence;           // Fence used for writing the lookup map generated from sort keys
+        Fence   mapFence;           // Fence used for writing the lookup map generated from sort keys. With table 2, it is used for writing X back to disk.
         Fence   backPointersFence;  // Fence used for writing table backpointers
 
         // Used for overflows
@@ -157,14 +157,7 @@ private:
         uint32        pairsOffsetR
     );
 
-    
-    template<TableId tableId>
-    void GenFxForTable( uint bucketIdx, uint entryCount, const Pairs pairs, 
-                        const uint32* yIn, uint32* yOut, byte* bucketIdOut,
-                        const uint64* metaInA, const uint64* metaInB,
-                        uint64* metaOutA, uint64* metaOutB );
-
-
+  
     void GetWriteFileIdsForBucket( TableId table, FileId& outYId, 
                                    FileId& outMetaAId, FileId& outMetaBId );
 
@@ -259,50 +252,3 @@ struct MatchJob : MTJob<MatchJob>
 
     void Run() override;
 };
-
-struct FxJob : BucketJob<FxJob>
-{
-    TableId         tableId;
-    uint32          bucketIdx;
-    uint32          entriesPerChunk;        // Entries per chunk across all threads
-    uint32          entryCount;             // Entry count for each individual job
-    uint32          chunkCount;
-    uint32          trailingChunkEntries;   // If greater than 0,
-                                            // then we have an extra last chunk
-                                            // with less entries than entryCount
-
-//     uint32          offset;
-    Pairs           pairs;
-    const uint32*   yIn;
-    uint32*         yOut;
-    byte*           bucketIdOut;
-    const uint64*   metaInA;
-    const uint64*   metaInB;
-    uint64*         metaOutA;
-    uint64*         metaOutB;
-
-    OverflowBuffer* yOverflows;
-    OverflowBuffer* metaAOverflows;
-    OverflowBuffer* metaBOverflows;
-
-private:
-    void* _bucketY    ;     // Buffer that will be used to write buckets to disk.
-    void* _bucketMetaA;     // These buffers are assigned by the control thread.
-    void* _bucketMetaB;
-
-public:
-    void Run() override;
-
-    template<TableId tableId>
-    void RunForTable();
-
-    template<TableId tableId, typename TMetaA, typename TMetaB>
-    void SortToBucket( uint entryCount, const byte* bucketIndices,
-                       const uint32* yBuffer, const TMetaA* metaABuffer, const TMetaB* metaBBuffer,
-                       uint bucketCounts[BB_DP_BUCKET_COUNT] );
-
-    template<typename T>
-    void SaveBlockRemainders( FileId fileId, const uint32* bucketCounts, const T* buffer, 
-                              uint32* remainderSizes, DoubleBuffer* remainderBuffers );
-};
-

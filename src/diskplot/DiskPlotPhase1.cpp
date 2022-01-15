@@ -440,7 +440,7 @@ void DiskPlotPhase1::ForwardPropagate()
 
     // Set these fences as signalled initially
     bucket.backPointersFence.Signal();
-    bucket.mapFence.Signal();
+    // bucket.mapFence.Signal();    // Used by X in Table 2
 
     /// Propagate to each table
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
@@ -621,6 +621,10 @@ void DiskPlotPhase1::ForwardPropagateTable()
         const uint32 bucketEntryCount = ForwardPropagateBucket<tableId>( bucketIdx, bucket, entryCount );
         bucket.tableEntryCount += bucketEntryCount;
 
+        // Ensure we finished writing X before swapping buffers
+        if( tableId == TableId::Table2 )
+            bucket.mapFence.Wait();
+
         // Swap are front/back buffers
         std::swap( bucket.y0      , bucket.y1       );
         std::swap( bucket.metaA0  , bucket.metaA1   );
@@ -667,10 +671,10 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             // No sort key needed for table 1, just sort x along with y
             sortKey    = (uint32*)bucket.metaA0;
 
-            fxMetaInA  = bucket.metaA0;
-            fxMetaInB  = bucket.metaB0;
+            fxMetaInA  = sortKey;
+            fxMetaInB  = nullptr;
             fxMetaOutA = bucket.metaATmp;
-            fxMetaOutB = bucket.metaBTmp;
+            fxMetaOutB = nullptr;
 
             // Ensure Meta A has been loaded (which for table to is just x)
             bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx );
@@ -708,6 +712,15 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
             // Write the reverse lookup back into its original buckets as a forward lookup map
             WriteReverseMap( tableId, bucketIdx, entryCount, sortedLookup );
+        }
+        else
+        {
+            // Write sorted x back to disk
+            // #TODO: Should we copy x to metaBFront here to wait for the Fence here instead on swap?
+            ioQueue.SeekFile( FileId::X, bucket, 0, SeekOrigin::Begin );
+            ioQueue.WriteFile( FileId::X, bucket, fxMetaInA, entryCount * sizeof( uint32 ) );
+            ioQueue.SignalFence( bucket.mapFence ); // Use map fence here
+            ioQueue.CommitCommands();
         }
 
         // OK to load next (back) metadata B buffer now (see comment above in ForwardPropagateTable)
@@ -1760,212 +1773,6 @@ RETURN:
 
 
 
-
-
-///
-/// Fx Generation
-///
-//-----------------------------------------------------------
-template<TableId tableId>
-void DiskPlotPhase1::GenFxForTable( uint bucketIdx, uint entryCount, const Pairs pairs,
-                                    const uint32* yIn, uint32* yOut, byte* bucketIdOut,
-                                    const uint64* metaInA, const uint64* metaInB,
-                                    uint64* metaOutA, uint64* metaOutB )
-{
-    Log::Line( "  Computing Fx..." );
-    auto timer = TimerBegin();
-
-    auto& cx = _cx;
-
-    const size_t outMetaSizeA     = TableMetaOut<tableId>::SizeA;
-    const size_t outMetaSizeB     = TableMetaOut<tableId>::SizeB;
-
-    const size_t fileBlockSize    = _diskQueue->BlockSize();
-    const size_t sizePerEntry     = sizeof( uint32 ) + outMetaSizeA + outMetaSizeB;
-
-    const size_t writeInterval    = cx.writeIntervals[(uint)tableId].fxGen;
-
-    const size_t entriesTotalSize = entryCount * sizePerEntry;
-    ASSERT( writeInterval <= entriesTotalSize );
-
-    uint32 entriesPerChunk        = (uint32)( writeInterval / sizePerEntry );
-    uint32 sizePerChunk           = (uint32)( entriesPerChunk * sizePerEntry ); ASSERT( sizePerChunk <= writeInterval );
-    uint32 chunkCount             = (uint32)( entriesTotalSize / sizePerChunk );
-
-    const uint32 threadCount      = cx.threadCount;
-    const uint32 entriesPerThread = entriesPerChunk / threadCount;
-
-    entriesPerChunk = entriesPerThread * threadCount;
-    uint32       trailingEntries  = entryCount - ( entriesPerChunk * chunkCount );
-
-    while( trailingEntries >= entriesPerChunk )
-    {
-        chunkCount++;
-        trailingEntries -= entriesPerChunk;
-    }
-
-    // Add trailing entries as a trailing chunk
-    const uint32 lastChunkEntries = trailingEntries / threadCount;
-
-    // Remove that from the trailing entries.
-    // This guarantees that any trailing entries will be <= threadCount
-    trailingEntries -= lastChunkEntries * threadCount;
-
-    ASSERT( entriesPerThread * threadCount * chunkCount + lastChunkEntries * threadCount + trailingEntries == entryCount );
-
-    uint32* bucketCounts = _cx.bucketCounts[(uint)tableId];
-//     memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );    // Already zeroed
-
-    MTJobRunner<FxJob> jobs( *cx.threadPool );
-
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        FxJob& job = jobs[i];
-
-        job.totalBucketCounts    = nullptr;        
-        job.diskQueue            = _diskQueue;
-        job.tableId              = tableId;
-        job.bucketIdx            = bucketIdx;
-        job.entryCount           = entriesPerThread;
-        job.chunkCount           = chunkCount;
-        job.entriesPerChunk      = entriesPerChunk;
-        job.trailingChunkEntries = lastChunkEntries;
-
-        const size_t offset = entriesPerThread * i;
-        job.pairs       = pairs;
-        job.pairs.left  += offset;
-        job.pairs.right += offset;
-
-        job.yIn            = yIn;
-        job.metaInA        = metaInA;
-        job.metaInB        = metaInB;
-        job.yOut           = yOut        + offset;
-        job.metaOutA       = metaOutA    + offset;
-        job.metaOutB       = metaOutB    + offset;
-        job.bucketIdOut    = bucketIdOut + offset;
-
-        job.yOverflows     = &_bucket->yOverflow;
-        job.metaAOverflows = &_bucket->metaAOverflow;
-        job.metaBOverflows = &_bucket->metaBOverflow;
-    }
-
-    jobs[0].totalBucketCounts = bucketCounts;
-
-    // #TODO We need to grab the trailing entries...
-    //       This isn't working for some reason. Not sure why yet.
-    jobs[threadCount - 1].trailingChunkEntries += trailingEntries;
-
-    // Zero-out overflow buffers
-    memset( _bucket->yOverflow.sizes    , 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-    memset( _bucket->metaAOverflow.sizes, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-    memset( _bucket->metaBOverflow.sizes, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-
-    // Calculate Fx
-    jobs.Run();
-
-    // #TODO: Calculate trailing entries here (they are less than the thread count)
-    //        if we have any.
-    if( trailingEntries )
-    {
-        // Call ComputeFxForTable
-    }
-
-    auto elapsed = TimerEnd( timer );
-    Log::Line( "  Finished computing Fx in %.4lf seconds.", elapsed );
-}
-
-//-----------------------------------------------------------
-void FxJob::Run()
-{
-    // ASSERT( this->entriesPerChunk == this->entryCount * this->_jobCount );
-    // switch( tableId )
-    // {
-    //     case TableId::Table1: RunForTable<TableId::Table1>(); return;
-    //     case TableId::Table2: RunForTable<TableId::Table2>(); return;
-    //     case TableId::Table3: RunForTable<TableId::Table3>(); return;
-    //     case TableId::Table4: RunForTable<TableId::Table4>(); return;
-    //     case TableId::Table5: RunForTable<TableId::Table5>(); return;
-    //     case TableId::Table6: RunForTable<TableId::Table6>(); return;
-    //     case TableId::Table7: RunForTable<TableId::Table7>(); return;
-        
-    //     default:
-    //         ASSERT( 0 );
-    //     break;
-    // }
-}
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wattributes"
-
-//-----------------------------------------------------------
-template<typename T>
-FORCE_INLINE
-void FxJob::SaveBlockRemainders( FileId fileId, const uint32* bucketCounts, const T* buffer, 
-                                 uint32* remainderSizes, DoubleBuffer* remainderBuffers )
-{
-    DiskBufferQueue& queue               = *this->diskQueue;
-    const size_t     fileBlockSize       = queue.BlockSize();
-    const size_t     remainderBufferSize = fileBlockSize * BB_DP_BUCKET_COUNT;
-
-    ASSERT( fileBlockSize > sizeof( T) );
-    
-    byte* ptr = (byte*)buffer;
-
-    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-    {
-        const size_t bucketSize       = bucketCounts[i] * sizeof( T );
-        const size_t blockAlignedSize = bucketSize / fileBlockSize * fileBlockSize;
-        
-        size_t remainderSize = bucketSize - blockAlignedSize;
-        ASSERT( remainderSize / sizeof( T ) * sizeof( T ) == remainderSize );
-
-        if( remainderSize )
-        {
-            size_t curRemainderSize = remainderSizes[i];
-                        
-            const size_t copySize = std::min( remainderSize, fileBlockSize - curRemainderSize );
-
-            DoubleBuffer& buf       = remainderBuffers[i];
-            byte*         remainder = buf.front;
-
-            bbmemcpy_t( remainder + curRemainderSize, ptr + blockAlignedSize, copySize );
-
-            curRemainderSize += remainderSize;
-
-            if( curRemainderSize >= fileBlockSize )
-            {
-                // This may block if the last buffer has not yet finished writing to disk
-                buf.Flip();
-
-                // Overflow buffer is full, submit it for writing
-                queue.WriteFile( fileId, i, remainder, fileBlockSize );
-                queue.SignalFence( buf.fence );
-                queue.CommitCommands();
-
-                // Update new remainder size, if we overflowed our buffer
-                // and copy any overflow, if we have some.
-                remainderSize = curRemainderSize - fileBlockSize;
-
-                if( remainderSize )
-                {
-                    remainder = buf.front;
-                    bbmemcpy_t( remainder, ptr + blockAlignedSize + copySize, remainderSize );
-                }
-
-                remainderSizes[i] = 0;
-                remainderSize     = remainderSize;
-            }
-
-            // Update size
-            remainderSizes[i] += (uint)remainderSize;
-        }
-
-        // Go to the next input bucket
-        ptr += bucketSize;
-    }
-}
-
-#pragma GCC diagnostic pop
 
 //-----------------------------------------------------------
 void OverflowBuffer::Init( void* bucketBuffers, const size_t fileBlockSize )

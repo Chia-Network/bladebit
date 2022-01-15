@@ -49,7 +49,6 @@ enum class FileId
 
 struct FileSet
 {
-    const char*      path;
     const char*      name;
     Span<FileStream> files;
 };
@@ -173,8 +172,8 @@ public:
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
     // These returns the buffer back to the queue so that it is in use.
-    // This command is serialized and should be added after any writing/reading has finished
-    // with said buffer
+    // This command is serialized and should be added after 
+    // any writing/reading has finished with said buffer
     void ReleaseBuffer( void* buffer );
 
     // Add a memory fence into the command stream.
@@ -183,10 +182,10 @@ public:
     // fence have been processed.
     void SignalFence( Fence& fence );
 
+    // Signal a fence with a specific value.
     void SignalFence( Fence& fence, uint32 value );
 
-    // Instructs the command dispatch thread to wait until the specified fence
-    // has been signalled
+    // Instructs the command dispatch thread to wait until the specified fence has been signalled
     void WaitForFence( Fence& fence );
 
     void CompletePendingReleases();
@@ -198,7 +197,7 @@ public:
     
 private:
 
-    void InitFileSet( FileId fileId, const char* name, uint bucketCount, char* pathBuffer, size_t workDirLength );
+    void InitFileSet( FileId fileId, const char* name, uint bucketCount );
 
     Command* GetCommandObject( Command::CommandType type );
 
@@ -221,18 +220,19 @@ private:
 
 
 private:
-    const char*      _workDir;              // Temporary directory in which we will store our temporary files
+    std::string      _workDir;              // Temporary directory in which we will store our temporary files
     WorkHeap         _workHeap;             // Reserved memory for performing plot work and I/O
     
     // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];
-    byte*            _blockBuffer   = nullptr;
-    size_t           _blockSize     = 0;
+    byte*            _blockBuffer    = nullptr;
+    size_t           _blockSize      = 0;
+    
+    char*            _filePathBuffer = nullptr; // For deleting files
 
     // I/O thread stuff
     Thread            _dispatchThread;
     
-//     Command           _commands[BB_DISK_QUEUE_MAX_CMDS];
     SPCQueue<Command, BB_DISK_QUEUE_MAX_CMDS> _commands;
 
     bool              _useDirectIO;
@@ -325,3 +325,4 @@ inline FileId TableIdToMarkedEntriesFileId( const TableId table )
     ASSERT( 0 );
     return FileId::None;
 }
+
