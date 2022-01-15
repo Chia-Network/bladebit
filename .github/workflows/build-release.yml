@@ -65,11 +65,6 @@ jobs:
 
   build-ubuntu-arm64:
     runs-on: [ARM64]
-    container:
-      image: ubuntu:20.04
-    defaults:
-      run:
-        shell: bash
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
