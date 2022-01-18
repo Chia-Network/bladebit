@@ -20,6 +20,8 @@ public:
     void    LoadNextBuckets( TableId table, uint32 bucket, uint64*& mapBuffer, Pairs& pairsBuffer, uint32& outBucketEntryCount );
     uint32* SortAndStripMap( uint64* map, uint32 entryCount );
 
+    inline const Phase3Data& GetPhase3Data() const { return _phase3Data; }
+
 private:
     DiskPlotContext& _context;
 
@@ -30,4 +32,5 @@ private:
     PairAndMap  _bucketBuffers[BB_DP_BUCKET_COUNT]; 
     uint32      _bucketsLoaded;
 
+    Phase3Data  _phase3Data;
 };

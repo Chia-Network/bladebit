@@ -1,6 +1,7 @@
 #include "DiskPlotPhase2.h"
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
+#include "jobs/StripAndSortMap.h"
 
 // Fence ids used when loading buckets
 struct FenceId
@@ -43,16 +44,6 @@ public:
                            uint64 lTableOffset, const Pairs& pairs, const uint32* map );
 };
 
-struct StripMapJob : MTJob<StripMapJob>
-{
-    uint32        entryCount;
-    const uint64* inMap;
-    uint32*       outKey;
-    uint32*       outMap;
-
-    void Run() override;
-};
-
 //-----------------------------------------------------------
 DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
     : _context( context )
@@ -85,7 +76,7 @@ void DiskPlotPhase2::Run()
     // Determine what size we can use to load
     // #TODO: Support overflow entries.
     const uint64 maxEntries          = 1ull << _K;
-    const size_t bitFieldSize        = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
+    const size_t bitFieldSize        = RoundUpToNextBoundary( (size_t)largestTableLength / 8, 8 );  // Round up to 64-bit boundary
     const size_t bitFieldBuffersSize = bitFieldSize * 2;
     
     const uint32 mapBucketEvenSize   = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
@@ -402,6 +393,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
                                               maxEntriesPerBucket :
                                               (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
 
+        // #TODO: I think we need to ne loading a different amount for the L table and the R table on the last bucket.
         // #TODO: Block-align size?
         // Reserve a buffer to load both a map bucket and the same amount of entries worth of pairs.
         const size_t mapReadSize  = rMapId != FileId::None ? sizeof( uint64 ) * bucketToLoadEntryCount : 0;
@@ -498,22 +490,6 @@ uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
     RadixSort256::SortWithKey<BB_MAX_JOBS>( *_context.threadPool, key, tmpKey, outMap, tmpMap, entryCount );
 
     return outMap;
-}
-
-//-----------------------------------------------------------
-void StripMapJob::Run()
-{
-    const int64   entryCount = (int64)this->entryCount;
-    const uint64* inMap      = this->inMap;
-    uint32*       key        = this->outKey;
-    uint32*       map        = this->outMap;
-
-    for( int64 i = 0; i < entryCount; i++ )
-    {
-        const uint64 m = inMap[i];
-        key[i] = (uint32)m;
-        map[i] = (uint32)(m >> 32);
-    }
 }
 
 //-----------------------------------------------------------

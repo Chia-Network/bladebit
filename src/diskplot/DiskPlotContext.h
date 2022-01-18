@@ -89,3 +89,10 @@ struct DiskPlotContext
     DiskFPBufferSizes* bufferSizes;
 };
 
+struct Phase3Data
+{
+    uint64 maxTableLength;
+    size_t bitFieldSize;
+    uint32 bucketMaxSize;
+};
+

@@ -519,7 +519,6 @@ void DiskPlotPhase1::ForwardPropagateTable()
     DiskPlotContext& cx                = _cx;
     DiskBufferQueue& ioQueue           = *_diskQueue;
     Bucket&          bucket            = *_bucket;
-    const uint       threadCount       = _cx.threadCount;
     const uint32*    inputBucketCounts = cx.bucketCounts[(uint)tableId - 1];
 
     const FileId sortKeyFileId = tableId > TableId::Table2 ? TableIdToSortKeyId( (TableId)((int)tableId - 1) ) : FileId::None;
@@ -640,6 +639,9 @@ void DiskPlotPhase1::ForwardPropagateTable()
         std::swap( bucket.metaB0  , bucket.metaB1   );
         std::swap( bucket.sortKey0, bucket.sortKey1 );
     }
+
+    // Reset-it for the next map start
+    bucket.mapFence.Signal();
 }
 
 //-----------------------------------------------------------
@@ -680,7 +682,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             // No sort key needed for table 1, just sort x along with y
             sortKey    = (uint32*)bucket.metaA0;
 
-            fxMetaInA  = sortKey;
+            fxMetaInA  = bucket.metaA0;
             fxMetaInB  = nullptr;
             fxMetaOutA = bucket.metaATmp;
             fxMetaOutB = nullptr;
@@ -723,16 +725,15 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             WriteReverseMap( tableId, bucketIdx, entryCount, sortedLookup );
 
             // OK to delete key file bucket
-            const FileId sortKeyFileId = TableIdToSortKeyId( (TableId)((int)tableId - 1) );
-            ioQueue.DeleteFile( sortKeyFileId, bucket );
+            ioQueue.DeleteFile( TableIdToSortKeyId( tableId - 1 ), bucketIdx );
             ioQueue.CommitCommands();
         }
         else
         {
             // Write sorted x back to disk
             // #TODO: Should we copy x to metaBFront here to wait for the Fence here instead on swap?
-            ioQueue.SeekFile( FileId::X, bucket, 0, SeekOrigin::Begin );
-            ioQueue.WriteFile( FileId::X, bucket, fxMetaInA, entryCount * sizeof( uint32 ) );
+            ioQueue.SeekFile( FileId::X, bucketIdx, 0, SeekOrigin::Begin );
+            ioQueue.WriteFile( FileId::X, bucketIdx, fxMetaInA, entryCount * sizeof( uint32 ) );
             ioQueue.SignalFence( bucket.mapFence ); // Use map fence here
             ioQueue.CommitCommands();
         }
