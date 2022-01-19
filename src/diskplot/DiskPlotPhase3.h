@@ -38,11 +38,14 @@ private:
     uint64* _lMap       [2];
     Pairs   _rTablePairs[2];
     uint64* _rMap       [2];
-    uint64* _tmpRMap;                   // Temporary R map buffer for stripping and sorting.
+    uint64* _tmpLMap;                   // Temporary L map buffer for stripping and sorting.
     uint64* _linePoints;                // Used to convert to line points/tmp buffer
     
     Fence   _rTableFence;
     Fence   _lTableFence;
+
+    uint64  _rTableOffset;
+    uint32  _rTableBucket;
 
     uint64  _tableEntryCount[7];        // Count of each table, after prunning
 };

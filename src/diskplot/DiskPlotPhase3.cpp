@@ -51,17 +51,24 @@ struct P3FenceId
 };
 
 
-struct LPStep1Job : MTJob<LPStep1Job>
+struct ConvertToLPJob : MTJob<ConvertToLPJob>
 {
-    DiskPlotContext* _context;
+    DiskPlotContext* context;
     TableId          rTable;
     
-    uint64*          markedEntries;
-    uint64*          lMap;
-    uint64*          rMap;
+    uint32           bucketEntryCount;
+    const uint64*    markedEntries;
+    const uint64*    lMap;
+    const uint32*    rMap;
     Pairs            rTablePairs;
-    uint64*         _linePoints;        // Buffer for line points
-    
+
+    uint64*          linePoints;        // Buffer for line points/pruned pairs
+    uint32*          rMapPruned;        // Where we store our pruned R map
+
+    uint64           rTableOffset;
+    uint32           rTableBucket;
+
+    int64            prunedEntryCount;
 
     void Run() override;
 };
@@ -208,6 +215,10 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
         ioQueue.CommitCommands();
     }
 
+    // Reset offsets
+    _rTableOffset = 0;
+    _rTableBucket = 0;
+
     // Start processing buckets
     for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
     {
@@ -260,14 +271,13 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
 }
 
 //-----------------------------------------------------------
-void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket, 
-                                      const uint32 entryCount )
+void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket )
 {
-    DiskPlotContext& context     = _context;
-    DiskBufferQueue& ioQueue     = *context.ioQueue;
-    ThreadPool&      threadPool  = *context.threadPool;
-    Fence&           lTableFence = _lTableFence;
-    Fence&           rTableFence = _rTableFence;
+    DiskPlotContext& context       = _context;
+    DiskBufferQueue& ioQueue       = *context.ioQueue;
+    ThreadPool&      threadPool    = *context.threadPool;
+    Fence&           lTableFence   = _lTableFence;
+    Fence&           rTableFence   = _rTableFence;
 
     const TableId lTable           = rTable - 1;
     const uint64  maxEntries       = 1ull << _K;
@@ -276,48 +286,63 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket,
 
     const bool isLastBucket = bucket == BB_DP_BUCKET_COUNT - 1;
 
-    uint32 nextBucketLengthL = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
-    uint32 nextBucketLengthR = nextBucketLengthL;
+    uint32 bucketEntryCountL = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+    uint32 bucketEntryCountR = bucketEntryCountL;
 
     if( isLastBucket )
     {
         const uint64 nEntriesLoaded = (BB_DP_BUCKET_COUNT-1) * ( maxEntries / BB_DP_BUCKET_COUNT );
 
-        nextBucketLengthL = (uint32)( lTableEntryCount - nEntriesLoaded );
-        nextBucketLengthR = (uint32)( rTableEntryCount - nEntriesLoaded );
+        bucketEntryCountL = (uint32)( lTableEntryCount - nEntriesLoaded );
+        bucketEntryCountR = (uint32)( rTableEntryCount - nEntriesLoaded );
     }
 
     // Wait for the L bucket to be loaded
     lTableFence.Wait( bucket + 1 );
 
     // Strip and sort the L map.
-    uint32* lTableMap = nullptr;
+    uint32* lTableMap  = nullptr;
+    uint32* rPrunedMap = nullptr;
 
     if( rTable > TableId::Table2 )
     {
-        lTableMap = (uint32*)_tmpRMap;
-        uint32* outKey = lTableMap + lTableEntryCount;
+        lTableMap = (uint32*)_tmpLMap;
+        uint32* outKey = lTableMap + bucketEntryCountL;
 
         StripMapJob::RunJob( *context.threadPool, context.threadCount,
-            lTableEntryCount, _lMap[0], outKey, lTableMap );
+                             bucketEntryCountL, _lMap[0], outKey, lTableMap );
+
+        // Re-use l map as the pruned r map
+        rPrunedMap = (uint32*)_lMap[0];
     }
     else
-        lTableMap = (uint32*)_lMap[0];
-
+    {
+        lTableMap  = (uint32*)_lMap[0];
+        rPrunedMap = ((uint32*)_tmpLMap) + bucketEntryCountR; // Can use tmp L map
+    }
 
     // Convert to line points
-    // uint64* linePoints = (uint64*)ioQueue.GetBuffer( sizeof( uint64 ) * entryCount );
-    // uint32* rMapStripped = (uint32*)ioQueue.GetBuffer( sizeof( uint64 ) * entryCount );
-
     const uint32 rFenceIdx = bucket * P3FenceId::FENCE_COUNT;
-    // rTableFence.Wait( P3FenceId::RTableLoaded + rFenceIdx );
-    rTableFence.Wait( P3FenceId::RMapLoaded + rFenceIdx );
 
-    uint32 prunedEntryCount = PointersToLinePoints( entryCount, _markedEntries, (uint32*)_rMap[0], _rTablePairs[0], lTableMap, _linePoints );
+    rTableFence.Wait( P3FenceId::RMapLoaded + rFenceIdx );
+    
+    // On table 2 we need to strip and sort our R map,
+    // since we did not do this for table 2 on Phase 2
+    uint32* rMap = (uint32*)_rMap[0];
+
+    if( rTable == TableId::Table2 )
+    {
+        rMap = (uint32*)_tmpLMap;
+        uint32* outKey = rMap + bucketEntryCountR;
+
+        StripMapJob::RunJob( *context.threadPool, context.threadCount,
+                             bucketEntryCountR, _rMap[0], outKey, rMap );
+    }
+
+    const uint32 prunedEntryCount = PointersToLinePoints( bucketEntryCountR, _markedEntries, rMap, _rTablePairs[0], lTableMap, rPrunedMap, _linePoints );
 
     // Distribute line points to buckets along with the map
-    // void DistributeLinePoints( const TableId rTable, const uint32 entryCount, const uint64* linePoints, const uint32* rMap );
-
+    DistributeLinePoints( rTable, prunedEntryCount, _linePoints, rPrunedMap );
 }
 
 //-----------------------------------------------------------
@@ -331,6 +356,60 @@ uint32 DiskPlotPhase3::PointersToLinePoints(
 }
 
 //-----------------------------------------------------------
+void DiskPlotPhase3::DistributeLinePoints( 
+    const TableId rTable, const uint32 entryCount, 
+    const uint64* linePoints, const uint32* rMap )
+{
+    
+}
+
+//-----------------------------------------------------------
+void ConvertToLPJob::Run()
+{
+    DiskPlotContext& context = *this->context;
+
+    const int32 threadCount = (int32)this->JobCount();
+    int64       entryCount  = (int64)( this->bucketEntryCount / threadCount );
+
+    const int64 offset      = entryCount * (int32)this->JobId();
+    
+    if( this->IsLastThread() )
+        entryCount += (int64)this->bucketEntryCount - entryCount * threadCount;
+
+    const int64 end = offset + entryCount;
+
+    const BitField markedEntries( (uint64*)this->markedEntries );
+
+    const uint32* rMap  = this->rMap;
+    const Pairs   pairs = this->rTablePairs;
+
+    // First, scan our entries in order to prune them
+    int64 prunedLength = 0;
+    int64 dstOffset    = 0;
+
+    for( int64 i = offset; i < end; i++)
+    {
+        if( markedEntries[i] )
+            prunedLength ++;
+    }
+
+    this->prunedEntryCount = prunedLength;
+
+    this->SyncThreads();
+
+    // Set our destination offset
+    for( int32 i = 0; i < (int32)this->JobId(); i++ )
+        dstOffset += GetJob( i ).prunedEntryCount;
+
+    // Prune entries into new buffer
+    // Store the pairs as pairs contiguously ?
+    for( int64 i = offset; i < end; i++)
+    {
+        if( !markedEntries[i] )
+            continue;
+    }
+}
+
 // void LPJob::Run()
 // {
 //     FirstPass();

@@ -460,6 +460,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
 //-----------------------------------------------------------
 uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
 {
+    // #TODO: Move to shared function now.
     MTJobRunner<StripMapJob> jobs( *_context.threadPool );
 
     const uint32 threadCount      = _context.threadCount;
