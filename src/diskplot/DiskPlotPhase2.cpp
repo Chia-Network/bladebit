@@ -23,6 +23,10 @@ struct MarkJob : MTJob<MarkJob>
     Pairs            pairs;
     const uint32*    map;
 
+    Pairs            lTable;
+    Pairs            prunedLTable;
+    uint32*          prunedMap;
+
     DiskPlotContext* context;
 
     uint64*          lTableMarkedEntries;
@@ -32,6 +36,7 @@ struct MarkJob : MTJob<MarkJob>
     uint32           pairBucket;
     uint32           pairBucketOffset;
 
+    uint32           prunedEntryCount;
 
 public:
     void Run() override;
@@ -42,6 +47,12 @@ public:
     template<TableId table>
     inline int32 MarkStep( int32 i, const int32 entryCount, BitField lTable, const BitField rTable,
                            uint64 lTableOffset, const Pairs& pairs, const uint32* map );
+
+    void ReWriteLTable( const BitField markedEntries, const uint32 srcOffset, 
+                        const uint32 entryCount, const uint32 prunedEntryCount );
+    
+    void ReWriteRTable( const BitField markedEntries, const uint32 offset, 
+                        const uint32 entryCount, uint32 droppedCount );
 };
 
 //-----------------------------------------------------------
@@ -570,7 +581,7 @@ void MarkJob::MarkEntries()
             // We need a minimum number of entries per thread to ensure that we don't,
             // write to the same qword in the bit field. So let's ensure that each thread
             // has at least more than 2 groups worth of entries.
-            // There's an average of 284,190 entries per bucket, which means each group
+            // There's an average of 284,190 groups per bucket, which means each group
             // has an about 236.1 entries. We round up to 280 entries.
             // We use minimum 3 groups and round up to 896 entries per thread which gives us
             // 14 QWords worth of area each threads can reference.
@@ -644,6 +655,98 @@ void MarkJob::MarkEntries()
             this->pairBucket ++;
             this->pairBucketOffset = 0;
         }
+    }
+
+
+    // #TODO: Now that the table has been marked, we need to count how many entries we now have.
+    this->SyncThreads();
+
+    {
+        uint32 prunedEntryCount = 0;
+        uint32 entriesPerThread = this->entryCount / JobCount();
+        uint32 offset           = entriesPerThread * this->JobId();
+
+        if( this->IsLastThread() )
+            entriesPerThread += this->entryCount - entriesPerThread * this->JobCount();
+
+        for( uint32 i = offset; i < entriesPerThread; i++ )
+        {
+            if( lTableMarkedEntries.Get( i ) )
+                prunedEntryCount ++;
+        }
+
+        this->prunedEntryCount = prunedEntryCount;
+        this->SyncThreads();
+    }
+
+    // Re-write our tables
+    this->ReWriteLTable();
+
+    if( this->IsControlThread() )
+    {
+        this->LockThreads();
+
+        // #TODO: Write L tables to disk
+
+        this->ReleaseThreads();
+    }
+    else
+    {
+        this->WaitForRelease();
+    }
+
+    this->ReWriteRTable();
+}
+
+//-----------------------------------------------------------
+void MarkJob::ReWriteLTable( const BitField markedEntries, const uint32 srcOffset, const uint32 entryCount, const uint32 prunedEntryCount )
+{
+    // Get dst offset
+    uint32 dstOffset = 0;
+
+    for( uint i = 0; i < this->JobId(); i++ )
+        dstOffset += this->GetJob( i ).prunedEntryCount;
+
+    uint32* dstL   = this->pairs.left  + dstOffset;
+    uint16* dstR   = this->pairs.right + dstOffset;
+    uint32* dstMap = this->prunedMap   + dstOffset;
+
+
+    const uint32* srcMap = this->map;
+    const uint32* srcL   = this->lTable.left  + srcOffset;
+    const uint16* srcR   = this->lTable.right + srcOffset;
+
+    uint32 dstIndex = 0;
+
+    // #TODO: Do in different steps for each buffer? (once for map once forst pairs?)
+    for( uint32 i = 0; i < entryCount; i++ )
+    {
+        if( !markedEntries.Get( i ) )
+            continue;
+
+        dstL  [dstIndex] = srcL  [i];
+        dstR  [dstIndex] = srcR  [i];
+        dstMap[dstIndex] = srcMap[i];
+        dstIndex++;
+    }
+}
+
+//-----------------------------------------------------------
+void MarkJob::ReWriteRTable( 
+    const BitField markedEntries, const uint32 offset, 
+    const uint32 entryCount, uint32 droppedCount )
+{
+    Pairs rTable = this->pairs;
+    
+    for( uint32 i = offset, end = offset + entryCount; i < end; i++ )
+    {
+        if( !markedEntries.Get( i ) )
+        {
+            droppedCount ++;
+            continue;
+        }
+
+
     }
 }
 

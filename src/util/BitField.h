@@ -30,6 +30,12 @@ public:
     }
 
     //-----------------------------------------------------------
+    inline bool Get( uint32 index ) const { return Get( (uint64)index ); }
+
+    //-----------------------------------------------------------
+    inline bool Get( int64 index ) const { return Get( (uint64)index ); }
+
+    //-----------------------------------------------------------
     inline void Set( uint64 index )
     {
         uint64* fields = _fields;

@@ -73,14 +73,14 @@ struct ConvertToLPJob : MTJob<ConvertToLPJob>
     void Run() override;
 };
 
+
 //-----------------------------------------------------------
 DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phase3Data )
     : _context   ( context    )
     , _phase3Data( phase3Data )
 {
     memset( _tableEntryCount, 0, sizeof( _tableEntryCount ) );
-
-    DiskPlotContext& context = _context;
+    // DiskPlotContext& context = _context;
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
     const uint64 maxEntries       = 1ull << _K;
@@ -116,7 +116,7 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
     _lMap[0]    = (uint64*)heap; heap += lTableBucketSize;
     _lMap[1]    = (uint64*)heap; heap += lTableBucketSize;
 
-    _tmpRMap    = (uint64*)heap; heap += rTableMapBucketSize;
+    _tmpLMap    = (uint64*)heap; heap += rTableMapBucketSize;
     _linePoints = (uint64*)heap; heap += lpBucketSize;
 
     size_t totalSize = 
@@ -336,7 +336,7 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket 
         uint32* outKey = rMap + bucketEntryCountR;
 
         StripMapJob::RunJob( *context.threadPool, context.threadCount,
-                             bucketEntryCountR, _rMap[0], outKey, rMap );
+                              bucketEntryCountR, _rMap[0], outKey, rMap );
     }
 
     const uint32 prunedEntryCount = PointersToLinePoints( bucketEntryCountR, _markedEntries, rMap, _rTablePairs[0], lTableMap, rPrunedMap, _linePoints );
@@ -409,6 +409,7 @@ void ConvertToLPJob::Run()
             continue;
     }
 }
+
 
 // void LPJob::Run()
 // {

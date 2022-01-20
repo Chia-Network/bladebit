@@ -101,6 +101,8 @@ DiskPlotter::DiskPlotter( const Config cfg )
 void DiskPlotter::Plot( const PlotRequest& req )
 {
     // TestF1Buckets( *_cx.threadPool, _cx.plotId, _cx.plotMemo ); return;
+    Phase3Data p3Data;
+    ZeroMem( &p3Data );
 
     Log::Line( "Started plot." );
     auto plotTimer = TimerBegin();
@@ -125,13 +127,15 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+
+        p3Data = phase2.GetPhase3Data();
     }
 
     {
         Log::Line( "Running Phase 3" );
         const auto timer = TimerBegin();
 
-        DiskPlotPhase3 phase3( _cx );
+        DiskPlotPhase3 phase3( _cx, p3Data );
         phase3.Run();
 
         const double elapsed = TimerEnd( timer );

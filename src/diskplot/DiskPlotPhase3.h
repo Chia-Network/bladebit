@@ -25,7 +25,7 @@ private:
                                  const uint32* rMapIn, uint32* rMapOut,
                                  uint64* outLinePoints );
 
-
+    void LoadLMapBuckets(  const TableId rTable, const uint32 buckets );
 
     // void TableSecondStep( const TableId rTable );
 
@@ -44,8 +44,14 @@ private:
     Fence   _rTableFence;
     Fence   _lTableFence;
 
-    uint64  _rTableOffset;
-    uint32  _rTableBucket;
+    uint32  _lMapBucketsLoaded  = 0;
+
+    uint32  _lYEntriesLoaded = 0;       // Keeps track of the "y" buckets, that is the original bucket lengths, based on Y sorted values
+                                        // which generated tables in Phase 1. This is disjointed from the bucket lengths in the L map since those
+                                        // are evenly distributed (all the buckets have the same length, except potentially the last one).
+
+    uint64  _rTableOffset       = 0;
+    uint32  _rTableBucket       = 0;
 
     uint64  _tableEntryCount[7];        // Count of each table, after prunning
 };
