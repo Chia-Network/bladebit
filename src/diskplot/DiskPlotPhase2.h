@@ -20,6 +20,8 @@ public:
     void    LoadNextBuckets( TableId table, uint32 bucket, uint64*& mapBuffer, Pairs& pairsBuffer, uint32& outBucketEntryCount );
     uint32* SortAndStripMap( uint64* map, uint32 entryCount );
 
+    void    StripTable2Map();
+
     inline const Phase3Data& GetPhase3Data() const { return _phase3Data; }
 
 private:

@@ -273,6 +273,9 @@ void DiskPlotPhase2::Run()
 
     bitFieldFence.Wait();
     queue.CompletePendingReleases();
+
+    // Strip table 2's map here to to make Phase 3 easier, though this will issue more read/writes
+    StripTable2Map();
 }
 
 
@@ -502,6 +505,105 @@ uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
     return outMap;
 }
 
+//-----------------------------------------------------------
+void DiskPlotPhase2::StripTable2Map()
+{
+    auto& context = _context;
+    auto& ioQueue = *context.ioQueue;
+
+    Log::Line( "Stripping table 2 map..." );
+    const auto timer = TimerBegin();
+
+    const uint64 maxEntries = 1ull << _K;
+
+    uint32 bucketEntryCount = (uint32)( maxEntries / BB_DP_BUCKET_COUNT);
+    uint32 lastBucketCount  = (uint32)std::max( (uint64)bucketEntryCount, 
+                                                context.entryCounts[(int)TableId::Table2] - bucketEntryCount * (BB_DP_BUCKET_COUNT-1) );
+    
+    size_t bucketSize = bucketEntryCount * sizeof( uint64 );
+
+    // Take some heap space for the tmp stripping buffer
+    const size_t tmpBucketSize = std::max( lastBucketCount * sizeof( uint64), bucketSize );
+    const size_t totalHeapSize = context.heapSize + context.ioHeapSize;
+    
+    byte*   heap      = context.heapBuffer;
+    uint64* tmpBucket = (uint64*)heap;  
+
+    // Reset our heap to use what remains
+    ioQueue.ResetHeap( totalHeapSize - tmpBucketSize , heap + tmpBucketSize );
+    ioQueue.SeekBucket( FileId::MAP2, 0, SeekOrigin::Begin );
+    ioQueue.CommitCommands();
+
+    // Load the buckets
+    uint32 maxBucketsToLoadPerIter = 2;
+    uint32 bucketsLoaded           = 1;
+
+    // Load first bucket
+    Fence fence;
+
+    uint64* buckets[BB_DP_BUCKET_COUNT];
+
+    buckets[0] = (uint64*)ioQueue.GetBuffer( bucketSize );
+
+    ioQueue.ReadFile( FileId::MAP2, 0, buckets[0], bucketSize );
+    ioQueue.SeekFile( FileId::MAP2, 0, 0, SeekOrigin::Begin );      // Seek back since we will re-write to the first bucket
+    ioQueue.SignalFence( fence, 1 );
+    ioQueue.CommitCommands();
+
+    for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+    {
+        if( bucket == BB_DP_BUCKET_COUNT - 1)
+            bucketEntryCount = lastBucketCount;
+
+        // Obtain a bucket for writing
+        uint32* writeBucket = (uint32*)ioQueue.GetBuffer( bucketEntryCount * sizeof( uint32 ) );
+
+        // Load buckets in the background if we need to
+        if( bucketsLoaded < BB_DP_BUCKET_COUNT )
+        {
+            uint32 bucketsToLoadCount = std::min( BB_DP_BUCKET_COUNT - bucketsLoaded, maxBucketsToLoadPerIter );
+
+            for( uint32 i = 0; i < bucketsToLoadCount; i++ )
+            {
+                const uint32 bucketToLoadEntryCount = bucketsLoaded < BB_DP_BUCKET_COUNT-1 ?
+                                                      bucketEntryCount : lastBucketCount;
+
+                // If we don't currently have a bucket, we need to force to load a bucket now
+                const bool blockForBuffer = bucketsLoaded == bucket;
+
+                const size_t bucketToLoadSize = sizeof( uint64 ) * bucketsToLoadCount;
+                byte* buffer = ioQueue.GetBuffer( bucketToLoadSize, blockForBuffer );
+                if( !buffer )
+                    break;
+
+                ioQueue.ReadFile( FileId::MAP2, bucketsLoaded, buffer, bucketToLoadSize );
+                ioQueue.SignalFence( fence, bucketsLoaded+1 );
+                ioQueue.DeleteFile( FileId::MAP2, bucketsLoaded );
+                ioQueue.CommitCommands();
+
+                buckets[bucketsLoaded++] = (uint64*)buffer;
+            }
+        }
+
+        // Ensure the bucket has finished loading
+        fence.Wait( bucket + 1 );
+
+        // Sort the map to the correct positions and strip it
+        uint64* map = buckets[bucket];
+
+        // SortAndStripMap()
+
+        // Write back to disk
+        ioQueue.ReleaseBuffer( map );
+        ioQueue.WriteFile( FileId::MAP2, 0, writeBucket, sizeof( uint32 ) * bucketEntryCount );
+        ioQueue.ReleaseBuffer( writeBucket );
+        ioQueue.DeleteFile( FileId::MAP2, bucket );
+        ioQueue.CommitCommands();
+    }
+
+    const double elapsed = TimerEnd( timer );
+    Log::Line( "Finished stripping table 2 in %.2lf seconds.", elapsed );
+}
 
 //-----------------------------------------------------------
 void MarkJob::Run()
