@@ -50,6 +50,10 @@ public:
 
     inline size_t FreeSize() const { return _usedHeapSize - _heapSize; }
 
+    inline size_t HeapSize() const { return _heapSize; }
+
+    inline const void* Heap() const { return _heap; }
+
 
     // Makes pending released allocations available to the heap for allocation again.
     void CompletePendingReleases();

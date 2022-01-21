@@ -327,8 +327,8 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
             map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
 
             // Write the map back to disk & release the buffer
-            queue.ReleaseBuffer( _bucketBuffers[bucket].map );
-            queue.WriteFile( rMapId, 0, map, bucketEntryCount * sizeof( uint32 ) );
+            // queue.ReleaseBuffer( _bucketBuffers[bucket].map );
+            // queue.WriteFile( rMapId, 0, map, bucketEntryCount * sizeof( uint32 ) );
             queue.SignalFence( *_mapWriteFence );
             queue.CommitCommands();
         }
@@ -360,8 +360,9 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
         jobs.Run( threadCount );
 
         // Release the paiors buffer we just used
-        queue.ReleaseBuffer( _bucketBuffers[bucket].pairs.left );
-        queue.CommitCommands();
+        ASSERT( _bucketBuffers[bucket].pairs.left < queue.Heap().Heap() + queue.Heap().HeapSize()  );
+        // queue.ReleaseBuffer( _bucketBuffers[bucket].pairs.left );
+        // queue.CommitCommands();
 
         // Update our offsets
         lTableEntryOffset     = jobs[0].lTableOffset;
@@ -410,9 +411,9 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
         ZeroMem( &buffer );
         
         if( mapReadSize > 0 )
-            buffer.map = (uint64*)queue.GetBuffer( mapReadSize , true );
+            buffer.map = bbvirtalloc<uint64>( mapReadSize ); //(uint64*)queue.GetBuffer( mapReadSize , true );
 
-        buffer.pairs.left  = (uint32*)queue.GetBuffer( pairReadSize, true );
+        buffer.pairs.left  = bbvirtalloc<uint32>( pairReadSize ); //(uint32*)queue.GetBuffer( pairReadSize, true );
         buffer.pairs.right = (uint16*)( buffer.pairs.left + bucketToLoadEntryCount );
 
         const uint32 loadFenceId = _bucketsLoaded * FenceId::FenceCount;
@@ -424,10 +425,10 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
 
             // Seek the file back to origin, and over-write it.
             // If it's not the origin bucket, then just delete the file, don't need it anymore
-            if( _bucketsLoaded == 0 )
-                queue.SeekFile( rMapId, 0, 0, SeekOrigin::Begin );
-            else
-                queue.DeleteFile( rMapId, _bucketsLoaded );
+            // if( _bucketsLoaded == 0 )
+            //     queue.SeekFile( rMapId, 0, 0, SeekOrigin::Begin );
+            // else
+                // queue.DeleteFile( rMapId, _bucketsLoaded );
         }
 
         queue.ReadFile( rTableLPtrId, 0, buffer.pairs.left , lReadSize );

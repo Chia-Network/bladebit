@@ -80,7 +80,6 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
 {
     memset( _tableEntryCount, 0, sizeof( _tableEntryCount ) );
 
-    DiskPlotContext& context = _context;
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
     const uint64 maxEntries       = 1ull << _K;
@@ -116,7 +115,7 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
     _lMap[0]    = (uint64*)heap; heap += lTableBucketSize;
     _lMap[1]    = (uint64*)heap; heap += lTableBucketSize;
 
-    _tmpRMap    = (uint64*)heap; heap += rTableMapBucketSize;
+    _tmpLMap    = (uint64*)heap; heap += rTableMapBucketSize;
     _linePoints = (uint64*)heap; heap += lpBucketSize;
 
     size_t totalSize = 

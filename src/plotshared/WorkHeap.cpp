@@ -30,6 +30,8 @@ void WorkHeap::ResetHeap( const size_t heapSize, void* heapBuffer )
     ASSERT( _allocationTable.Length() == 0 );
     ASSERT( _heapTable.Length()       == 1 );
 
+    _heap      = (byte*)heapBuffer;
+    _heapSize  = heapSize;
     _heapTable[0].address = (byte*)heapBuffer;
     _heapTable[0].size    = heapSize;
 }
@@ -53,6 +55,7 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment, bool blockUntilFreeBuffer 
         for( size_t i = 0; i < _heapTable.Length(); i++ )
         {
             HeapEntry& entry = _heapTable[i];
+            ASSERT( entry.EndAddress() <= _heap + _heapSize );
 
             if( entry.CanAllocate( size, alignment ) )
             {
@@ -71,12 +74,12 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment, bool blockUntilFreeBuffer 
 
                 if( addressOffset )
                 {
-                    // Adjust the current entry's size to the space between the aligned address and the base address
-                    entry.size = addressOffset;
-
                     // If we did not occupy all of the remaining size in the entry, 
                     // we need to insert a new entry to the right of the current one.
                     const size_t remainder = (size_t)( entry.EndAddress() - allocation.EndAddress() );
+
+                    // Adjust the current entry's size to the space between the aligned address and the base address
+                    entry.size = addressOffset;
 
                     if( remainder )
                     {
