@@ -129,7 +129,7 @@ void DiskPlotter::Plot( const PlotRequest& req )
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
 
-        p3Data = phase2.GetPhase3Data();
+        // p3Data = phase2.GetPhase3Data();
     }
 
     {

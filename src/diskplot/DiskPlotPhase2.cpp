@@ -1,7 +1,6 @@
 #include "DiskPlotPhase2.h"
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
-#include "jobs/StripAndSortMap.h"
 
 // Fence ids used when loading buckets
 struct FenceId
@@ -44,6 +43,16 @@ public:
                            uint64 lTableOffset, const Pairs& pairs, const uint32* map );
 };
 
+struct StripMapJob : MTJob<StripMapJob>
+{
+    uint32        entryCount;
+    const uint64* inMap;
+    uint32*       outKey;
+    uint32*       outMap;
+
+    void Run() override;
+};
+
 //-----------------------------------------------------------
 DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
     : _context( context )
@@ -76,7 +85,7 @@ void DiskPlotPhase2::Run()
     // Determine what size we can use to load
     // #TODO: Support overflow entries.
     const uint64 maxEntries          = 1ull << _K;
-    const size_t bitFieldSize        = RoundUpToNextBoundary( (size_t)largestTableLength / 8, 8 );  // Round up to 64-bit boundary
+    const size_t bitFieldSize        = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
     const size_t bitFieldBuffersSize = bitFieldSize * 2;
     
     const uint32 mapBucketEvenSize   = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
@@ -327,8 +336,8 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
             map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
 
             // Write the map back to disk & release the buffer
-            // queue.ReleaseBuffer( _bucketBuffers[bucket].map );
-            // queue.WriteFile( rMapId, 0, map, bucketEntryCount * sizeof( uint32 ) );
+            queue.ReleaseBuffer( _bucketBuffers[bucket].map );
+            queue.WriteFile( rMapId, 0, map, bucketEntryCount * sizeof( uint32 ) );
             queue.SignalFence( *_mapWriteFence );
             queue.CommitCommands();
         }
@@ -360,9 +369,9 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
         jobs.Run( threadCount );
 
         // Release the paiors buffer we just used
-        ASSERT( _bucketBuffers[bucket].pairs.left < queue.Heap().Heap() + queue.Heap().HeapSize()  );
-        // queue.ReleaseBuffer( _bucketBuffers[bucket].pairs.left );
-        // queue.CommitCommands();
+        ASSERT( _bucketBuffers[bucket].pairs.left < queue.Heap().Heap() + queue.Heap().HeapSize() );
+        queue.ReleaseBuffer( _bucketBuffers[bucket].pairs.left );
+        queue.CommitCommands();
 
         // Update our offsets
         lTableEntryOffset     = jobs[0].lTableOffset;
@@ -411,9 +420,9 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
         ZeroMem( &buffer );
         
         if( mapReadSize > 0 )
-            buffer.map = bbvirtalloc<uint64>( mapReadSize ); //(uint64*)queue.GetBuffer( mapReadSize , true );
+            buffer.map = (uint64*)queue.GetBuffer( mapReadSize , true );
 
-        buffer.pairs.left  = bbvirtalloc<uint32>( pairReadSize ); //(uint32*)queue.GetBuffer( pairReadSize, true );
+        buffer.pairs.left  = (uint32*)queue.GetBuffer( pairReadSize, true );
         buffer.pairs.right = (uint16*)( buffer.pairs.left + bucketToLoadEntryCount );
 
         const uint32 loadFenceId = _bucketsLoaded * FenceId::FenceCount;
@@ -425,10 +434,10 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
 
             // Seek the file back to origin, and over-write it.
             // If it's not the origin bucket, then just delete the file, don't need it anymore
-            // if( _bucketsLoaded == 0 )
-            //     queue.SeekFile( rMapId, 0, 0, SeekOrigin::Begin );
-            // else
-                // queue.DeleteFile( rMapId, _bucketsLoaded );
+            if( _bucketsLoaded == 0 )
+                queue.SeekFile( rMapId, 0, 0, SeekOrigin::Begin );
+            else
+                queue.DeleteFile( rMapId, _bucketsLoaded );
         }
 
         queue.ReadFile( rTableLPtrId, 0, buffer.pairs.left , lReadSize );
@@ -461,7 +470,6 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
 //-----------------------------------------------------------
 uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
 {
-    // #TODO: Move to shared function now.
     MTJobRunner<StripMapJob> jobs( *_context.threadPool );
 
     const uint32 threadCount      = _context.threadCount;
@@ -493,6 +501,7 @@ uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
 
     return outMap;
 }
+
 
 //-----------------------------------------------------------
 void MarkJob::Run()
