@@ -90,7 +90,7 @@ void DiskPlotPhase2::Run()
     
     const uint32 mapBucketEvenSize   = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
     const uint32 mapBucketMaxSize    = std::max( mapBucketEvenSize, (uint32)( largestTableLength - mapBucketEvenSize * (BB_DP_BUCKET_COUNT-1) ) );
-    const size_t tmpMapBufferSize    = mapBucketMaxSize * sizeof( uint64 );
+    const size_t tmpMapBufferSize    = mapBucketMaxSize * sizeof( uint32 );
 
     const size_t fullHeapSize        = context.heapSize + context.ioHeapSize;
     const size_t heapRemainder       = fullHeapSize - bitFieldBuffersSize - tmpMapBufferSize;
@@ -104,7 +104,7 @@ void DiskPlotPhase2::Run()
     bitFields[1] = (uint64*)( context.heapBuffer + bitFieldSize );
 
     // Prepare map buffer
-    _tmpMap = (uint64*)( context.heapBuffer + bitFieldSize*2 );
+    _tmpMap = (uint32*)( context.heapBuffer + bitFieldSize*2 );
 
     // Prepare our fences
     Fence bitFieldFence, bucketLoadFence, mapWriteFence;
@@ -245,7 +245,8 @@ void DiskPlotPhase2::Run()
         Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
 
         // #TEST:
-        // if( table < TableId::Table7 )
+        if( table < TableId::Table7 )
+        if( 0 )
         {
             BitField markedEntries( bitFields[1] );
             uint64 lTableEntries = context.entryCounts[(int)table-1];
@@ -336,7 +337,10 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
             _mapWriteFence->Wait();
 
             // Sort the lookup map and strip out the origin index
-            map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount );
+            // const auto stripTimer = TimerBegin();
+            map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount, bucket );
+            // const auto stripElapsed = TimerEnd( stripTimer );
+            // Log::Line( "  Stripped bucket %u in %.2lf seconds.", bucket, stripElapsed );
 
             // Write the map back to disk & release the buffer
             queue.ReleaseBuffer( _bucketBuffers[bucket].map );
@@ -470,39 +474,105 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
     }
 }
 
-//-----------------------------------------------------------
-uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount )
+
+
+struct UnpackMapJob : MTJob<UnpackMapJob>
 {
-    MTJobRunner<StripMapJob> jobs( *_context.threadPool );
+    uint32        bucket;
+    uint32        entryCount;
+    const uint64* mapSrc;
+    uint32*       mapDst;
 
-    const uint32 threadCount      = _context.threadCount;
-    const uint32 entriesPerThread = entryCount / threadCount;
-
-    uint32* outMap = (uint32*)_tmpMap;
-    uint32* key    = outMap + entryCount;
-
-    for( uint32 i = 0; i < threadCount; i++ )
+    //-----------------------------------------------------------
+    static void RunJob( ThreadPool& pool, const uint32 threadCount, const uint32 bucket,
+                        const uint32 entryCount, const uint64* mapSrc, uint32* mapDst )
     {
-        auto& job = jobs[i];
+        MTJobRunner<UnpackMapJob> jobs( pool );
 
-        job.entryCount = entriesPerThread;
-        job.inMap      = map    + entriesPerThread * i;
-        job.outKey     = key    + entriesPerThread * i;
-        job.outMap     = outMap + entriesPerThread * i;
+        for( uint32 i = 0; i < threadCount; i++ )
+        {
+            auto& job = jobs[i];
+            job.bucket     = bucket;
+            job.entryCount = entryCount;
+            job.mapSrc     = mapSrc;
+            job.mapDst     = mapDst;
+        }
+
+        jobs.Run( threadCount );
     }
 
-    const uint32 trailingEntries = entryCount - entriesPerThread * threadCount;
-    jobs[threadCount-1].entryCount += trailingEntries;
+    //-----------------------------------------------------------
+    void Run() override
+    {
+        const uint64 maxEntries         = 1ull << _K ;
+        const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+        const uint32 bucketOffset       = fixedBucketLength * this->bucket;
 
-    jobs.Run( threadCount );
 
-    // Now sort it
-    uint32* tmpKey = (uint32*)map;
-    uint32* tmpMap = tmpKey + entryCount;
+        const uint32 threadCount = this->JobCount();
+        uint32 entriesPerThread = this->entryCount / threadCount;
+
+        const uint32 offset = entriesPerThread * this->JobId();
+
+        if( this->IsLastThread() )
+            entriesPerThread += this->entryCount - entriesPerThread * threadCount;
+
+        const uint64* mapSrc = this->mapSrc + offset;
+        uint32*       mapDst = this->mapDst;
+
+        // Try Unpacking it directly is probably faster, no need to sort, as long as we know the bucket id
+        for( uint32 i = 0; i < entriesPerThread; i++ )
+        {
+            const uint64 m   = mapSrc[i];
+            const uint32 idx = (uint32)m - bucketOffset;
+            
+            ASSERT( idx < this->entryCount );
+
+            mapDst[idx] = (uint32)(m >> 32);
+        }
+    }
+};
+
+//-----------------------------------------------------------
+uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount, const uint32 bucket )
+{
+    auto& context = _context;
+
+    UnpackMapJob::RunJob( 
+            *context.threadPool, context.threadCount,
+            bucket, entryCount, map, _tmpMap );
+
+    return _tmpMap;
+    // MTJobRunner<StripMapJob> jobs( *_context.threadPool );
+
+    // const uint32 threadCount      = _context.threadCount;
+    // const uint32 entriesPerThread = entryCount / threadCount;
+
+    // uint32* outMap = (uint32*)_tmpMap;
+    // uint32* key    = outMap + entryCount;
+
+    // for( uint32 i = 0; i < threadCount; i++ )
+    // {
+    //     auto& job = jobs[i];
+
+    //     job.entryCount = entriesPerThread;
+    //     job.inMap      = map    + entriesPerThread * i;
+    //     job.outKey     = key    + entriesPerThread * i;
+    //     job.outMap     = outMap + entriesPerThread * i;
+    // }
+
+    // const uint32 trailingEntries = entryCount - entriesPerThread * threadCount;
+    // jobs[threadCount-1].entryCount += trailingEntries;
+
+    // jobs.Run( threadCount );
+
+    // // Now sort it
+    // uint32* tmpKey = (uint32*)map;
+    // uint32* tmpMap = tmpKey + entryCount;
     
-    RadixSort256::SortWithKey<BB_MAX_JOBS>( *_context.threadPool, key, tmpKey, outMap, tmpMap, entryCount );
+    // RadixSort256::SortWithKey<BB_MAX_JOBS>( *_context.threadPool, key, tmpKey, outMap, tmpMap, entryCount );
 
-    return outMap;
+    // return outMap;
 }
 
 //-----------------------------------------------------------
@@ -517,20 +587,19 @@ void DiskPlotPhase2::StripTable2Map()
     const uint64 maxEntries = 1ull << _K;
 
     uint32 bucketEntryCount = (uint32)( maxEntries / BB_DP_BUCKET_COUNT);
-    uint32 lastBucketCount  = (uint32)std::max( (uint64)bucketEntryCount, 
-                                                context.entryCounts[(int)TableId::Table2] - bucketEntryCount * (BB_DP_BUCKET_COUNT-1) );
+    uint32 lastBucketCount  = (uint32)( context.entryCounts[(int)TableId::Table2] - bucketEntryCount * (BB_DP_BUCKET_COUNT-1) );
     
     size_t bucketSize = bucketEntryCount * sizeof( uint64 );
 
     // Take some heap space for the tmp stripping buffer
-    const size_t tmpBucketSize = std::max( lastBucketCount * sizeof( uint64), bucketSize );
+    // const size_t tmpBucketSize = std::max( bucketEntryCount, lastBucketCount ) * sizeof( uint32);
     const size_t totalHeapSize = context.heapSize + context.ioHeapSize;
     
     byte*   heap      = context.heapBuffer;
-    uint64* tmpBucket = (uint64*)heap;  
+    // uint32* tmpBucket = (uint32*)heap;  
 
     // Reset our heap to use what remains
-    ioQueue.ResetHeap( totalHeapSize - tmpBucketSize , heap + tmpBucketSize );
+    ioQueue.ResetHeap( totalHeapSize, heap );
     ioQueue.SeekBucket( FileId::MAP2, 0, SeekOrigin::Begin );
     ioQueue.CommitCommands();
 
@@ -569,9 +638,9 @@ void DiskPlotPhase2::StripTable2Map()
                                                       bucketEntryCount : lastBucketCount;
 
                 // If we don't currently have a bucket, we need to force to load a bucket now
-                const bool blockForBuffer = bucketsLoaded == bucket;
+                const bool   blockForBuffer   = bucketsLoaded == bucket;
+                const size_t bucketToLoadSize = sizeof( uint64 ) * bucketToLoadEntryCount;
 
-                const size_t bucketToLoadSize = sizeof( uint64 ) * bucketsToLoadCount;
                 byte* buffer = ioQueue.GetBuffer( bucketToLoadSize, blockForBuffer );
                 if( !buffer )
                     break;
@@ -591,19 +660,34 @@ void DiskPlotPhase2::StripTable2Map()
         // Sort the map to the correct positions and strip it
         uint64* map = buckets[bucket];
 
-        // SortAndStripMap()
+        // const auto jobTimer = TimerBegin();
+
+        UnpackMapJob::RunJob( 
+            *context.threadPool, context.threadCount,
+            bucket, bucketEntryCount, map, writeBucket );
+        
+        // const auto jobElapsed = TimerEnd( jobTimer );
+        // Log::Line( " Unpacked bucket %u in %.2lf seconds.", bucket, jobElapsed );
 
         // Write back to disk
         ioQueue.ReleaseBuffer( map );
         ioQueue.WriteFile( FileId::MAP2, 0, writeBucket, sizeof( uint32 ) * bucketEntryCount );
         ioQueue.ReleaseBuffer( writeBucket );
-        ioQueue.DeleteFile( FileId::MAP2, bucket );
         ioQueue.CommitCommands();
     }
 
+    // Wait for last write to finish
+    fence.Reset( 0 );
+    ioQueue.SignalFence( fence, 1 );
+    ioQueue.CommitCommands();
+    fence.Wait( 1 );
+    ioQueue.CompletePendingReleases();
+
     const double elapsed = TimerEnd( timer );
     Log::Line( "Finished stripping table 2 in %.2lf seconds.", elapsed );
+
 }
+
 
 //-----------------------------------------------------------
 void MarkJob::Run()
