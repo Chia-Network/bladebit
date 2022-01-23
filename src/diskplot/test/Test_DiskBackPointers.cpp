@@ -1,6 +1,7 @@
 #include "io/FileStream.h"
 #include "diskplot/DiskPlotConfig.h"
 #include "diskplot/jobs/IOJob.h"
+#include "util/Log.h"
 
 void LoadTable( TableId table, uint32*& lPtr, uint16*& rPtr, uint64 entryCount )
 {

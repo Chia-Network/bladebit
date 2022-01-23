@@ -71,16 +71,9 @@ void DiskPlotPhase2::Run()
     DiskPlotContext& context = _context;
     DiskBufferQueue& queue   = *context.ioQueue;
 
-    #if BB_DP_DBG_SKIP_PHASE_2
-    {
-        return;
-    }
-    #endif
-
     uint64 largestTableLength = 1;
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
         largestTableLength = std::max( largestTableLength, context.entryCounts[(int)table] );
-    
 
     // Determine what size we can use to load
     // #TODO: Support overflow entries.
@@ -94,6 +87,16 @@ void DiskPlotPhase2::Run()
 
     const size_t fullHeapSize        = context.heapSize + context.ioHeapSize;
     const size_t heapRemainder       = fullHeapSize - bitFieldBuffersSize - tmpMapBufferSize;
+
+
+    _phase3Data.bitFieldSize   = bitFieldSize;
+    _phase3Data.maxTableLength = largestTableLength;
+
+    #if BB_DP_DBG_SKIP_PHASE_2
+    {
+        return;
+    }
+    #endif
 
     // Reserve the remainder of the heap for reading R table backpointers
     queue.ResetHeap( heapRemainder, context.heapBuffer + bitFieldBuffersSize + tmpMapBufferSize );
@@ -443,8 +446,8 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
             // If it's not the origin bucket, then just delete the file, don't need it anymore
             if( _bucketsLoaded == 0 )
                 queue.SeekFile( rMapId, 0, 0, SeekOrigin::Begin );
-            else
-                queue.DeleteFile( rMapId, _bucketsLoaded );
+            // else
+            //     queue.DeleteFile( rMapId, _bucketsLoaded );
         }
 
         queue.ReadFile( rTableLPtrId, 0, buffer.pairs.left , lReadSize );
@@ -647,7 +650,7 @@ void DiskPlotPhase2::StripTable2Map()
 
                 ioQueue.ReadFile( FileId::MAP2, bucketsLoaded, buffer, bucketToLoadSize );
                 ioQueue.SignalFence( fence, bucketsLoaded+1 );
-                ioQueue.DeleteFile( FileId::MAP2, bucketsLoaded );
+                // ioQueue.DeleteFile( FileId::MAP2, bucketsLoaded );
                 ioQueue.CommitCommands();
 
                 buckets[bucketsLoaded++] = (uint64*)buffer;

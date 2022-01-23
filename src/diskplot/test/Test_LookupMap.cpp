@@ -4,6 +4,7 @@
 #include "plotshared/GenSortKey.h"
 #include "algorithm/RadixSort.h"
 #include "util/BitField.h"
+#include "util/Log.h"
 
 static uint32 bucketCounts[7][BB_DP_BUCKET_COUNT];
 static uint32 ptrTableBucketCounts[7][BB_DP_BUCKET_COUNT];

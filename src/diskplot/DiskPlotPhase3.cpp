@@ -2,7 +2,10 @@
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
 #include "jobs/StripAndSortMap.h"
+#include "memplot/LPGen.h"
 
+#define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
+                                            // have cross bucket entries accounted for
 /**
  * Algorithm:
  * 
@@ -58,19 +61,18 @@ struct ConvertToLPJob : MTJob<ConvertToLPJob>
     
     uint32           bucketEntryCount;
     const uint64*    markedEntries;
-    const uint64*    lMap;
+    const uint32*    lMap;
     const uint32*    rMap;
     Pairs            rTablePairs;
 
     uint64*          linePoints;        // Buffer for line points/pruned pairs
     uint32*          rMapPruned;        // Where we store our pruned R map
 
-    uint64           rTableOffset;
-    uint32           rTableBucket;
-
     int64            prunedEntryCount;
 
     void Run() override;
+
+    void DistributeToBuckets( const int64 enytryCount, uint64* linePoints, uint32* map );
 };
 
 //-----------------------------------------------------------
@@ -82,29 +84,45 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
 
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
-    const uint64 maxEntries       = 1ull << _K;
-    const uint64 tableMaxLength   = phase3Data.maxTableLength;
-    const uint32 bucketEntryCount = phase3Data.bucketMaxSize;
+    // Find largest bucket size accross all tables
+    uint32 maxBucketLength = 0;
+    for( TableId table = TableId::Table1; table <= TableId::Table7; table = table +1 )
+    {
+        if( table < TableId::Table2 )
+        {
+            for( uint32 i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+                maxBucketLength = std::max( context.bucketCounts[(int)table][i], maxBucketLength );
+        }
+        else
+        {
+            for( uint32 i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            {
+                maxBucketLength = std::max( context.bucketCounts[(int)table][i], 
+                                    std::max( context.ptrTableBucketCounts[(int)table][i], maxBucketLength ) );
+            }
+        }
+    }
+
+    maxBucketLength += 1024;
 
     // Init our buffers
     const size_t fileBlockSize        = ioQueue.BlockSize();
 
     const size_t markedEntriesSize    = phase3Data.bitFieldSize;
-    const size_t rTableMapBucketSize  = RoundUpToNextBoundary( bucketEntryCount * sizeof( uint64 ), fileBlockSize );
-    const size_t rTableLPtrBucketSize = RoundUpToNextBoundary( bucketEntryCount * sizeof( uint32 ), fileBlockSize );
-    const size_t rTableRPtrBucketSize = RoundUpToNextBoundary( bucketEntryCount * sizeof( uint16 ), fileBlockSize );
+    const size_t rTableMapBucketSize  = RoundUpToNextBoundary( maxBucketLength * sizeof( uint32 ), fileBlockSize );
+    const size_t rTableLPtrBucketSize = RoundUpToNextBoundary( maxBucketLength * sizeof( uint32 ), fileBlockSize );
+    const size_t rTableRPtrBucketSize = RoundUpToNextBoundary( maxBucketLength * sizeof( uint16 ), fileBlockSize );
     
-    const size_t lTableBucketSize     = RoundUpToNextBoundary( bucketEntryCount * sizeof( uint64 ), fileBlockSize );
-
-    const size_t lpBucketSize         = RoundUpToNextBoundary( bucketEntryCount * sizeof( uint64 ), fileBlockSize );
+    const size_t lTableBucketSize     = RoundUpToNextBoundary( maxBucketLength * sizeof( uint32 ), fileBlockSize );
+    const size_t lpBucketSize         = RoundUpToNextBoundary( maxBucketLength * sizeof( uint64 ), fileBlockSize );
 
     byte* heap = context.heapBuffer;
 
-    _markedEntries     = (uint64*)heap;
+    _markedEntries        = (uint64*)heap;
     heap += markedEntriesSize;
 
-    _rMap[0]              = (uint64*)heap; heap += rTableMapBucketSize;
-    _rMap[1]              = (uint64*)heap; heap += rTableMapBucketSize;
+    _rMap[0]              = (uint32*)heap; heap += rTableMapBucketSize;
+    _rMap[1]              = (uint32*)heap; heap += rTableMapBucketSize;
 
     _rTablePairs[0].left  = (uint32*)heap; heap += rTableLPtrBucketSize;
     _rTablePairs[1].left  = (uint32*)heap; heap += rTableLPtrBucketSize;
@@ -112,10 +130,10 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
     _rTablePairs[0].right = (uint16*)heap; heap += rTableRPtrBucketSize;
     _rTablePairs[1].right = (uint16*)heap; heap += rTableRPtrBucketSize;
 
-    _lMap[0]    = (uint64*)heap; heap += lTableBucketSize;
-    _lMap[1]    = (uint64*)heap; heap += lTableBucketSize;
+    _lMap[0]    = (uint32*)heap; heap += lTableBucketSize;
+    _lMap[1]    = (uint32*)heap; heap += lTableBucketSize;
 
-    _tmpLMap    = (uint64*)heap; heap += rTableMapBucketSize;
+    _rPrunedMap = (uint32*)heap; heap += rTableMapBucketSize;
     _linePoints = (uint64*)heap; heap += lpBucketSize;
 
     size_t totalSize = 
@@ -134,16 +152,20 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
 
 //-----------------------------------------------------------
 DiskPlotPhase3::~DiskPlotPhase3()
-{
-
-}
+{}
 
 //-----------------------------------------------------------
 void DiskPlotPhase3::Run()
 {
     for( TableId table = TableId::Table2; table < TableId::Table7; table++ )
     {
+        Log::Line( "Compressing Tables %u and %u...", table, table+1 );
+        const auto timer = TimerBegin();
+
         ProcessTable( table );
+
+        const auto elapsed = TimerEnd( timer );
+        Log::Line( "Finished compression in %.2lf seconds.", elapsed );
     }
 }
 
@@ -154,8 +176,7 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
     // Reset Fence
-    _rTableFence.Reset( P3FenceId::Start );
-    _lTableFence.Reset( 0 );
+    _readFence.Reset( P3FenceId::Start );
 
     TableFirstStep( rTable );
 //    TableSecondPass( rTable );
@@ -167,8 +188,7 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
 {
     DiskPlotContext& context         = _context;
     DiskBufferQueue& ioQueue         = *context.ioQueue;
-    Fence&           lTableFence     = _lTableFence;
-    Fence&           rTableFence     = _rTableFence;
+    Fence&           readFence       = _readFence;
 
     const TableId lTable             = rTable - 1;
     const uint64  maxEntries         = 1ull << _K;
@@ -183,33 +203,33 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
 
     // Prepare our files for reading
     ioQueue.SeekBucket( markedEntriesFileId, 0, SeekOrigin::Begin );
-    ioQueue.SeekBucket( lMapId             , 0, SeekOrigin::Begin );
-    ioQueue.SeekBucket( rMapId             , 0, SeekOrigin::Begin );
-    ioQueue.SeekBucket( rPtrsRId           , 0, SeekOrigin::Begin );
-    ioQueue.SeekBucket( rPtrsLId           , 0, SeekOrigin::Begin );
+    ioQueue.SeekFile  ( lMapId             , 0, 0, SeekOrigin::Begin );
+    ioQueue.SeekFile  ( rMapId             , 0, 0, SeekOrigin::Begin );
+    ioQueue.SeekFile  ( rPtrsRId           , 0, 0, SeekOrigin::Begin );
+    ioQueue.SeekFile  ( rPtrsLId           , 0, 0, SeekOrigin::Begin );
     ioQueue.CommitCommands();
 
-    const size_t lMapEntrySize = rTable == TableId::Table2 ? sizeof( uint32 ) : sizeof( uint64 );
-    const size_t rMapEntrySize = rTable == TableId::Table2 ? sizeof( uint64 ) : sizeof( uint32 );
+    uint64 lEntriesLoaded = 0;
 
     // Read first bucket
     {
-        const uint32 bucketLength = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+        const uint32 lBucketLength = context.bucketCounts[(int)lTable][0] + P3_EXTRA_L_ENTRIES_TO_LOAD;
+        const uint32 rBucketLength = context.ptrTableBucketCounts[(int)rTable][0];
+
+        lEntriesLoaded += lBucketLength;
 
         // Read L Table 1st bucket
-        ioQueue.ReadFile( lMapId, 0, _lMap[0], bucketLength * lMapEntrySize );
-        ioQueue.SignalFence( _lTableFence, 1 );
+        ioQueue.ReadFile( lMapId, 0, _lMap[0], lBucketLength * sizeof( uint32 ) );;
 
         // Read R Table marks
         ioQueue.ReadFile( markedEntriesFileId, 0, _markedEntries, _phase3Data.bitFieldSize );
 
         // Read R Table 1st bucket
-        ioQueue.ReadFile( rPtrsRId, 0, _rTablePairs[0].left , bucketLength * sizeof( uint32 ) );
-        ioQueue.ReadFile( rPtrsLId, 0, _rTablePairs[0].right, bucketLength * sizeof( uint16 ) );
-        ioQueue.SignalFence( _rTableFence, P3FenceId::RTableLoaded );
+        ioQueue.ReadFile( rPtrsRId, 0, _rTablePairs[0].left , rBucketLength * sizeof( uint32 ) );
+        ioQueue.ReadFile( rPtrsLId, 0, _rTablePairs[0].right, rBucketLength * sizeof( uint16 ) );
 
-        ioQueue.ReadFile( rMapId  , 0, _rMap[0], bucketLength * rMapEntrySize );
-        ioQueue.SignalFence( _rTableFence, P3FenceId::RMapLoaded );
+        ioQueue.ReadFile( rMapId, 0, _rMap[0], rBucketLength * sizeof( int32 ) );
+        ioQueue.SignalFence( readFence, 1 );
 
         ioQueue.CommitCommands();
     }
@@ -227,40 +247,34 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
         {
             // Load the next bucket on the background
             const uint32 nextBucket             = bucket + 1;
-            const bool   isNextBucketLastBucket = nextBucket == BB_DP_BUCKET_COUNT - 1;
-            
-            uint32 nextBucketLengthL = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
-            uint32 nextBucketLengthR = nextBucketLengthL;
+            const bool   nextBucketIsLastBucket = nextBucket == BB_DP_BUCKET_COUNT - 1; 
+           
+            uint32 lBucketLength = context.bucketCounts[(int)lTable][nextBucket];
+            uint32 rBucketLength = context.ptrTableBucketCounts[(int)rTable][nextBucket];
 
-            if( isNextBucketLastBucket )
-            {
-                const uint64 nEntriesLoaded = (BB_DP_BUCKET_COUNT-1) * ( maxEntries / BB_DP_BUCKET_COUNT );
+            if( nextBucketIsLastBucket )
+                lBucketLength = (uint32)( context.entryCounts[(int)lTable] - lEntriesLoaded );
 
-                nextBucketLengthL = (uint32)( lTableEntryCount - nEntriesLoaded );
-                nextBucketLengthR = (uint32)( rTableEntryCount - nEntriesLoaded );
-            }
+            lEntriesLoaded += lBucketLength;
 
             // Load L Table
-            const uint32 lMapBucket = lTable == TableId::Table1 ? 0 : nextBucket;
-            ioQueue.ReadFile( lMapId, lMapBucket, _lMap[1], nextBucketLengthL * lMapEntrySize );
-            ioQueue.SignalFence( _lTableFence, nextBucket + 1 );
+            ioQueue.ReadFile( lMapId, 0, _lMap[1] + P3_EXTRA_L_ENTRIES_TO_LOAD, lBucketLength * sizeof( uint32 ) );
 
             // Load R Table
-            const uint32 nextRFenceIdx = nextBucket * P3FenceId::FENCE_COUNT;
-
-            ioQueue.ReadFile( rPtrsRId, 0, _rTablePairs[1].left , nextBucketLengthR * sizeof( uint32 ) );
-            ioQueue.ReadFile( rPtrsLId, 0, _rTablePairs[1].right, nextBucketLengthR * sizeof( uint16 ) );
-            ioQueue.SignalFence( rTableFence, P3FenceId::RTableLoaded + nextRFenceIdx );
+            ioQueue.ReadFile( rPtrsRId, 0, _rTablePairs[1].left , rBucketLength * sizeof( uint32 ) );
+            ioQueue.ReadFile( rPtrsLId, 0, _rTablePairs[1].right, rBucketLength * sizeof( uint16 ) );
             
-            const uint32 rMapBucket = rTable == TableId::Table2 ? nextBucket : 0;
-            ioQueue.ReadFile( rMapId, rMapBucket, _rMap[1], nextBucketLengthR * rMapEntrySize );
-            ioQueue.SignalFence( rTableFence, P3FenceId::RMapLoaded + nextRFenceIdx );
+            ioQueue.ReadFile( rMapId, 0, _rMap[1], rBucketLength * sizeof( uint32 ) );
+            ioQueue.SignalFence( readFence, nextBucket + 1 );
 
             ioQueue.CommitCommands();
         }
 
         // Process the bucket
         BucketFirstStep( rTable, bucket );
+
+        // Copy last entries from current bucket to last bucket
+        memcpy( _lMap[1], _lMap[0] + context.bucketCounts[(int)lTable][bucket], P3_EXTRA_L_ENTRIES_TO_LOAD * sizeof( uint32 ) );
 
         // Swap buffers
         std::swap( _lMap[0]       , _lMap[1] );
@@ -275,83 +289,75 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket 
     DiskPlotContext& context       = _context;
     DiskBufferQueue& ioQueue       = *context.ioQueue;
     ThreadPool&      threadPool    = *context.threadPool;
-    Fence&           lTableFence   = _lTableFence;
-    Fence&           rTableFence   = _rTableFence;
+    Fence&           readFence     = _readFence;
 
     const TableId lTable           = rTable - 1;
-    const uint64  maxEntries       = 1ull << _K;
-    const uint64  lTableEntryCount = context.entryCounts[(int)lTable];
-    const uint64  rTableEntryCount = context.entryCounts[(int)rTable];
 
     const bool isLastBucket = bucket == BB_DP_BUCKET_COUNT - 1;
 
-    uint32 bucketEntryCountL = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
-    uint32 bucketEntryCountR = bucketEntryCountL;
+    // uint32 bucketEntryCountL = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+    const uint32 bucketEntryCountR = context.ptrTableBucketCounts[(int)rTable][bucket];
 
-    if( isLastBucket )
+    // Wait for the bucket to be loaded
+    readFence.Wait( bucket + 1 );
+
+    // Convert to line point
+
+    #if _DEBUG
     {
-        const uint64 nEntriesLoaded = (BB_DP_BUCKET_COUNT-1) * ( maxEntries / BB_DP_BUCKET_COUNT );
-
-        bucketEntryCountL = (uint32)( lTableEntryCount - nEntriesLoaded );
-        bucketEntryCountR = (uint32)( rTableEntryCount - nEntriesLoaded );
+        const uint32 r = _rTablePairs[0].left[bucketEntryCountR-1] + _rTablePairs[0].right[bucketEntryCountR-1];
+        const uint32 lTableBucketLength = _context.bucketCounts[(int)lTable][bucket] + P3_EXTRA_L_ENTRIES_TO_LOAD;
+        ASSERT( r < lTableBucketLength );
     }
-
-    // Wait for the L bucket to be loaded
-    lTableFence.Wait( bucket + 1 );
-
-    // Strip and sort the L map.
-    uint32* lTableMap  = nullptr;
-    uint32* rPrunedMap = nullptr;
-
-    if( rTable > TableId::Table2 )
-    {
-        lTableMap = (uint32*)_tmpLMap;
-        uint32* outKey = lTableMap + bucketEntryCountL;
-
-        StripMapJob::RunJob( *context.threadPool, context.threadCount,
-                             bucketEntryCountL, _lMap[0], outKey, lTableMap );
-
-        // Re-use l map as the pruned r map
-        rPrunedMap = (uint32*)_lMap[0];
-    }
-    else
-    {
-        lTableMap  = (uint32*)_lMap[0];
-        rPrunedMap = ((uint32*)_tmpLMap) + bucketEntryCountR; // Can use tmp L map
-    }
-
-    // Convert to line points
-    const uint32 rFenceIdx = bucket * P3FenceId::FENCE_COUNT;
-
-    rTableFence.Wait( P3FenceId::RMapLoaded + rFenceIdx );
+    #endif
     
-    // On table 2 we need to strip and sort our R map,
-    // since we did not do this for table 2 on Phase 2
-    uint32* rMap = (uint32*)_rMap[0];
-
-    if( rTable == TableId::Table2 )
-    {
-        rMap = (uint32*)_tmpLMap;
-        uint32* outKey = rMap + bucketEntryCountR;
-
-        StripMapJob::RunJob( *context.threadPool, context.threadCount,
-                             bucketEntryCountR, _rMap[0], outKey, rMap );
-    }
-
-    const uint32 prunedEntryCount = PointersToLinePoints( bucketEntryCountR, _markedEntries, rMap, _rTablePairs[0], lTableMap, rPrunedMap, _linePoints );
+    const uint32 prunedEntryCount = 
+        PointersToLinePoints( 
+            rTable,
+            bucketEntryCountR, _markedEntries, 
+            _lMap[0], 
+            _rTablePairs[0], _rMap[0], 
+            _rPrunedMap, _linePoints );
 
     // Distribute line points to buckets along with the map
-    DistributeLinePoints( rTable, prunedEntryCount, _linePoints, rPrunedMap );
+    DistributeLinePoints( rTable, prunedEntryCount, _linePoints, _rPrunedMap );
 }
 
 //-----------------------------------------------------------
 uint32 DiskPlotPhase3::PointersToLinePoints( 
+    TableId rTable, 
     const uint32 entryCount, const uint64* markedEntries, 
-    const uint32* lTable, const Pairs pairs,
-    const uint32* rMapIn, uint32* rMapOut,
-    uint64* outLinePoints )
+    const uint32* lTable, 
+    const Pairs pairs, const uint32* rMapIn, 
+    uint32* rMapOut, uint64* outLinePoints )
 {
-    return 0;
+    const uint32 threadCount = _context.threadCount;
+
+    MTJobRunner<ConvertToLPJob> jobs( *_context.threadPool );
+
+    for( uint32 i = 0; i < threadCount; i++ )
+    {
+        ConvertToLPJob& job = jobs[i];
+
+        job.context = &_context;
+        job.rTable  = rTable;
+
+        job.bucketEntryCount = entryCount;
+        job.markedEntries    = markedEntries;
+        job.lMap             = lTable;
+        job.rTablePairs      = pairs;
+        job.rMap             = rMapIn;
+        job.linePoints       = outLinePoints;
+        job.rMapPruned       = rMapOut;
+    }
+
+    jobs.Run( threadCount );
+
+    uint32 prunedEntryCount = 0;
+    for( uint32 i = 0; i < threadCount; i++ )
+        prunedEntryCount += (uint32)jobs[i].prunedEntryCount;
+
+    return prunedEntryCount;
 }
 
 //-----------------------------------------------------------
@@ -379,12 +385,8 @@ void ConvertToLPJob::Run()
 
     const BitField markedEntries( (uint64*)this->markedEntries );
 
-    const uint32* rMap  = this->rMap;
-    const Pairs   pairs = this->rTablePairs;
-
     // First, scan our entries in order to prune them
     int64 prunedLength = 0;
-    int64 dstOffset    = 0;
 
     for( int64 i = offset; i < end; i++)
     {
@@ -397,16 +399,72 @@ void ConvertToLPJob::Run()
     this->SyncThreads();
 
     // Set our destination offset
+    int64 dstOffset = 0;
+
     for( int32 i = 0; i < (int32)this->JobId(); i++ )
         dstOffset += GetJob( i ).prunedEntryCount;
 
-    // Prune entries into new buffer
-    // Store the pairs as pairs contiguously ?
+    // Copy pruned entries into new buffer
+    // #TODO: heck if doing 1 pass per buffer performs better
+    const uint32* rMap  = this->rMap;
+    const Pairs   pairs = this->rTablePairs;
+
+
+    struct Pair
+    {
+        uint32 left;
+        uint32 right;
+    };
+
+    Pair*   outPairsStart = (Pair*)(this->linePoints + dstOffset);
+    Pair*   outPairs      = outPairsStart;
+    uint32* outRMap       = this->rMapPruned + dstOffset;
+
     for( int64 i = offset; i < end; i++)
     {
         if( !markedEntries[i] )
             continue;
+
+        outPairs->left  = pairs.left[i];
+        outPairs->right = outPairs->left + pairs.right[i];
+
+        *outRMap        = rMap[i];
+
+        outPairs++;
+        outRMap++;
     }
+
+    // Now we can convert our pruned pairs to line points
+    {
+        const uint32* lTable = this->lMap;
+        
+        uint64*       outLinePoints = this->linePoints + dstOffset;
+        for( int64 i = 0; i < prunedLength; i++ )
+        {
+            Pair p = outPairsStart[i];
+            const uint64 x = lTable[p.left ];
+            const uint64 y = lTable[p.right];
+            
+            outLinePoints[i] = SquareToLinePoint( x, y );
+        }
+        // const uint64* lpEnd         = outLinePoints + prunedLength;
+
+        // do
+        // {
+        //     Pair p = *((Pair*)outLinePoints);
+        //     const uint64 x = lTable[p.left ];
+        //     const uint64 y = lTable[p.right];
+            
+        //     *outLinePoints = SquareToLinePoint( x, y );
+
+        // } while( ++outLinePoints < lpEnd );
+    }
+}
+
+//-----------------------------------------------------------
+void ConvertToLPJob::DistributeToBuckets( const int64 enytryCount, uint64* linePoints, uint32* map )
+{
+
 }
 
 // void LPJob::Run()

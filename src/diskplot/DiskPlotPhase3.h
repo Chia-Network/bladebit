@@ -20,7 +20,7 @@ private:
 
     void ProcessLTableMap( const uint32 bucket, const uint32 entryCount, const uint64* lMap, uint32* outSortedLMap );
 
-    uint32 PointersToLinePoints( const uint32 entryCount, const uint64* markedEntries, 
+    uint32 PointersToLinePoints( TableId rTable, const uint32 entryCount, const uint64* markedEntries, 
                                  const uint32* lTable, const Pairs pairs,
                                  const uint32* rMapIn, uint32* rMapOut,
                                  uint64* outLinePoints );
@@ -35,14 +35,14 @@ private:
     Phase3Data _phase3Data;
 
     uint64* _markedEntries;             // Right table marked entries buffer
-    uint64* _lMap       [2];
+    uint32* _lMap       [2];
     Pairs   _rTablePairs[2];
-    uint64* _rMap       [2];
-    uint64* _tmpLMap;                   // Temporary L map buffer for stripping and sorting.
+    uint32* _rMap       [2];
+    uint32* _rPrunedMap;                // Temporary buffer for storing the pruned R map
     uint64* _linePoints;                // Used to convert to line points/tmp buffer
     
-    Fence   _rTableFence;
-    Fence   _lTableFence;
+    Fence   _readFence;
+    // Fence   _lTableFence;
 
     uint64  _rTableOffset;
     uint32  _rTableBucket;

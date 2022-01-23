@@ -7,6 +7,7 @@
 // TEST
 #include "diskplot/jobs/IOJob.h"
 #include "threading/ThreadPool.h"
+#include <sys/resource.h>
 
 // TEST:
 void TestDiskBackPointers();
@@ -90,6 +91,14 @@ int main( int argc, const char* argv[] )
 {
     // Install a crash handler to dump our stack traces
     SysHost::InstallCrashHandler();
+    
+    
+    struct rlimit limit;
+    getrlimit( RLIMIT_NOFILE, &limit );
+    Log::Line( "%u / %u", limit.rlim_cur, limit.rlim_max );
+    
+    limit.rlim_cur = limit.rlim_max;
+    setrlimit( RLIMIT_NOFILE, &limit );
 
     #if _DEBUG
         Log::Line( "DEBUG: ON" );

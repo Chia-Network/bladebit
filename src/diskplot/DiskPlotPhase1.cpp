@@ -309,7 +309,8 @@ void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
     Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)sizes.totalSize BtoMB );
     
     // These are already allocated as a single buffer, we assign the pointers to their regions here.
-    #if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
+    // #if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
+    #if BB_DP_DBG_PROTECT_FP_BUFFERS
     {
         bucket.fpBuffer = nullptr;
 
@@ -732,8 +733,12 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         {
             // Write sorted x back to disk
             // #TODO: Should we copy x to metaBFront here to wait for the Fence here instead on swap?
-            ioQueue.SeekFile( FileId::X, bucketIdx, 0, SeekOrigin::Begin );
-            ioQueue.WriteFile( FileId::X, bucketIdx, fxMetaInA, entryCount * sizeof( uint32 ) );
+            if( bucketIdx == 0 )
+                ioQueue.SeekFile( FileId::X, 0, 0, SeekOrigin::Begin );
+            else
+                ioQueue.DeleteFile( FileId::X, bucketIdx );
+
+            ioQueue.WriteFile( FileId::X, 0, fxMetaInA, entryCount * sizeof( uint32 ) );
             ioQueue.SignalFence( bucket.mapFence ); // Use map fence here
             ioQueue.CommitCommands();
         }
