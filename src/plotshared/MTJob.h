@@ -274,8 +274,61 @@ inline void MTJobSyncT<TJob>::Trace( const char* msg, ... )
 #endif
 
 /// Helper Job that calculates a prefix sum
-template<uint32 BucketSize>
-struct PrefixSumJob : public MTJob<PrefixSumJob>
+template<typename TJob>
+struct PrefixSumJob : public MTJob<TJob>
 {
+    uint32* counts;
 
+    void CalculatePrefixSum(
+        uint32  bucketSize,
+        uint32* counts,
+        uint32* pfxSum,
+        uint32* bucketCounts );
 };
+
+//-----------------------------------------------------------
+template<typename TJob>
+inline void PrefixSumJob<TJob>::CalculatePrefixSum(
+        uint32  bucketSize,
+        uint32* counts,
+        uint32* pfxSum,
+        uint32* bucketCounts )
+{
+    const uint32 jobId    = this->JobId();
+    const uint32 jobCount = this->JobCount();
+
+    this->counts = counts;
+    this->SyncThreads();
+
+    // Add up all of the jobs counts
+    memset( pfxSum, 0, sizeof( uint32 ) * bucketSize );
+
+    for( uint i = 0; i < jobCount; i++ )
+    {
+        const uint* tCounts = this->GetJob( i ).counts;
+
+        for( uint j = 0; j < bucketSize; j++ )
+            pfxSum[j] += tCounts[j];
+    }
+
+    // If we're the control thread, retain the total bucket count
+    if( this->IsControlThread() )
+    {
+        memcpy( bucketCounts, pfxSum, sizeof( uint32 ) * bucketSize );
+    }
+
+    // Calculate the prefix sum
+    for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
+        pfxSum[i] += pfxSum[i-1];
+
+    // Subtract the count from all threads after ours 
+    // to get the correct prefix sum for this thread
+    for( uint t = jobId+1; t < jobCount; t++ )
+    {
+        const uint* tCounts = this->GetJob( t ).counts;
+
+        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+            pfxSum[i] -= tCounts[i];
+    }
+}
+

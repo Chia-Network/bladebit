@@ -67,11 +67,11 @@ struct Step2FenceId
 };
 
 
-struct ConvertToLPJob : MTJob<ConvertToLPJob>
+struct ConvertToLPJob : public PrefixSumJob<ConvertToLPJob>
 {
     DiskPlotContext* context;
     TableId          rTable;
-    
+
     uint32           bucketEntryCount;
     const uint64*    markedEntries;
     const uint32*    lMap;
@@ -81,12 +81,17 @@ struct ConvertToLPJob : MTJob<ConvertToLPJob>
     uint64*          linePoints;        // Buffer for line points/pruned pairs
     uint32*          rMapPruned;        // Where we store our pruned R map
 
-    int64            prunedEntryCount;
-    uint32*          counts;
+    int64            prunedEntryCount;      // Pruned entry count per thread.
+    int64            totalPrunedEntryCount; // Pruned entry count accross all threads
+    
+    void Run() override
+    ;
+    // For distributing
+    uint32*          bucketCounts;          // Total count of entries per bucket (used by first thread)
+    uint64*          lpOutBuffer;
+    uint32*          keyOutBuffer;
 
-    void Run() override;
-
-    void DistributeToBuckets( const int64 enytryCount, uint64* linePoints, uint32* map );
+    void DistributeToBuckets( const int64 enytryCount, const uint64* linePoints, const uint32* map );
 };
 
 //-----------------------------------------------------------
@@ -332,7 +337,7 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket 
         ASSERT( r < lTableBucketLength );
     }
     #endif
-    
+
     // Convert to line points
     const uint32 prunedEntryCount = 
         PointersToLinePoints( 
@@ -460,10 +465,10 @@ void ConvertToLPJob::Run()
     }
 
     // Now we can convert our pruned pairs to line points
+    uint64* outLinePoints = this->linePoints + dstOffset;
     {
         const uint32* lTable = this->lMap;
         
-        uint64*       outLinePoints = this->linePoints + dstOffset;
         for( int64 i = 0; i < prunedLength; i++ )
         {
             Pair p = outPairsStart[i];
@@ -484,13 +489,99 @@ void ConvertToLPJob::Run()
 
         // } while( ++outLinePoints < lpEnd );
     }
+
+    this->DistributeToBuckets( prunedLength, outLinePoints, outRMap );
 }
 
 //-----------------------------------------------------------
-void ConvertToLPJob::DistributeToBuckets( const int64 enytryCount, uint64* linePoints, uint32* map )
+void ConvertToLPJob::DistributeToBuckets( const int64 entryCount, const uint64* linePoints, const uint32* key )
 {
+    uint32 counts[BB_DPP3_LP_BUCKET_COUNT];
+    uint32 pfxSum[BB_DPP3_LP_BUCKET_COUNT];
 
+    // Count entries per bucket
+    for( const uint64* lp = linePoints, *end = lp + entryCount; lp < end; lp++ )
+    {
+        const uint64 bucket = (*lp) >> 56; ASSERT( bucket < BB_DPP3_LP_BUCKET_COUNT );
+        counts[bucket]++;
+    }
     
+    this->CalculatePrefixSum( BB_DPP3_LP_BUCKET_COUNT, counts, pfxSum, this->bucketCounts );
+
+    uint64* lpOutBuffer  = nullptr;
+    uint32* keyOutBuffer = nullptr;
+
+    if( this->IsControlThread() )
+    {
+        this->LockThreads();
+
+        DiskBufferQueue& ioQueue = *context->ioQueue;
+
+        const int64 threadCount           = (int64)this->JobCount();
+        int64       totalEntryCountPruned = entryCount;
+
+        for( int64 i = 1; i < threadCount; i++ )
+            totalEntryCountPruned += this->GetJob( (int)i ).prunedEntryCount;
+
+        this->totalPrunedEntryCount = totalEntryCountPruned;
+
+        const size_t sizeLPs = (size_t)totalEntryCountPruned * sizeof( uint64 );
+        const size_t sizeKey = (size_t)totalEntryCountPruned * sizeof( uint32 );
+
+        lpOutBuffer  = (uint64*)ioQueue.GetBuffer( sizeLPs, true );
+        keyOutBuffer = (uint32*)ioQueue.GetBuffer( sizeKey, true );
+
+        this->lpOutBuffer  = lpOutBuffer;
+        this->keyOutBuffer = keyOutBuffer;
+
+        this->ReleaseThreads();
+    }
+    else
+    {
+        this->WaitForRelease();
+        lpOutBuffer  = GetJob( 0 ).lpOutBuffer ;
+        keyOutBuffer = GetJob( 0 ).keyOutBuffer;
+    }
+
+    // Distribute entries to their respective buckets
+    for( int64 i = 0; i < entryCount; i++ )
+    {
+        const uint64 lp       = linePoints[i];
+        const uint64 bucket   = lp >> 56;
+        const uint32 dstIndex = --pfxSum[bucket];
+
+        lpOutBuffer [dstIndex] = lp;
+        keyOutBuffer[dstIndex] = key[i];
+    }
+
+    if( this->IsControlThread() )
+    {
+        DiskBufferQueue& ioQueue = *context->ioQueue;
+
+        uint32* lpSizes  = (uint32*)ioQueue.GetBuffer( BB_DPP3_LP_BUCKET_COUNT * sizeof( uint32 ) );
+        uint32* keySizes = (uint32*)ioQueue.GetBuffer( BB_DPP3_LP_BUCKET_COUNT * sizeof( uint32 ) );
+
+        const uint32* bucketCounts = this->bucketCounts;
+
+        for( int64 i = 0; i < (int)BB_DPP3_LP_BUCKET_COUNT; i++ )
+            lpSizes[i] = bucketCounts[i] * sizeof( uint64 );
+
+        for( int64 i = 0; i < (int)BB_DPP3_LP_BUCKET_COUNT; i++ )
+            keySizes[i] = bucketCounts[i] * sizeof( uint32 );
+
+        const FileId lpFileId   = TableIdToLinePointFileId   ( this->rTable );
+        const FileId lpKeyFilId = TableIdToLinePointKeyFileId( this->rTable );
+        
+        ioQueue.WriteBuckets( lpFileId, lpOutBuffer, lpSizes );
+        ioQueue.ReleaseBuffer( lpOutBuffer );
+        ioQueue.ReleaseBuffer( lpSizes );
+
+        ioQueue.WriteBuckets( lpKeyFilId, keyOutBuffer, keySizes );
+        ioQueue.ReleaseBuffer( keyOutBuffer );
+        ioQueue.ReleaseBuffer( keySizes );
+
+        ioQueue.CommitCommands();
+    }
 }
 
 
