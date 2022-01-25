@@ -2,7 +2,7 @@
 
 #include "Config.h"
 #include "threading/ThreadPool.h"
-
+#include <cstring>
 #if _DEBUG
     #include "util/Log.h"
 #endif
@@ -318,7 +318,7 @@ inline void PrefixSumJob<TJob>::CalculatePrefixSum(
     }
 
     // Calculate the prefix sum
-    for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
+    for( uint i = 1; i < bucketSize; i++ )
         pfxSum[i] += pfxSum[i-1];
 
     // Subtract the count from all threads after ours 
@@ -327,7 +327,7 @@ inline void PrefixSumJob<TJob>::CalculatePrefixSum(
     {
         const uint* tCounts = this->GetJob( t ).counts;
 
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+        for( uint i = 0; i < bucketSize; i++ )
             pfxSum[i] -= tCounts[i];
     }
 }

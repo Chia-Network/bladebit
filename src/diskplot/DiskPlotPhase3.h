@@ -33,6 +33,8 @@ private:
                                const uint32 bucket, const uint32 entryCount,
                                const uint64 entryOffset );
 
+    void TableThirdStep( const TableId rTable );
+
 private:
     DiskPlotContext& _context;
     
