@@ -40,7 +40,7 @@ public:
     template<uint32 ThreadCount, typename T1, int MaxIter=sizeof( T1 )/8>
     static void Sort( ThreadPool& pool, T1* input, T1* tmp, uint64 length );
 
-    template<uint32 ThreadCount, typename T1, typename TK>
+    template<uint32 ThreadCount, typename T1, typename TK, int MaxIter=sizeof( T1 )/8>
     static void SortWithKey( ThreadPool& pool, T1* input, T1* tmp, TK* keyInput, TK* keyTmp, uint64 length );
 
     template<uint32 ThreadCount>
@@ -67,10 +67,10 @@ inline void RadixSort256::Sort( ThreadPool& pool, T1* input, T1* tmp, uint64 len
 }
 
 //-----------------------------------------------------------
-template<uint32 ThreadCount, typename T1, typename TK>
+template<uint32 ThreadCount, typename T1, typename TK, int MaxIter>
 inline void RadixSort256::SortWithKey( ThreadPool& pool, T1* input, T1* tmp, TK* keyInput, TK* keyTmp, uint64 length )
 {
-    DoSort<ThreadCount, SortAndGenKey, T1, TK>( pool, input, tmp, keyInput, keyTmp, length );
+    DoSort<ThreadCount, SortAndGenKey, T1, TK, MaxIter>( pool, input, tmp, keyInput, keyTmp, length );
 }
 
 //-----------------------------------------------------------

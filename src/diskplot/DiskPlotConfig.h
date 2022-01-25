@@ -19,6 +19,11 @@
 
 #define BB_DISK_QUEUE_MAX_CMDS 4096 //1024
 
+// Use at 256 buckets for line points so that
+// we can save 1 iteration when sorting it.
+#define BB_DPP3_LP_BUCKET_COUNT 256
+
+
 /// 
 /// DEBUG
 ///

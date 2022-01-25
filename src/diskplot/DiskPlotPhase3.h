@@ -27,7 +27,11 @@ private:
 
 
 
-    // void TableSecondStep( const TableId rTable );
+    void TableSecondStep( const TableId rTable );
+
+    void WriteLPReverseLookup( const TableId rTable, const uint32* key,
+                               const uint32 bucket, const uint32 entryCount,
+                               const uint64 entryOffset );
 
 private:
     DiskPlotContext& _context;
@@ -48,4 +52,11 @@ private:
     uint32  _rTableBucket;
 
     uint64  _tableEntryCount[7];        // Count of each table, after prunning
+
+    // Entry count for the current R table after it has been pruned
+    uint64  _prunedEntryCount;
+
+    // Entry count for each bucket of our current R table after
+    // it has been converted to line points.
+    uint32  _lpBucketEntryCount[BB_DPP3_LP_BUCKET_COUNT];
 };

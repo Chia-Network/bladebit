@@ -53,6 +53,19 @@ struct P3FenceId
     };
 };
 
+struct Step2FenceId
+{
+    enum 
+    {
+        Start = 0,
+
+        LPLoaded,
+        MapLoaded,
+
+        FENCE_COUNT
+    };
+};
+
 
 struct ConvertToLPJob : MTJob<ConvertToLPJob>
 {
@@ -69,6 +82,7 @@ struct ConvertToLPJob : MTJob<ConvertToLPJob>
     uint32*          rMapPruned;        // Where we store our pruned R map
 
     int64            prunedEntryCount;
+    uint32*          counts;
 
     void Run() override;
 
@@ -83,6 +97,14 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
     memset( _tableEntryCount, 0, sizeof( _tableEntryCount ) );
 
     DiskBufferQueue& ioQueue = *context.ioQueue;
+
+    // Open required files
+    ioQueue.InitFileSet( FileId::LP_2, "lp_2", BB_DPP3_LP_BUCKET_COUNT );
+    ioQueue.InitFileSet( FileId::LP_3, "lp_3", BB_DPP3_LP_BUCKET_COUNT );
+    ioQueue.InitFileSet( FileId::LP_4, "lp_4", BB_DPP3_LP_BUCKET_COUNT );
+    ioQueue.InitFileSet( FileId::LP_5, "lp_5", BB_DPP3_LP_BUCKET_COUNT );
+    ioQueue.InitFileSet( FileId::LP_6, "lp_6", BB_DPP3_LP_BUCKET_COUNT );
+    ioQueue.InitFileSet( FileId::LP_7, "lp_7", BB_DPP3_LP_BUCKET_COUNT );
 
     // Find largest bucket size accross all tables
     uint32 maxBucketLength = 0;
@@ -179,10 +201,12 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     _readFence.Reset( P3FenceId::Start );
 
     TableFirstStep( rTable );
-//    TableSecondPass( rTable );
-    
+    TableSecondStep( rTable );
 }
 
+///
+/// First Step
+///
 //-----------------------------------------------------------
 void DiskPlotPhase3::TableFirstStep( const TableId rTable )
 {
@@ -301,8 +325,6 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket 
     // Wait for the bucket to be loaded
     readFence.Wait( bucket + 1 );
 
-    // Convert to line point
-
     #if _DEBUG
     {
         const uint32 r = _rTablePairs[0].left[bucketEntryCountR-1] + _rTablePairs[0].right[bucketEntryCountR-1];
@@ -311,6 +333,7 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket 
     }
     #endif
     
+    // Convert to line points
     const uint32 prunedEntryCount = 
         PointersToLinePoints( 
             rTable,
@@ -318,6 +341,8 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket 
             _lMap[0], 
             _rTablePairs[0], _rMap[0], 
             _rPrunedMap, _linePoints );
+
+    // #TODO: Update entry count in buckets    
 
     // Distribute line points to buckets along with the map
     DistributeLinePoints( rTable, prunedEntryCount, _linePoints, _rPrunedMap );
@@ -465,90 +490,191 @@ void ConvertToLPJob::Run()
 void ConvertToLPJob::DistributeToBuckets( const int64 enytryCount, uint64* linePoints, uint32* map )
 {
 
+    
 }
 
-// void LPJob::Run()
-// {
-//     FirstPass();
-//     SyncThreads();
-//     SecondPass();
-// }
 
 
-// //-----------------------------------------------------------
-// void LPJob::FirstPass()
-// {
-//     DiskPlotContext& context = *this->_context;
-//     DiskBufferQueue& ioQueue = *context.ioQueue;
+///
+/// Seconds Step
+///
+//-----------------------------------------------------------
+void DiskPlotPhase3::TableSecondStep( const TableId rTable )
+{
+    auto& context = _context;
+    auto& ioQueue = *context.ioQueue;
 
-//     const TableId rTable = this->_rTable;
-//     const TableId lTable = rTable - 1;
-//     ASSERT( rTable >= TableId::Table2 );
+    const FileId lpId  = TableIdToLinePointFileId   ( rTable );
+    const FileId keyId = TableIdToLinePointKeyFileId( rTable );
+    
+    Fence& readFence = _readFence;
+    readFence.Reset( Step2FenceId::Start );
 
-//     BitField markedEntries( this->_markedEntries );
+    ioQueue.SeekBucket( lpId , 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( keyId, 0, SeekOrigin::Begin );
+    ioQueue.CommitCommands();
 
-//     // #TODO: Suspend the other threads hard here, don't just spin
-//     if( this->IsControlThread() )
-//     {
-//         this->LockThreads();
+    struct BucketBuffers
+    {
+        uint64* linePoints;
+        uint32* key;
+    };
 
-//         Fence& fence = *_readFence;
 
-//         fence.Reset( P3FenceId::Start );
+    uint64 entryOffset   = 0;
+    uint32 bucketsLoaded = 0;
+    BucketBuffers buffers[BB_DPP3_LP_BUCKET_COUNT];
 
-//         const FileId lMapId  = rTable == TableId::Table2 ? FileId::X : TableIdToMapFileId( lTable );
-//         const FileId rPtrId  = TableIdToBackPointerFileId( rTable );
-//         const FileId rMapId  = TableIdToMapFileId( rTable );
-//         const FileId rPtrsId = TableIdToBackPointerFileId( rTable );
+    // Use a capture lampda for now, but change this to a non-capturing one later maybe
+    auto LoadBucket = [&]( uint32 bucket, bool forceLoad ) -> BucketBuffers
+    {
+        const uint32 bucketLength = context.ptrTableBucketCounts[(int)rTable][bucket];
 
-//          // Load rPtrs and rMap and lMap (or x, if lTable is 1)
-//         ioQueue.ReadFile( TableIdToMarkedEntriesFileId( rTable ), 0, _markedEntries, _markedEntriesSize );
-//         ioQueue.SignalFence( fence, P3FenceId::MarkedEntriesLoaded );
+        const size_t lpBucketSize  = sizeof( uint64 ) * bucketLength;
+        const size_t mapBucketSize = sizeof( uint32 ) * bucketLength;
+
+        uint64* linePoints = (uint64*)ioQueue.GetBuffer( lpBucketSize , forceLoad );
+        uint32* map        = (uint32*)ioQueue.GetBuffer( mapBucketSize, forceLoad );
+
+        const uint32 fenceIdx = bucket * Step2FenceId::FENCE_COUNT;
+
+        ioQueue.ReadFile( lpId , bucket, linePoints, lpBucketSize  );
+        ioQueue.SignalFence( readFence, Step2FenceId::LPLoaded + fenceIdx );
+
+        ioQueue.ReadFile( keyId, bucket, map, mapBucketSize );
+        ioQueue.SignalFence( readFence, Step2FenceId::MapLoaded + fenceIdx );
         
-//         ioQueue.ReadFile( rPtrId    , 0, _rTablePairs[0].left, rBucketEntryCount * sizeof( uint32 ) );
-//         ioQueue.ReadFile( rPtrId + 1, 0, _rTablePairs[0].left, rBucketEntryCount * sizeof( uint16 ) );
-//         ioQueue.SignalFence( fence, P3FenceId::RTableLoaded );
+        ioQueue.CommitCommands();
 
-//         ioQueue.ReadFile( rMapId, 0, _rMap[0], rBucketEntryCount * sizeof( uint64 ) );
-//         ioQueue.SignalFence( fence, P3FenceId::RMapLoaded );
+        return {
+            .linePoints = linePoints,
+            .map        = map
+        };
+    };
 
+    buffers[0] = LoadBucket( 0, true );
+    bucketsLoaded++;
 
-//         // We always need 2 L table buckets loaded at a time to ensure that our
-//         // R ptrs have the entries they expect, since the R entries are offset by BC groups size
-//         const uint32 lBucket0EntryCount = context.bucketCounts[(int)lTable][0];
-//         const uint32 lBucket1EntryCount = context.bucketCounts[(int)lTable][1];
+    for( uint32 bucket = 0; bucket < BB_DPP3_LP_BUCKET_COUNT; bucket++ )
+    {
+        const uint32 nextBucket   = bucket + 1;
+        const bool   isLastBucket = nextBucket == BB_DPP3_LP_BUCKET_COUNT - 1;
 
-//         const size_t lMapEntrySize = rTable == TableId::Table2 ? sizeof( uint32 ) : sizeof( uint64 );
+        if( !isLastBucket )
+        {
+            // #TODO: Make background loading optional if we have no buffers available,
+            //        then force-load if we don't have the current bucket pre-loaded.
+            buffers[nextBucket] = LoadBucket( nextBucket, true );
+            bucketsLoaded++;
+        }
 
-//         ioQueue.ReadFile( lMapId, 0, _lMap[0], lBucket0EntryCount * lMapEntrySize );
-//         ioQueue.SignalFence( fence, P3FenceId::RTableLoaded );
-//         ioQueue.ReadFile( lMapId, 1, _lMap[1], lBucket0EntryCount * lMapEntrySize );
-//         ioQueue.SignalFence( fence, P3FenceId::RTableLoaded + P3FenceId::FENCE_COUNT );
-//         ioQueue.CommitCommands();
-
-//         fence.Wait( P3FenceId::RTableLoaded + P3FenceId::FENCE_COUNT );
-
-//         ioQueue.SeekBucket( lMapId , 0, SeekOrigin::Begin );
-//         ioQueue.SeekBucket( rMapId , 0, SeekOrigin::Begin );
-//         ioQueue.SeekBucket( rPtrsId, 0, SeekOrigin::Begin );
-//         ioQueue.CommitCommands();
-
-//         this->ReleaseThreads();
-//     }
-//     else
-//     {
-//         this->WaitForRelease();
-//     }
-
-
-//     for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
-//     {
+        const uint32 bucketLength = context.bucketCounts[(int)rTable][bucket];
         
-//     }
-// }
+        const uint32 fenceIdx = bucket * Step2FenceId::FENCE_COUNT;
+        readFence.Wait( Step2FenceId::MapLoaded + fenceIdx );
 
-// //-----------------------------------------------------------
-// void LPJob::FirstPassBucket( const uint32 bucket )
-// {
+        uint64* linePoints = buffers[bucket].linePoints;
+        uint32* key        = buffers[bucket].key;
 
-// }
+        uint64* sortedLinePoints = _linePoints;
+        uint32* sortedKey        = _rPrunedMap;
+
+        // Sort line point w/ the key
+        // Since we're skipping an iteration, the output will be 
+        // stored in the temp buffers, instead on the input ones.
+        RadixSort256::SortWithKey<BB_MAX_JOBS, uint64, uint32, 7>( 
+            *context.threadPool, linePoints, sortedLinePoints,
+            key, sortedKey, bucketLength );
+
+        ioQueue.ReleaseBuffer( linePoints ); linePoints = nullptr;
+        ioQueue.ReleaseBuffer( key        ); key        = nullptr;
+        ioQueue.CommitCommands();
+
+        // Write the map back to disk as a reverse lookup map
+        WriteLPReverseLookup( rTable, sortedKey, bucket, bucketLength, entryOffset );
+
+        // #TODO: Deltafy, compress and write bucket to plot file in a park
+
+        entryOffset += bucketLength;
+    }
+}
+
+struct WriteLPMapJob : MTJob<WriteLPMapJob>
+{
+    uint32 bucket     ;
+    uint32 entryCount ;
+    uint64 entryOffset;
+
+    const uint32* inKey;
+    const uint64* outMap;
+
+    uint32* counts;
+    uint32* bucketCounts;
+
+    void Run() override;
+};
+
+//-----------------------------------------------------------
+void WriteLPMapJob::Run()
+{
+    const uint32 threadCount = this->JobCount();
+    
+    uint32 entriesPerThread  = this->entryCount / threadCount;
+
+    uint32 offset = entriesPerThread * this->JobId();
+
+    if( this->IsLastThread() )
+        entriesPerThread += this->entryCount - entriesPerThread * threadCount;
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase3::WriteLPReverseLookup( 
+    const TableId rTable, const uint32* key,
+    const uint32 bucket , const uint32  entryCount,
+    const uint64 entryOffset )
+{
+    // Pack entries to a reverse lookup map and sort them
+    // into their buckets of origin (before sorted to line point)
+    ASSERT( entryOffset + entryCount <= 0xFFFFFFFFull );
+
+    auto& ioQueue = *_context.ioQueue;
+
+    const size_t bufferSize =  sizeof( uint64 ) * entryCount;
+
+    uint64* outMap       = (uint64*)ioQueue.GetBuffer( bufferSize );
+    uint32* bucketCounts = (uint32*)ioQueue.GetBuffer( BB_DPP3_LP_BUCKET_COUNT * sizeof( uint32 ) );
+
+    const uint32 threadCount = _context.threadCount;
+
+    memset( bucketCounts, 0, sizeof( bucketCounts ) );
+
+    MTJobRunner<WriteLPMapJob> jobs( *_context.threadPool );
+
+    for( uint32 i = 0; i < threadCount; i++ )
+    {
+        auto& job = jobs[i];
+
+        job.bucket       = bucket;
+        job.entryCount   = entryCount;
+        job.entryOffset  = entryOffset;
+
+        job.inKey        = key;
+        job.outMap       = outMap;
+        job.bucketCounts = nullptr;
+    }
+
+    jobs[threadCount-1].bucketCounts = bucketCounts;
+    jobs.Run( threadCount );
+
+    // Update count to sizes
+    for( uint32 i = 0; i < BB_DPP3_LP_BUCKET_COUNT; i++ )
+        bucketCounts[i] *= sizeof( uint64 );
+
+    // Write to disk
+    const FileId mapId = TableIdToLinePointMapFileId( rTable );
+
+    ioQueue.WriteBuckets( mapId, outMap, bucketCounts );
+    ioQueue.ReleaseBuffer( outMap );
+    ioQueue.CommitCommands();
+}
+

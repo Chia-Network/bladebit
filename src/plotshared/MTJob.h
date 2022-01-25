@@ -272,3 +272,10 @@ inline void MTJobSyncT<TJob>::Trace( const char* msg, ... )
 }
 
 #endif
+
+/// Helper Job that calculates a prefix sum
+template<uint32 BucketSize>
+struct PrefixSumJob : public MTJob<PrefixSumJob>
+{
+
+};
