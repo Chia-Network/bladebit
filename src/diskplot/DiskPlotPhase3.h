@@ -20,7 +20,8 @@ private:
 
     void ProcessLTableMap( const uint32 bucket, const uint32 entryCount, const uint64* lMap, uint32* outSortedLMap );
 
-    uint32 PointersToLinePoints( TableId rTable, const uint32 entryCount, const uint64* markedEntries, 
+    uint32 PointersToLinePoints( TableId rTable, const uint64 entryOffset,
+                                 const uint32 entryCount, const uint64* markedEntries, 
                                  const uint32* lTable, const Pairs pairs,
                                  const uint32* rMapIn, uint32* rMapOut,
                                  uint64* outLinePoints );
@@ -51,7 +52,7 @@ private:
     // Fence   _lTableFence;
 
     uint64  _rTableOffset;
-    uint32  _rTableBucket;
+    // uint32  _rTableBucket;
 
     uint64  _tableEntryCount[7];        // Count of each table, after prunning
 
@@ -60,5 +61,6 @@ private:
 
     // Entry count for each bucket of our current R table after
     // it has been converted to line points.
-    uint32  _lpBucketEntryCount[BB_DPP3_LP_BUCKET_COUNT];
+    uint32  _lpBucketCounts  [BB_DPP3_LP_BUCKET_COUNT];
+    uint32  _lMapBucketCounts[BB_DP_BUCKET_COUNT];
 };
