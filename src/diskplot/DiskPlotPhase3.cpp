@@ -1,7 +1,7 @@
 #include "DiskPlotPhase3.h"
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
-#include "jobs/StripAndSortMap.h"
+#include "jobs/UnpackMapJob.h"
 #include "memplot/LPGen.h"
 
 #define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
@@ -266,7 +266,7 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
     const uint64  rTableEntryCount   = context.entryCounts[(int)rTable];
 
     const FileId markedEntriesFileId = TableIdToMarkedEntriesFileId( rTable );
-    const FileId lMapId              = rTable == TableId::Table2 ? FileId::X : TableIdToMapFileId( lTable );
+    const FileId lMapId              = rTable == TableId::Table2 ? FileId::X : TableIdToLinePointMapFileId( lTable );
     const FileId rMapId              = TableIdToMapFileId( rTable );
     const FileId rPtrsRId            = TableIdToBackPointerFileId( rTable ); 
     const FileId rPtrsLId            = rPtrsRId + 1;
@@ -421,9 +421,6 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket 
 
     _prunedEntryCount += prunedEntryCount;
 
-    // Distribute line points to buckets along with the map
-    DistributeLinePoints( rTable, prunedEntryCount, _linePoints, _rPrunedMap );
-
     // Update our offset for the next bucket
     _rTableOffset += bucketEntryCountR;
 }
@@ -468,14 +465,6 @@ uint32 DiskPlotPhase3::PointersToLinePoints(
 
     uint32 prunedEntryCount = (uint32)jobs[0].totalPrunedEntryCount;
     return prunedEntryCount;
-}
-
-//-----------------------------------------------------------
-void DiskPlotPhase3::DistributeLinePoints( 
-    const TableId rTable, const uint32 entryCount, 
-    const uint64* linePoints, const uint32* rMap )
-{
-    
 }
 
 //-----------------------------------------------------------
@@ -901,6 +890,7 @@ void WriteLPMapJob::Run()
     this->SyncThreads();
 }
 
+
 ///
 /// Third Step
 ///
@@ -908,7 +898,97 @@ void WriteLPMapJob::Run()
 //-----------------------------------------------------------
 void DiskPlotPhase3::TableThirdStep( const TableId rTable )
 {
+    // Read back the packed map buffer from the current R table, then
+    // write them back to disk as a single, contiguous file
 
+    DiskPlotContext& context = _context;
+    DiskBufferQueue& ioQueue = *context.ioQueue;
+
+    constexpr uint32 BucketCount = BB_DP_BUCKET_COUNT;
+
+    const FileId mapId = TableIdToLinePointMapFileId( rTable );
+
+    const uint64 tableEntryCount = context.entryCounts[(int)rTable];
+
+    const uint64 maxEntries      = 1ull << _K;
+    const uint32 fixedBucketSize = (uint32)( maxEntries / BucketCount );
+    const uint32 lastBucketSize  = (uint32)( tableEntryCount - fixedBucketSize * ( BucketCount - 1 ) );
+
+    Fence& readFence = _readFence;
+    readFence.Reset( 0 );
+
+    ioQueue.SeekBucket( mapId, 0, SeekOrigin::Begin );
+    ioQueue.CommitCommands();
+
+
+    uint64* buffers[BucketCount];
+    uint32  bucketsLoaded = 0;
+
+    auto LoadBucket = [&]( const uint32 bucket, const bool forceLoad ) -> void
+    {
+        const uint32 entryCount = _lMapBucketCounts[bucket];
+        const size_t bucketSize = entryCount * sizeof( uint64 );
+
+        auto* buffer = (uint64*)ioQueue.GetBuffer( bucketSize, forceLoad );
+        if( !buffer )
+            return;
+
+        ioQueue.ReadFile( mapId, bucket, buffer, bucketSize );
+        ioQueue.SignalFence( readFence, bucket + 1 );
+
+        if( bucket == 0 )
+            ioQueue.SeekFile( mapId, 0, 0, SeekOrigin::Begin ); // Seek to the start to re-use this file for writing the unpacked map
+        else
+            ioQueue.DeleteFile( mapId, bucket );
+        
+        ioQueue.CommitCommands();
+
+        buffers[bucketsLoaded++] = buffer;
+    };
+
+    LoadBucket( 0, true );
+
+    const uint32 maxBucketsToLoadPerIter = 2;
+
+    for( uint32 bucket = 0; bucket < BucketCount; bucket++ )
+    {
+        const uint32 nextBucket   = bucket + 1;
+        const bool   isLastBucket = nextBucket == BucketCount;
+
+        // Reserve a buffer for writing
+        const uint32 entryCount = _lMapBucketCounts[bucket];
+
+        const uint32 writeEntryCount = isLastBucket ? lastBucketSize : fixedBucketSize;
+        const size_t writeSize       = writeEntryCount * sizeof( uint32 );
+        
+        auto* writeBuffer = (uint32*)ioQueue.GetBuffer( writeSize, true );
+
+        // Load next bucket
+        if( !isLastBucket && bucketsLoaded < BucketCount )
+        {
+            uint32 maxBucketsToLoad = std::min( maxBucketsToLoadPerIter, BucketCount - bucketsLoaded );
+
+            for( uint32 i = 0; i < maxBucketsToLoad; i++ )
+            {
+                const bool needNextBucket = bucketsLoaded == nextBucket;
+                LoadBucket( bucketsLoaded, needNextBucket );
+            }
+        }
+
+        readFence.Wait( nextBucket );
+
+        // Unpack the map
+        const uint64* inMap = buffers[bucket];
+
+        UnpackMapJob::RunJob( 
+            *context.threadPool, context.threadCount, 
+            bucket, BucketCount, entryCount, inMap, writeBuffer );
+        
+        // Write the unpacked map back to disk
+        ioQueue.ReleaseBuffer( (void*)inMap );
+        ioQueue.WriteFile( mapId, 0, writeBuffer, writeSize );
+        ioQueue.ReleaseBuffer( writeBuffer );
+        ioQueue.CommitCommands();
+    }
 }
-
 

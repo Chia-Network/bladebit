@@ -16,10 +16,6 @@ private:
     void TableFirstStep( const TableId rTable );
     void BucketFirstStep( const TableId rTable, const uint32 bucket );
 
-    void DistributeLinePoints( const TableId rTable, const uint32 entryCount, const uint64* linePoints, const uint32* rMap );
-
-    void ProcessLTableMap( const uint32 bucket, const uint32 entryCount, const uint64* lMap, uint32* outSortedLMap );
-
     uint32 PointersToLinePoints( TableId rTable, const uint64 entryOffset,
                                  const uint32 entryCount, const uint64* markedEntries, 
                                  const uint32* lTable, const Pairs pairs,

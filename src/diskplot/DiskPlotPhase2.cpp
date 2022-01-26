@@ -523,7 +523,7 @@ struct UnpackMapJob : MTJob<UnpackMapJob>
         const uint64* mapSrc = this->mapSrc + offset;
         uint32*       mapDst = this->mapDst;
 
-        // Try Unpacking it directly is probably faster, no need to sort, as long as we know the bucket id
+        // Unpack with the bucket id
         for( uint32 i = 0; i < entriesPerThread; i++ )
         {
             const uint64 m   = mapSrc[i];
