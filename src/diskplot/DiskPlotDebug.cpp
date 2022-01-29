@@ -525,6 +525,8 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
     if( !readBuckets )
     {
         // Write This table's LP bucket counts
+        Log::Line( " Writing table %d LP bucket counts...", table );
+        
         char path[1024];
         sprintf( path, "%slp_t%u_bucket_counts.tmp", BB_DP_DBG_TEST_DIR, table+1 );
 
@@ -569,13 +571,14 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
         readFence.Wait();
         
         // Sort the bucket
-        RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, linePoints, lpTemp, entryCount );
+        RadixSort256::Sort<BB_MAX_JOBS, uint64, 7>( *context.threadPool, linePoints, lpTemp, entryCount );
 
         // Compare values
+        uint64* lpReader = lpTemp;
         for( int64 i = 0; i < (int64)entryCount; i++ )
         {
             const uint64 ref = refLP[i];
-            const uint64 lp  = linePoints[i];
+            const uint64 lp  = lpReader[i];
             ASSERT( lp == ref );
         }
 
