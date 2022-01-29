@@ -69,6 +69,7 @@ struct UnpackMapJob : MTJob<UnpackMapJob>
             const uint64 m   = mapSrc[i];
             const uint32 idx = (uint32)m - bucketOffset;
             
+            ASSERT( idx >> 26 == bucket );
             ASSERT( idx < this->entryCount );
 
             mapDst[idx] = (uint32)(m >> 32);

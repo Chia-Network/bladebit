@@ -39,6 +39,7 @@ void WorkHeap::ResetHeap( const size_t heapSize, void* heapBuffer )
 //-----------------------------------------------------------
 byte* WorkHeap::Alloc( size_t size, size_t alignment, bool blockUntilFreeBuffer )
 {
+    ASSERT( size );
     size = alignment * CDivT( size, alignment );
 
     ASSERT( size <= _heapSize );
@@ -80,12 +81,14 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment, bool blockUntilFreeBuffer 
 
                     // Adjust the current entry's size to the space between the aligned address and the base address
                     entry.size = addressOffset;
+                    ASSERT( entry.size );
 
                     if( remainder )
                     {
                         HeapEntry& rightEntry = _heapTable.Insert( i + 1 );
                         rightEntry.address    = allocation.EndAddress();
                         rightEntry.size       = remainder;
+                        ASSERT( rightEntry.size );
                     }
                 }
                 else
@@ -95,6 +98,7 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment, bool blockUntilFreeBuffer 
                         // Split/fragment the current entry
                         entry.address += size;
                         entry.size    -= size;
+                        ASSERT( entry.size );
                     }
                     else
                     {
@@ -216,6 +220,7 @@ void WorkHeap::CompletePendingReleases()
                         // Extend size to the released entry
                         HeapEntry& entry = _heapTable[insertIndex - 1];
                         entry.size += allocation.size;
+                        ASSERT( entry.size );
 
                         // Case 3? See if we also need to merge with the right entry (fills a hole between 2 entries).
                         if( insertIndex < _heapTable.Length() && allocation.EndAddress() == _heapTable[insertIndex].address )
@@ -223,6 +228,7 @@ void WorkHeap::CompletePendingReleases()
                             // Extend size to the right entry
                             entry.size += _heapTable[insertIndex].size;
                             _heapTable.Remove( insertIndex );
+                            ASSERT( entry.size );
                         }
                     }
                     // Case 2? Can we merge with the right entry
@@ -231,12 +237,14 @@ void WorkHeap::CompletePendingReleases()
                         // Don't create a new allocation, merge with the right entry
                         _heapTable[insertIndex].address = allocation.address;
                         _heapTable[insertIndex].size   += allocation.size;
+                        ASSERT( _heapTable[insertIndex].size );
                     }
                     // Case 4: Insert a new entry, no merges
                     else
                     {
                         // We need to insert a new entry
                         _heapTable.Insert( allocation, insertIndex );
+                        ASSERT( _heapTable[insertIndex].size );
                     }
 
                     break;

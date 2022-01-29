@@ -3,7 +3,7 @@
 #include "algorithm/RadixSort.h"
 #include "memplot/LPGen.h"
 #include "DiskPlotDebug.h"
-// #include "jobs/UnpackMapJob.h"
+#include "jobs/UnpackMapJob.h"
 
 #define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
                                             // have cross bucket entries accounted for
@@ -186,14 +186,19 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
 
     size_t totalSize = 
         markedEntriesSize        + 
-        rTableMapBucketSize  * 3 + 
+        rTableMapBucketSize  * 2 + 
         rTableLPtrBucketSize * 2 + 
         rTableRPtrBucketSize * 2 + 
+        lTableBucketSize     * 2 +
+        rTableMapBucketSize      +
         lpBucketSize;
+
+    ASSERT( (size_t)(heap - context.heapBuffer) == totalSize );
 
     // Reset our heap to the remainder of what we're not using
     const size_t fullHeapSize  = context.heapSize + context.ioHeapSize;
     const size_t heapRemainder = fullHeapSize - totalSize;
+    ASSERT( context.heapBuffer + fullHeapSize == heap + heapRemainder );
 
     ioQueue.ResetHeap( heapRemainder, heap );
 }
@@ -243,7 +248,8 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
 
     // Validate linePoints
     #if _DEBUG
-        // Debug::ValidateLinePoints( context, rTable, _lpBucketCounts );
+        if( rTable > TableId::Table2 )
+            Debug::ValidateLinePoints( context, rTable, _lpBucketCounts );
     #endif
 
     // Load LP buckets and key, sort them, 
@@ -256,7 +262,7 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
 
     // Update to our new bucket count and table entry count
     const uint64 oldEntryCount = context.entryCounts[(int)rTable];
-    Log::Line( " Table %u now has %llu / %llu ( %.2lf%%) entries.", rTable,
+    Log::Line( " Table %u now has %llu / %llu ( %.2lf%% ) entries.", rTable,
                 _prunedEntryCount, oldEntryCount, (double)_prunedEntryCount / oldEntryCount * 100 );
 
     context.entryCounts[(int)rTable] = _prunedEntryCount;
@@ -685,6 +691,10 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
     auto LoadBucket = [&]( uint32 bucket, bool forceLoad ) -> BucketBuffers
     {
         const uint32 bucketLength = _lpBucketCounts[bucket];
+        if( bucketLength < 1 )
+        {
+            return { nullptr, nullptr };
+        }
 
         const size_t lpBucketSize  = sizeof( uint64 ) * bucketLength;
         const size_t mapBucketSize = sizeof( uint32 ) * bucketLength;
@@ -725,31 +735,33 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
         }
 
         const uint32 bucketLength = _lpBucketCounts[bucket];
-        
-        const uint32 fenceIdx = bucket * Step2FenceId::FENCE_COUNT;
-        readFence.Wait( Step2FenceId::MapLoaded + fenceIdx );
+        if( bucketLength > 0 )
+        {
+            const uint32 fenceIdx = bucket * Step2FenceId::FENCE_COUNT;
+            readFence.Wait( Step2FenceId::MapLoaded + fenceIdx );
 
-        uint64* linePoints = buffers[bucket].linePoints;
-        uint32* key        = buffers[bucket].key;
+            uint64* linePoints = buffers[bucket].linePoints;
+            uint32* key        = buffers[bucket].key;
 
-        uint64* sortedLinePoints = _linePoints;
-        uint32* sortedKey        = _rPrunedMap;
+            uint64* sortedLinePoints = _linePoints;
+            uint32* sortedKey        = _rPrunedMap;
 
-        // Sort line point w/ the key
-        // Since we're skipping an iteration, the output will be 
-        // stored in the temp buffers, instead on the input ones.
-        RadixSort256::SortWithKey<BB_MAX_JOBS, uint64, uint32, 7>( 
-            *context.threadPool, linePoints, sortedLinePoints,
-            key, sortedKey, bucketLength );
+            // Sort line point w/ the key
+            // Since we're skipping an iteration, the output will be 
+            // stored in the temp buffers, instead on the input ones.
+            RadixSort256::SortWithKey<BB_MAX_JOBS, uint64, uint32, 7>( 
+                *context.threadPool, linePoints, sortedLinePoints,
+                key, sortedKey, bucketLength );
 
-        ioQueue.ReleaseBuffer( linePoints ); linePoints = nullptr;
-        ioQueue.ReleaseBuffer( key        ); key        = nullptr;
-        ioQueue.CommitCommands();
+            ioQueue.ReleaseBuffer( linePoints ); linePoints = nullptr;
+            ioQueue.ReleaseBuffer( key        ); key        = nullptr;
+            ioQueue.CommitCommands();
 
-        // Write the map back to disk as a reverse lookup map
-        WriteLPReverseLookup( rTable, sortedKey, bucket, bucketLength, entryOffset );
-
-        // #TODO: Deltafy, compress and write bucket to plot file in a park
+            // Write the map back to disk as a reverse lookup map
+            WriteLPReverseLookup( rTable, sortedKey, bucket, bucketLength, entryOffset );
+            
+            // #TODO: Deltafy, compress and write bucket to plot file in a park
+        }
 
         entryOffset += bucketLength;
     }
@@ -780,6 +792,9 @@ void DiskPlotPhase3::WriteLPReverseLookup(
     // Pack entries to a reverse lookup map and sort them
     // into their buckets of origin (before sorted to line point)
     ASSERT( entryOffset + entryCount <= 0xFFFFFFFFull );
+
+    if( entryCount < 1 )
+        return;
 
     auto& ioQueue = *_context.ioQueue;
 
@@ -815,6 +830,7 @@ void DiskPlotPhase3::WriteLPReverseLookup(
         _lMapBucketCounts[i] += bucketCounts[i];
 
     #if _DEBUG
+    // if( 0 )
     {
         uint32 totalCount = 0;
         for( uint32 i = 0; i < BucketSize; i++ )
@@ -822,16 +838,19 @@ void DiskPlotPhase3::WriteLPReverseLookup(
 
         ASSERT( totalCount == entryCount )
         
+        const uint64* map = outMap;
         for( uint32 b = 0; b < BucketSize; b++ )
         {
             const uint32 count = bucketCounts[b];
             
             for( uint32 i = 0; i < count; i++ )
             {
-                const uint64 e   = outMap[i];
+                const uint64 e   = map[i];
                 const uint32 idx = (uint32)e;
                 ASSERT( idx >> 26 == b );
             }
+
+            map += count;
         }
     }
     #endif
@@ -867,10 +886,15 @@ void WriteLPMapJob::Run()
     const uint32 bitShift = 32 - kExtraBits;
     constexpr uint32 BucketSize = BB_DP_BUCKET_COUNT;
 
+    const uint32* inKey  = this->inKey + offset;
+    uint64*       outMap = this->outMap;
+
+
     uint32 counts[BucketSize];
     uint32 pfxSum[BucketSize];
 
     memset( counts, 0, sizeof( counts ) );
+
 
     for( const uint32* key = inKey, *end = key + entriesPerThread; key < end; key++ )
     {
@@ -883,16 +907,11 @@ void WriteLPMapJob::Run()
     // Write into our buckets
     const uint64 entryOffset = (uint64)this->entryOffset + (uint64)offset;
 
-    const uint32* inKey  = this->inKey + offset;
-    uint64*       outMap = this->outMap;
-
     for( int64 i = 0; i < entriesPerThread; i++ )
     {
         const uint32 key    = inKey[i];
         const uint32 bucket = key >> bitShift;
-        #if _DEBUG
-        if( key == 1804879200 ) BBDebugBreak();
-        #endif
+        
         const uint32 writeIdx = --pfxSum[bucket];
         ASSERT( writeIdx < this->entryCount );
 
@@ -959,7 +978,7 @@ struct LPUnpackMapJob : MTJob<LPUnpackMapJob>
             const uint64 m   = mapSrc[i];
             const uint32 idx = (uint32)m - bucketOffset;
             
-            ASSERT( idx < this->entryCount );
+            ASSERT( idx < fixedBucketLength );
 
             mapDst[idx] = (uint32)(m >> 32);
         }
@@ -1000,6 +1019,12 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
         const uint32 bucket = bucketsLoaded;
 
         const uint32 entryCount = _lMapBucketCounts[bucket];
+        if( entryCount < 1 )
+        {
+            buffers[bucketsLoaded++] = nullptr;
+            return;
+        }
+
         // const size_t bucketSize = RoundUpToNextBoundaryT( entryCount * sizeof( uint64 ), 4096ul );
         const size_t bucketSize = entryCount * sizeof( uint64 );
 
@@ -1036,7 +1061,9 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
         const uint32 writeEntryCount = isLastBucket ? lastBucketSize : fixedBucketSize;
         const size_t writeSize       = writeEntryCount * sizeof( uint32 );
         
-        auto* writeBuffer = (uint32*)ioQueue.GetBuffer( writeSize, true );
+        uint32* writeBuffer = nullptr;
+        if( entryCount > 0 )
+            writeBuffer = (uint32*)ioQueue.GetBuffer( writeSize, true );
 
         // Load next bucket
         if( !isLastBucket && bucketsLoaded < BucketCount )
@@ -1049,6 +1076,9 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
                 LoadBucket( needNextBucket );
             }
         }
+
+        if( entryCount < 1 )
+            continue;
 
         readFence.Wait( nextBucket );
 
@@ -1064,8 +1094,8 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
             for( int64 i = 0; i < (int64)entryCount; i++ )
             {
                 const uint32 idx = (uint32)inMap[i] - bucketOffset;
-                ASSERT( idx >> 26 == bucket );
                 ASSERT( idx < fixedBucketLength );
+                // ASSERT( idx >> 26 == bucket );
             }
         }
         // TEST protect this mem
