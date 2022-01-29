@@ -1,6 +1,7 @@
 #include "DiskPlotPhase2.h"
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
+// #include "jobs/UnpackMapJob.h"
 
 // Fence ids used when loading buckets
 struct FenceId
@@ -864,6 +865,9 @@ inline int32 MarkJob::MarkStep( int32 i, const int32 entryCount, BitField lTable
         const uint64 left  = lTableOffset + pairs.left [i];
         const uint64 right = left         + pairs.right[i];
 
+        // #TODO Test with atomic sets so that we can write into the
+        //       mapped index, and not have to do mapped readings when
+        //       reading from the R table here, or in Phase 3.
         lTable.Set( left  );
         lTable.Set( right );
     }

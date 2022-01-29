@@ -1,8 +1,9 @@
 #include "DiskPlotPhase3.h"
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
-#include "jobs/UnpackMapJob.h"
 #include "memplot/LPGen.h"
+#include "DiskPlotDebug.h"
+// #include "jobs/UnpackMapJob.h"
 
 #define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
                                             // have cross bucket entries accounted for
@@ -218,7 +219,7 @@ void DiskPlotPhase3::Run()
 void DiskPlotPhase3::ProcessTable( const TableId rTable )
 {
     DiskPlotContext& context = _context;
-    DiskBufferQueue& ioQueue = *context.ioQueue;
+    // DiskBufferQueue& ioQueue = *context.ioQueue;
 
     // Reset table counts 
     _prunedEntryCount = 0;
@@ -233,13 +234,18 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     // the LPs to buckets, along with the key.
     TableFirstStep( rTable );
 
+    // Test linePoints
+    #if _DEBUG
+        Debug::ValidateLinePoints( context, rTable, _lpBucketCounts );
+    #endif
+
     // Load LP buckets and key, sort them, 
     // write a reverse lookup map given the sorted key,
     // then compress and write the rTable to disk.
     TableSecondStep( rTable );
 
     // Unpack map to be used as the L table for the next table iteration
-    // TableThirdStep( rTable);
+    TableThirdStep( rTable );
 
     // Update to our new bucket count and table entry count
     const uint64 oldEntryCount = context.entryCounts[(int)rTable];
@@ -303,40 +309,7 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
 
         ioQueue.CommitCommands();
     }
-    // if( 0 )
-    // {
-    //     // TEST
-    //     readFence.Wait( 1 );
-
-    //     BitField markedEntries( _markedEntries );
-
-    //     const uint64 lTableEntries       = context.entryCounts[(int)rTable];
-    //     uint64       lTablePrunedEntries = 0;
-
-    //     // for( uint64 e = 0; e < lTableEntries; ++e )
-    //     // {
-    //     //     if( markedEntries.Get( e ) )
-    //     //         lTablePrunedEntries++;
-    //     // }
-
-    //     uint64 offset = 0;
-    //     for( uint bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
-    //     {
-    //         const uint32 entryCount = context.ptrTableBucketCounts[(int)rTable][bucket];
-    //         for( uint64 e = offset, end = e + entryCount; e < end; ++e )
-    //         {
-    //             if( markedEntries.Get( e ) )
-    //                 lTablePrunedEntries++;
-    //         }
-
-    //         offset += entryCount;
-    //     }
-
-    //     Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", rTable+1,
-    //                 lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
-    //     Log::Line( "" );
-    // }
-
+    
     // Reset offsets
     _rTableOffset = 0;
 
@@ -472,25 +445,32 @@ void ConvertToLPJob::Run()
 {
     DiskPlotContext& context = *this->context;
 
-    const int32 threadCount = (int32)this->JobCount();
-    int64       entryCount  = (int64)( this->bucketEntryCount / threadCount );
+    const int32 threadCount  = (int32)this->JobCount();
+    int64       entryCount   = (int64)( this->bucketEntryCount / threadCount );
 
-    const int64 bucketOffset = entryCount * (int32)this->JobId();
-    const int64 marksOffset  = (int64)this->rTableOffset + bucketOffset;
+    const int64 bucketOffset = entryCount * (int32)this->JobId();   // Offset in the bucket
+    const int64 rTableOffset = (int64)this->rTableOffset;           // Offset in the table overall (used for checking marks)
+    const int64 marksOffset  = rTableOffset + bucketOffset;
 
     if( this->IsLastThread() )
         entryCount += (int64)this->bucketEntryCount - entryCount * threadCount;
 
-    const int64 end = marksOffset + entryCount;
+    const int64 end = bucketOffset + entryCount;
 
     const BitField markedEntries( (uint64*)this->markedEntries );
+    
+    const uint32* rMap  = this->rMap;
+    const Pairs   pairs = this->rTablePairs;
 
     // First, scan our entries in order to prune them
     int64 prunedLength = 0;
 
-    for( int64 i = marksOffset; i < end; i++)
+    for( int64 i = bucketOffset; i < end; i++)
     {
-        if( markedEntries[i] )
+        // #TODO: Try changing Phase 2 to write atomically to see
+        //        (if we don't get a huge performance hit),
+        //        if we can do reads without the rMap
+        if( markedEntries.Get( rMap[i] ) )
             prunedLength ++;
     }
 
@@ -506,8 +486,7 @@ void ConvertToLPJob::Run()
 
     // Copy pruned entries into new buffer
     // #TODO: heck if doing 1 pass per buffer performs better
-    const uint32* rMap  = this->rMap;
-    const Pairs   pairs = this->rTablePairs;
+    
 
 
     struct Pair
@@ -520,16 +499,16 @@ void ConvertToLPJob::Run()
     Pair*   outPairs      = outPairsStart;
     uint32* outRMap       = this->rMapPruned + dstOffset;
 
-    for( int64 i = marksOffset; i < end; i++ )
+    for( int64 i = bucketOffset; i < end; i++ )
     {
-        if( !markedEntries[i] )
+        const uint32 mapIdx = rMap[i];
+        if( !markedEntries.Get( mapIdx ) )
             continue;
 
-        const int64 r = i - marksOffset;
-        outPairs->left  = pairs.left[r];
-        outPairs->right = outPairs->left + pairs.right[r];
+        outPairs->left  = pairs.left[i];
+        outPairs->right = outPairs->left + pairs.right[i];
 
-        *outRMap        = rMap[r];
+        *outRMap        = mapIdx;
 
         outPairs++;
         outRMap++;
@@ -545,8 +524,13 @@ void ConvertToLPJob::Run()
             Pair p = outPairsStart[i];
             const uint64 x = lTable[p.left ];
             const uint64 y = lTable[p.right];
-            
+            // if( p.left == 0 ) BBDebugBreak();
+
             outLinePoints[i] = SquareToLinePoint( x, y );
+            
+            // #if _DEBUG
+            // if( outLinePoints[i] == 2664297094 ) BBDebugBreak();
+            // #endif
         }
         // const uint64* lpEnd         = outLinePoints + prunedLength;
 
@@ -619,7 +603,7 @@ void ConvertToLPJob::DistributeToBuckets( const int64 entryCount, const uint64* 
     // Distribute entries to their respective buckets
     for( int64 i = 0; i < entryCount; i++ )
     {
-        const uint64 lp       = linePoints[i];
+        const uint64 lp       = linePoints[i]; //if( lp == 2664297094 ) BBDebugBreak();
         const uint64 bucket   = lp >> 56;           ASSERT( bucket < BB_DPP3_LP_BUCKET_COUNT );
         const uint32 dstIndex = --pfxSum[bucket];
 
@@ -749,9 +733,13 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
         // Sort line point w/ the key
         // Since we're skipping an iteration, the output will be 
         // stored in the temp buffers, instead on the input ones.
-        RadixSort256::SortWithKey<BB_MAX_JOBS, uint64, uint32, 7>( 
+        RadixSort256::SortWithKey<BB_MAX_JOBS, uint64, uint32>( 
             *context.threadPool, linePoints, sortedLinePoints,
             key, sortedKey, bucketLength );
+
+        // RadixSort256::Sort<BB_MAX_JOBS>( 
+        //     *context.threadPool, linePoints, sortedLinePoints,
+        //      bucketLength );
 
         ioQueue.ReleaseBuffer( linePoints ); linePoints = nullptr;
         ioQueue.ReleaseBuffer( key        ); key        = nullptr;
@@ -881,8 +869,14 @@ void WriteLPMapJob::Run()
         const uint32 bucket = key >> bitShift;
 
         const uint32 writeIdx = --pfxSum[bucket];
-        
+        ASSERT( writeIdx < this->entryCount );
+
         uint64 map = (entryOffset + (uint64)i) << 32;
+        
+        #if _DEBUG
+        // if( key == 4256999824 ) BBDebugBreak();
+        if( writeIdx == 42033 ) BBDebugBreak();
+        #endif
         outMap[writeIdx] = map | key;
     }
 
@@ -894,6 +888,63 @@ void WriteLPMapJob::Run()
 ///
 /// Third Step
 ///
+
+
+struct LPUnpackMapJob : MTJob<LPUnpackMapJob>
+{
+    uint32        bucket;
+    uint32        entryCount;
+    const uint64* mapSrc;
+    uint32*       mapDst;
+
+    //-----------------------------------------------------------
+    static void RunJob( ThreadPool& pool, const uint32 threadCount, const uint32 bucket,
+                        const uint32 entryCount, const uint64* mapSrc, uint32* mapDst )
+    {
+        MTJobRunner<LPUnpackMapJob> jobs( pool );
+
+        for( uint32 i = 0; i < threadCount; i++ )
+        {
+            auto& job = jobs[i];
+            job.bucket     = bucket;
+            job.entryCount = entryCount;
+            job.mapSrc     = mapSrc;
+            job.mapDst     = mapDst;
+        }
+
+        jobs.Run( threadCount );
+    }
+
+    //-----------------------------------------------------------
+    void Run() override
+    {
+        const uint64 maxEntries         = 1ull << _K ;
+        const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+        const uint32 bucketOffset       = fixedBucketLength * this->bucket;
+
+        const uint32 threadCount = this->JobCount();
+        uint32 entriesPerThread = this->entryCount / threadCount;
+
+        const uint32 offset = entriesPerThread * this->JobId();
+
+        if( this->IsLastThread() )
+            entriesPerThread += this->entryCount - entriesPerThread * threadCount;
+
+        const uint64* mapSrc = this->mapSrc + offset;
+        uint32*       mapDst = this->mapDst;
+
+        // Unpack with the bucket id
+        for( uint32 i = 0; i < entriesPerThread; i++ )
+        {
+            const uint64 m   = mapSrc[i];
+            const uint32 idx = (uint32)m - bucketOffset;
+            
+            ASSERT( idx < this->entryCount );
+
+            mapDst[idx] = (uint32)(m >> 32);
+        }
+    }
+};
 
 //-----------------------------------------------------------
 void DiskPlotPhase3::TableThirdStep( const TableId rTable )
@@ -921,12 +972,15 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
     ioQueue.CommitCommands();
 
 
-    uint64* buffers[BucketCount];
+    uint64* buffers[BucketCount] = { 0 };
     uint32  bucketsLoaded = 0;
 
-    auto LoadBucket = [&]( const uint32 bucket, const bool forceLoad ) -> void
+    auto LoadBucket = [&]( const bool forceLoad ) -> void
     {
+        const uint32 bucket = bucketsLoaded;
+
         const uint32 entryCount = _lMapBucketCounts[bucket];
+        // const size_t bucketSize = RoundUpToNextBoundaryT( entryCount * sizeof( uint64 ), 4096ul );
         const size_t bucketSize = entryCount * sizeof( uint64 );
 
         auto* buffer = (uint64*)ioQueue.GetBuffer( bucketSize, forceLoad );
@@ -935,6 +989,7 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
 
         ioQueue.ReadFile( mapId, bucket, buffer, bucketSize );
         ioQueue.SignalFence( readFence, bucket + 1 );
+        ioQueue.CommitCommands();
 
         if( bucket == 0 )
             ioQueue.SeekFile( mapId, 0, 0, SeekOrigin::Begin ); // Seek to the start to re-use this file for writing the unpacked map
@@ -946,7 +1001,7 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
         buffers[bucketsLoaded++] = buffer;
     };
 
-    LoadBucket( 0, true );
+    LoadBucket( true );
 
     const uint32 maxBucketsToLoadPerIter = 2;
 
@@ -964,26 +1019,42 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
         auto* writeBuffer = (uint32*)ioQueue.GetBuffer( writeSize, true );
 
         // Load next bucket
-        if( !isLastBucket && bucketsLoaded < BucketCount )
-        {
-            uint32 maxBucketsToLoad = std::min( maxBucketsToLoadPerIter, BucketCount - bucketsLoaded );
+        // if( !isLastBucket && bucketsLoaded < BucketCount )
+        // {
+        //     uint32 maxBucketsToLoad = std::min( maxBucketsToLoadPerIter, BucketCount - bucketsLoaded );
 
-            for( uint32 i = 0; i < maxBucketsToLoad; i++ )
-            {
-                const bool needNextBucket = bucketsLoaded == nextBucket;
-                LoadBucket( bucketsLoaded, needNextBucket );
-            }
-        }
+        //     for( uint32 i = 0; i < maxBucketsToLoad; i++ )
+        //     {
+        //         const bool needNextBucket = bucketsLoaded == nextBucket;
+        //         LoadBucket( needNextBucket );
+        //     }
+        // }
 
         readFence.Wait( nextBucket );
 
         // Unpack the map
         const uint64* inMap = buffers[bucket];
 
-        UnpackMapJob::RunJob( 
+        // TEST
+        {
+            const uint64 maxEntries         = 1ull << _K ;
+            const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+            // const uint32 bucketOffset       = fixedBucketLength * this->bucket;
+
+            for( int64 i = 0; i < (int64)entryCount; i++ )
+            {
+                const uint32 idx = (uint32)inMap[i];
+                ASSERT( idx < fixedBucketLength );
+            }
+        }
+        // TEST protect this mem
+        // SysHost::VirtualProtect( (void*)inMap, sizeof( uint64 ) * entryCount );
+        // for( ;; ){}
+
+        LPUnpackMapJob::RunJob( 
             *context.threadPool, context.threadCount, 
-            bucket, BucketCount, entryCount, inMap, writeBuffer );
-        
+            bucket, entryCount, inMap, writeBuffer );
+
         // Write the unpacked map back to disk
         ioQueue.ReleaseBuffer( (void*)inMap );
         ioQueue.WriteFile( mapId, 0, writeBuffer, writeSize );

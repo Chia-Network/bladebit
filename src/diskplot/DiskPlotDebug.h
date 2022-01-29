@@ -5,6 +5,7 @@
 #include "DiskBufferQueue.h"
 
 class ThreadPool;
+struct DiskPlotContext;
 
 namespace Debug
 {
@@ -17,4 +18,6 @@ namespace Debug
 
 
     void ValidateLookupIndex( TableId table, ThreadPool& pool, DiskBufferQueue& queue, const uint32 bucketCounts[BB_DP_BUCKET_COUNT] );
+
+    void ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 bucketCounts[BB_DPP3_LP_BUCKET_COUNT] );
 }
