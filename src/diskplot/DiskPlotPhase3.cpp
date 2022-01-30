@@ -103,7 +103,7 @@ DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phas
     : _context   ( context    )
     , _phase3Data( phase3Data )
 {
-    memset( _tableEntryCount, 0, sizeof( _tableEntryCount ) );
+    memset( _tablePrunedEntryCount, 0, sizeof( _tablePrunedEntryCount ) );
 
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
@@ -265,7 +265,8 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     Log::Line( " Table %u now has %llu / %llu ( %.2lf%% ) entries.", rTable,
                 _prunedEntryCount, oldEntryCount, (double)_prunedEntryCount / oldEntryCount * 100 );
 
-    context.entryCounts[(int)rTable] = _prunedEntryCount;
+    // context.entryCounts[(int)rTable] = _prunedEntryCount;
+    _tablePrunedEntryCount[(int)rTable] = _prunedEntryCount;
 }
 
 
@@ -308,7 +309,7 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
         lEntriesLoaded += lBucketLength;
 
         // Read L Table 1st bucket
-        ioQueue.ReadFile( lMapId, 0, _lMap[0], lBucketLength * sizeof( uint32 ) );;
+        ioQueue.ReadFile( lMapId, 0, _lMap[0], lBucketLength * sizeof( uint32 ) );
 
         // Read R Table marks
         ioQueue.ReadFile( markedEntriesFileId, 0, _markedEntries, _phase3Data.bitFieldSize );
@@ -340,6 +341,7 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
             uint32 lBucketLength = context.bucketCounts[(int)lTable][nextBucket];
             uint32 rBucketLength = context.ptrTableBucketCounts[(int)rTable][nextBucket];
 
+            // ASSERT( !nextBucketIsLastBucket || lEntriesLoaded+lBucketLength == context.entryCounts[(int)lTable] );
             if( nextBucketIsLastBucket )
                 lBucketLength = (uint32)( context.entryCounts[(int)lTable] - lEntriesLoaded );
 
@@ -505,6 +507,7 @@ void ConvertToLPJob::Run()
     Pair*   outPairsStart = (Pair*)(this->linePoints + dstOffset);
     Pair*   outPairs      = outPairsStart;
     uint32* outRMap       = this->rMapPruned + dstOffset;
+    uint32* mapWriter     = outRMap;
 
     for( int64 i = bucketOffset; i < end; i++ )
     {
@@ -515,10 +518,10 @@ void ConvertToLPJob::Run()
         outPairs->left  = pairs.left[i];
         outPairs->right = outPairs->left + pairs.right[i];
 
-        *outRMap        = mapIdx;
+        *mapWriter      = mapIdx;
 
         outPairs++;
-        outRMap++;
+        mapWriter++;
     }
 
     // Now we can convert our pruned pairs to line points
@@ -533,6 +536,11 @@ void ConvertToLPJob::Run()
             const uint64 y = lTable[p.right];
 
             outLinePoints[i] = SquareToLinePoint( x, y );
+            
+            // TEST
+            #if _DEBUG
+            if( rTable > TableId::Table2 && outLinePoints[i] == 2664297094 ) BBDebugBreak();
+            #endif
         }
 
         // const uint64* lpEnd = outLinePoints + prunedLength;
@@ -803,8 +811,6 @@ void DiskPlotPhase3::WriteLPReverseLookup(
     uint64* outMap       = (uint64*)ioQueue.GetBuffer( bufferSize );
     uint32* bucketCounts = (uint32*)ioQueue.GetBuffer( sizeof( uint32 ) * BucketSize );
 
-    // memset( bucketCounts, 0, BucketSize * sizeof( uint32 ) );
-
     const uint32 threadCount = _context.threadCount;
 
     MTJobRunner<WriteLPMapJob> jobs( *_context.threadPool );
@@ -830,6 +836,7 @@ void DiskPlotPhase3::WriteLPReverseLookup(
         _lMapBucketCounts[i] += bucketCounts[i];
 
     #if _DEBUG
+    // #TEST
     // if( 0 )
     {
         uint32 totalCount = 0;
@@ -847,7 +854,7 @@ void DiskPlotPhase3::WriteLPReverseLookup(
             {
                 const uint64 e   = map[i];
                 const uint32 idx = (uint32)e;
-                ASSERT( idx >> 26 == b );
+                ASSERT( ( idx >> 26 ) == b );
             }
 
             map += count;
@@ -889,12 +896,10 @@ void WriteLPMapJob::Run()
     const uint32* inKey  = this->inKey + offset;
     uint64*       outMap = this->outMap;
 
-
     uint32 counts[BucketSize];
     uint32 pfxSum[BucketSize];
 
     memset( counts, 0, sizeof( counts ) );
-
 
     for( const uint32* key = inKey, *end = key + entriesPerThread; key < end; key++ )
     {
@@ -917,6 +922,11 @@ void WriteLPMapJob::Run()
 
         uint64 map = (entryOffset + (uint64)i) << 32;
         
+        // TEST
+        #if _DEBUG
+            // if( key == 2 ) BBDebugBreak();
+        #endif
+
         outMap[writeIdx] = map | key;
     }
 
@@ -961,8 +971,8 @@ struct LPUnpackMapJob : MTJob<LPUnpackMapJob>
         const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
         const uint32 bucketOffset       = fixedBucketLength * this->bucket;
 
-        const uint32 threadCount = this->JobCount();
-        uint32 entriesPerThread = this->entryCount / threadCount;
+        const uint32 threadCount        = this->JobCount();
+        uint32       entriesPerThread   = this->entryCount / threadCount;
 
         const uint32 offset = entriesPerThread * this->JobId();
 
@@ -978,6 +988,8 @@ struct LPUnpackMapJob : MTJob<LPUnpackMapJob>
             const uint64 m   = mapSrc[i];
             const uint32 idx = (uint32)m - bucketOffset;
             
+            // #TODO: No need to keep track of bucketOffset, can just 
+            //        mask out the bucket portion...
             ASSERT( idx < fixedBucketLength );
 
             mapDst[idx] = (uint32)(m >> 32);
@@ -1060,7 +1072,7 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
 
         const uint32 writeEntryCount = isLastBucket ? lastBucketSize : fixedBucketSize;
         const size_t writeSize       = writeEntryCount * sizeof( uint32 );
-        
+
         uint32* writeBuffer = nullptr;
         if( entryCount > 0 )
             writeBuffer = (uint32*)ioQueue.GetBuffer( writeSize, true );
@@ -1086,6 +1098,8 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
         const uint64* inMap = buffers[bucket];
 
         // TEST
+        #if _DEBUG
+        // if( 0 )
         {
             const uint64 maxEntries         = 1ull << _K ;
             const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
@@ -1093,14 +1107,14 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
 
             for( int64 i = 0; i < (int64)entryCount; i++ )
             {
-                const uint32 idx = (uint32)inMap[i] - bucketOffset;
-                ASSERT( idx < fixedBucketLength );
-                // ASSERT( idx >> 26 == bucket );
+                const uint32 idx = ((uint32)inMap[i]);
+                ASSERT( idx  - bucketOffset < fixedBucketLength );
+                ASSERT( ( idx >> 26 ) == bucket );
             }
         }
-        // TEST protect this mem
-        // SysHost::VirtualProtect( (void*)inMap, sizeof( uint64 ) * entryCount );
-        // for( ;; ){}
+
+        memset( writeBuffer, 0, 67108864 * sizeof( uint32 ) );
+        #endif
 
         LPUnpackMapJob::RunJob( 
             *context.threadPool, context.threadCount, 

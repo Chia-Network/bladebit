@@ -546,9 +546,10 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
     ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
     ioQueue.CommitCommands();
 
-    uint64 lpBucketSize = ( ( 1ull << _K ) / BB_DPP3_LP_BUCKET_COUNT ) * 2;
-    uint64* linePoints  = bbcvirtalloc<uint64>( lpBucketSize );
-    uint64* lpTemp      = bbcvirtalloc<uint64>( lpBucketSize );
+    // Should be enough for an allocation size
+    uint64  lpBucketSize = ( ( 1ull << _K ) / BB_DP_BUCKET_COUNT ) * 2;
+    uint64* linePoints   = bbcvirtalloc<uint64>( lpBucketSize );
+    uint64* lpTemp       = bbcvirtalloc<uint64>( lpBucketSize );
 
     Fence readFence;
     readFence.Reset( 0 );
@@ -561,6 +562,7 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
     {
         const uint64 entryCount = bucketCounts[bucket];
         ASSERT( totalCount + entryCount <= refLPCount );
+        ASSERT( entryCount <= lpBucketSize );
 
         Log::Write( " Bucket %2u... ", bucket );
 

@@ -50,7 +50,7 @@ private:
     uint64  _rTableOffset;
     // uint32  _rTableBucket;
 
-    uint64  _tableEntryCount[7];        // Count of each table, after prunning
+    uint64  _tablePrunedEntryCount[7];        // Count of each table, after prunning
 
     // Entry count for the current R table after it has been pruned
     uint64  _prunedEntryCount;
