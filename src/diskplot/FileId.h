@@ -62,7 +62,9 @@ enum class FileId
     LP_MAP_4,
     LP_MAP_5,
     LP_MAP_6,
-    LP_MAP_7
+    LP_MAP_7,
+
+    PLOT
 
     ,_COUNT
 }; ImplementArithmeticOps( FileId );

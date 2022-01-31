@@ -22,13 +22,16 @@ private:
                                  const uint32* rMapIn, uint32* rMapOut,
                                  uint64* outLinePoints );
 
-
+    
 
     void TableSecondStep( const TableId rTable );
 
     void WriteLPReverseLookup( const TableId rTable, const uint32* key,
                                const uint32 bucket, const uint32 entryCount,
                                const uint64 entryOffset );
+
+    void WriteLinePointsToPark( TableId rTable, bool isLastBucket, const uint64* linePoints, uint32 bucketLength );
+
 
     void TableThirdStep( const TableId rTable );
 
@@ -45,12 +48,11 @@ private:
     uint64* _linePoints;                // Used to convert to line points/tmp buffer
     
     Fence   _readFence;
-    // Fence   _lTableFence;
 
-    uint64  _rTableOffset;
-    // uint32  _rTableBucket;
+    uint64  _rTableOffset;              // 
 
-    uint64  _tablePrunedEntryCount[7];        // Count of each table, after prunning
+
+    uint64  _tablePrunedEntryCount[7];  // Count of each table, after prunning
 
     // Entry count for the current R table after it has been pruned
     uint64  _prunedEntryCount;
@@ -59,4 +61,10 @@ private:
     // it has been converted to line points.
     uint32  _lpBucketCounts  [BB_DPP3_LP_BUCKET_COUNT];
     uint32  _lMapBucketCounts[BB_DP_BUCKET_COUNT];
+
+    // Left over entries in a bucket (which is not the last bucket)
+    // that did not fit into a full park, these need to be included in
+    // the first park of the next bucket
+    uint64  _bucketParkLeftOvers[kEntriesPerPark] = { 0 };
+    uint32  _bucketParkLeftOversCount;
 };

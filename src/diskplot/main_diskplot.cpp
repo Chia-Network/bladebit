@@ -3,6 +3,7 @@
 #include "SysHost.h"
 #include "io/FileStream.h"
 #include "util/Log.h"
+#include "plotshared/PlotTools.h"
 
 // TEST
 #include "diskplot/jobs/IOJob.h"
@@ -126,7 +127,34 @@ int main( int argc, const char* argv[] )
 
     DiskPlotter plotter( plotCfg );
 
+    byte*   plotId       = new byte[BB_PLOT_ID_LEN];
+    byte*   plotMemo     = new byte[BB_PLOT_MEMO_MAX_SIZE];
+    char*   plotFileName = new char[BB_PLOT_FILE_LEN_TMP];
+    uint16 plotMemoSize  = 0;
+
     DiskPlotter::PlotRequest req;
+    req.plotFileName = plotFileName;
+    req.plotId       = plotId;
+    req.plotMemo     = plotMemo;
+    // #TODO: Generate plot id & memo
+
+
+    // TEST
+    // #TODO: Remove
+    {
+        const char refPlotId  [] = "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835";
+        const char refPlotMemo[] = "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef01b7bf8a22a9ac82a003e07b551c851ea683839f3e1beb8ac9ede57d2c020669";
+
+        memset( plotId  , 0, BB_PLOT_ID_LEN );
+        memset( plotMemo, 0, BB_PLOT_MEMO_MAX_SIZE );
+
+        HexStrToBytes( refPlotId  , sizeof( refPlotId   )-1, plotId  , BB_PLOT_ID_LEN );
+        HexStrToBytes( refPlotMemo, sizeof( refPlotMemo )-1, plotMemo, BB_PLOT_MEMO_MAX_SIZE );
+        
+        req.plotMemoSize = 128;
+    }
+
+    PlotTools::GenPlotFileName( plotId, plotFileName );
     plotter.Plot( req );
 
     exit( 0 );

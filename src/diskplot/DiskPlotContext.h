@@ -72,7 +72,7 @@ struct DiskPlotContext
 
     const byte*  plotId;
     const byte*  plotMemo;
-    uint32       plotMemoSize;
+    uint16       plotMemoSize;
 
     uint32       bucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];
     uint64       entryCounts [(uint)TableId::_Count];

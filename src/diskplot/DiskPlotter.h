@@ -20,9 +20,10 @@ public:
 
     struct PlotRequest
     {
-        byte*  plotId;
-        byte*  plotMemo;
-        uint64 plotMemoSize;
+        const byte*  plotId;
+        const byte*  plotMemo;
+        uint16       plotMemoSize;
+        const char*  plotFileName;
     };
 
 public:

@@ -1,8 +1,9 @@
 #include "DiskPlotPhase3.h"
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
-#include "memplot/LPGen.h"
 #include "DiskPlotDebug.h"
+#include "memplot/LPGen.h"
+#include "memplot/ParkWriter.h"
 #include "jobs/UnpackMapJob.h"
 
 #define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
@@ -671,6 +672,9 @@ void ConvertToLPJob::DistributeToBuckets( const int64 entryCount, const uint64* 
 //-----------------------------------------------------------
 void DiskPlotPhase3::TableSecondStep( const TableId rTable )
 {
+    // #TODO: Organize buckets for a single bucket step here so that we can avoid waiting for buffers
+    //        as much as we can.
+
     auto& context = _context;
     auto& ioQueue = *context.ioQueue;
 
@@ -690,6 +694,8 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
         uint32* key;
     };
 
+    // Clear per-bucket park left over LPs for parks
+    _bucketParkLeftOversCount = 0;
 
     uint64 entryOffset   = 0;
     uint32 bucketsLoaded = 0;
@@ -768,7 +774,8 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
             // Write the map back to disk as a reverse lookup map
             WriteLPReverseLookup( rTable, sortedKey, bucket, bucketLength, entryOffset );
             
-            // #TODO: Deltafy, compress and write bucket to plot file in a park
+            // Deltafy, compress and write bucket to a park into the plot file
+            WriteLinePointsToPark( rTable, isLastBucket, sortedLinePoints, bucketLength );
         }
 
         entryOffset += bucketLength;
@@ -837,29 +844,29 @@ void DiskPlotPhase3::WriteLPReverseLookup(
 
     #if _DEBUG
     // #TEST
-    // if( 0 )
-    {
-        uint32 totalCount = 0;
-        for( uint32 i = 0; i < BucketSize; i++ )
-            totalCount += bucketCounts[i];
+    // // if( 0 )
+    // {
+    //     uint32 totalCount = 0;
+    //     for( uint32 i = 0; i < BucketSize; i++ )
+    //         totalCount += bucketCounts[i];
 
-        ASSERT( totalCount == entryCount )
+    //     ASSERT( totalCount == entryCount )
         
-        const uint64* map = outMap;
-        for( uint32 b = 0; b < BucketSize; b++ )
-        {
-            const uint32 count = bucketCounts[b];
+    //     const uint64* map = outMap;
+    //     for( uint32 b = 0; b < BucketSize; b++ )
+    //     {
+    //         const uint32 count = bucketCounts[b];
             
-            for( uint32 i = 0; i < count; i++ )
-            {
-                const uint64 e   = map[i];
-                const uint32 idx = (uint32)e;
-                ASSERT( ( idx >> 26 ) == b );
-            }
+    //         for( uint32 i = 0; i < count; i++ )
+    //         {
+    //             const uint64 e   = map[i];
+    //             const uint32 idx = (uint32)e;
+    //             ASSERT( ( idx >> 26 ) == b );
+    //         }
 
-            map += count;
-        }
-    }
+    //         map += count;
+    //     }
+    // }
     #endif
 
     // Update count to sizes
@@ -934,6 +941,73 @@ void WriteLPMapJob::Run()
     this->SyncThreads();
 }
 
+//-----------------------------------------------------------
+void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, const uint64* linePoints, uint32 bucketLength )
+{
+    ASSERT( bucketLength );
+
+    DiskPlotContext& context = _context;
+    DiskBufferQueue& ioQueue = *context.ioQueue;
+
+    const TableId lTable     = rTable - 1;
+    const size_t  parkSize   = CalculateParkSize( lTable );
+
+    if( _bucketParkLeftOversCount )
+    {
+        const uint32 requiredEntriesToCompletePark = kEntriesPerPark - _bucketParkLeftOversCount;
+        const uint32 entriesToCopy                 = std::min( requiredEntriesToCompletePark, bucketLength );
+
+        // Write cross-bucket park
+        byte* xBucketPark = (byte*)ioQueue.GetBuffer( parkSize );
+
+        memcpy( _bucketParkLeftOvers + _bucketParkLeftOversCount, linePoints, entriesToCopy * sizeof( uint64 ) );
+
+        WritePark( parkSize, _bucketParkLeftOversCount + entriesToCopy, _bucketParkLeftOvers, xBucketPark, lTable );
+
+        ioQueue.WriteFile( FileId::PLOT, 0, xBucketPark, parkSize );
+        ioQueue.ReleaseBuffer( xBucketPark  );
+        ioQueue.CommitCommands();
+
+        // Offset our current bucket to account for the entries we just used
+        linePoints   += entriesToCopy;
+        bucketLength -= entriesToCopy;
+
+        // Clear the left-overs
+        _bucketParkLeftOversCount = 0;
+
+        if( bucketLength < 1 )
+            return;
+    }
+
+    uint32  parkCount       = bucketLength / kEntriesPerPark;
+    uint32  leftOverEntries = bucketLength - parkCount * kEntriesPerPark;
+
+    if( isLastBucket && leftOverEntries )
+    {
+        leftOverEntries = 0;
+        parkCount++;
+    }
+    else if( leftOverEntries )
+    {
+        // Save any entries that don't fill-up a full park for the next bucket
+        memcpy( _bucketParkLeftOvers, linePoints + bucketLength - leftOverEntries, leftOverEntries * sizeof( uint64 ) );
+        
+        _bucketParkLeftOversCount = leftOverEntries;
+        bucketLength -= leftOverEntries;
+    }
+
+    ASSERT( isLastBucket || bucketLength / kEntriesPerPark * kEntriesPerPark == bucketLength );
+
+    byte* parkBuffer = (byte*)ioQueue.GetBuffer( parkSize * parkCount );
+
+    const size_t sizeWritten = WriteParks<BB_MAX_JOBS>( *context.threadPool, bucketLength, (uint64*)linePoints, parkBuffer, lTable );
+    ASSERT( sizeWritten <= parkSize * parkCount  );
+
+    ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
+    ioQueue.ReleaseBuffer( parkBuffer );
+    ioQueue.CommitCommands();
+
+}
 
 
 ///
@@ -1099,21 +1173,21 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
 
         // TEST
         #if _DEBUG
-        // if( 0 )
-        {
-            const uint64 maxEntries         = 1ull << _K ;
-            const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
-            const uint32 bucketOffset       = fixedBucketLength * bucket;
+        // // if( 0 )
+        // {
+        //     const uint64 maxEntries         = 1ull << _K ;
+        //     const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
+        //     const uint32 bucketOffset       = fixedBucketLength * bucket;
 
-            for( int64 i = 0; i < (int64)entryCount; i++ )
-            {
-                const uint32 idx = ((uint32)inMap[i]);
-                ASSERT( idx  - bucketOffset < fixedBucketLength );
-                ASSERT( ( idx >> 26 ) == bucket );
-            }
-        }
+        //     for( int64 i = 0; i < (int64)entryCount; i++ )
+        //     {
+        //         const uint32 idx = ((uint32)inMap[i]);
+        //         ASSERT( idx  - bucketOffset < fixedBucketLength );
+        //         ASSERT( ( idx >> 26 ) == bucket );
+        //     }
+        // }
 
-        memset( writeBuffer, 0, 67108864 * sizeof( uint32 ) );
+        // memset( writeBuffer, 0, 67108864 * sizeof( uint32 ) );
         #endif
 
         LPUnpackMapJob::RunJob( 

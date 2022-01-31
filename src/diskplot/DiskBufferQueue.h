@@ -110,7 +110,9 @@ public:
     
     ~DiskBufferQueue();
 
-    void InitFileSet( FileId fileId, const char* name, uint bucketCount );
+    bool InitFileSet( FileId fileId, const char* name, uint bucketCount );
+
+    void OpenPlotFile( const char* fileName, const byte* plotId, const byte* plotMemo, uint16 plotMemoSize );
 
     void ResetHeap( const size_t heapSize, void* heapBuffer );
 
@@ -192,6 +194,10 @@ private:
     size_t           _blockSize      = 0;
     
     char*            _filePathBuffer = nullptr; // For deleting files
+
+    byte*            _plotHeaderbuffer  = nullptr;
+    uint64           _plotTablesPointer = 0;            // Offset in the plot file to the tables pointer table
+    uint64           _plotTablePointers[10] = { 0 };    // Pointers to the starting (park) address of each table in the plot file
 
     // I/O thread stuff
     Thread            _dispatchThread;

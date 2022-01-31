@@ -27,7 +27,9 @@ DiskBufferQueue::DiskBufferQueue(
     // Initialize Files
     const size_t workDirLen = _workDir.length();
 
-    _filePathBuffer = bbmalloc<char>( workDirLen + 64 );  // Should be enough for all our file names
+    const size_t PLOT_FILE_LEN = sizeof( "/plot-k32-2021-08-05-18-55-77a011fc20f0003c3adcc739b615041ae56351a22b690fd854ccb6726e5f43b7.plot.tmp" );
+
+    _filePathBuffer = bbmalloc<char>( workDirLen + PLOT_FILE_LEN );  // Should be enough for all our file names
 
     memcpy( _filePathBuffer, workDir, workDirLen + 1 );
 
@@ -38,6 +40,7 @@ DiskBufferQueue::DiskBufferQueue(
         _workDir += "/";
     }
 
+    // #TODO: Move these out of here and let the Phases handle this themselves.
     InitFileSet( FileId::Y0              , "y0"           , BB_DP_BUCKET_COUNT );
     InitFileSet( FileId::Y1              , "y1"           , BB_DP_BUCKET_COUNT );
     InitFileSet( FileId::META_A_0        , "meta_a0"      , BB_DP_BUCKET_COUNT );
@@ -93,7 +96,7 @@ void DiskBufferQueue::ResetHeap( const size_t heapSize, void* heapBuffer )
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketCount )
+bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketCount )
 {
     char*        pathBuffer    = _filePathBuffer;
     const size_t workDirLength = _workDir.length();
@@ -116,15 +119,29 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 
         const FileMode fileMode =
         #if _DEBUG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 )
-            FileMode::OpenOrCreate;
+            fileId != FileId::PLOT ? FileMode::OpenOrCreate : FileMode::Create;
         #else
             FileMode::Create;
         #endif
 
-        sprintf( baseName, "%s_%u.tmp", name, i );
+        if( fileId != FileId::PLOT )
+            sprintf( baseName, "%s_%u.tmp", name, i );
+        else
+            sprintf( baseName, "%s.tmp", name );
+        
         if( !file.Open( pathBuffer, fileMode, FileAccess::ReadWrite, flags ) )
+        {
+            // Allow plot file to fail opening
+            if( fileId == FileId::PLOT )
+            {
+                Log::Line( "Failed to open plot file %s with error: %d.", pathBuffer, file.GetError() );
+                return false;
+            }
+            
             Fatal( "Failed to open temp work file @ %s with error: %d.", pathBuffer, file.GetError() );
+        }
 
+        // #TODO: Remove this, we will keep a block size per-file set and do alignment ourselves.
         if( !_blockBuffer )
         {
             _blockSize = file.BlockSize();
@@ -133,12 +150,81 @@ void DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
             _blockBuffer = (byte*)SysHost::VirtualAlloc( _blockSize, false );
             FatalIf( !_blockBuffer, "Out of memory." );
         }
-        else
+        else if( fileId != FileId::PLOT )
         {
             if( file.BlockSize() != _blockSize )
                 Fatal( "Temporary work files have differing block sizes." );
         }
     }
+
+    return true;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::OpenPlotFile( const char* fileName, const byte* plotId, const byte* plotMemo, uint16 plotMemoSize )
+{
+    ASSERT( fileName     );
+    ASSERT( plotId       );
+    ASSERT( plotMemo     );
+    ASSERT( plotMemoSize );
+
+    // #TODO: Retry multiple-times.
+    const bool didOpen = InitFileSet( FileId::PLOT, fileName, 1 );
+    FatalIf( !didOpen, "Failed to open plot file." );
+
+    // Write plot header
+    const size_t headerSize =
+        ( sizeof( kPOSMagic ) - 1 ) +
+        32 +            // plot id
+        1  +            // k
+        2  +            // kFormatDescription length
+        ( sizeof( kFormatDescription ) - 1 ) +
+        2  +            // Memo length
+        plotMemoSize +  // Memo
+        80              // Table pointers
+    ;
+
+    // #TODO: Support block-aligned like in PlotWriter.cpp
+    if( !_plotHeaderbuffer )
+        _plotHeaderbuffer = bbvirtalloc<byte>( headerSize );
+
+    byte* header = _plotHeaderbuffer;
+
+    // Encode the headers
+    {
+        // Magic
+        byte* headerWriter = header;
+        memcpy( headerWriter, kPOSMagic, sizeof( kPOSMagic ) - 1 );
+        headerWriter += sizeof( kPOSMagic ) - 1;
+
+        // Plot Id
+        memcpy( headerWriter, plotId, 32 );
+        headerWriter += 32;
+
+        // K
+        *headerWriter++ = (byte)_K;
+
+        // Format description
+        *((uint16*)headerWriter) = Swap16( (uint16)(sizeof( kFormatDescription ) - 1) );
+        headerWriter += 2;
+        memcpy( headerWriter, kFormatDescription, sizeof( kFormatDescription ) - 1 );
+        headerWriter += sizeof( kFormatDescription ) - 1;
+
+        // Memo
+        *((uint16*)headerWriter) = Swap16( plotMemoSize );
+        headerWriter += 2;
+        memcpy( headerWriter, plotMemo, plotMemoSize );
+        headerWriter += plotMemoSize;
+
+        // Tables will be copied at the end.
+        _plotTablesPointer = (uint64)(headerWriter - header);
+
+        // Write the headers to disk
+        WriteFile( FileId::PLOT, 0, header, (size_t)_plotTablesPointer );
+        CommitCommands();
+    }
+
+    memset( _plotTablePointers, 0, sizeof( _plotTablePointers ) );
 }
 
 //-----------------------------------------------------------
