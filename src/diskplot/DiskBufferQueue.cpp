@@ -48,7 +48,7 @@ DiskBufferQueue::DiskBufferQueue(
     InitFileSet( FileId::META_B_0        , "meta_b0"      , BB_DP_BUCKET_COUNT );
     InitFileSet( FileId::META_B_1        , "meta_b1"      , BB_DP_BUCKET_COUNT );
     InitFileSet( FileId::X               , "x"            , BB_DP_BUCKET_COUNT );
-    // InitFileSet( FileId::F7              , "f7"           , 1               );
+    InitFileSet( FileId::F7              , "f7"           , BB_DP_BUCKET_COUNT );
     InitFileSet( FileId::T2_L            , "table_2_l"    , 1                  );
     InitFileSet( FileId::T2_R            , "table_2_r"    , 1                  );
     InitFileSet( FileId::T3_L            , "table_3_l"    , 1                  );
@@ -319,6 +319,11 @@ void DiskBufferQueue::DeleteFile( FileId id, uint bucket )
 //-----------------------------------------------------------
 void DiskBufferQueue::DeleteBucket( FileId id )
 {
+    // #TODO: This command must be run in another helper thread in order
+    //        to not block while the kernel buffers are being
+    //        cleared (when not using direct IO). Otherwise
+    //        other commands will get blocked while a command
+    //        we don't care about is executing.
     Command* cmd = GetCommandObject( Command::DeleteBucket );
     cmd->deleteFile.fileId = id;
 }

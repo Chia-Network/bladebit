@@ -401,7 +401,7 @@ void FxBucketJob::RunForTable()
     const uint64* metaInB         = this->metaInB;
 
     // Temporary buffers used when we're calculating FX, but before distribution into buckets.
-    uint32* yTmp          = this->yTmp ;
+    uint32* yTmp          = this->yTmp;
     uint64* metaATmp      = this->metaTmpA;
     uint64* metaBTmp      = this->metaTmpB;
     byte*   bucketIndices = this->bucketIdOut;
@@ -420,10 +420,12 @@ void FxBucketJob::RunForTable()
     uint32* metaBSizes    = nullptr;
 
 
-    // #TODO: Pass these as job input
-    const bool isEven        = static_cast<uint>( tableId ) & 1;
+    // #TODO: Pass these as job input?
+    const bool isEven = static_cast<uint>( tableId ) & 1;
 
-    const FileId yFileId       = isEven ? FileId::Y1       : FileId::Y0;
+    const FileId yFileId       = tableId == TableId::Table7 ? FileId::F7 : 
+                                    isEven ? FileId::Y1 : FileId::Y0;
+
     const FileId metaAFileId   = isEven ? FileId::META_A_0 : FileId::META_A_1;
     const FileId metaBFileId   = isEven ? FileId::META_B_0 : FileId::META_B_1;
     const FileId sortKeyFileId = TableIdToSortKeyId( tableId );

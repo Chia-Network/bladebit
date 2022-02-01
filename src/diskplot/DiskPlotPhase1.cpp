@@ -272,9 +272,12 @@ inline void DiskPlotPhase1::GetWriteFileIdsForBucket(
     TableId table, FileId& outYId,
     FileId& outMetaAId, FileId& outMetaBId )
 {
+    // #TODO: Use the ID's are needed function everywhere this is needed
     const bool isEven = static_cast<uint>( table ) & 1;
 
-    outYId     = isEven ? FileId::Y1       : FileId::Y0;
+    outYId = table == TableId::Table7 ? FileId::F7 : 
+                isEven ? FileId::Y1 : FileId::Y0;
+
     outMetaAId = isEven ? FileId::META_A_0 : FileId::META_A_1;
     outMetaBId = isEven ? FileId::META_B_0 : FileId::META_B_1;
 }
@@ -420,7 +423,7 @@ void DiskPlotPhase1::ForwardPropagate()
 
     maxBucketCount = BB_DP_MAX_ENTRIES_PER_BUCKET;
     maxBucketSize   = maxBucketCount * sizeof( uint32 );
-    _maxBucketCount =  maxBucketCount;
+    _maxBucketCount = maxBucketCount;
 
     // #TODO: We need to have a maximum size here, and just allocate that.
     //        we don't want to allocate per-table as we might not be able to do
@@ -486,15 +489,25 @@ void DiskPlotPhase1::ForwardPropagate()
         // if( 0 )
         //     Debug::ValidateLookupIndex( table, *_cx.threadPool, *_diskQueue, _cx.bucketCounts[(int)table] );
         // #endif
+
+        if( table == TableId::Table6 )
+        {
+            // We no longer need Y0 or MetaA1 files, as table 7 does not write meta and
+            // its y values go to the F7 file.
+            ioQueue.DeleteBucket( FileId::Y0       );
+            ioQueue.DeleteBucket( FileId::META_A_1 );
+
+            // We aslo no longer need Meta B as eta
+            ioQueue.DeleteBucket( FileId::META_B_0 );
+            ioQueue.DeleteBucket( FileId::META_B_1 );
+
+            ioQueue.CommitCommands();
+        }
     }
 
     // Delete files we don't need anymore
-    ioQueue.DeleteBucket( FileId::Y0       );
     ioQueue.DeleteBucket( FileId::Y1       );
     ioQueue.DeleteBucket( FileId::META_A_0 );
-    ioQueue.DeleteBucket( FileId::META_A_1 );
-    ioQueue.DeleteBucket( FileId::META_B_0 );
-    ioQueue.DeleteBucket( FileId::META_B_1 );
     ioQueue.CommitCommands();
 
     // Ensure all commands IO completed.
@@ -539,21 +552,27 @@ void DiskPlotPhase1::ForwardPropagateTable()
     }
 
     // Seek all buckets to the start
-    ioQueue.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
     ioQueue.SeekBucket( FileId::Y1, 0, SeekOrigin::Begin );
 
-    if constexpr( tableId == TableId::Table2 )
+    if constexpr ( tableId < TableId::Table7 )
+        ioQueue.SeekBucket( FileId::Y0, 0, SeekOrigin::Begin );
+        
+
+    if constexpr ( tableId == TableId::Table2 )
     {
         ioQueue.SeekBucket( FileId::X, 0, SeekOrigin::Begin );
     }
     else
     {
-        ioQueue.SeekBucket( sortKeyFileId,    0, SeekOrigin::Begin );
-
+        ioQueue.SeekBucket( sortKeyFileId   , 0, SeekOrigin::Begin );
         ioQueue.SeekBucket( FileId::META_A_0, 0, SeekOrigin::Begin );
-        ioQueue.SeekBucket( FileId::META_A_1, 0, SeekOrigin::Begin );
-        ioQueue.SeekBucket( FileId::META_B_0, 0, SeekOrigin::Begin );
-        ioQueue.SeekBucket( FileId::META_B_1, 0, SeekOrigin::Begin );
+
+        if constexpr ( tableId < TableId::Table7 )
+        {
+            ioQueue.SeekBucket( FileId::META_A_1, 0, SeekOrigin::Begin );
+            ioQueue.SeekBucket( FileId::META_B_0, 0, SeekOrigin::Begin );
+            ioQueue.SeekBucket( FileId::META_B_1, 0, SeekOrigin::Begin );
+        }
     }
     ioQueue.CommitCommands();
 

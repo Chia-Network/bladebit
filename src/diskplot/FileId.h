@@ -32,6 +32,7 @@ enum class FileId
     MAP4,
     MAP5,
     MAP6,
+    MAP7,
     
     // Marked entries for prunning
     MARKED_ENTRIES_2,
