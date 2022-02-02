@@ -8,6 +8,7 @@
 #include "jobs/F1GenBucketized.h"
 #include "jobs/FxGenBucketized.h"
 #include "jobs/LookupMapJob.h"
+#include "plotshared/TableWriter.h"
 
 // Test
 #include "io/FileStream.h"
@@ -742,7 +743,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             SortKeyGen::Sort<BB_MAX_JOBS>( threadPool, (int64)entryCount, sortKey, lookupIdx, sortedLookup );
 
             // Write the reverse lookup back into its original buckets as a forward lookup map
-            WriteReverseMap( tableId, bucketIdx, entryCount, sortedLookup );
+            WriteReverseMap( tableId - 1, bucketIdx, entryCount, sortedLookup, bucket.map, false );
 
             // OK to delete key file bucket
             ioQueue.DeleteFile( TableIdToSortKeyId( tableId - 1 ), bucketIdx );
@@ -854,11 +855,6 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         Log::Line( "  Finished generating fx in %.2lf seconds.", elapsed );
     }
 
-    if( tableId == TableId::Table7 )
-    {
-        // #TODO: Write f7 values to disk.
-    }
-
     ///
     /// Save the last 2 groups worth of data for this bucket.
     ///
@@ -898,18 +894,113 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 }
 
 
+// Load and sort F7s along with its key, then write back to disk
+//-----------------------------------------------------------
+void DiskPlotPhase1::SortAndCompressTable7()
+{
+    DiskPlotContext& context = _cx;
+    DiskBufferQueue& ioQueue = *context.ioQueue;
+
+    // Load F7 buckets and sort them
+    const uint32 BucketCount = BB_DP_BUCKET_COUNT;
+
+    struct BucketBuffer
+    {
+        uint32* f7;
+        uint32* key;
+    };
+
+    uint32       bucketsLoaded        = 0;
+    BucketBuffer buffers[BucketCount] = { 0 };
+
+    Fence readFence;
+
+    // #TODO: Check buffer usage here fits within the minimum heap allocation.
+    ioQueue.SeekBucket( FileId::F7       , 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( FileId::SORT_KEY7, 0, SeekOrigin::Begin );
+    ioQueue.CommitCommands();
+
+    auto LoadNextBucket = [&]() -> void 
+    {
+        ASSERT( bucketsLoaded < BucketCount );
+
+        const uint32 bucket       = bucketsLoaded;
+        const uint32 bucketLength = context.bucketCounts[(int)TableId::Table7][bucket];
+        
+        const size_t loadSize     = sizeof( uint32 ) * bucketLength;
+
+        BucketBuffer& bucketBuffer = buffers[bucketsLoaded++];
+
+        bucketBuffer.f7  = (uint32*)ioQueue.GetBuffer( loadSize, true );
+        bucketBuffer.key = (uint32*)ioQueue.GetBuffer( loadSize, true );
+
+        ioQueue.ReadFile( FileId::F7       , bucket, bucketBuffer.f7 , bucketLength * sizeof( uint32 ) );
+        ioQueue.ReadFile( FileId::SORT_KEY7, bucket, bucketBuffer.key, bucketLength * sizeof( uint32 ) );
+        ioQueue.SignalFence( readFence, bucketsLoaded );
+        ioQueue.CommitCommands();
+    };
+
+    // Load first bucket
+    LoadNextBucket();
+
+    for( uint32 bucket = 0; bucket < BucketCount; bucket++ )
+    {
+        const uint32 nextBucket = bucket + 1;
+        
+        if( bucketsLoaded < BucketCount )
+            LoadNextBucket();
+
+        readFence.Wait( nextBucket );
+
+        ioQueue.DeleteFile( FileId::F7, bucket );
+        ioQueue.CommitCommands();
+
+        // Sort on F7
+        BucketBuffer& buffer = buffers[bucket];
+
+        const uint32 bucketLength = context.bucketCounts[(int)TableId::Table7][bucket];
+        const size_t allocSize    = sizeof( uint32 ) * bucketLength;
+
+        uint32* keyTmp = (uint32*)ioQueue.GetBuffer( allocSize * 2, true );
+        uint32* f7Tmp  = keyTmp + bucketLength;
+
+        RadixSort256::SortWithKey<BB_MAX_JOBS>( *context.threadPool, 
+            buffer.f7, f7Tmp, buffer.key, keyTmp, bucketLength );
+
+        // We can re-use the temp sort buffer as the map buffer
+        uint64* map = (uint64*)keyTmp;
+        WriteReverseMap( TableId::Table7, bucket, bucketLength, buffer.key, map, true );
+
+        // Write back sorted f7 to the first bucket
+        // At this point we can compress F7 into C tables, but we
+        // can't write it directly to the plot file yet.
+        // #TODO: Actually, maybe we can write it to the plot
+        //        with the current plot format. I don't
+        //        believe the C3 table size is inferred.
+        // ioQueue.WriteFile( FileId::F7, 0, buffer.f7, allocSize );
+        // ioQueue.GetBuffer()
+        
+        // uint64 lastParkEntries = 0;
+        // uint64 c3ParkCount TableWriter::GetC3ParkCount( bucketLength, lastParkRemainder );
+
+
+        ioQueue.ReleaseBuffer( buffer.f7 );
+        ioQueue.CommitCommands();
+    }
+}
+
 ///
 /// Write map from the sort key
 ///
 //-----------------------------------------------------------
-void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, const uint32 count, const uint32* sortedSourceIndices )
+void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, const uint32 count, 
+                                      const uint32* sortedSourceIndices, uint64* map, bool releaseIndices )
 {
     DiskBufferQueue& ioQueue       = *_cx.ioQueue;
 
     Bucket&       bucket           = *_bucket;
     const uint32  threadCount      = _cx.threadCount;
     const uint32  entriesPerThread = count / threadCount;
-    uint64*       map              = bucket.map;
 
     // This offset must be based on the previous table as these
     // entries come from the previous table
@@ -947,6 +1038,12 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
 
     jobs.Run( threadCount );
 
+    if( releaseIndices )
+    {
+        ioQueue.ReleaseBuffer( (void*)sortedSourceIndices );
+        ioQueue.CommitCommands();
+    }
+
     // Calculate sizes for each bucket to write.
     // #NOTE: That because we write both buffers (origin and target)
     //        together, we treat the entry size as uint64
@@ -954,11 +1051,12 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
         bucketCounts[i] *= sizeof( uint64 );
 
     // Write to disk
-    const FileId mapFileId = TableIdToMapFileId( tableId - (TableId)1 );
+    const FileId mapFileId = TableIdToMapFileId( tableId );
     
     ioQueue.WriteBuckets( mapFileId, map, bucketCounts );
     ioQueue.SignalFence( bucket.mapFence );
     ioQueue.CommitCommands();
+    
 }
 
 

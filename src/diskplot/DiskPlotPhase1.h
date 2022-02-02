@@ -106,6 +106,12 @@ private:
 
     void AllocateFPBuffers( Bucket& bucket );
 
+    void SortAndCompressTable7();
+
+    // Write the sort key as a reverse lookup map (map target (sorted) position to original position)
+    void WriteReverseMap( TableId tableId, const uint32 bucketIdx, const uint32 count, 
+                          const uint32* sortedLookupIndices, uint64* map, bool releaseIndices );
+
     void ForwardPropagate();
 
     template<TableId tableId>
@@ -161,8 +167,6 @@ private:
     void GetWriteFileIdsForBucket( TableId table, FileId& outYId, 
                                    FileId& outMetaAId, FileId& outMetaBId );
 
-    // Write the sort key as a reverse lookup map (map target (sorted) position to original position)
-    void WriteReverseMap( TableId tableId, const uint32 bucketIdx, const uint32 count, const uint32* sortedLookupIndices );
 
 
 private:

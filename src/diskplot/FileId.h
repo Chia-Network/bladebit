@@ -65,6 +65,9 @@ enum class FileId
     LP_MAP_6,
     LP_MAP_7,
 
+    C1,
+    C2,
+    C3,
     PLOT
 
     ,_COUNT
@@ -123,6 +126,7 @@ inline FileId TableIdToMapFileId( const TableId table )
         case TableId::Table4: return FileId::MAP4;
         case TableId::Table5: return FileId::MAP5;
         case TableId::Table6: return FileId::MAP6;
+        case TableId::Table7: return FileId::MAP7;
 
         default:
             ASSERT( 0 );
