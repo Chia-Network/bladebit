@@ -18,7 +18,7 @@ struct TableWriter
 
 
     /// C1 & C2 tables
-    template<uint MAX_JOBS>
+    template<uint MAX_JOBS, uint CInterval>
     static size_t WriteC12Parallel( ThreadPool& pool, uint32 threadCount, const uint64 length, 
                                     const uint32* f7Entries, uint32* parkBuffer );
 
@@ -214,8 +214,8 @@ inline void P7Job::Run()
 /// C1 & C2 tables
 ///
 //-----------------------------------------------------------
-template<uint MAX_JOBS>
-inline size_t TableWriter::WriteC12Parallel<MAX_JOBS>( 
+template<uint MAX_JOBS, uint CInterval>
+inline size_t TableWriter::WriteC12Parallel<MAX_JOBS, CInterval>( 
     ThreadPool& pool, uint32 threadCount, const uint64 length, 
     const uint32* f7Entries, uint32* parkBuffer )
 {
@@ -263,7 +263,7 @@ inline size_t TableWriter::WriteC12Parallel<MAX_JOBS>(
         //  To work around this, we can add a trailing entry with the maximum k32 value size.
         //  This will force chiapos to stop at that point as the f7 is lesser than max k32 value.
         //  #IMPORTANT: This means that we can't have any f7's that are 0xFFFFFFFF!.
-        parkWriter[trailingEntries] = 0xFFFFFFFF;
+        // parkWriter[trailingEntries] = 0xFFFFFFFF;
     }
     else
     {
@@ -389,6 +389,8 @@ inline void TableWriter::WriteC3Parks( const uint64 parkCount, uint32* f7Entries
 //-----------------------------------------------------------
 inline void TableWriter::WriteC3Park( const uint64 length, uint32* f7Entries, byte* parkBuffer )
 {
+    ASSERT( length <= kCheckpoint1Interval-1 );
+    
     const size_t c3Size = CalculateC3Size();
 
     // Re-use f7Entries as the delta buffer. 
