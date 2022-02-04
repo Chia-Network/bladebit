@@ -245,7 +245,7 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
-    // SortAndCompressTable7();
+    SortAndCompressTable7();
 }
 
 
@@ -1187,7 +1187,7 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
     // entries come from the previous table
     uint32 sortKeyOffset = 0;
     for( uint32 i = 0; i < bucketIdx; i++ )
-        sortKeyOffset += _cx.bucketCounts[(int)tableId-1][i];
+        sortKeyOffset += _cx.bucketCounts[(int)tableId][i];
 
     // Ensure the previous bucket finished writing.
     // #TODO: Should we double-buffer here?
@@ -1197,6 +1197,8 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
     // static uint32 bucketCounts[BB_DP_BUCKET_COUNT];
     uint32* bucketCounts = (uint32*)ioQueue.GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
     // memset( bucketCounts, 0, sizeof( bucketCounts ) );
+
+    // const void* sortedIdicesStart = sortedSourceIndices;
 
     MTJobRunner<ReverseMapJob<BB_DP_BUCKET_COUNT>> jobs( *_cx.threadPool );
 
@@ -1245,7 +1247,6 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
     ioQueue.CommitCommands();
     
 }
-
 
 ///
 /// Adjacent Bucket Groups

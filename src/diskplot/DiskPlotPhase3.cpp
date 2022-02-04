@@ -248,10 +248,10 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     TableFirstStep( rTable );
 
     // Validate linePoints
-    #if _DEBUG
-        if( rTable > TableId::Table2 )
-            Debug::ValidateLinePoints( context, rTable, _lpBucketCounts );
-    #endif
+    // #if _DEBUG
+    //     if( rTable > TableId::Table2 )
+    //         Debug::ValidateLinePoints( context, rTable, _lpBucketCounts );
+    // #endif
 
     // Load LP buckets and key, sort them, 
     // write a reverse lookup map given the sorted key,
