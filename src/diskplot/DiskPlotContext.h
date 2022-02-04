@@ -90,6 +90,7 @@ struct DiskPlotContext
     //  0-6 = Parked tables 1-7
     //  7-9 = C1-C3 tables
     uint64       plotTablePointers[10];
+    uint64       plotTableSizes   [10];
 
     DiskFPBufferSizes* bufferSizes;
 };

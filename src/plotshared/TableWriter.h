@@ -94,7 +94,7 @@ inline size_t TableWriter::WriteP7( ThreadPool& threadPool, uint32 threadCount, 
      *          = 8448 / 8
      *          = 1056 64-bit fields
      */
-    const size_t parkSize = CDiv( (_K + 1) * kEntriesPerPark, 8 );
+    const size_t parkSize = CDiv( (_K + 1) * kEntriesPerPark, 8 );  // #TODO: Move this to its own function
     static_assert( parkSize / 8 == 1056 );
     
     MTJobRunner<P7Job, MAX_JOBS> jobs;
@@ -152,8 +152,8 @@ inline void TableWriter::WriteP7Entries( const uint64 length, const uint32* indi
 {
     uint64* fieldWriter = (uint64*)parkBuffer;
     
-    // chiapos requires this to have an extra bit for some odd reason.
-    // Otherwise we could have copied the buffer as-is.
+    // chiapos requires this to have an extra bit 
+    // (for overflows, but we don't support them yet)
     const uint32 bitsPerEntry = _K + 1;
 
     uint64 field = 0;

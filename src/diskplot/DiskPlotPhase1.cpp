@@ -909,7 +909,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 //-----------------------------------------------------------
 void DiskPlotPhase1::SortAndCompressTable7()
 {
-    Log::Line( "Writing C tables to plot file..." );
+    Log::Line( "Sorting F7s and writing C tables to plot file..." );
     const auto timer = TimerBegin();
 
     DiskPlotContext& context = _cx;
@@ -1162,8 +1162,13 @@ void DiskPlotPhase1::SortAndCompressTable7()
     context.plotTablePointers[9] = context.plotTablePointers[8] + c2TableSizeBytes; // C3
     context.plotTablePointers[0] = context.plotTablePointers[9] + c3TableSizeBytes; // T1
 
+    // Save sizes
+    context.plotTableSizes[7] = c1TableSizeBytes;
+    context.plotTableSizes[8] = c2TableSizeBytes;
+    context.plotTableSizes[9] = c3TableSizeBytes;
+
     const double elapsed = TimerEnd( timer );
-    Log::Line( "Finished writing C tables in %.2lf seconds.", elapsed );
+    Log::Line( "Finished sorting and writing C tables in %.2lf seconds.", elapsed );
 
     // Wait for all commands to finish
     readFence.Wait();

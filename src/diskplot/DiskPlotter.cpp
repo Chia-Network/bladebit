@@ -100,6 +100,15 @@ DiskPlotter::DiskPlotter( const Config cfg )
 //-----------------------------------------------------------
 void DiskPlotter::Plot( const PlotRequest& req )
 {
+    // Reset state
+    memset( _cx.plotTablePointers   , 0, sizeof( _cx.plotTablePointers ) );
+    memset( _cx.plotTableSizes      , 0, sizeof( _cx.plotTableSizes ) );
+    memset( _cx.bucketCounts        , 0, sizeof( _cx.bucketCounts ) );
+    memset( _cx.entryCounts         , 0, sizeof( _cx.entryCounts ) );
+    memset( _cx.ptrTableBucketCounts, 0, sizeof( _cx.ptrTableBucketCounts ) );
+    // #TODO: Reset the rest of the state, including the heap
+
+
     Log::Line( "Started plot." );
     auto plotTimer = TimerBegin();
 
@@ -147,6 +156,42 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished Phase 3 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+    }
+
+    {
+        // Now we need to update the table sizes on the file
+        Log::Line( "Waiting for plot file to complete pending writes..." );
+        const auto timer = TimerBegin();
+
+        // Update the table pointers location
+        DiskBufferQueue& ioQueue = *_cx.ioQueue;
+        ASSERT( sizeof( _cx.plotTablePointers ) == sizeof( uint64 ) * 10 );
+
+        const int64 tablePtrsStart = (int64)( ioQueue.PlotHeaderSize() - sizeof( uint64 ) * 10 );
+        ioQueue.SeekFile( FileId::PLOT, 0, tablePtrsStart, SeekOrigin::Begin );
+        ioQueue.WriteFile( FileId::PLOT, 0, _cx.plotTablePointers, sizeof( _cx.plotTablePointers ) );
+        
+        // Wait for all IO commands to finish
+        Fence fence;
+        ioQueue.SignalFence( fence );
+        ioQueue.CommitCommands();
+        fence.Wait();
+        
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Cmpleted pending writes in %.2lf seconds.", elapsed );
+        Log::Line( "Finished writing plot %s.", _cx.plotId );
+        Log::Line( "Final plot table pointers: " );
+
+        for( int i = 0; i < 10; i++ )
+        {
+            const uint64 addy = _cx.plotTablePointers[i];
+
+            if( i < 7 )
+                Log::Line( " Table %d: 0x%8X | %llu", i+1, addy, addy );
+            else
+                Log::Line( " C %d    : 0x%8X | %llu", i-6, addy, addy );
+        }
+        Log::Line( "" );
     }
 
     double plotElapsed = TimerEnd( plotTimer );

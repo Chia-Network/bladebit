@@ -35,6 +35,8 @@ private:
 
     void TableThirdStep( const TableId rTable );
 
+    void WritePark7( uint32 bucket, uint32* t6Indices, uint32 entryCount );
+
 private:
     DiskPlotContext& _context;
     
@@ -66,5 +68,8 @@ private:
     // that did not fit into a full park, these need to be included in
     // the first park of the next bucket
     uint64  _bucketParkLeftOvers[kEntriesPerPark] = { 0 };
-    uint32  _bucketParkLeftOversCount;
+    uint32  _bucketParkLeftOversCount = 0;
+
+    uint32  _park7LeftOvers[kEntriesPerPark] = { 0 };
+    uint32  _park7LeftOversCount = 0;
 };

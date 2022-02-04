@@ -5,6 +5,7 @@
 #include "memplot/LPGen.h"
 #include "memplot/ParkWriter.h"
 #include "jobs/UnpackMapJob.h"
+#include "plotshared/TableWriter.h"
 
 #define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
                                             // have cross bucket entries accounted for
@@ -90,6 +91,9 @@ struct ConvertToLPJob : public PrefixSumJob<ConvertToLPJob>
     int64            totalPrunedEntryCount; // Pruned entry count accross all threads
     
     void Run() override;
+
+    template<TableId rTable>
+    void RunForTable();
 
     // For distributing
     uint32*          bucketCounts;          // Total count of entries per bucket (used by first thread)
@@ -293,7 +297,9 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
     const FileId rPtrsLId            = rPtrsRId + 1;
 
     // Prepare our files for reading
-    ioQueue.SeekBucket( markedEntriesFileId, 0, SeekOrigin::Begin );
+    if( rTable < TableId::Table7 )
+        ioQueue.SeekBucket( markedEntriesFileId, 0, SeekOrigin::Begin );
+
     ioQueue.SeekFile  ( lMapId             , 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile  ( rMapId             , 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile  ( rPtrsRId           , 0, 0, SeekOrigin::Begin );
@@ -313,7 +319,8 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
         ioQueue.ReadFile( lMapId, 0, _lMap[0], lBucketLength * sizeof( uint32 ) );
 
         // Read R Table marks
-        ioQueue.ReadFile( markedEntriesFileId, 0, _markedEntries, _phase3Data.bitFieldSize );
+        if( rTable < TableId::Table7 )
+            ioQueue.ReadFile( markedEntriesFileId, 0, _markedEntries, _phase3Data.bitFieldSize );
 
         // Read R Table 1st bucket
         ioQueue.ReadFile( rPtrsRId, 0, _rTablePairs[0].left , rBucketLength * sizeof( uint32 ) );
@@ -457,6 +464,25 @@ uint32 DiskPlotPhase3::PointersToLinePoints(
 //-----------------------------------------------------------
 void ConvertToLPJob::Run()
 {
+    switch( this->rTable )
+    {
+        case TableId::Table2: this->RunForTable<TableId::Table2>(); break;
+        case TableId::Table3: this->RunForTable<TableId::Table3>(); break;
+        case TableId::Table4: this->RunForTable<TableId::Table4>(); break;
+        case TableId::Table5: this->RunForTable<TableId::Table5>(); break;
+        case TableId::Table6: this->RunForTable<TableId::Table6>(); break;
+        case TableId::Table7: this->RunForTable<TableId::Table7>(); break;
+    
+    default:
+        ASSERT( 0 );
+        break;
+    }
+}
+
+//-----------------------------------------------------------
+template<TableId rTable>
+void ConvertToLPJob::RunForTable()
+{
     DiskPlotContext& context = *this->context;
 
     const int32 threadCount  = (int32)this->JobCount();
@@ -479,25 +505,33 @@ void ConvertToLPJob::Run()
     // First, scan our entries in order to prune them
     int64 prunedLength = 0;
 
-    for( int64 i = bucketOffset; i < end; i++)
+    if constexpr ( rTable < TableId::Table7 )
     {
-        // #TODO: Try changing Phase 2 to write atomically to see
-        //        (if we don't get a huge performance hit),
-        //        if we can do reads without the rMap
-        if( markedEntries.Get( rMap[i] ) )
-            prunedLength ++;
+        for( int64 i = bucketOffset; i < end; i++)
+        {
+            // #TODO: Try changing Phase 2 to write atomically to see
+            //        (if we don't get a huge performance hit),
+            //        if we can do reads without the rMap
+            if( markedEntries.Get( rMap[i] ) )
+                prunedLength ++;
+        }
+    }
+    else
+    {
+        prunedLength = entryCount;
     }
 
     this->prunedEntryCount = prunedLength;
     this->SyncThreads();
 
+    // #NOTE: Not necesarry for T7, but let's avoid code duplication for now.
     // Set our destination offset
     int64 dstOffset = 0;
 
     for( int32 i = 0; i < (int32)this->JobId(); i++ )
         dstOffset += GetJob( i ).prunedEntryCount;
 
-    // Copy pruned entries into new buffer
+    // Copy pruned entries into new buffer and expend R pointers to absolute address
     // #TODO: check if doing 1 pass per buffer performs better
     struct Pair
     {
@@ -512,9 +546,18 @@ void ConvertToLPJob::Run()
 
     for( int64 i = bucketOffset; i < end; i++ )
     {
-        const uint32 mapIdx = rMap[i];
-        if( !markedEntries.Get( mapIdx ) )
-            continue;
+        uint32 mapIdx;
+
+        if constexpr ( rTable < TableId::Table7 )
+        {
+            mapIdx = rMap[i];
+            if( !markedEntries.Get( mapIdx ) )
+                continue;
+        }
+        else
+        {
+            mapIdx = i;
+        }
 
         outPairs->left  = pairs.left[i];
         outPairs->right = outPairs->left + pairs.right[i];
@@ -780,6 +823,9 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
 
         entryOffset += bucketLength;
     }
+
+    // Set the table offset for the next table
+    context.plotTablePointers[(int)rTable] = context.plotTablePointers[(int)rTable-1] + context.plotTableSizes[(int)rTable-1];
 }
 
 struct WriteLPMapJob : PrefixSumJob<WriteLPMapJob>
@@ -979,6 +1025,8 @@ void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, c
         ioQueue.ReleaseBuffer( xBucketPark );
         ioQueue.CommitCommands();
 
+        context.plotTableSizes[(int)rTable-1] += parkSize;
+
         // Offset our current bucket to account for the entries we just used
         linePoints   += entriesToCopy;
         bucketLength -= entriesToCopy;
@@ -1018,6 +1066,7 @@ void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, c
     ioQueue.ReleaseBuffer( parkBuffer );
     ioQueue.CommitCommands();
 
+    context.plotTableSizes[(int)rTable-1] += sizeWritten;
 }
 
 
@@ -1205,11 +1254,109 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
             *context.threadPool, context.threadCount, 
             bucket, entryCount, inMap, writeBuffer );
 
-        // Write the unpacked map back to disk
         ioQueue.ReleaseBuffer( (void*)inMap );
-        ioQueue.WriteFile( mapId, 0, writeBuffer, writeSize );
+        ioQueue.CommitCommands();
+
+        if( rTable < TableId::Table7 )
+        {
+            // Write the unpacked map back to disk
+            ioQueue.WriteFile( mapId, 0, writeBuffer, writeSize );
+        }
+        else
+        {
+            // For table 7 we just write the parks to disk
+            WritePark7( bucket, writeBuffer, writeEntryCount );
+        }
+
         ioQueue.ReleaseBuffer( writeBuffer );
         ioQueue.CommitCommands();
     }
 }
+
+// Write the entries for table 7 as indices into 
+// table 6 into a park in the plot file
+//-----------------------------------------------------------
+void DiskPlotPhase3::WritePark7( uint32 bucket, uint32* t6Indices, uint32 bucketLength )
+{
+    ASSERT( bucketLength );
+
+    DiskPlotContext& context = _context;
+    DiskBufferQueue& ioQueue = *context.ioQueue;
+
+    const size_t parkSize  = CDiv( (_K + 1) * kEntriesPerPark, 8 );  // #TODO: Move this to its own function
+
+    if( _park7LeftOversCount )
+    {
+        ASSERT( _park7LeftOversCount < kEntriesPerPark );
+
+        const uint32 requiredEntriesToCompletePark = kEntriesPerPark - _park7LeftOversCount;
+        const uint32 entriesToCopy                 = std::min( requiredEntriesToCompletePark, bucketLength );
+
+        // Write cross-bucket park
+        byte* xBucketPark = (byte*)ioQueue.GetBuffer( parkSize );
+
+        memcpy( _park7LeftOvers + _park7LeftOversCount, t6Indices, entriesToCopy * sizeof( uint32 ) );
+        _park7LeftOversCount += entriesToCopy;
+
+        // Don't write unless we filled the whole park, or it is the last bucket (non-filled park is allowed then)
+        if( entriesToCopy < requiredEntriesToCompletePark )
+        {
+            ASSERT( bucketLength < requiredEntriesToCompletePark );
+            return;
+        }
+        
+        ASSERT( _park7LeftOversCount == kEntriesPerPark );
+        TableWriter::WriteP7Entries( kEntriesPerPark, _park7LeftOvers, xBucketPark );
+        context.plotTableSizes[(int)TableId::Table7] += parkSize;
+
+        ioQueue.WriteFile( FileId::PLOT, 0, xBucketPark, parkSize );
+        ioQueue.ReleaseBuffer( xBucketPark );
+        ioQueue.CommitCommands();
+
+        // Offset our current bucket to account for the entries we just used
+        t6Indices    += entriesToCopy;
+        bucketLength -= entriesToCopy;
+
+        // Clear the overflow entries
+        _park7LeftOversCount = 0;
+
+        if( bucketLength < 1 )
+            return;
+    }
+
+    const uint32 BucketCount  = BB_DP_BUCKET_COUNT;
+    const bool   isLastBucket = bucket + 1 == BucketCount;
+
+    uint32 parkCount       = bucketLength / kEntriesPerPark;
+    uint32 overflowEntries = bucketLength - parkCount * kEntriesPerPark;
+
+    if( isLastBucket && overflowEntries )
+    {
+        overflowEntries = 0;
+        parkCount++;
+    }
+    else if( overflowEntries )
+    {
+        // Save any entries that don't fill-up a full park for the next bucket
+        memcpy( _park7LeftOvers, t6Indices + bucketLength - overflowEntries, overflowEntries * sizeof( uint32 ) );
+        
+        _bucketParkLeftOversCount = overflowEntries;
+        bucketLength -= overflowEntries;
+    }
+
+    ASSERT( isLastBucket || bucketLength / kEntriesPerPark * kEntriesPerPark == bucketLength );
+
+    byte* parkBuffer = (byte*)ioQueue.GetBuffer( parkSize * parkCount );
+
+    const size_t sizeWritten = TableWriter::WriteP7<BB_MAX_JOBS>( *context.threadPool, 
+                                context.threadCount, bucketLength, t6Indices, parkBuffer );
+    ASSERT( sizeWritten <= parkSize * parkCount  );
+
+    ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
+    ioQueue.ReleaseBuffer( parkBuffer );
+    ioQueue.CommitCommands();
+
+    context.plotTableSizes[(int)TableId::Table7] += sizeWritten;
+}
+
 
