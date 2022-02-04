@@ -961,6 +961,14 @@ void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, c
         byte* xBucketPark = (byte*)ioQueue.GetBuffer( parkSize );
 
         memcpy( _bucketParkLeftOvers + _bucketParkLeftOversCount, linePoints, entriesToCopy * sizeof( uint64 ) );
+        _bucketParkLeftOversCount += entriesToCopy;
+
+        // Don't write unless we filled the park, or it is the last bucket (non-filled park is allowed then)
+        if( entriesToCopy < kEntriesPerPark )
+        {
+            ASSERT( bucketLength < requiredEntriesToCompletePark );
+            return;
+        }
 
         WritePark( parkSize, _bucketParkLeftOversCount + entriesToCopy, _bucketParkLeftOvers, xBucketPark, lTable );
 

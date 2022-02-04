@@ -33,8 +33,8 @@ struct TableWriter
     template<uint MAX_JOBS>
     static size_t WriteC3Parallel( ThreadPool& pool, uint32 threadCount, const uint64 length, uint32* f7Entries, byte* c3Buffer );
 
-    static void WriteC3Parks( const uint64 parkCount, uint32* f7Entries, byte* writeBuffer );
-    static void WriteC3Park( const uint64 length, uint32* f7Entries, byte* parkBuffer );
+    static void WriteC3Parks( const uint64 parkCount, uint32* f7Entries, byte* writeBuffer, uint32 jobId = 0 );
+    static void WriteC3Park( const uint64 length, uint32* f7Entries, byte* parkBuffer, uint32 jobId = 0 );
 };
 
 struct P7Job : MTJob<P7Job>
@@ -71,10 +71,10 @@ struct C3Job : MTJob<C3Job>
 ///
 //-----------------------------------------------------------
 template<uint MAX_JOBS>
-inline size_t TableWriter::WriteP7<MAX_JOBS>( ThreadPool& threadPool, uint32 threadCount, const uint64 length, 
-                                              const uint32* indices, byte* parkBuffer )
+inline size_t TableWriter::WriteP7( ThreadPool& threadPool, uint32 threadCount, const uint64 length, 
+                                    const uint32* indices, byte* parkBuffer )
 {
-    uint32 threadCount = std::min( threadCount, MAX_JOBS );
+    threadCount = std::min( threadCount, MAX_JOBS );
 
     const uint64 parkCount       = length / kEntriesPerPark;           // Number of parks that are completely filled with entries
     const uint64 parksPerThread  = parkCount / threadCount;
@@ -215,17 +215,17 @@ inline void P7Job::Run()
 ///
 //-----------------------------------------------------------
 template<uint MAX_JOBS, uint CInterval>
-inline size_t TableWriter::WriteC12Parallel<MAX_JOBS, CInterval>( 
+inline size_t TableWriter::WriteC12Parallel( 
     ThreadPool& pool, uint32 threadCount, const uint64 length, 
     const uint32* f7Entries, uint32* parkBuffer )
 {
-    const uint32 threadCount      = std::min( threadCount, MAX_JOBS );
+     threadCount = std::min( threadCount, MAX_JOBS );
 
     const uint64 parkEntries      = CDiv( length, (int)CInterval );
     const uint64 entriesPerThread = parkEntries / threadCount;
     const uint64 trailingEntries  = parkEntries - (entriesPerThread * threadCount);
 
-    MTJobRunner<C12Job, MAX_JOBS> jobs;
+    MTJobRunner<C12Job<CInterval>, MAX_JOBS> jobs;
 
     const uint32* threadf7Entries = f7Entries;
     uint32*       parkWriter      = parkBuffer;
@@ -283,6 +283,7 @@ inline void TableWriter::WriteC12Entries( const uint64 length, const uint32* f7E
     for( uint64 i = 0; i < length; i++, f7Src += CInterval )
         c1Buffer[i] = Swap32( f7Entries[f7Src] );
 }
+
 //-----------------------------------------------------------
 template<uint CInterval>
 inline void C12Job<CInterval>::Run()
@@ -322,7 +323,7 @@ inline uint64 TableWriter::GetC3ParkCount( const uint64 length )
 template<uint MAX_JOBS>
 inline size_t TableWriter::WriteC3Parallel( ThreadPool& pool, uint32 threadCount, const uint64 length, uint32* f7Entries, byte* c3Buffer )
 {
-    const uint32 threadCount        = std::min( threadCount, MAX_JOBS );
+    threadCount = std::min( threadCount, MAX_JOBS );
 
     const uint64 parkCount          = length / kCheckpoint1Interval;
     const uint64 parksPerThread     = parkCount / threadCount;
@@ -338,7 +339,7 @@ inline size_t TableWriter::WriteC3Parallel( ThreadPool& pool, uint32 threadCount
     
     const size_t c3Size = CalculateC3Size();
 
-    MTJobRunner<C3Job, MAX_JOBS> jobs;
+    MTJobRunner<C3Job, MAX_JOBS> jobs( pool );
 
     uint32* threadF7Entries = f7Entries;
     byte*   threadC3Buffer  = c3Buffer;
@@ -373,13 +374,13 @@ inline size_t TableWriter::WriteC3Parallel( ThreadPool& pool, uint32 threadCount
 }
 
 //-----------------------------------------------------------
-inline void TableWriter::WriteC3Parks( const uint64 parkCount, uint32* f7Entries, byte* writeBuffer )
+inline void TableWriter::WriteC3Parks( const uint64 parkCount, uint32* f7Entries, byte* writeBuffer, uint32 jobId )
 {
     const size_t c3Size = CalculateC3Size();
 
     for( uint64 i = 0; i < parkCount; i++ )
     {
-        WriteC3Park( kCheckpoint1Interval-1, f7Entries, writeBuffer );
+        WriteC3Park( kCheckpoint1Interval-1, f7Entries, writeBuffer, jobId  );
 
         f7Entries   += kCheckpoint1Interval;
         writeBuffer += c3Size;
@@ -387,7 +388,7 @@ inline void TableWriter::WriteC3Parks( const uint64 parkCount, uint32* f7Entries
 }
 
 //-----------------------------------------------------------
-inline void TableWriter::WriteC3Park( const uint64 length, uint32* f7Entries, byte* parkBuffer )
+inline void TableWriter::WriteC3Park( const uint64 length, uint32* f7Entries, byte* parkBuffer, uint32 jobId )
 {
     ASSERT( length <= kCheckpoint1Interval-1 );
     
@@ -427,13 +428,13 @@ inline void TableWriter::WriteC3Park( const uint64 length, uint32* f7Entries, by
     // Zero-out remainder (not necessary, though...)
     const size_t remainder = c3Size - (compressedSize + 2);
     if( remainder )
-        memset( deltaWriter + compressedSize + 2, 0, remainder );
+        memset( parkBuffer + compressedSize + 2, 0, remainder );
 }
 
 //-----------------------------------------------------------
 inline void C3Job::Run()
 {
-    TableWriter::WriteC3Parks( this->parkCount, this->f7Entries, this->writeBuffer );
+    TableWriter::WriteC3Parks( this->parkCount, this->f7Entries, this->writeBuffer, this->_jobId );
 }
 
 

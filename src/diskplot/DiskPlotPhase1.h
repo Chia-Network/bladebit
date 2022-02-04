@@ -110,7 +110,7 @@ private:
 
     // Write the sort key as a reverse lookup map (map target (sorted) position to original position)
     void WriteReverseMap( TableId tableId, const uint32 bucketIdx, const uint32 count, 
-                          const uint32* sortedLookupIndices, uint64* map, bool releaseIndices );
+                          const uint32* sortedLookupIndices, uint64* map, Fence* writeFence, bool releaseIndices );
 
     void ForwardPropagate();
 

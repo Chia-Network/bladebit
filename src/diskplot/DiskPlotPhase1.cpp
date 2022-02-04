@@ -15,6 +15,10 @@
 #include "SysHost.h"
 #include "DiskPlotDebug.h"
 
+// Test C3
+#include "jobs/IOJob.h"
+#include <sys/stat.h>
+
 #if _DEBUG
     #include "../memplot/DbgHelper.h"
 #endif
@@ -140,6 +144,10 @@ void DiskPlotPhase1::Run()
             Fatal( "Failed to open pointer bucket counts file." );
         }
 
+        #if BB_DP_DBG_SKIP_TO_C_TABLES
+            SortAndCompressTable7();
+        #endif
+
         return;
 
     CONTINUE:;
@@ -240,6 +248,8 @@ void DiskPlotPhase1::Run()
             Log::Error( "Failed to open back pointer bucket counts file." );
     }
     #endif
+
+    SortAndCompressTable7();
 }
 
 
@@ -743,7 +753,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             SortKeyGen::Sort<BB_MAX_JOBS>( threadPool, (int64)entryCount, sortKey, lookupIdx, sortedLookup );
 
             // Write the reverse lookup back into its original buckets as a forward lookup map
-            WriteReverseMap( tableId - 1, bucketIdx, entryCount, sortedLookup, bucket.map, false );
+            WriteReverseMap( tableId - 1, bucketIdx, entryCount, sortedLookup, bucket.map, &bucket.mapFence, false );
 
             // OK to delete key file bucket
             ioQueue.DeleteFile( TableIdToSortKeyId( tableId - 1 ), bucketIdx );
@@ -922,7 +932,8 @@ void DiskPlotPhase1::SortAndCompressTable7()
 
     const uint64 tableLength = context.entryCounts[(int)TableId::Table7];
     const uint32 c1TotalEntries = (uint32)CDiv( tableLength, (int)c1Interval ) + 1; // +1 because chiapos adds an extra '0' entry at the end
-    const uint32 c2TotalEntries = (uint32)CDiv( tableLength, (int)c2Interval );
+    const uint32 c2TotalEntries = (uint32)CDiv( tableLength, (int)c2Interval ) + 1; // +1 because we add a short-circuit entry to prevent C2 lookup overflows
+                                                                                    // #TODO: Remove the extra c2 entry when we support >k^32 entries
     
     const size_t c1TableSizeBytes = c1TotalEntries * sizeof( uint32 );
     const size_t c2TableSizeBytes = c2TotalEntries * sizeof( uint32 );
@@ -930,9 +941,14 @@ void DiskPlotPhase1::SortAndCompressTable7()
     uint32* c1Buffer = (uint32*)ioQueue.GetBuffer( c1TableSizeBytes );
     uint32* c2Buffer = (uint32*)ioQueue.GetBuffer( c2TableSizeBytes );
     
-    uint32 c3ParkOverflowCount = 0;
-    uint32 c3ParkOverflow[kEntriesPerPark];    // #TODO: Heap-allocate this
-    size_t c3TableSizeBytes = 0;
+    // See Note in LoadNextbucket() regarding the 'prefix region' for c3 overflow that we allocate
+    const size_t c3ParkOverflowSize = sizeof( uint32 ) * kCheckpoint1Interval;
+
+    uint32 c3ParkOverflowCount = 0; // Overflow entries from a bucket that did not make it into a C3 park this bucket. Saved for the next bucket.
+    uint32 c3ParkOverflow[kCheckpoint1Interval];
+
+    size_t c3TableSizeBytes    = 0; // Total size of the C3 table
+
 
     // #TODO: Seek to the C3 table instead of writing garbage data.
     //        For now we write false C1 and C2 tables to get the plot file to the right offset
@@ -962,7 +978,9 @@ void DiskPlotPhase1::SortAndCompressTable7()
 
         BucketBuffer& bucketBuffer = buffers[bucketsLoaded++];
 
-        bucketBuffer.f7  = (uint32*)ioQueue.GetBuffer( loadSize, true );
+        // Add enough space on the f7 buffer to keep cross-bucket C3 park's worth of entries.
+        // this way we can copy park overflow entries to that prefix region and process the parks normally.
+        bucketBuffer.f7 =  (uint32*)( ioQueue.GetBuffer( loadSize + c3ParkOverflowSize, true ) + c3ParkOverflowSize );
         bucketBuffer.key = (uint32*)ioQueue.GetBuffer( loadSize, true );
 
         ioQueue.ReadFile( FileId::F7       , bucket, bucketBuffer.f7 , bucketLength * sizeof( uint32 ) );
@@ -980,13 +998,13 @@ void DiskPlotPhase1::SortAndCompressTable7()
     for( uint32 bucket = 0; bucket < BucketCount; bucket++ )
     {
         const uint32 nextBucket = bucket + 1;
-        
+
         if( bucketsLoaded < BucketCount )
             LoadNextBucket();
 
         readFence.Wait( nextBucket );
 
-        ioQueue.DeleteFile( FileId::F7, bucket );
+        // ioQueue.DeleteFile( FileId::F7, bucket );
         ioQueue.CommitCommands();
 
         // Sort on F7
@@ -1003,8 +1021,9 @@ void DiskPlotPhase1::SortAndCompressTable7()
         
         // Write reverse map
         // #NOTE: We can re-use the temp sort buffer as the map buffer
+        //        We instruct WriteReverseMap to release our key buffer as well.
         uint64* map = (uint64*)keyTmp;
-        WriteReverseMap( TableId::Table7, bucket, bucketLength, buffer.key, map, true );
+        WriteReverseMap( TableId::Table7, bucket, bucketLength, buffer.key, map, nullptr, true );
         ioQueue.ReleaseBuffer( map );
         ioQueue.CommitCommands();
 
@@ -1022,7 +1041,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
 
             // #TODO: Do C1 multi-threaded. For now jsut single-thread it...
             for( uint32 i = c1NextCheckpoint; i < bucketLength; i += c1Interval )
-                *c1Writer++ = buffer.f7[i];
+                *c1Writer++ = Swap32( buffer.f7[i] );
             
             // Track how many entries we covered in the last checkpoint region
             const uint32 c1Length          = bucketLength - c1NextCheckpoint;
@@ -1041,7 +1060,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
             else
             {
                 for( uint32 i = c2NextCheckpoint; i < bucketLength; i += c2Interval )
-                    *c2Writer++ = buffer.f7[i];
+                    *c2Writer++ = Swap32( buffer.f7[i] );
             
                 // Track how many entries we covered in the last checkpoint region
                 const uint32 c2Length          = bucketLength - c2NextCheckpoint;
@@ -1053,13 +1072,118 @@ void DiskPlotPhase1::SortAndCompressTable7()
 
         // Write C3
         {
-            uint32 c3BucketLength = bucketLength;
+            const bool isLastBucket = nextBucket == BucketCount;
+
+            uint32* c3F7           = buffer.f7;
+            uint32  c3BucketLength = bucketLength;
+
+            // +TEST:
+            // Bucket offset 
+            uint64 bucketOffset = 0;
+            for( uint32 i = 0; i < bucket; i++ )
+                bucketOffset += context.bucketCounts[(int)TableId::Table7][i];
+            // -TEST
+
+            if( c3ParkOverflowCount )
+            {
+                // Copy our overflow to the prefix region of our f7 buffer
+                c3F7 -= c3ParkOverflowCount;
+                c3BucketLength += c3ParkOverflowCount;
+
+                memcpy( c3F7, c3ParkOverflow, sizeof( uint32 ) * c3ParkOverflowCount );
+
+                c3ParkOverflowCount = 0;
+            }
+
+            // Write any pending park
+            // if( c3ParkOverflowCount )
+            // {
+            //     const uint32 entriesToCompletePark = kCheckpoint1Interval - c3ParkOverflowCount;
+            //     const uint32 entriesToCopy         = std::min( entriesToCompletePark, c3BucketLength );
+
+            //     // Copy the entries to our overflow park buffer
+            //     memcpy( c3ParkOverflow + c3ParkOverflowCount, c3F7, entriesToCopy * sizeof( uint32 ) );
+            //     c3ParkOverflowCount += entriesToCopy;
+
+            //     // Don't write the buffer if we haven't completed a whole park, unless it is the last bucket
+            //     if( entriesToCopy < entriesToCompletePark && !isLastBucket )
+            //     {
+            //         // Should never happen with the current fixed bucket count of 64
+            //         ASSERT( c3BucketLength < entriesToCompletePark );
+            //         continue;
+            //     }
+                
+            //     // Have a completed park, write it
+            //     byte* buffer = ioQueue.GetBuffer( CalculateC3Size(), true );
+
+            //     ASSERT( c3ParkOverflowCount == kCheckpoint1Interval );
+            //     TableWriter::WriteC3Park( kCheckpoint1Interval, c3ParkOverflow, buffer );
+
+            //     ioQueue.WriteFile( FileId::PLOT, 0, buffer, CalculateC3Size() );
+            //     ioQueue.ReleaseBuffer( buffer );
+            //     ioQueue.CommitCommands();
+
+            //     c3TableSizeBytes += CalculateC3Size();
+
+            //     // Skip the area we just copied
+            //     c3F7           += entriesToCopy;
+            //     c3BucketLength -= entriesToCopy;
+            //     c3ParkOverflowCount = 0;
+
+            //     if( c3BucketLength < 1 )
+            //         continue;
+            // }
+            // +Test:
+            static byte* c3Ref = nullptr;
+            static const byte* c3RefReader = nullptr;
+            {
+                static byte* plotData = nullptr;
+                if( !plotData )
+                {
+                    // Load Plot file
+                    FileStream file;
+                    if( !file.Open( "/mnt/p5510a/plots-ref/plot-k32-2021-11-16-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot", FileMode::Open, FileAccess::Read, FileFlags::NoBuffering | FileFlags::LargeFile ) )
+                        Fatal( "Failed to open plot file for testing." );
+
+                    byte* block = bbvirtalloc<byte>( file.BlockSize() );
+
+                    int fd = (int)file.Id();
+                    struct stat fs;
+                    
+                    int r = fstat( fd, &fs );
+                    FatalIf( r != 0, "Failed to get plot size: %u", r );
+
+                    const size_t plotSize = (size_t)fs.st_size;
+
+                    plotData = bbvirtalloc<byte>( plotSize );
+                    int err;
+                    FatalIf( !IOWriteJob::ReadFromFile( file, plotData, plotSize, block, file.BlockSize(), err ), "Failed to read plot file: %u", err );
+
+                    // Get C3 pointer offset
+                    const size_t memoSizeOffset = 
+                        ( sizeof( kPOSMagic ) - 1 ) +
+                        32 +            // plot id
+                        1  +            // k
+                        2  +            // kFormatDescription length
+                        ( sizeof( kFormatDescription ) - 1 );
+
+                    const uint16 memoLen = Swap16( *(uint16*)( plotData + memoSizeOffset ) );
+
+                    uint64* tablePtrs = (uint64*)( plotData + memoSizeOffset + 2 + memoLen );
+                    for( int i = 0; i < 10; i++ )
+                        tablePtrs[i] = Swap64( tablePtrs[i] );
+                    
+                    const uint64 c3Address = tablePtrs[9];
+                    c3Ref       = plotData + c3Address;
+                    c3RefReader = c3Ref;
+
+                }
+            }
+            // -Test
             
             // See TableWriter::GetC3ParkCount for details
             uint32 parkCount       = c3BucketLength / kCheckpoint1Interval;
             uint32 overflowEntries = c3BucketLength - ( parkCount * kCheckpoint1Interval );
-
-            const bool isLastBucket = nextBucket == BucketCount;
 
             // Greater than 1 because the first entry is excluded as it is written in C1 instead.
             if( isLastBucket && overflowEntries > 1 )
@@ -1070,7 +1194,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
             else if( overflowEntries && !isLastBucket )
             {
                 // Save any entries that don't fill-up a full park for the next bucket
-                memcpy( c3ParkOverflow, buffer.f7 + c3BucketLength - overflowEntries, overflowEntries * sizeof( uint32 ) );
+                memcpy( c3ParkOverflow, c3F7 + c3BucketLength - overflowEntries, overflowEntries * sizeof( uint32 ) );
                 
                 c3ParkOverflowCount = overflowEntries;
                 c3BucketLength -= overflowEntries;
@@ -1079,10 +1203,37 @@ void DiskPlotPhase1::SortAndCompressTable7()
             const size_t c3BufferSize = CalculateC3Size() * parkCount;
             byte* c3Buffer = ioQueue.GetBuffer( c3BufferSize );
 
-            const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_MAX_JOBS>( *context.threadPool, context.threadCount, c3BucketLength, buffer.f7, c3Buffer );
+            const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_MAX_JOBS>( *context.threadPool, 
+                                            context.threadCount, c3BucketLength, c3F7, c3Buffer );
             ASSERT( sizeWritten == c3BufferSize );
 
+            // +TEST
+            // Verify
+            #if _DEBUG
+            {
+                // int cmp = memcmp( c3RefReader, c3Buffer, sizeWritten );
+                // ASSERT( cmp == 0 );
+                for( size_t i = 0; i < parkCount; i++ )
+                {
+                    const uint16 compressedSize = Swap16( *(uint16*)c3Buffer ) + 2;
+
+                    for( size_t b = 0; b < compressedSize; b++ )
+                    {
+                        if( c3RefReader[b] != c3Buffer[b] )
+                        {
+                            Log::Line( "Bucket %u: C3 failed validation at byte %llu Offset %llu", bucket, i * 3000 + b, c3TableSizeBytes );
+                            BBDebugBreak();
+                        }
+                    }
+                    
+                }
+                c3RefReader += sizeWritten;
+            }
+            #endif
+            // -TEST
+
             c3TableSizeBytes += sizeWritten;
+
 
             // Write the C3 table to the plot file directly
             ioQueue.WriteFile( FileId::PLOT, 0, c3Buffer, c3BufferSize );
@@ -1091,12 +1242,16 @@ void DiskPlotPhase1::SortAndCompressTable7()
         }
 
         // Done with the bucket f7 buffer
-        ioQueue.ReleaseBuffer( buffer.f7 );
+        ioQueue.ReleaseBuffer( buffer.f7 - kCheckpoint1Interval );
         ioQueue.CommitCommands();
     }
 
     // Seek back to the begining of the C1 table and
     // write C1 and C2 buffers to file, then seek back to the end of the C3 table
+
+    c1Buffer[c1TotalEntries-1] = 0;          // Chiapos adds a trailing 0
+    c2Buffer[c2TotalEntries-1] = 0xFFFFFFFF; // C2 overflow protection
+
     ioQueue.SeekBucket( FileId::PLOT, -(int64)( c1TableSizeBytes + c2TableSizeBytes + c3TableSizeBytes ), SeekOrigin::Current );
     ioQueue.WriteFile( FileId::PLOT, 0, c1Buffer, c1TableSizeBytes );
     ioQueue.WriteFile( FileId::PLOT, 0, c2Buffer, c2TableSizeBytes );
@@ -1105,7 +1260,14 @@ void DiskPlotPhase1::SortAndCompressTable7()
     ioQueue.SeekBucket( FileId::PLOT, (int64)c3TableSizeBytes, SeekOrigin::Current );
     ioQueue.CommitCommands();
 
-    // #TODO: Save C table addresses into the plot context.
+    // Save C table addresses into the plot context.
+    // And set the starting address for the table 1 to be written
+    const size_t headerSize = ioQueue.PlotHeaderSize();
+
+    context.plotTablePointers[7] = headerSize;                                      // C1
+    context.plotTablePointers[8] = context.plotTablePointers[7] + c1TableSizeBytes; // C2
+    context.plotTablePointers[9] = context.plotTablePointers[8] + c2TableSizeBytes; // C3
+    context.plotTablePointers[0] = context.plotTablePointers[9] + c3TableSizeBytes; // T1
 }
 
 ///
@@ -1113,7 +1275,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
 ///
 //-----------------------------------------------------------
 void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, const uint32 count, 
-                                      const uint32* sortedSourceIndices, uint64* map, bool releaseIndices )
+                                      const uint32* sortedSourceIndices, uint64* map, Fence* writeFence, bool releaseIndices )
 {
     DiskBufferQueue& ioQueue       = *_cx.ioQueue;
 
@@ -1129,7 +1291,8 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
 
     // Ensure the previous bucket finished writing.
     // #TODO: Should we double-buffer here?
-    bucket.mapFence.Wait();
+    if( writeFence )
+        writeFence->Wait();
 
     static uint32 bucketCounts[BB_DP_BUCKET_COUNT];
     memset( bucketCounts, 0, sizeof( bucketCounts ) );
@@ -1143,12 +1306,12 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
         job.ioQueue             = &ioQueue;
         job.entryCount          = entriesPerThread;
         job.sortedIndexOffset   = sortKeyOffset;
-        job.sortedSourceIndices = sortedSourceIndices;
+        job.sortedSourceIndices = sortedSourceIndices + ((uint64)entriesPerThread * i);
         job.mappedIndices       = map;
         job.bucketCounts        = bucketCounts;
         job.counts              = nullptr;
         
-        sortedSourceIndices += entriesPerThread;
+        // sortedSourceIndices += entriesPerThread;
     }
 
     const uint32 remainder = count - entriesPerThread * threadCount;
@@ -1173,7 +1336,10 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
     const FileId mapFileId = TableIdToMapFileId( tableId );
     
     ioQueue.WriteBuckets( mapFileId, map, bucketCounts );
-    ioQueue.SignalFence( bucket.mapFence );
+
+    if( writeFence )
+        ioQueue.SignalFence( *writeFence );
+
     ioQueue.CommitCommands();
     
 }

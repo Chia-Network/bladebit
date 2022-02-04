@@ -72,6 +72,7 @@ DiskBufferQueue::DiskBufferQueue(
     InitFileSet( FileId::MAP4            , "table_4_map"  , BB_DP_BUCKET_COUNT );
     InitFileSet( FileId::MAP5            , "table_5_map"  , BB_DP_BUCKET_COUNT );
     InitFileSet( FileId::MAP6            , "table_6_map"  , BB_DP_BUCKET_COUNT );
+    InitFileSet( FileId::MAP7            , "table_7_map"  , BB_DP_BUCKET_COUNT );
     InitFileSet( FileId::MARKED_ENTRIES_2, "table_2_marks", 1                  );
     InitFileSet( FileId::MARKED_ENTRIES_3, "table_3_marks", 1                  );
     InitFileSet( FileId::MARKED_ENTRIES_4, "table_4_marks", 1                  );
@@ -183,6 +184,8 @@ void DiskBufferQueue::OpenPlotFile( const char* fileName, const byte* plotId, co
         plotMemoSize +  // Memo
         80              // Table pointers
     ;
+
+    _plotHeaderSize = headerSize;
 
     // #TODO: Support block-aligned like in PlotWriter.cpp
     if( !_plotHeaderbuffer )

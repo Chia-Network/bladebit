@@ -161,6 +161,8 @@ public:
     inline bool   UseDirectIO()   const { return _useDirectIO; }
 
     inline const WorkHeap& Heap() const { return _workHeap; }
+
+    inline size_t PlotHeaderSize() const { return _plotHeaderSize; }
     
 private:
 
@@ -195,6 +197,7 @@ private:
     
     char*            _filePathBuffer = nullptr; // For deleting files
 
+    size_t           _plotHeaderSize    = 0;
     byte*            _plotHeaderbuffer  = nullptr;
     uint64           _plotTablesPointer = 0;            // Offset in the plot file to the tables pointer table
     uint64           _plotTablePointers[10] = { 0 };    // Pointers to the starting (park) address of each table in the plot file

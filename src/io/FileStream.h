@@ -81,6 +81,8 @@ public:
 
     inline FileFlags GetFlags() const { return _flags; }
 
+    inline intptr_t Id() { return (intptr_t)_fd; }
+
 private:
     inline bool HasValidFD() const
     {

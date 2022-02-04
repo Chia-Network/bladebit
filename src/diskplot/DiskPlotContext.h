@@ -85,6 +85,11 @@ struct DiskPlotContext
     // including the cross-bucket entries.
     uint32       ptrTableBucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];;
 
+    // Pointers to tables in the plot file (byte offset to where it starts in the plot file)
+    // Where:
+    //  0-6 = Parked tables 1-7
+    //  7-9 = C1-C3 tables
+    uint64       plotTablePointers[10];
 
     DiskFPBufferSizes* bufferSizes;
 };
