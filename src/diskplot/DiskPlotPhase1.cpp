@@ -15,10 +15,6 @@
 #include "SysHost.h"
 #include "DiskPlotDebug.h"
 
-// Test C3
-#include "jobs/IOJob.h"
-#include <sys/stat.h>
-
 #if _DEBUG
     #include "../memplot/DbgHelper.h"
 #endif
@@ -904,6 +900,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 }
 
 
+// #TODO: Move this function to another file...
 // Load and sort F7s along with its key, then write back to disk
 //-----------------------------------------------------------
 void DiskPlotPhase1::SortAndCompressTable7()
@@ -1004,7 +1001,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
 
         readFence.Wait( nextBucket );
 
-        // ioQueue.DeleteFile( FileId::F7, bucket );
+        ioQueue.DeleteFile( FileId::F7, bucket );
         ioQueue.CommitCommands();
 
         // Sort on F7
@@ -1077,13 +1074,6 @@ void DiskPlotPhase1::SortAndCompressTable7()
             uint32* c3F7           = buffer.f7;
             uint32  c3BucketLength = bucketLength;
 
-            // +TEST:
-            // Bucket offset 
-            uint64 bucketOffset = 0;
-            for( uint32 i = 0; i < bucket; i++ )
-                bucketOffset += context.bucketCounts[(int)TableId::Table7][i];
-            // -TEST
-
             if( c3ParkOverflowCount )
             {
                 // Copy our overflow to the prefix region of our f7 buffer
@@ -1094,92 +1084,6 @@ void DiskPlotPhase1::SortAndCompressTable7()
 
                 c3ParkOverflowCount = 0;
             }
-
-            // Write any pending park
-            // if( c3ParkOverflowCount )
-            // {
-            //     const uint32 entriesToCompletePark = kCheckpoint1Interval - c3ParkOverflowCount;
-            //     const uint32 entriesToCopy         = std::min( entriesToCompletePark, c3BucketLength );
-
-            //     // Copy the entries to our overflow park buffer
-            //     memcpy( c3ParkOverflow + c3ParkOverflowCount, c3F7, entriesToCopy * sizeof( uint32 ) );
-            //     c3ParkOverflowCount += entriesToCopy;
-
-            //     // Don't write the buffer if we haven't completed a whole park, unless it is the last bucket
-            //     if( entriesToCopy < entriesToCompletePark && !isLastBucket )
-            //     {
-            //         // Should never happen with the current fixed bucket count of 64
-            //         ASSERT( c3BucketLength < entriesToCompletePark );
-            //         continue;
-            //     }
-                
-            //     // Have a completed park, write it
-            //     byte* buffer = ioQueue.GetBuffer( CalculateC3Size(), true );
-
-            //     ASSERT( c3ParkOverflowCount == kCheckpoint1Interval );
-            //     TableWriter::WriteC3Park( kCheckpoint1Interval, c3ParkOverflow, buffer );
-
-            //     ioQueue.WriteFile( FileId::PLOT, 0, buffer, CalculateC3Size() );
-            //     ioQueue.ReleaseBuffer( buffer );
-            //     ioQueue.CommitCommands();
-
-            //     c3TableSizeBytes += CalculateC3Size();
-
-            //     // Skip the area we just copied
-            //     c3F7           += entriesToCopy;
-            //     c3BucketLength -= entriesToCopy;
-            //     c3ParkOverflowCount = 0;
-
-            //     if( c3BucketLength < 1 )
-            //         continue;
-            // }
-            // +Test:
-            static byte* c3Ref = nullptr;
-            static const byte* c3RefReader = nullptr;
-            {
-                static byte* plotData = nullptr;
-                if( !plotData )
-                {
-                    // Load Plot file
-                    FileStream file;
-                    if( !file.Open( "/mnt/p5510a/plots-ref/plot-k32-2021-11-16-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot", FileMode::Open, FileAccess::Read, FileFlags::NoBuffering | FileFlags::LargeFile ) )
-                        Fatal( "Failed to open plot file for testing." );
-
-                    byte* block = bbvirtalloc<byte>( file.BlockSize() );
-
-                    int fd = (int)file.Id();
-                    struct stat fs;
-                    
-                    int r = fstat( fd, &fs );
-                    FatalIf( r != 0, "Failed to get plot size: %u", r );
-
-                    const size_t plotSize = (size_t)fs.st_size;
-
-                    plotData = bbvirtalloc<byte>( plotSize );
-                    int err;
-                    FatalIf( !IOWriteJob::ReadFromFile( file, plotData, plotSize, block, file.BlockSize(), err ), "Failed to read plot file: %u", err );
-
-                    // Get C3 pointer offset
-                    const size_t memoSizeOffset = 
-                        ( sizeof( kPOSMagic ) - 1 ) +
-                        32 +            // plot id
-                        1  +            // k
-                        2  +            // kFormatDescription length
-                        ( sizeof( kFormatDescription ) - 1 );
-
-                    const uint16 memoLen = Swap16( *(uint16*)( plotData + memoSizeOffset ) );
-
-                    uint64* tablePtrs = (uint64*)( plotData + memoSizeOffset + 2 + memoLen );
-                    for( int i = 0; i < 10; i++ )
-                        tablePtrs[i] = Swap64( tablePtrs[i] );
-                    
-                    const uint64 c3Address = tablePtrs[9];
-                    c3Ref       = plotData + c3Address;
-                    c3RefReader = c3Ref;
-
-                }
-            }
-            // -Test
             
             // See TableWriter::GetC3ParkCount for details
             uint32 parkCount       = c3BucketLength / kCheckpoint1Interval;
@@ -1203,34 +1107,11 @@ void DiskPlotPhase1::SortAndCompressTable7()
             const size_t c3BufferSize = CalculateC3Size() * parkCount;
             byte* c3Buffer = ioQueue.GetBuffer( c3BufferSize );
 
+            // #NOTE: This function uses re-writes our f7 buffer, so ensure it is done after
+            //        that buffer is no longer needed.
             const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_MAX_JOBS>( *context.threadPool, 
                                             context.threadCount, c3BucketLength, c3F7, c3Buffer );
             ASSERT( sizeWritten == c3BufferSize );
-
-            // +TEST
-            // Verify
-            #if _DEBUG
-            {
-                // int cmp = memcmp( c3RefReader, c3Buffer, sizeWritten );
-                // ASSERT( cmp == 0 );
-                for( size_t i = 0; i < parkCount; i++ )
-                {
-                    const uint16 compressedSize = Swap16( *(uint16*)c3Buffer ) + 2;
-
-                    for( size_t b = 0; b < compressedSize; b++ )
-                    {
-                        if( c3RefReader[b] != c3Buffer[b] )
-                        {
-                            Log::Line( "Bucket %u: C3 failed validation at byte %llu Offset %llu", bucket, i * 3000 + b, c3TableSizeBytes );
-                            BBDebugBreak();
-                        }
-                    }
-                    
-                }
-                c3RefReader += sizeWritten;
-            }
-            #endif
-            // -TEST
 
             c3TableSizeBytes += sizeWritten;
 
