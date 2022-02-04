@@ -29,7 +29,7 @@
 ///
 // #define BB_DP_DBG_READ_EXISTING_F1 1
 //#define BB_DP_DBG_VALIDATE_F1   1
-//#define BB_DP_DBG_VALIDATE_FX   1
+// #define BB_DP_DBG_VALIDATE_FX   1
 //#define BB_DP_DBG_VALIDATE_META 1
 #define BB_DP_DBG_PROTECT_FP_BUFFERS 1
 
@@ -40,8 +40,8 @@
 #define BB_DP_DBG_TEST_DIR      "/mnt/p5510a/disk_dbg/"
 #define BB_DP_DBG_REF_DIR       "/mnt/p5510a/reference/"
 
-#define BB_DP_DBG_SKIP_PHASE_1  1
+// #define BB_DP_DBG_SKIP_PHASE_1  1
 // #define BB_DP_DBG_SKIP_PHASE_2  1
 
 // Skip all of Phase 1 except the C tables writing. BB_DP_DBG_SKIP_PHASE_1 Must be defined
-#define BB_DP_DBG_SKIP_TO_C_TABLES 1
+// #define BB_DP_DBG_SKIP_TO_C_TABLES 1

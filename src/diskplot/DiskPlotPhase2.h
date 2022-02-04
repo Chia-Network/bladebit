@@ -18,9 +18,9 @@ public:
 
     void    MarkTable( TableId table, uint64* lTableMarks, uint64* rTableMarks );
     void    LoadNextBuckets( TableId table, uint32 bucket, uint64*& mapBuffer, Pairs& pairsBuffer, uint32& outBucketEntryCount );
-    uint32* SortAndStripMap( uint64* map, uint32 entryCount, const uint32 bucket );
-
-    void    StripTable2Map();
+    uint32* UnpackMap( uint64* map, uint32 entryCount, const uint32 bucket );
+    
+    void    UnpackTableMap( TableId table );
 
     inline const Phase3Data& GetPhase3Data() const { return _phase3Data; }
 

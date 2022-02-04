@@ -482,11 +482,12 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
         int err = tmpFile.GetError();
         Fatal( "Failed to open a file in the temp directory with error %d (0x%x).", err, err );
     }
+    
 
     cfg.expectedTmpDirBlockSize = tmpFile.BlockSize();
 
+    remove( randFileName );
     free( randFileName );
-    // #TODO: Delete the file
 
     return cfg.expectedTmpDirBlockSize;
 }

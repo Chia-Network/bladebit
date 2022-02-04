@@ -250,7 +250,7 @@ void DiskPlotPhase2::Run()
 
         // #TEST:
         if( table < TableId::Table7 )
-        if( 0 )
+        // if( 0 )
         {
             BitField markedEntries( bitFields[1] );
             uint64 lTableEntries = context.entryCounts[(int)table-1];
@@ -279,10 +279,10 @@ void DiskPlotPhase2::Run()
     bitFieldFence.Wait();
     queue.CompletePendingReleases();
 
-    // Strip table 2's map here to to make Phase 3 easier, though this will issue more read/writes
-    StripTable2Map();
+    // Unpack table 2 and 7's map here to to make Phase 3 easier, though this will issue more read/writes
+    UnpackTableMap( TableId::Table7 );
+    UnpackTableMap( TableId::Table2 );
 }
-
 
 //-----------------------------------------------------------
 void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTableMarks )
@@ -342,7 +342,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
             // Sort the lookup map and strip out the origin index
             // const auto stripTimer = TimerBegin();
-            map = SortAndStripMap( unsortedMapBuffer, bucketEntryCount, bucket );
+            map = UnpackMap( unsortedMapBuffer, bucketEntryCount, bucket );
             // const auto stripElapsed = TimerEnd( stripTimer );
             // Log::Line( "  Stripped bucket %u in %.2lf seconds.", bucket, stripElapsed );
 
@@ -538,7 +538,7 @@ struct UnpackMapJob : MTJob<UnpackMapJob>
 };
 
 //-----------------------------------------------------------
-uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount, const uint32 bucket )
+uint32* DiskPlotPhase2::UnpackMap( uint64* map, uint32 entryCount, const uint32 bucket )
 {
     auto& context = _context;
 
@@ -547,51 +547,23 @@ uint32* DiskPlotPhase2::SortAndStripMap( uint64* map, uint32 entryCount, const u
             bucket, entryCount, map, _tmpMap );
 
     return _tmpMap;
-    // MTJobRunner<StripMapJob> jobs( *_context.threadPool );
-
-    // const uint32 threadCount      = _context.threadCount;
-    // const uint32 entriesPerThread = entryCount / threadCount;
-
-    // uint32* outMap = (uint32*)_tmpMap;
-    // uint32* key    = outMap + entryCount;
-
-    // for( uint32 i = 0; i < threadCount; i++ )
-    // {
-    //     auto& job = jobs[i];
-
-    //     job.entryCount = entriesPerThread;
-    //     job.inMap      = map    + entriesPerThread * i;
-    //     job.outKey     = key    + entriesPerThread * i;
-    //     job.outMap     = outMap + entriesPerThread * i;
-    // }
-
-    // const uint32 trailingEntries = entryCount - entriesPerThread * threadCount;
-    // jobs[threadCount-1].entryCount += trailingEntries;
-
-    // jobs.Run( threadCount );
-
-    // // Now sort it
-    // uint32* tmpKey = (uint32*)map;
-    // uint32* tmpMap = tmpKey + entryCount;
-    
-    // RadixSort256::SortWithKey<BB_MAX_JOBS>( *_context.threadPool, key, tmpKey, outMap, tmpMap, entryCount );
-
-    // return outMap;
 }
 
 //-----------------------------------------------------------
-void DiskPlotPhase2::StripTable2Map()
+void DiskPlotPhase2::UnpackTableMap( TableId table )
 {
     auto& context = _context;
     auto& ioQueue = *context.ioQueue;
 
-    Log::Line( "Stripping table 2 map..." );
+    Log::Line( "Unpacking table %u's map...", table + 1 );
     const auto timer = TimerBegin();
+
+    const FileId mapId = TableIdToMapFileId( table );
 
     const uint64 maxEntries = 1ull << _K;
 
     uint32 bucketEntryCount = (uint32)( maxEntries / BB_DP_BUCKET_COUNT);
-    uint32 lastBucketCount  = (uint32)( context.entryCounts[(int)TableId::Table2] - bucketEntryCount * (BB_DP_BUCKET_COUNT-1) );
+    uint32 lastBucketCount  = (uint32)( context.entryCounts[(int)table] - bucketEntryCount * (BB_DP_BUCKET_COUNT-1) );
     
     size_t bucketSize = bucketEntryCount * sizeof( uint64 );
 
@@ -604,7 +576,7 @@ void DiskPlotPhase2::StripTable2Map()
 
     // Reset our heap to use what remains
     ioQueue.ResetHeap( totalHeapSize, heap );
-    ioQueue.SeekBucket( FileId::MAP2, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( mapId, 0, SeekOrigin::Begin );
     ioQueue.CommitCommands();
 
     // Load the buckets
@@ -618,8 +590,8 @@ void DiskPlotPhase2::StripTable2Map()
 
     buckets[0] = (uint64*)ioQueue.GetBuffer( bucketSize );
 
-    ioQueue.ReadFile( FileId::MAP2, 0, buckets[0], bucketSize );
-    ioQueue.SeekFile( FileId::MAP2, 0, 0, SeekOrigin::Begin );      // Seek back since we will re-write to the first bucket
+    ioQueue.ReadFile( mapId, 0, buckets[0], bucketSize );
+    ioQueue.SeekFile( mapId, 0, 0, SeekOrigin::Begin );      // Seek back since we will re-write to the first bucket
     ioQueue.SignalFence( fence, 1 );
     ioQueue.CommitCommands();
 
@@ -649,9 +621,9 @@ void DiskPlotPhase2::StripTable2Map()
                 if( !buffer )
                     break;
 
-                ioQueue.ReadFile( FileId::MAP2, bucketsLoaded, buffer, bucketToLoadSize );
+                ioQueue.ReadFile( mapId, bucketsLoaded, buffer, bucketToLoadSize );
                 ioQueue.SignalFence( fence, bucketsLoaded+1 );
-                // ioQueue.DeleteFile( FileId::MAP2, bucketsLoaded );
+                ioQueue.DeleteFile( mapId, bucketsLoaded );
                 ioQueue.CommitCommands();
 
                 buckets[bucketsLoaded++] = (uint64*)buffer;
@@ -661,7 +633,7 @@ void DiskPlotPhase2::StripTable2Map()
         // Ensure the bucket has finished loading
         fence.Wait( bucket + 1 );
 
-        // Sort the map to the correct positions and strip it
+        // Unpack the map to its target position given its origin index
         uint64* map = buckets[bucket];
 
         // const auto jobTimer = TimerBegin();
@@ -675,7 +647,7 @@ void DiskPlotPhase2::StripTable2Map()
 
         // Write back to disk
         ioQueue.ReleaseBuffer( map );
-        ioQueue.WriteFile( FileId::MAP2, 0, writeBucket, sizeof( uint32 ) * bucketEntryCount );
+        ioQueue.WriteFile( mapId, 0, writeBucket, sizeof( uint32 ) * bucketEntryCount );
         ioQueue.ReleaseBuffer( writeBucket );
         ioQueue.CommitCommands();
     }
@@ -688,7 +660,7 @@ void DiskPlotPhase2::StripTable2Map()
     ioQueue.CompletePendingReleases();
 
     const double elapsed = TimerEnd( timer );
-    Log::Line( "Finished stripping table 2 in %.2lf seconds.", elapsed );
+    Log::Line( "Finished unpacking table %u map in %.2lf seconds.", table + 1, elapsed );
 
 }
 

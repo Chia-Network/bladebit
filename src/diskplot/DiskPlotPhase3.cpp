@@ -211,12 +211,12 @@ DiskPlotPhase3::~DiskPlotPhase3()
 //-----------------------------------------------------------
 void DiskPlotPhase3::Run()
 {
-    for( TableId table = TableId::Table2; table < TableId::Table7; table++ )
+    for( TableId rTable = TableId::Table2; rTable <= TableId::Table7; rTable++ )
     {
-        Log::Line( "Compressing Tables %u and %u...", table, table+1 );
+        Log::Line( "Compressing Tables %u and %u...", rTable, rTable+1 );
         const auto timer = TimerBegin();
 
-        ProcessTable( table );
+        ProcessTable( rTable );
 
         const auto elapsed = TimerEnd( timer );
         Log::Line( "Finished compression in %.2lf seconds.", elapsed );
@@ -954,6 +954,8 @@ void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, c
 
     if( _bucketParkLeftOversCount )
     {
+        ASSERT( _bucketParkLeftOversCount < kEntriesPerPark );
+
         const uint32 requiredEntriesToCompletePark = kEntriesPerPark - _bucketParkLeftOversCount;
         const uint32 entriesToCopy                 = std::min( requiredEntriesToCompletePark, bucketLength );
 
@@ -963,17 +965,18 @@ void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, c
         memcpy( _bucketParkLeftOvers + _bucketParkLeftOversCount, linePoints, entriesToCopy * sizeof( uint64 ) );
         _bucketParkLeftOversCount += entriesToCopy;
 
-        // Don't write unless we filled the park, or it is the last bucket (non-filled park is allowed then)
-        if( entriesToCopy < kEntriesPerPark )
+        // Don't write unless we filled the whole park, or it is the last bucket (non-filled park is allowed then)
+        if( entriesToCopy < requiredEntriesToCompletePark )
         {
             ASSERT( bucketLength < requiredEntriesToCompletePark );
             return;
         }
-
-        WritePark( parkSize, _bucketParkLeftOversCount + entriesToCopy, _bucketParkLeftOvers, xBucketPark, lTable );
+        
+        ASSERT( _bucketParkLeftOversCount == kEntriesPerPark );
+        WritePark( parkSize, kEntriesPerPark, _bucketParkLeftOvers, xBucketPark, lTable );
 
         ioQueue.WriteFile( FileId::PLOT, 0, xBucketPark, parkSize );
-        ioQueue.ReleaseBuffer( xBucketPark  );
+        ioQueue.ReleaseBuffer( xBucketPark );
         ioQueue.CommitCommands();
 
         // Offset our current bucket to account for the entries we just used

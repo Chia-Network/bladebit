@@ -245,7 +245,7 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
-    SortAndCompressTable7();
+    // SortAndCompressTable7();
 }
 
 
@@ -484,12 +484,16 @@ void DiskPlotPhase1::ForwardPropagate()
 
         #if _DEBUG && BB_DP_DBG_VALIDATE_FX
         // if( 0 )
-        // if( table >= TableId::Table6 )
+        if( table < TableId::Table7 )
         {
-            Log::Line( "Validating table %d...", (int)table + 1 );
+            Log::Line( "Validating table %d Y...", (int)table + 1 );
             const FileId fileId = isEven ? FileId::Y1 : FileId::Y0;
             Debug::ValidateYFileFromBuckets( fileId, *_cx.threadPool, *_diskQueue, table, _cx.bucketCounts[(int)table] );
         }
+        // else
+        // {
+        //     // Log::Line( "Validating F7s..." );
+        // }
         #endif
 
         // #if _DEBUG
@@ -905,6 +909,9 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 //-----------------------------------------------------------
 void DiskPlotPhase1::SortAndCompressTable7()
 {
+    Log::Line( "Writing C tables to plot file..." );
+    const auto timer = TimerBegin();
+
     DiskPlotContext& context = _cx;
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
@@ -982,6 +989,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
 
         ioQueue.ReadFile( FileId::F7       , bucket, bucketBuffer.f7 , bucketLength * sizeof( uint32 ) );
         ioQueue.ReadFile( FileId::SORT_KEY7, bucket, bucketBuffer.key, bucketLength * sizeof( uint32 ) );
+        ioQueue.DeleteFile( FileId::SORT_KEY7, bucket );
         ioQueue.SignalFence( readFence, bucketsLoaded );
         ioQueue.CommitCommands();
     };
@@ -1133,12 +1141,16 @@ void DiskPlotPhase1::SortAndCompressTable7()
     c1Buffer[c1TotalEntries-1] = 0;          // Chiapos adds a trailing 0
     c2Buffer[c2TotalEntries-1] = 0xFFFFFFFF; // C2 overflow protection
 
+    readFence.Reset( 0 );
+
     ioQueue.SeekBucket( FileId::PLOT, -(int64)( c1TableSizeBytes + c2TableSizeBytes + c3TableSizeBytes ), SeekOrigin::Current );
     ioQueue.WriteFile( FileId::PLOT, 0, c1Buffer, c1TableSizeBytes );
     ioQueue.WriteFile( FileId::PLOT, 0, c2Buffer, c2TableSizeBytes );
     ioQueue.ReleaseBuffer( c1Buffer );
     ioQueue.ReleaseBuffer( c2Buffer );
     ioQueue.SeekBucket( FileId::PLOT, (int64)c3TableSizeBytes, SeekOrigin::Current );
+
+    ioQueue.SignalFence( readFence );
     ioQueue.CommitCommands();
 
     // Save C table addresses into the plot context.
@@ -1149,6 +1161,13 @@ void DiskPlotPhase1::SortAndCompressTable7()
     context.plotTablePointers[8] = context.plotTablePointers[7] + c1TableSizeBytes; // C2
     context.plotTablePointers[9] = context.plotTablePointers[8] + c2TableSizeBytes; // C3
     context.plotTablePointers[0] = context.plotTablePointers[9] + c3TableSizeBytes; // T1
+
+    const double elapsed = TimerEnd( timer );
+    Log::Line( "Finished writing C tables in %.2lf seconds.", elapsed );
+
+    // Wait for all commands to finish
+    readFence.Wait();
+    ioQueue.CompletePendingReleases();
 }
 
 ///
@@ -1175,8 +1194,9 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
     if( writeFence )
         writeFence->Wait();
 
-    static uint32 bucketCounts[BB_DP_BUCKET_COUNT];
-    memset( bucketCounts, 0, sizeof( bucketCounts ) );
+    // static uint32 bucketCounts[BB_DP_BUCKET_COUNT];
+    uint32* bucketCounts = (uint32*)ioQueue.GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+    // memset( bucketCounts, 0, sizeof( bucketCounts ) );
 
     MTJobRunner<ReverseMapJob<BB_DP_BUCKET_COUNT>> jobs( *_cx.threadPool );
 
@@ -1217,6 +1237,7 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
     const FileId mapFileId = TableIdToMapFileId( tableId );
     
     ioQueue.WriteBuckets( mapFileId, map, bucketCounts );
+    ioQueue.ReleaseBuffer( bucketCounts );
 
     if( writeFence )
         ioQueue.SignalFence( *writeFence );
