@@ -128,7 +128,7 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
         if( fileId != FileId::PLOT )
             sprintf( baseName, "%s_%u.tmp", name, i );
         else
-            sprintf( baseName, "%s.tmp", name );
+            sprintf( baseName, "%s", name );
         
         if( !file.Open( pathBuffer, fileMode, FileAccess::ReadWrite, flags ) )
         {
@@ -220,14 +220,12 @@ void DiskBufferQueue::OpenPlotFile( const char* fileName, const byte* plotId, co
         headerWriter += plotMemoSize;
 
         // Tables will be copied at the end.
-        _plotTablesPointer = (uint64)(headerWriter - header);
+        _plotTablesPointers = (uint64)(headerWriter - header);
 
         // Write the headers to disk
-        WriteFile( FileId::PLOT, 0, header, (size_t)_plotTablesPointer );
+        WriteFile( FileId::PLOT, 0, header, (size_t)headerSize );
         CommitCommands();
     }
-
-    memset( _plotTablePointers, 0, sizeof( _plotTablePointers ) );
 }
 
 //-----------------------------------------------------------
@@ -689,7 +687,7 @@ void DiskBufferQueue::CmdDeleteFile( const Command& cmd )
     const int r = remove( _filePathBuffer );
 
     if( r )
-        Log::Error( "Error: Failed to delete file %s.", _filePathBuffer );
+        Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", _filePathBuffer, r, r );
 }
 
 //----------------------------------------------------------
@@ -709,7 +707,7 @@ void DiskBufferQueue::CmdDeleteBucket( const Command& cmd )
         const int r = remove( _filePathBuffer );
 
         if( r )
-            Log::Error( "Error: Failed to delete file %s.", _filePathBuffer );
+            Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", _filePathBuffer, r, r );
     }
 }
 

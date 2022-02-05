@@ -97,7 +97,7 @@ inline size_t TableWriter::WriteP7( ThreadPool& threadPool, uint32 threadCount, 
     const size_t parkSize = CDiv( (_K + 1) * kEntriesPerPark, 8 );  // #TODO: Move this to its own function
     static_assert( parkSize / 8 == 1056 );
     
-    MTJobRunner<P7Job, MAX_JOBS> jobs;
+    MTJobRunner<P7Job, MAX_JOBS> jobs( threadPool );
 
     const uint32* threadIndices    = indices;
     byte*         threadParkBuffer = parkBuffer;

@@ -163,12 +163,16 @@ public:
     inline const WorkHeap& Heap() const { return _workHeap; }
 
     inline size_t PlotHeaderSize() const { return _plotHeaderSize; }
+
+    inline uint64 PlotTablePointersAddress() const { return _plotTablesPointers; }
     
 private:
 
     Command* GetCommandObject( Command::CommandType type );
 
     static void CommandThreadMain( DiskBufferQueue* self );
+    static void DeleterThreadMain( DiskBufferQueue* self );
+
     void CommandMain();
     void ExecuteCommand( Command& cmd );
 
@@ -197,13 +201,18 @@ private:
     
     char*            _filePathBuffer = nullptr; // For deleting files
 
-    size_t           _plotHeaderSize    = 0;
-    byte*            _plotHeaderbuffer  = nullptr;
-    uint64           _plotTablesPointer = 0;            // Offset in the plot file to the tables pointer table
-    uint64           _plotTablePointers[10] = { 0 };    // Pointers to the starting (park) address of each table in the plot file
+    size_t           _plotHeaderSize     = 0;
+    byte*            _plotHeaderbuffer   = nullptr;
+    uint64           _plotTablesPointers = 0;            // Offset in the plot file to the tables pointer table
+
 
     // I/O thread stuff
     Thread            _dispatchThread;
+    // Thread            _deleterThread;       // For deleting files.
+    // AutoResetSignal   _deleteSignal         // We do this in a separate thread as to not
+    // SPCQueue<4096                                        // block other commands when the kernel is emptyion out
+                                            // cached IO buffers for the files.
+
     
     SPCQueue<Command, BB_DISK_QUEUE_MAX_CMDS> _commands;
 

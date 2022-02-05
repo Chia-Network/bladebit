@@ -270,7 +270,7 @@ void MemPlotter::WaitPlotWriter()
         for( uint i = 7; i < 10; i++ )
         {
             const uint64 ptr = Swap64( tablePointers[i] );
-            Log::Line( "  C%u table pointer : %16lu ( 0x%016lx )", i+1-7, ptr, ptr);
+            Log::Line( "  C%u table pointer : %16lu ( 0x%016lx )", i+1-7, ptr, ptr );
         }
         Log::Line( "" );
     // }

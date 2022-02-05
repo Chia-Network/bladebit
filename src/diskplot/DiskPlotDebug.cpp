@@ -9,6 +9,7 @@
 #include"DiskPlotContext.h"
 
 #define BB_DBG_WRITE_LP_BUCKET_COUNTS 1
+
 // #define BB_DBG_READ_LP_BUCKET_COUNTS 1
 
 //-----------------------------------------------------------
@@ -480,7 +481,7 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
     byte* blockBuffer = nullptr;
 
     {
-        Log::Line( " Loading reference valies..." );
+        Log::Line( " Loading reference values..." );
         char path[1024];
         sprintf( path, "%slp.t%u.tmp", BB_DP_DBG_REF_DIR, table );
 
@@ -560,7 +561,11 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
     Log::Line( " Validating buckets..." );
     for( uint32 bucket = 0; bucket < BB_DPP3_LP_BUCKET_COUNT; bucket++ )
     {
-        const uint64 entryCount = bucketCounts[bucket];
+        uint64 entryCount = bucketCounts[bucket];
+
+        if( totalCount + entryCount > refLPCount )
+            entryCount -= ( ( totalCount + entryCount ) - refLPCount );
+
         ASSERT( totalCount + entryCount <= refLPCount );
         ASSERT( entryCount <= lpBucketSize );
 
@@ -576,12 +581,20 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
         RadixSort256::Sort<BB_MAX_JOBS, uint64, 7>( *context.threadPool, linePoints, lpTemp, entryCount );
 
         // Compare values
+        int64 compareOffset = 0;
+
         uint64* lpReader = lpTemp;
         for( int64 i = 0; i < (int64)entryCount; i++ )
         {
-            const uint64 ref = refLP[i];
-            const uint64 lp  = lpReader[i];
-            ASSERT( lp == ref );
+            const uint64 ref = refLP   [i];
+            const uint64 lp  = lpReader[i+compareOffset];
+            // ASSERT( lp == ref );
+            if( lp != ref )
+            {
+                Log::Line( "FAILED: Bucket %u index %lld failed. Index: %lld", bucket, i, (int64)totalCount + i );
+                // Test for now
+                compareOffset --;
+            }
         }
 
         refLP += entryCount;

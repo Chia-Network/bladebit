@@ -10,7 +10,11 @@
 #define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
                                             // have cross bucket entries accounted for
 
-#define BB_DBG_SKIP_P3_S1 1
+#if _DEBUG
+    // #define BB_DBG_SKIP_P3_S1 1
+    // #define BB_DP_DBG_P3_START_TABLE Table7
+#endif
+
 /**
  * Algorithm:
  * 
@@ -215,7 +219,12 @@ DiskPlotPhase3::~DiskPlotPhase3()
 //-----------------------------------------------------------
 void DiskPlotPhase3::Run()
 {
-    for( TableId rTable = TableId::Table2; rTable <= TableId::Table7; rTable++ )
+    TableId startTable = TableId::Table2;
+    #ifdef BB_DP_DBG_P3_START_TABLE
+        startTable = TableId::BB_DP_DBG_P3_START_TABLE;
+    #endif
+
+    for( TableId rTable = startTable; rTable <= TableId::Table7; rTable++ )
     {
         Log::Line( "Compressing Tables %u and %u...", rTable, rTable+1 );
         const auto timer = TimerBegin();
@@ -290,7 +299,7 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
     const uint64  lTableEntryCount   = context.entryCounts[(int)lTable];
     const uint64  rTableEntryCount   = context.entryCounts[(int)rTable];
 
-    const FileId markedEntriesFileId = TableIdToMarkedEntriesFileId( rTable );
+    const FileId markedEntriesFileId = rTable < TableId::Table7 ? TableIdToMarkedEntriesFileId( rTable ) : FileId::None;
     const FileId lMapId              = rTable == TableId::Table2 ? FileId::X : TableIdToLinePointMapFileId( lTable );
     const FileId rMapId              = TableIdToMapFileId( rTable );
     const FileId rPtrsRId            = TableIdToBackPointerFileId( rTable ); 
@@ -546,17 +555,12 @@ void ConvertToLPJob::RunForTable()
 
     for( int64 i = bucketOffset; i < end; i++ )
     {
-        uint32 mapIdx;
+        const uint32 mapIdx = rMap[i];
 
         if constexpr ( rTable < TableId::Table7 )
         {
-            mapIdx = rMap[i];
             if( !markedEntries.Get( mapIdx ) )
                 continue;
-        }
-        else
-        {
-            mapIdx = i;
         }
 
         outPairs->left  = pairs.left[i];
@@ -1233,7 +1237,7 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
 
         // TEST
         #if _DEBUG
-        // // if( 0 )
+        // if( 0 )
         // {
         //     const uint64 maxEntries         = 1ull << _K ;
         //     const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );

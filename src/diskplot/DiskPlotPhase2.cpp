@@ -249,31 +249,31 @@ void DiskPlotPhase2::Run()
         Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
 
         // #TEST:
-        if( table < TableId::Table7 )
+        // if( table < TableId::Table7 )
         // if( 0 )
-        {
-            BitField markedEntries( bitFields[1] );
-            uint64 lTableEntries = context.entryCounts[(int)table-1];
+        // {
+        //     BitField markedEntries( bitFields[1] );
+        //     uint64 lTableEntries = context.entryCounts[(int)table-1];
 
-            uint64 bucketsTotalCount = 0;
-            for( uint64 e = 0; e < BB_DP_BUCKET_COUNT; ++e )
-                bucketsTotalCount += context.ptrTableBucketCounts[(int)table-1][e];
+        //     uint64 bucketsTotalCount = 0;
+        //     for( uint64 e = 0; e < BB_DP_BUCKET_COUNT; ++e )
+        //         bucketsTotalCount += context.ptrTableBucketCounts[(int)table-1][e];
 
-            ASSERT( bucketsTotalCount == lTableEntries );
+        //     ASSERT( bucketsTotalCount == lTableEntries );
 
-            uint64 lTablePrunedEntries = 0;
+        //     uint64 lTablePrunedEntries = 0;
 
-            for( uint64 e = 0; e < lTableEntries; ++e )
-            {
-                if( markedEntries.Get( e ) )
-                    lTablePrunedEntries++;
-            }
+        //     for( uint64 e = 0; e < lTableEntries; ++e )
+        //     {
+        //         if( markedEntries.Get( e ) )
+        //             lTablePrunedEntries++;
+        //     }
 
-            Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", table,
-                       lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
-            Log::Line( "" );
+        //     Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", table,
+        //                lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
+        //     Log::Line( "" );
 
-        }
+        // }
     }
 
     bitFieldFence.Wait();

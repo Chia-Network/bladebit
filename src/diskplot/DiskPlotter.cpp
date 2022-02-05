@@ -167,7 +167,11 @@ void DiskPlotter::Plot( const PlotRequest& req )
         DiskBufferQueue& ioQueue = *_cx.ioQueue;
         ASSERT( sizeof( _cx.plotTablePointers ) == sizeof( uint64 ) * 10 );
 
-        const int64 tablePtrsStart = (int64)( ioQueue.PlotHeaderSize() - sizeof( uint64 ) * 10 );
+        // Convert them to big endian
+        for( int i = 0; i < 10; i++ )
+            _cx.plotTablePointers[i] = Swap64( _cx.plotTablePointers[i] );
+
+        const int64 tablePtrsStart = (int64)ioQueue.PlotTablePointersAddress();
         ioQueue.SeekFile( FileId::PLOT, 0, tablePtrsStart, SeekOrigin::Begin );
         ioQueue.WriteFile( FileId::PLOT, 0, _cx.plotTablePointers, sizeof( _cx.plotTablePointers ) );
         
@@ -178,18 +182,18 @@ void DiskPlotter::Plot( const PlotRequest& req )
         fence.Wait();
         
         const double elapsed = TimerEnd( timer );
-        Log::Line( "Cmpleted pending writes in %.2lf seconds.", elapsed );
-        Log::Line( "Finished writing plot %s.", _cx.plotId );
+        Log::Line( "Completed pending writes in %.2lf seconds.", elapsed );
+        Log::Line( "Finished writing plot %s.", req.plotFileName );
         Log::Line( "Final plot table pointers: " );
 
         for( int i = 0; i < 10; i++ )
         {
-            const uint64 addy = _cx.plotTablePointers[i];
+            const uint64 addy = Swap64( _cx.plotTablePointers[i] );
 
             if( i < 7 )
-                Log::Line( " Table %d: 0x%8X | %llu", i+1, addy, addy );
+                Log::Line( " Table %d: %16lu ( 0x%016lx )", i+1, addy, addy );
             else
-                Log::Line( " C %d    : 0x%8X | %llu", i-6, addy, addy );
+                Log::Line( " C %d    : %16lu ( 0x%016lx )", i-6, addy, addy );
         }
         Log::Line( "" );
     }
