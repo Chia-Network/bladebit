@@ -1093,6 +1093,16 @@ void DiskPlotPhase1::SortAndCompressTable7()
                 c3ParkOverflowCount = 0;
             }
             
+            
+            // Dump f7's that have the value of 0xFFFFFFFF for now,
+            // for bladebit ram compatibility (testing)
+            // #TODO: Remove this when plots test equal
+            if( isLastBucket )
+            {
+                while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
+                    c3BucketLength--;
+            }
+
             // See TableWriter::GetC3ParkCount for details
             uint32 parkCount       = c3BucketLength / kCheckpoint1Interval;
             uint32 overflowEntries = c3BucketLength - ( parkCount * kCheckpoint1Interval );
@@ -1111,6 +1121,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
                 c3ParkOverflowCount = overflowEntries;
                 c3BucketLength -= overflowEntries;
             }
+
 
             const size_t c3BufferSize = CalculateC3Size() * parkCount;
             byte* c3Buffer = ioQueue.GetBuffer( c3BufferSize );

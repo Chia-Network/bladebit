@@ -191,6 +191,8 @@ file(GLOB_RECURSE bb_headers
 
 # Configure dependent on config/platform/architecture
 list(FILTER bb_sources EXCLUDE REGEX "src/main\.cpp")
+list(FILTER bb_sources EXCLUDE REGEX "src/tools/.+")
+list(FILTER bb_sources EXCLUDE REGEX "src/sandbox/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/(memplot|plot128|diskplot)")
 list(FILTER bb_sources EXCLUDE REGEX "src/(test|platform)/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
@@ -314,6 +316,10 @@ add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/test/test_main.cpp ${bb_source
 add_executable(bladebit_128  ${src_plot128} ${bb_headers})
 add_executable(bladebit_disk ${src_diskplot} ${bb_headers})
 
+# Tools
+add_executable(plot_cmp src/tools/PlotComparer.cpp ${bb_sources} ${bb_headers})
+add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
+
 macro(config_proj tgt)
 
     
@@ -350,8 +356,12 @@ endmacro()
 
 config_proj(bladebit)
 config_proj(bladebit_dev)
-config_proj(bladebit_128)
+# config_proj(bladebit_128)
 config_proj(bladebit_disk)
+
+# Tools
+config_proj(plot_cmp)
+config_proj(fsegen)
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 

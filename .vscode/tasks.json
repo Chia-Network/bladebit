@@ -104,5 +104,40 @@
 				"isDefault": true
 			}
 		}
+
+		// Build plot_cmp tool
+		,{
+			"type"   : "shell",
+			"label"  : "build_plot_cmp_debug",
+			"detail" : "Build plot_cmp Debug",
+			"command": "cmake",
+			
+			"args": [
+				"--build", ".",
+				"--target", "plot_cmp",
+				"--config", "Debug",
+				"-j", "24"
+			],
+			
+			"windows":{
+			},
+
+			"linux":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"osx":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
 	]
 }

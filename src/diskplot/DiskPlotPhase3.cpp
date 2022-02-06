@@ -290,6 +290,8 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
 //-----------------------------------------------------------
 void DiskPlotPhase3::TableFirstStep( const TableId rTable )
 {
+    Log::Line( "  Step 1" );
+
     DiskPlotContext& context         = _context;
     DiskBufferQueue& ioQueue         = *context.ioQueue;
     Fence&           readFence       = _readFence;
@@ -587,7 +589,7 @@ void ConvertToLPJob::RunForTable()
             
             // TEST
             #if _DEBUG
-            if( rTable > TableId::Table2 && outLinePoints[i] == 2664297094 ) BBDebugBreak();
+            // if( rTable == TableId::Table7 && outLinePoints[i] == 6866525082325270466 ) BBDebugBreak();
             #endif
         }
 
@@ -666,6 +668,8 @@ void ConvertToLPJob::DistributeToBuckets( const int64 entryCount, const uint64* 
         const uint64 bucket   = lp >> 56;           ASSERT( bucket < BB_DPP3_LP_BUCKET_COUNT );
         const uint32 dstIndex = --pfxSum[bucket];
 
+        ASSERT( dstIndex < this->bucketEntryCount );
+
         lpOutBuffer [dstIndex] = lp;
         keyOutBuffer[dstIndex] = key[i];
     }
@@ -687,7 +691,7 @@ void ConvertToLPJob::DistributeToBuckets( const int64 entryCount, const uint64* 
 
         const FileId lpFileId   = TableIdToLinePointFileId   ( this->rTable );
         const FileId lpKeyFilId = TableIdToLinePointKeyFileId( this->rTable );
-        
+
         // Wait for all threads to finish writing
         this->LockThreads();
 
@@ -719,6 +723,8 @@ void ConvertToLPJob::DistributeToBuckets( const int64 entryCount, const uint64* 
 //-----------------------------------------------------------
 void DiskPlotPhase3::TableSecondStep( const TableId rTable )
 {
+    Log::Line( "  Step 2" );
+
     // #TODO: Organize buckets for a single bucket step here so that we can avoid waiting for buffers
     //        as much as we can.
 
@@ -1138,6 +1144,8 @@ struct LPUnpackMapJob : MTJob<LPUnpackMapJob>
 //-----------------------------------------------------------
 void DiskPlotPhase3::TableThirdStep( const TableId rTable )
 {
+    Log::Line( "  Step 3" );
+
     // Read back the packed map buffer from the current R table, then
     // write them back to disk as a single, contiguous file
 

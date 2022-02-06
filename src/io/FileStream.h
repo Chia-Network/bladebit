@@ -64,6 +64,8 @@ public:
         return _blockSize;
     }
 
+    ssize_t Size();
+
     void Close();
 
     bool IsOpen() const;

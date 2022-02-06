@@ -92,8 +92,7 @@ int main( int argc, const char* argv[] )
 {
     // Install a crash handler to dump our stack traces
     SysHost::InstallCrashHandler();
-    
-    
+
     struct rlimit limit;
     getrlimit( RLIMIT_NOFILE, &limit );
     Log::Line( "%u / %u", limit.rlim_cur, limit.rlim_max );

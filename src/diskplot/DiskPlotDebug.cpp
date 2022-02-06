@@ -6,7 +6,8 @@
 #include "Util.h"
 #include "util/Log.h"
 #include "jobs/IOJob.h"
-#include"DiskPlotContext.h"
+#include "DiskPlotContext.h"
+#include "DiskBufferQueue.h"
 
 #define BB_DBG_WRITE_LP_BUCKET_COUNTS 1
 
@@ -563,38 +564,32 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
     {
         uint64 entryCount = bucketCounts[bucket];
 
-        if( totalCount + entryCount > refLPCount )
-            entryCount -= ( ( totalCount + entryCount ) - refLPCount );
-
-        ASSERT( totalCount + entryCount <= refLPCount );
-        ASSERT( entryCount <= lpBucketSize );
-
-        Log::Write( " Bucket %2u... ", bucket );
+        Log::Write( " Bucket %2u... ", bucket ); Log::Flush();
 
         ioQueue.ReadFile( fileId, bucket, linePoints, entryCount * sizeof( uint64 ) );
         ioQueue.SignalFence( readFence );
         ioQueue.CommitCommands();
 
         readFence.Wait();
-        
+
         // Sort the bucket
         RadixSort256::Sort<BB_MAX_JOBS, uint64, 7>( *context.threadPool, linePoints, lpTemp, entryCount );
 
-        // Compare values
-        int64 compareOffset = 0;
+        // Cap the entry count if we're above the ref count
+        // (bladebit ram is dropping 1 entry for table 7 for some reason, have to check why.)
+        if( totalCount + entryCount > refLPCount )
+            entryCount -= ( ( totalCount + entryCount ) - refLPCount );
 
+        ASSERT( totalCount + entryCount <= refLPCount );
+        ASSERT( entryCount <= lpBucketSize );
+
+        // Compare values
         uint64* lpReader = lpTemp;
         for( int64 i = 0; i < (int64)entryCount; i++ )
         {
             const uint64 ref = refLP   [i];
-            const uint64 lp  = lpReader[i+compareOffset];
-            // ASSERT( lp == ref );
-            if( lp != ref )
-            {
-                Log::Line( "FAILED: Bucket %u index %lld failed. Index: %lld", bucket, i, (int64)totalCount + i );
-                // Test for now
-                compareOffset --;
-            }
+            const uint64 lp  = lpReader[i];
+            ASSERT( lp == ref );
         }
 
         refLP += entryCount;
@@ -614,3 +609,14 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
     SysHost::VirtualFree( linePoints    );
     SysHost::VirtualFree( lpTemp        );
 }
+
+//-----------------------------------------------------------
+// void ValidatePark7( DiskBufferQueue& ioQueue, uint64 park7Size )
+
+
+
+
+
+
+
+

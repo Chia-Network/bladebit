@@ -119,6 +119,19 @@ void FileStream::Close()
 }
 
 //-----------------------------------------------------------
+ssize_t FileStream::Size()
+{
+    struct stat fs;
+    int r = fstat( _fd, &fs );
+
+    if( r == 0 )
+        return (ssize_t)fs.st_size;
+
+    _error = errno;
+    return -1;
+}
+
+//-----------------------------------------------------------
 ssize_t FileStream::Read( void* buffer, size_t size )
 {
     ASSERT( buffer );
