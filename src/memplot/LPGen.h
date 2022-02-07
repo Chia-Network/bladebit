@@ -53,6 +53,7 @@ inline uint64 SquareToLinePoint( uint64 x, uint64 y );
 //-----------------------------------------------------------
 FORCE_INLINE uint64 GetXEnc( uint64 x )
 {
+    ASSERT( x );
     uint64 a = x, b = x - 1;
 
     // if( a % 2 == 0 )

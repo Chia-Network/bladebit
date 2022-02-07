@@ -16,6 +16,8 @@ void TestTable( TableId table, PlotInfo& ref, PlotInfo& tgt );
 void TestC3Table( PlotInfo& ref, PlotInfo& tgt );
 void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table );
 
+void UnpackPark7( uint64* srcBits, uint32* dstEntries );
+
 Span<uint> ReadC1Table( PlotInfo& plot );
 
 class PlotInfo
@@ -117,6 +119,8 @@ public:
 
     uint K() const { return _k; }
 
+    FileStream& PlotFile() { return _plotFile; }
+
     uint64 TableAddress( TableId table ) const
     {
         ASSERT( table >= TableId::Table1 && table <= TableId::Table7 );
@@ -158,20 +162,20 @@ public:
         const size_t blockSize  = _plotFile.BlockSize();
 
         // Read-in any data already left-over in the block buffer
-        if( _blockRemainder )
-        {
-            const size_t copySize = std::min( _blockRemainder, size );
-            memcpy( buffer, _blockBuffer + _blockOffset, copySize );
+        // if( _blockRemainder )
+        // {
+        //     const size_t copySize = std::min( _blockRemainder, size );
+        //     memcpy( buffer, _blockBuffer + _blockOffset, copySize );
 
-            _blockOffset    += copySize;
-            _blockRemainder -= copySize;
+        //     _blockOffset    += copySize;
+        //     _blockRemainder -= copySize;
 
-            buffer = (void*)((byte*)buffer + copySize);
-            size -= copySize;
+        //     buffer = (void*)((byte*)buffer + copySize);
+        //     size -= copySize;
 
-            if( size == 0 )
-                return copySize;
-        }
+        //     if( size == 0 )
+        //         return copySize;
+        // }
 
         const size_t blockCount = size / blockSize;
 
@@ -183,7 +187,7 @@ public:
 
         while( blockSizeToRead )
         {
-            ssize_t read = _plotFile.Read( buffer, blockSizeToRead );
+            ssize_t read = _plotFile.Read( reader, blockSizeToRead );
             FatalIf( read < 0 , "Plot %s failed to read with error: %d.", _path.c_str(), _plotFile.GetError() );
             
             reader   += read;
@@ -193,17 +197,19 @@ public:
 
         if( remainder )
         {
-            ssize_t read = _plotFile.Read( _blockBuffer, blockSize );
+            ssize_t read = _plotFile.Read( reader, remainder );
+            
+            // ssize_t read = _plotFile.Read( _blockBuffer, blockSize );
             ASSERT( read == (ssize_t)remainder || read == (ssize_t)blockSize );       
 
-            FatalIf( read < (ssize_t)remainder, "Failed to read a full block on plot %s.", _path.c_str() );
+            // FatalIf( read < (ssize_t)remainder, "Failed to read a full block on plot %s.", _path.c_str() );
 
-            memcpy( reader, _blockBuffer, remainder );
+            // memcpy( reader, _blockBuffer, remainder );
             sizeRead += read;
 
-            // Save any left over data in the block buffer
-            _blockOffset    = remainder;
-            _blockRemainder = blockSize - remainder;
+            // // Save any left over data in the block buffer
+            // _blockOffset    = remainder;
+            // _blockRemainder = blockSize - remainder;
         }
 
         return sizeRead;
@@ -253,7 +259,6 @@ public:
                 i-6, _tablePtrs[i], _tablePtrs[i],
                 size BtoMB, (double)size BtoGB );
         }
-
     }
 
 private:
@@ -284,7 +289,7 @@ int main( int argc, const char* argv[] )
 
     {
         const char* refPath = "/mnt/p5510a/plots-ref/plot-k32-2022-02-05-17-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot";
-        const char* tgtPath = "/mnt/p5510a/disk_tmp/plot-k32-2022-02-05-21-16-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot.tmp";
+        const char* tgtPath = "/mnt/p5510a/plots/plot-k32-2022-02-07-03-50-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot";
 
         refPlot.Open( refPath );
         tgtPlot.Open( tgtPath );
@@ -298,6 +303,8 @@ int main( int argc, const char* argv[] )
     FatalIf( !MemCmp( refPlot.PlotMemo(), tgtPlot.PlotMemo(), std::min( refPlot.PlotMemoSize(), tgtPlot.PlotMemoSize() ) ), "Plot memo mismatch." );
     FatalIf( refPlot.K() != tgtPlot.K(), "K value mismatch." );
 
+    // TestTable( refPlot, tgtPlot, TableId::Table7 );
+    // TestTable( refPlot, tgtPlot, TableId::Table3 );
     for( TableId table = TableId::Table1; table <= TableId::Table7; table++ )
         TestTable( refPlot, tgtPlot, table );
 
@@ -455,10 +462,95 @@ void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
 
     for( int64 i = 0; i < parkCount; i++ )
     {
+        // if( table == TableId::Table7 && i == 280888 )
+        // {
+        //     uint32 refEntries[kEntriesPerPark];
+        //     uint32 tgtEntries[kEntriesPerPark];
+
+        //     UnpackPark7( (uint64*)parkRef, refEntries );
+        //     UnpackPark7( (uint64*)parkTgt, tgtEntries );
+
+        //     uint32 indices[3] = { 0 };
+        //     uint32 idxFound = 0;
+
+        //     for( uint j = 0; j < kEntriesPerPark; j++ )
+        //     {
+        //         if( refEntries[j] == 1270942450 || refEntries[j] == 4293888549 || refEntries[j] == 1538836626 )
+        //         {
+        //             indices[idxFound++] = j;
+        //             if( idxFound >= 3 )
+        //                 break;
+        //         }
+        //     }
+        //     Log::Line( "Found %u indices.", idxFound );
+        // }
+
         if( !MemCmp( parkRef, parkTgt, parkSize ) )
         {
-            Log::Line( " T%u park %lld failed.", table+1, i );
-            failures.push_back( i );
+            bool failed = true;
+
+            if( table == TableId::Table7 )
+            {
+                // Read each 32-bit index in the park and find the first one that does not match.
+                uint32 refEntries[kEntriesPerPark];
+                uint32 tgtEntries[kEntriesPerPark];
+
+                UnpackPark7( (uint64*)parkRef, refEntries );
+                UnpackPark7( (uint64*)parkTgt, tgtEntries );
+
+                for( uint e = 0; e < kEntriesPerPark; e++ )
+                {
+                    if( refEntries[e] != tgtEntries[e] )
+                    {
+                        // #NOTE: Since it may be sorted differently with same-entries, some
+                        //        entries might be swapped in position. This can happen with more than
+                        //        2 entries, but we only test with 2 here
+                        if( refEntries[e] == tgtEntries[e+1] && refEntries[e+1] == tgtEntries[e] )
+                        {
+                            failed = false;
+                            e++;
+                            continue;
+                        }
+
+                        Log::Line( "First miss happens at entry %u: %u != %u ( 0x%8x != 0x%8x ).",
+                            e,  refEntries[e], tgtEntries[e], refEntries[e], tgtEntries[e] );
+
+                        break;
+                    }
+                }
+            }
+
+            if( failed )
+            {
+                Log::Line( " T%u park %lld failed.", table+1, i );
+                failures.push_back( i );
+            }
+
+            // const uint64 lpRef = Swap64( *(uint64*)parkRef );
+            // const uint64 lpTgt = Swap64( *(uint64*)parkTgt );
+            // if( lpRef != lpTgt )
+            //     Log::Line( "Starting LP mismatch." );
+            if( table != TableId::Table7 )
+            {
+                const byte* refBytes = parkRef;
+                const byte* tgtBytes = parkTgt;
+
+                // if( table != TableId::Table7 )
+                // {
+                //     refBytes += 8;
+                // }
+
+                for( uint64 b = 0; b < parkSize; b++ )
+                {
+                    if( refBytes[b] != tgtBytes[b] )
+                    {
+                        Log::Line( "Byte mismatch @ byte %llu: 0x%02x (%3d) != 0x%02x (%3d)", b,
+                         (int)refBytes[b], (int)refBytes[b], (int)tgtBytes[b], (int)tgtBytes[b] );
+                        break;
+                    }
+                }
+            }
+            
         }
 
         parkRef += parkSize;
@@ -473,5 +565,55 @@ void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
     SysHost::VirtualFree( p7Ref );
     SysHost::VirtualFree( p7Tgt );
 }
+
+// Unpack a single park 7
+//-----------------------------------------------------------
+void UnpackPark7( uint64* srcBits, uint32* dstEntries )
+{
+    const uint32 bitsPerEntry   = _K + 1;
+    const uint32 fieldShift     = 64 - bitsPerEntry;
+    const uint32 dFieldsPerPark = kEntriesPerPark * bitsPerEntry / 64;
+
+    ASSERT( dFieldsPerPark * 64 / bitsPerEntry == kEntriesPerPark );
+
+    uint64 sField = 0;  // Source field
+    uint64 dField = 0;  // Destination field
+
+    uint32 dBits  = 0;
+
+    for( uint i = 0; i < dFieldsPerPark; i++  )
+    {
+        sField = Swap64( srcBits[i] );
+        
+        const uint32 shift = fieldShift + dBits;
+        
+        // New S field, so we're sure we have a enough to fill a full D field
+        dField |= sField >> shift;
+        *dstEntries++ = (uint32)dField;
+
+        sField <<= 64 - shift;          // Clear out unpacked entries from S field
+        dField = sField >> fieldShift;  // Place what remains of S field on a new D fIeld (always guaranteed to have a remainder)
+
+
+        // Still have bits to unpack?
+        const uint32 sUsed = ( bitsPerEntry - dBits ) + bitsPerEntry;
+        if( sUsed < 64 )
+        {
+            // S field still has bits, we can begin to fill one more D field
+            *dstEntries++ = (uint32)dField;
+            
+            sField <<= 64 - fieldShift;     // Use up the S bits we just unpacked
+            dField = sField >> fieldShift;  // Add final S remainders to new D field
+
+            dBits = 64 - sUsed;
+        }
+        else
+        {
+            // S field used-up completely, D field not yet filled
+            dBits = shift;
+        }
+    }
+}
+
 
 

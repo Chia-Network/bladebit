@@ -13,8 +13,8 @@ struct TableWriter
     static size_t WriteP7( ThreadPool& threadPool, uint32 threadCount, const uint64 length, 
                            const uint32* indices, byte* parkBuffer );
 
-    static void WriteP7Parks( const uint64 parkCount, const uint32* indices, byte* parkBuffer );
-    static void WriteP7Entries( const uint64 length, const uint32* indices, byte* parkBuffer );
+    static void WriteP7Parks( const uint64 parkCount, const uint32* indices, byte* parkBuffer, uint32 jobId = 0 );
+    static void WriteP7Entries( const uint64 length, const uint32* indices, byte* parkBuffer, uint32 jobId = 0 );
 
 
     /// C1 & C2 tables
@@ -135,20 +135,20 @@ inline size_t TableWriter::WriteP7( ThreadPool& threadPool, uint32 threadCount, 
 }
 
 //-----------------------------------------------------------
-inline void TableWriter::WriteP7Parks( const uint64 parkCount, const uint32* indices, byte* parkBuffer )
+inline void TableWriter::WriteP7Parks( const uint64 parkCount, const uint32* indices, byte* parkBuffer, uint32 jobId )
 {
     const size_t parkSize = CDiv( (_K + 1) * kEntriesPerPark, 8 );
 
     for( uint64 i = 0; i < parkCount; i++ )
     {
-        WriteP7Entries( kEntriesPerPark, indices, parkBuffer );
+        WriteP7Entries( kEntriesPerPark, indices, parkBuffer, jobId );
         indices    += kEntriesPerPark;
         parkBuffer += parkSize;
     }
 }
 
 //-----------------------------------------------------------
-inline void TableWriter::WriteP7Entries( const uint64 length, const uint32* indices, byte* parkBuffer )
+inline void TableWriter::WriteP7Entries( const uint64 length, const uint32* indices, byte* parkBuffer, uint32 jobId )
 {
     uint64* fieldWriter = (uint64*)parkBuffer;
     
@@ -206,7 +206,7 @@ inline void TableWriter::WriteP7Entries( const uint64 length, const uint32* indi
 //-----------------------------------------------------------
 inline void P7Job::Run()
 {
-    TableWriter::WriteP7Parks( this->parkCount, this->indices, this->parkBuffer );
+    TableWriter::WriteP7Parks( this->parkCount, this->indices, this->parkBuffer, this->_jobId );
 }
 
 

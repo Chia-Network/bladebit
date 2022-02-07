@@ -10,10 +10,6 @@
 #define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
                                             // have cross bucket entries accounted for
 
-#if _DEBUG
-    // #define BB_DBG_SKIP_P3_S1 1
-    // #define BB_DP_DBG_P3_START_TABLE Table7
-#endif
 
 /**
  * Algorithm:
@@ -754,6 +750,19 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
     uint32 bucketsLoaded = 0;
     BucketBuffers buffers[BB_DPP3_LP_BUCKET_COUNT];
 
+    // #TODO: Check this to optimize better
+    // Since with BB_DPP3_LP_BUCKET_COUNT = 256, we get a lot of empty buckets,
+    //  we need to determine which is the last bucket with entries to let the 
+    //  park writer know when to write the final partial park.
+    uint32 lastBucketWithEntries = 0;
+
+    for( uint32 bucket = 0; bucket < BB_DPP3_LP_BUCKET_COUNT; bucket++ )
+    {
+        if( _lpBucketCounts[bucket] )
+            lastBucketWithEntries = bucket;
+    }
+    ASSERT( lastBucketWithEntries > 0 );
+
     // Use a capture lampda for now, but change this to a non-capturing one later maybe
     auto LoadBucket = [&]( uint32 bucket, bool forceLoad ) -> BucketBuffers
     {
@@ -788,13 +797,13 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
     buffers[0] = LoadBucket( 0, true );
     bucketsLoaded++;
 
-    for( uint32 bucket = 0; bucket < BB_DPP3_LP_BUCKET_COUNT; bucket++ )
+    for( uint32 bucket = 0; bucket <= lastBucketWithEntries; bucket++ )
     {
-        const uint32 nextBucket   = bucket + 1;
-        const bool   isLastBucket = bucket == BB_DPP3_LP_BUCKET_COUNT - 1;
+        const bool isLastBucket = bucket == lastBucketWithEntries;
 
         if( !isLastBucket )
         {
+            const uint32 nextBucket   = bucket + 1;
             // #TODO: Make background loading optional if we have no buffers available,
             //        then force-load if we don't have the current bucket pre-loaded.
             buffers[nextBucket] = LoadBucket( nextBucket, true );
@@ -998,7 +1007,7 @@ void WriteLPMapJob::Run()
 }
 
 //-----------------------------------------------------------
-void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, const uint64* linePoints, uint32 bucketLength )
+void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucketWithEntries, const uint64* linePoints, uint32 bucketLength )
 {
     ASSERT( bucketLength );
 
@@ -1051,7 +1060,7 @@ void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, c
     uint32  parkCount       = bucketLength / kEntriesPerPark;
     uint32  leftOverEntries = bucketLength - parkCount * kEntriesPerPark;
 
-    if( isLastBucket && leftOverEntries )
+    if( isLastBucketWithEntries && leftOverEntries )
     {
         leftOverEntries = 0;
         parkCount++;
@@ -1065,7 +1074,7 @@ void DiskPlotPhase3::WriteLinePointsToPark( TableId rTable, bool isLastBucket, c
         bucketLength -= leftOverEntries;
     }
 
-    ASSERT( isLastBucket || bucketLength / kEntriesPerPark * kEntriesPerPark == bucketLength );
+    ASSERT( isLastBucketWithEntries || bucketLength / kEntriesPerPark * kEntriesPerPark == bucketLength );
 
     byte* parkBuffer = (byte*)ioQueue.GetBuffer( parkSize * parkCount );
 

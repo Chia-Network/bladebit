@@ -31,7 +31,7 @@ inline size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoi
     const size_t parkSize       = CalculateParkSize( tableId );
     const uint64 parkCount      = length / kEntriesPerPark;
     const uint64 parksPerThread = parkCount / threadCount;
-    
+
     uint64 trailingParks        = parkCount - ( parksPerThread * threadCount );
     ASSERT( trailingParks < threadCount );
 
@@ -40,7 +40,7 @@ inline size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoi
     ASSERT( trailingEntries <= kEntriesPerPark );
 
     WriteParkJob jobs[MaxJobs];
-    
+
     uint64* threadLinePoints = linePoints;
     byte*   threadParkBuffer = parkBuffer;
 
@@ -71,8 +71,8 @@ inline size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoi
     // Write trailing entries if any
     if( trailingEntries )
         WritePark( parkSize, trailingEntries, threadLinePoints, threadParkBuffer, tableId );
-    
-    
+
+
     const size_t sizeWritten = parkSize * ( parkCount + (trailingEntries ? 1 : 0) );
 
     return sizeWritten;
