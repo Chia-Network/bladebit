@@ -1,4 +1,6 @@
 #include <vector>
+#include <cmath>
+#include <queue>
 #include "ChiaConsts.h"
 
 static std::vector<short> CreateNormalizedCount(double R);
@@ -9,6 +11,7 @@ static std::vector<short> CreateNormalizedCount(double R);
 int main( int argc, const char* argv[] )
 {
     /// Generate for C3
+    
 }
 
 

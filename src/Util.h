@@ -126,6 +126,7 @@ inline T* bbvirtalloc( size_t size )
     return reinterpret_cast<T*>( ptr );
 }
 
+//-----------------------------------------------------------
 template<typename T>
 inline T* bbcvirtalloc( size_t count )
 {
@@ -161,6 +162,12 @@ template<typename T>
 inline T RoundUpToNextBoundaryT( T value, T boundary )
 {
     return value + ( boundary - ( value % boundary ) ) % boundary;
+}
+
+//-----------------------------------------------------------
+inline bool MemCmp( const void* a, const void* b, size_t size )
+{
+    return memcmp( a, b, size ) == 0;
 }
 
 const char HEX_TO_BIN[256] = {

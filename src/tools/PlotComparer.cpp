@@ -5,11 +5,6 @@
 #include "plotshared/PlotTools.h"
 #include <vector>
 
-inline bool MemCmp( const void* a, const void* b, size_t size )
-{
-    return memcmp( a, b, size ) == 0;
-}
-
 class PlotInfo;
 
 void TestTable( TableId table, PlotInfo& ref, PlotInfo& tgt );

@@ -319,6 +319,9 @@ add_executable(bladebit_disk ${src_diskplot} ${bb_headers})
 # Tools
 add_executable(plot_cmp src/tools/PlotComparer.cpp ${bb_sources} ${bb_headers})
 add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
+add_executable(plot_validate src/tools/PlotValidator.cpp 
+    src/tools/PlotReader.cpp 
+    ${bb_sources} ${bb_headers})
 
 macro(config_proj tgt)
 
@@ -362,6 +365,7 @@ config_proj(bladebit_disk)
 # Tools
 config_proj(plot_cmp)
 config_proj(fsegen)
+config_proj(plot_validate)
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
