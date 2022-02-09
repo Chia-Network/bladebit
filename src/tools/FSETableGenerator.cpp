@@ -11,8 +11,10 @@
 ///
 /// Offline generate tables required for ANS encoding/decoding
 ///
-const char USAGE[] = "fsegen [OPTIONS] <output_path>\n"
+const char USAGE[] = "fsegen [OPTIONS] [<output_path>]\n"
 R"(
+output_path: Output file path. If nothing is specified, STDOUT is used.
+
 OPTIONS:
  -d, --decompress: Generate decompression table.
 )";
@@ -34,7 +36,7 @@ int main( int argc, const char* argv[] )
     for( int i = 0; i < argc; i++ )
     {
         const char* arg = argv[i];
-        if( strcmp( "-d", arg ) == 0 || strcmp( "--decompress", arg ) )
+        if( strcmp( "-d", arg ) == 0 || strcmp( "--decompress", arg ) == 0 )
             compress = false;
         else if( i < argc-1 )
         {
@@ -107,9 +109,9 @@ void DumpFSETables( FILE* file, bool compression )
         const uint8_t* bytes = (uint8_t*)ct;
 
         if( i < 6 )
-            fprintf( file, "const byte %Table_%d[%llu] = {\n", prefix, i, tableSizeBytes );
+            fprintf( file, "const byte %sTable_%d[%llu] = {\n", prefix, i, tableSizeBytes );
         else
-            fprintf( file, "const byte %Table_C3[%llu] = {\n", prefix, tableSizeBytes );
+            fprintf( file, "const byte %sTable_C3[%llu] = {\n", prefix, tableSizeBytes );
         
         for( size_t j = 0; j < nRows; j++ )
         {

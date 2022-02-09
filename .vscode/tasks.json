@@ -139,5 +139,34 @@
 				"isDefault": true
 			}
 		}
+
+		// Build fsegen
+		,{
+			"type"   : "shell",
+			"label"  : "build_fsegen_debug",
+			"command": "cmake",
+			
+			"args": [
+				"--build", ".",
+				"--target", "fsegen",
+				"--config", "Debug",
+				"-j", "24"
+			],
+
+			"problemMatcher": [ "$gcc" ],
+			
+			"windows":{
+				"problemMatcher":[ "$msCompile" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
 	]
 }

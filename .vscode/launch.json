@@ -100,5 +100,28 @@
             "args": [
             ]
         }
+
+        ,{
+            "name"       : "FSEGen",
+            
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_fsegen_debug",
+            "console"       : "internalConsole",
+
+            "program": "${workspaceRoot}/build/fsegen",
+
+            // "windows": {
+            //     "type"   : "cppvsdbg",
+            //     "program": "${workspaceFolder}/build/debug/fsegen.exe"
+            // },
+            
+            "environment": [],
+
+            "args": [
+            ]
+        }
     ]
 }

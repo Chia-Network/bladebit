@@ -66,11 +66,20 @@ public:
         return (size_t)( endAddress - address );
     }
 
+    // #NOTE: User must check for read errors!
     inline uint16 ReadUInt16()
     {
-        // #NOTE: Unsage, does not check for read errors
         uint16 value = 0;
-        Read( sizeof( value ), &value );
+        const ssize_t read = Read( sizeof( value ), &value );
+        if( read < 0 )
+            return 0;
+        
+        ASSERT( read == sizeof( uint16 ) );
+        if( read != sizeof( uint16 ) )
+        {
+            // #TODO: Set proper error
+            return 0;
+        }
 
         return Swap16( value );
     }
@@ -129,6 +138,7 @@ class PlotReader
 {
 public:
     PlotReader( IPlotFile& plot );
+    ~PlotReader();
 
     uint64 GetC3ParkCount() const;
     uint64 GetF7EntryCount() const;
@@ -143,5 +153,6 @@ private:
     IPlotFile& _plot;
 
     uint64 _c3ParkBuffer[CalculateC3Size()];
+    byte*  _c3DeltasBuffer;
 };
 
