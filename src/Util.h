@@ -153,13 +153,13 @@ constexpr inline T CDivT( T a, T b )
 // For example, if we want to round up some bytes to the next 8-byte boundary.
 //-----------------------------------------------------------
 template<typename T>
-inline T RoundUpToNextBoundary( T value, int boundary )
+constexpr inline T RoundUpToNextBoundary( T value, int boundary )
 {
     return value + ( boundary - ( value % boundary ) ) % boundary;
 }
 
 template<typename T>
-inline T RoundUpToNextBoundaryT( T value, T boundary )
+constexpr inline T RoundUpToNextBoundaryT( T value, T boundary )
 {
     return value + ( boundary - ( value % boundary ) ) % boundary;
 }

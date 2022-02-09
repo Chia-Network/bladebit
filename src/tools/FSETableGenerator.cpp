@@ -3,15 +3,149 @@
 #include <queue>
 #include "ChiaConsts.h"
 
-static std::vector<short> CreateNormalizedCount(double R);
+// Need to define this for FSE_CTABLE_SIZE/FSE_DTABLE_SIZE
+#define FSE_STATIC_LINKING_ONLY
+#include "fse/fse.h"
 
+
+///
 /// Offline generate tables required for ANS encoding/decoding
+///
+const char USAGE[] = "fsegen [OPTIONS] <output_path>\n"
+R"(
+OPTIONS:
+ -d, --decompress: Generate decompression table.
+)";
+
+static std::vector<short> CreateNormalizedCount(double R);
+static void DumpFSETables( FILE* file, bool compression );
+
 
 //-----------------------------------------------------------
 int main( int argc, const char* argv[] )
 {
-    /// Generate for C3
+    argc--;
+    argv++;
+
+    bool compress = true;
+
+    const char* outFilePath = nullptr;
     
+    for( int i = 0; i < argc; i++ )
+    {
+        const char* arg = argv[i];
+        if( strcmp( "-d", arg ) == 0 || strcmp( "--decompress", arg ) )
+            compress = false;
+        else if( i < argc-1 )
+        {
+            Fatal( "Unknown argument '%s'", arg );
+        }
+        else
+            outFilePath = arg;
+    }
+
+    FILE* file = nullptr;
+    if( outFilePath )
+    {
+        file = fopen( outFilePath, "wb" );
+        FatalIf( !file, "Failed to open file for writing at '%s'.", outFilePath );
+    }
+    else
+    {
+        file = stdout;
+    }
+
+    DumpFSETables( file, compress );
+    return 0;
+}
+
+//-----------------------------------------------------------
+void DumpFSETables( FILE* file, bool compression )
+{
+    ASSERT( file );
+    const char* prefix = compression ? "C" : "D";
+
+    fprintf( file, "#pragma once\n" );
+    fprintf( file, "#include \"fse/fse.h\"\n\n" );
+
+
+    for( int i = 0; i < 7; i++ )
+    {
+        double R = i < 6 ? kRValues[i] : kC3R;  // Last one is for C3 entries
+
+        std::vector<short> nCount = CreateNormalizedCount(R);
+        unsigned maxSymbolValue = nCount.size() - 1;
+        unsigned tableLog = 14;
+
+        FatalIf( maxSymbolValue > 255, "maxSymbolValue > 255" );
+        
+        size_t      err = 0;
+        FSE_CTable* ct  = nullptr;
+
+        if( compression )
+        {
+            ct  = FSE_createCTable( maxSymbolValue, tableLog );
+            err = FSE_buildCTable( ct, nCount.data(), maxSymbolValue, tableLog );
+        }
+        else
+        {
+            // FSE_CTable and FSE_DTable are just uint typedefs, so we can use FSE_CTable here
+            ct  = FSE_createDTable( tableLog );
+            err = FSE_buildDTable( ct, nCount.data(), maxSymbolValue, tableLog );
+        }
+
+        FatalIf( FSE_isError( err ), "Failed to build %sTable for table %d: %s", 
+            prefix, i+1, FSE_getErrorName( err ) );
+        
+        const size_t tableSizeBytes = compression ? 
+            FSE_CTABLE_SIZE( tableLog, maxSymbolValue ) : FSE_DTABLE_SIZE( tableLog );
+
+        const size_t rowSize        = 32;
+        const size_t nRows          = tableSizeBytes / rowSize;
+        const size_t lastRowCount   = tableSizeBytes - ( nRows * rowSize );
+
+        const uint8_t* bytes = (uint8_t*)ct;
+
+        if( i < 6 )
+            fprintf( file, "const byte %Table_%d[%llu] = {\n", prefix, i, tableSizeBytes );
+        else
+            fprintf( file, "const byte %Table_C3[%llu] = {\n", prefix, tableSizeBytes );
+        
+        for( size_t j = 0; j < nRows; j++ )
+        {
+            fprintf( file, "  " );
+            const uint8_t* row = bytes + j * rowSize;
+            for( size_t r = 0; r < rowSize; r++ )
+                fprintf( file, "0x%02hhx, ",  row[r] );
+
+            fprintf( file, "\n" );
+        }
+        
+        if( lastRowCount )
+        {
+            fprintf( file, "  " );
+            for( size_t j = 0; j < lastRowCount; j++ )
+            {
+                fprintf( file, "0x%02hhx",  bytes[rowSize*nRows+j] );
+                
+                if( j+1 < lastRowCount )
+                    fprintf( file, ", " );
+            }
+
+            fputc( '\n', file );
+        }
+
+        fprintf( file, "};\n\n" );
+        fflush( file );
+    }
+
+    fprintf( file, "const FSE_%sTable* const %sTables[6] = {\n", prefix, prefix );
+    for( int i = 0; i < 6; i++ )
+    {
+        fprintf( file, "  (const FSE_%sTable*)%sTable_%d,\n", prefix, prefix, i );
+    }
+    fprintf( file, "};\n\n" );
+    fclose( file );
 }
 
 

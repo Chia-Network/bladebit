@@ -1,4 +1,5 @@
 #pragma once
+#include "ChiaConsts.h"
 
 #define BB_PLOT_ID_LEN 32
 #define BB_PLOT_ID_HEX_LEN (BB_PLOT_ID_LEN * 2)
@@ -11,7 +12,31 @@
 struct PlotTools
 {
     static void GenPlotFileName( const byte plotId[BB_PLOT_ID_LEN], char outPlotFileName[BB_PLOT_FILE_LEN] );
-    static void PlotIdToString   ( const byte plotId[BB_PLOT_ID_LEN], char plotIdString[BB_PLOT_ID_HEX_LEN+1] );
+    static void PlotIdToString( const byte plotId[BB_PLOT_ID_LEN], char plotIdString[BB_PLOT_ID_HEX_LEN+1] );
     // static void PlotIdToStringTmp( const byte* plotId, const byte plotIdString[BB_PLOT_FILE_LEN_TMP] );
+
+    // //-----------------------------------------------------------
+    // static uint32_t CalculateLinePointSize(uint8_t k) { return Util::ByteAlign(2 * k) / 8; }
+
+    // // This is the full size of the deltas section in a park. However, it will not be fully filled
+    // static uint32_t CalculateMaxDeltasSize(uint8_t k, uint8_t table_index)
+    // {
+    //     if (table_index == 1) {
+    //         return Util::ByteAlign((kEntriesPerPark - 1) * kMaxAverageDeltaTable1) / 8;
+    //     }
+    //     return Util::ByteAlign((kEntriesPerPark - 1) * kMaxAverageDelta) / 8;
+    // }
+
+    // static uint32_t CalculateStubsSize(uint32_t k)
+    // {
+    //     return Util::ByteAlign((kEntriesPerPark - 1) * (k - kStubMinusBits)) / 8;
+    // }
+
+    // static uint32_t CalculateParkSize(uint8_t k, uint8_t table_index)
+    // {
+    //     return CalculateLinePointSize(k) + CalculateStubsSize(k) +
+    //            CalculateMaxDeltasSize(k, table_index);
+    // }
+    
 };
 

@@ -124,8 +124,7 @@ inline size_t CalculateParkSize( TableId tableId )
 }
 
 // Calculates the size of one C3 park. This will store bits for each f7 between
-// two C1 checkpoints, depending on how many times that f7 is present. For low
-// values of k, we need extra space to account for the additional variability.
+// two C1 checkpoints, depending on how many times that f7 is present. 
 constexpr inline static size_t CalculateC3Size()
 {
     return (size_t)CDiv( kC3BitsPerEntry * kCheckpoint1Interval, 8 );

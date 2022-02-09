@@ -1,5 +1,7 @@
 #pragma once
-#include "plotshared/PlotTools.h
+#include "plotshared/PlotTools.h"
+#include "Util.h"
+#include <vector>
 
 class FileStream;
 
@@ -131,10 +133,15 @@ public:
     uint64 GetC3ParkCount() const;
     uint64 GetF7EntryCount() const;
 
-    uint64 ReadC3Park( uint64 parkIndex, uint64* f7Buffer );
+    bool ReadC3Park( uint64 parkIndex, uint64* f7Buffer );
 
     uint64 GetFullProofForF7Index( uint64 f7Index, byte* fullProof );
 
+    // void   FindF7ParkIndices( uintt64 f7, std::vector<uint64> indices );
+
 private:
     IPlotFile& _plot;
+
+    uint64 _c3ParkBuffer[CalculateC3Size()];
 };
+

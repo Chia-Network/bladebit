@@ -2,10 +2,66 @@
 #include "io/FileStream.h"
 #include "memplot/CTables.h"
 #include "ChiaConsts.h"
+#include "util/BitView.h"
+#include "plotshared/PlotTools.h"
 
 ///
 /// Plot Reader
 ///
+
+//-----------------------------------------------------------
+PlotReader::PlotReader( IPlotFile& plot )
+    : _plot( plot )
+{}
+
+//-----------------------------------------------------------
+// uint64 PlotReader::GetC3ParkCount() const
+// {
+//     // We know how many C3 parks there are by how many 
+//     // entries we have in the C1 table - 1 (extra 0 entry added)
+//     // However, to make sure this is the case, we'll have to 
+//     // read-in all C1 entries and ensure we hit an empty one,
+//     // to ensure we don't run into dead/alignment-space
+//     const size_t c1Size = _plot.TableSize( PlotTable::C1 );
+// }
+
+// //-----------------------------------------------------------
+// uint64 PlotReader::GetF7EntryCount() const
+// {
+// }
+
+//-----------------------------------------------------------
+bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
+{
+    const size_t f7SizeBytes    = CDiv( _plot.K(), 8 );
+    const size_t c3ParkSize     = CalculateC3Size();
+    const uint64 c1Address      = _plot.TableAddress( PlotTable::C1 );
+    const uint64 c3Address      = _plot.TableAddress( PlotTable::C3 );
+    const uint64 c1EntryAddress = c1Address + parkIndex * f7SizeBytes;
+    const uint64 parkAddress    = c3Address + parkIndex * c3ParkSize;
+
+    // First we need to read the root F7 entry for the park, 
+    // which is at in C1 table.
+    if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
+        return false;
+
+    uint64 c1 = 0;
+    if( _plot.Read( f7SizeBytes, &c1 ) != (ssize_t)f7SizeBytes )
+        return false;
+
+    c1 = Swap64( c1 );
+
+    // Read the park into our buffer
+    if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
+        return false;
+
+    memset( _c3ParkBuffer, 0, sizeof( _c3ParkBuffer ) );
+    if( _plot.Read( c3ParkSize, _c3ParkBuffer ) != (ssize_t)c3ParkSize )
+        return false;
+
+    // Now we can read the f7 deltas from the C3 park
+    
+}
 
 ///
 /// Plot Files
@@ -103,6 +159,10 @@ bool IPlotFile::ReadHeader( int& error )
     // What follows is table data
 }
 
+
+///
+/// Memory Plot
+///
 //-----------------------------------------------------------
 MemoryPlot::MemoryPlot()
     : _bytes( nullptr, 0 )
@@ -116,7 +176,6 @@ MemoryPlot::~MemoryPlot()
 
     _bytes = Span<byte>( nullptr, 0 );
 }
-
 
 //-----------------------------------------------------------
 bool MemoryPlot::Open( const char* path )
