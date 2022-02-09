@@ -1,5 +1,4 @@
 #include "PlotReader.h"
-#include "io/FileStream.h"
 #include "ChiaConsts.h"
 #include "util/BitView.h"
 #include "plotshared/PlotTools.h"
@@ -50,7 +49,7 @@ bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
 
     // First we need to read the root F7 entry for the park, 
     // which is at in C1 table.
-    if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
+    if( !_plot.Seek( SeekOrigin::Begin, (int64)c1EntryAddress ) )
         return false;
 
     uint64 c1 = 0;
@@ -77,8 +76,6 @@ bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
         return false;
 
     // Now we can read the f7 deltas from the C3 park
-    const size_t deltasSize = 0;
-    
     const size_t err = FSE_decompress_usingDTable( 
                         _c3DeltasBuffer, kCheckpoint1Interval, 
                         _c3ParkBuffer, deltasSize, 
@@ -99,9 +96,7 @@ bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
     f7Buffer[0] = f7;
 
     for( uint32 i = 1; i < kCheckpoint1Interval; i++ )
-    {
-        uint64 delta = _c3DeltasBuffer[i-1];
-    }
+        f7Buffer[i] = f7Buffer[-1] + _c3DeltasBuffer[i-1];
 }
 
 ///
@@ -198,6 +193,7 @@ bool IPlotFile::ReadHeader( int& error )
         _header.tablePtrs[i] = Swap64( _header.tablePtrs[i] );
 
     // What follows is table data
+    return true;
 }
 
 
@@ -223,7 +219,7 @@ bool MemoryPlot::Open( const char* path )
 {
     ASSERT( path );
     if( !path )
-        return;
+        return false;
 
     if( IsOpen() )
         return false;
@@ -245,7 +241,9 @@ bool MemoryPlot::Open( const char* path )
         return false;
     }
 
-    const size_t allocSize = RoundUpToNextBoundary( (size_t)plotSize, file.BlockSize() );
+    // Add an extra block at the end to be able to do an aligned read there if
+    // we have any remainder that does not align to a block
+    const size_t allocSize = RoundUpToNextBoundary( (size_t)plotSize, (int)file.BlockSize() ) + file.BlockSize();
 
     byte* bytes = (byte*)SysHost::VirtualAlloc( allocSize );
     if( !bytes )
@@ -255,10 +253,13 @@ bool MemoryPlot::Open( const char* path )
     }
 
     // Read the whole thing to memory
-    size_t readSize = allocSize;
-    byte*  reader   = bytes;
+    size_t readSize      = RoundUpToNextBoundary( plotSize, (int)file.BlockSize() );/// file.BlockSize() * file.BlockSize();
+    // size_t readRemainder = plotSize - readSize;
+    const size_t readEnd = readSize - plotSize;
+    byte*  reader        = bytes;
     
-    while( readSize )
+    // Read blocks
+    while( readSize > readEnd )
     {
         const ssize_t read = file.Read( reader, readSize );
         ASSERT( read );
@@ -275,6 +276,28 @@ bool MemoryPlot::Open( const char* path )
         reader   += read;
     }
 
+    // if( readRemainder )
+    // {
+    //     byte* block = (byte*)RoundUpToNextBoundary( (uintptr_t)reader, (int)file.BlockSize() );
+
+    //     const ssize_t read = file.Read( block, (size_t)file.BlockSize() );
+    //     ASSERT( read );
+    //     ASSERT( read >= readRemainder );
+
+    //     if( read < 0 )
+    //     {
+    //         _err = file.GetError();
+    //         SysHost::VirtualFree( bytes );
+
+    //         return false;
+    //     }
+
+    //     if( reader != block )
+    //         memmove( reader, block, readRemainder );
+    // }
+
+    _bytes = Span<byte>( bytes, (size_t)plotSize );
+
     // Read the header
     int headerError = 0;
     if( !ReadHeader( headerError ) )
@@ -285,12 +308,12 @@ bool MemoryPlot::Open( const char* path )
         if( _err == 0 )
             _err = -1; // #TODO: Set generic plot header read error
 
+        _bytes.values = nullptr;
         SysHost::VirtualFree( bytes );
         return false;
     }
 
     // Save data, good to go
-    _bytes    = Span<byte>( bytes, (size_t)plotSize );
     _plotPath = path;
 
     return true;
@@ -362,5 +385,11 @@ ssize_t MemoryPlot::Read( size_t size, void* buffer )
     _position = (ssize_t)endPos;
 
     return (ssize_t)size;
+}
+
+//-----------------------------------------------------------
+int MemoryPlot::GetError() 
+{
+    return _err;
 }
 

@@ -105,29 +105,23 @@
 			}
 		}
 
-		// Build plot_cmp tool
+		// Build plot_tool tool
 		,{
 			"type"   : "shell",
-			"label"  : "build_plot_cmp_debug",
-			"detail" : "Build plot_cmp Debug",
+			"label"  : "build_plot_tool_debug",
 			"command": "cmake",
 			
 			"args": [
 				"--build", ".",
-				"--target", "plot_cmp",
+				"--target", "plot_tool",
 				"--config", "Debug",
 				"-j", "24"
 			],
 			
+			"problemMatcher": [ "$gcc" ],
+
 			"windows":{
-			},
-
-			"linux":{
-				"problemMatcher": [ "$gcc" ]
-			},
-
-			"osx":{
-				"problemMatcher": [ "$gcc" ]
+				"problemMatcher":[ "$msCompile" ]
 			},
 
 			"options": {

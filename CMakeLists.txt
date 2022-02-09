@@ -317,10 +317,12 @@ add_executable(bladebit_128  ${src_plot128} ${bb_headers})
 add_executable(bladebit_disk ${src_diskplot} ${bb_headers})
 
 # Tools
-add_executable(plot_cmp src/tools/PlotComparer.cpp ${bb_sources} ${bb_headers})
 add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
-add_executable(plot_validate src/tools/PlotValidator.cpp 
-    src/tools/PlotReader.cpp 
+add_executable(plot_tool 
+    src/tools/PlotTools_Main.cpp 
+    src/tools/PlotReader.cpp        # TODO: Move this out to the plotting/ folder
+    src/tools/PlotValidator.cpp
+    src/tools/PlotComparer.cpp 
     ${bb_sources} ${bb_headers})
 
 macro(config_proj tgt)
@@ -363,9 +365,8 @@ config_proj(bladebit_dev)
 config_proj(bladebit_disk)
 
 # Tools
-config_proj(plot_cmp)
 config_proj(fsegen)
-config_proj(plot_validate)
+config_proj(plot_tool)
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 

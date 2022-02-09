@@ -79,20 +79,20 @@
         }
 
         ,{
-            "name"       : "PlotCompare",
+            "name"       : "Plot Tool",
             
             "type"          : "cppdbg",
             "request"       : "launch",
             "stopAtEntry"   : false,
             "cwd"           : "${workspaceFolder}",
-            "preLaunchTask" : "build_plot_cmp_debug",
+            "preLaunchTask" : "build_plot_tool_debug",
             "console"       : "internalConsole",
 
-            "program": "${workspaceRoot}/build/plot_cmp",
+            "program": "${workspaceRoot}/build/plot_tool",
 
             "windows": {
                 "type"   : "cppvsdbg",
-                "program": "${workspaceFolder}/build/debug/plot_cmp.exe"
+                "program": "${workspaceFolder}/build/debug/plot_tool.exe"
             },
             
             "environment": [],
@@ -123,5 +123,6 @@
             "args": [
             ]
         }
+
     ]
 }

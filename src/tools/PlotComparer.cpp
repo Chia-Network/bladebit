@@ -277,7 +277,8 @@ private:
 
 /// Compares 2 plot's tables
 //-----------------------------------------------------------
-int main( int argc, const char* argv[] )
+// int PlotComparerTest_Main( int argc, const char* argv[] )
+void Test()
 {
     PlotInfo refPlot; // Reference
     PlotInfo tgtPlot; // Target
@@ -306,7 +307,7 @@ int main( int argc, const char* argv[] )
     TestC3Table( refPlot, tgtPlot );
 
 
-    return 0;
+    // return 0;
 }
 
 //-----------------------------------------------------------

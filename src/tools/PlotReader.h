@@ -1,9 +1,9 @@
 #pragma once
 #include "plotshared/PlotTools.h"
+#include "io/FileStream.h"
 #include "Util.h"
 #include <vector>
 
-class FileStream;
 
 enum class PlotTable
 {
@@ -126,7 +126,7 @@ public:
 
     bool Seek( SeekOrigin origin, int64 offset ) override;
 
-
+    int GetError() override;
 private:
     Span<byte>  _bytes;  // Plot bytes
     int         _err      = 0;

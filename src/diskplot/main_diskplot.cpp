@@ -129,7 +129,7 @@ int main( int argc, const char* argv[] )
     byte*   plotId       = new byte[BB_PLOT_ID_LEN];
     byte*   plotMemo     = new byte[BB_PLOT_MEMO_MAX_SIZE];
     char*   plotFileName = new char[BB_PLOT_FILE_LEN_TMP];
-    uint16 plotMemoSize  = 0;
+    uint16  plotMemoSize = 0;
 
     DiskPlotter::PlotRequest req;
     req.plotFileName = plotFileName;
