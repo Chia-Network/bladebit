@@ -20,8 +20,11 @@ void TestPlotValidate()
     uint64* f7Entries = bbcalloc<uint64>( kCheckpoint1Interval );
     memset( f7Entries, 0, kCheckpoint1Interval * sizeof( uint64 ) );
 
+    // Check how many C3 parks we have
+    const uint64 c3ParkCount = plotFile.TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
+
     // Read the C3 parks
-    FatalIf( !plot.ReadC3Park( 0, f7Entries ),
+    FatalIf( !plot.ReadC3Park( c3ParkCount-1, f7Entries ),
         "Could not read C3 park." );
     
 }

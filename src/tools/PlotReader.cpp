@@ -40,7 +40,8 @@ PlotReader::~PlotReader()
 //-----------------------------------------------------------
 bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
 {
-    const size_t f7SizeBytes    = CDiv( _plot.K(), 8 );
+    const uint32 k              = _plot.K();
+    const size_t f7SizeBytes    = CDiv( k, 8 );
     const size_t c3ParkSize     = CalculateC3Size();
     const uint64 c1Address      = _plot.TableAddress( PlotTable::C1 );
     const uint64 c3Address      = _plot.TableAddress( PlotTable::C3 );
@@ -56,36 +57,35 @@ bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
     if( _plot.Read( f7SizeBytes, &c1 ) != (ssize_t)f7SizeBytes )
         return false;
 
-    c1 = Swap64( c1 );
+    c1 = Swap64( c1 << ( 64 - k ) );
 
     // Read the park into our buffer
     if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
         return false;
 
     // Read the size of the compressed C3 deltas
-    uint16 deltasSize = 0;
-    if( _plot.Read( sizeof( uint16 ), &deltasSize ) != (ssize_t)sizeof( uint16 ) )
+    uint16 compressedSize = 0;
+    if( _plot.Read( sizeof( uint16 ), &compressedSize ) != (ssize_t)sizeof( uint16 ) )
         return false;
 
-    deltasSize = Swap64( deltasSize );
-    if( deltasSize > c3ParkSize )
+    compressedSize = Swap16( compressedSize );
+    if( compressedSize > c3ParkSize )
         return false;
 
     memset( _c3ParkBuffer, 0, sizeof( _c3ParkBuffer ) );
-    if( _plot.Read( deltasSize, _c3ParkBuffer ) != (ssize_t)deltasSize )
+    if( _plot.Read( c3ParkSize - sizeof( uint16 ), _c3ParkBuffer ) != c3ParkSize - sizeof( uint16 ) )
         return false;
 
     // Now we can read the f7 deltas from the C3 park
-    const size_t err = FSE_decompress_usingDTable( 
-                        _c3DeltasBuffer, kCheckpoint1Interval, 
-                        _c3ParkBuffer, deltasSize, 
-                        (const FSE_DTable*)DTable_C3 );
+    const size_t deltaCount = FSE_decompress_usingDTable( 
+                                _c3DeltasBuffer, kCheckpoint1Interval, 
+                                _c3ParkBuffer, compressedSize, 
+                                (const FSE_DTable*)DTable_C3 );
 
-    // #TODO: Set error message locally
-    if( FSE_isError(err) )
-        return false;
+    if( FSE_isError( deltaCount ) )
+        return false;           // #TODO: Set error message locally
 
-    for( uint32 i = 0; i < kCheckpoint1Interval; i++ )
+    for( uint32 i = 0; i < deltaCount; i++ )
         if( _c3DeltasBuffer[i] == 0xFF )
             return false;
 
@@ -95,8 +95,11 @@ bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
     uint64 f7 = c1;
     f7Buffer[0] = f7;
 
-    for( uint32 i = 1; i < kCheckpoint1Interval; i++ )
-        f7Buffer[i] = f7Buffer[-1] + _c3DeltasBuffer[i-1];
+    f7Buffer++;
+    for( int32 i = 0; i < (int32)deltaCount; i++ )
+        f7Buffer[i] = f7Buffer[i-1] + _c3DeltasBuffer[i];
+
+    return true;
 }
 
 ///
@@ -224,8 +227,8 @@ bool MemoryPlot::Open( const char* path )
     if( IsOpen() )
         return false;
 
-    FileStream file;
-    if( !file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering ) )
+    FileStream file;    // #TODO: Enable no buffering again, for now when testing disable to take advantage of caching.
+    if( !file.Open( path, FileMode::Open, FileAccess::Read ) )//, FileFlags::LargeFile | FileFlags::NoBuffering ) )
     {
         _err = file.GetError();
         return false;
