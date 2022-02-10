@@ -143,7 +143,15 @@ public:
     uint64 GetC3ParkCount() const;
     uint64 GetF7EntryCount() const;
 
-    bool ReadC3Park( uint64 parkIndex, uint64* f7Buffer );
+    // Read a whole C3 park into f7Buffer.
+    // f7Buffer must hold at least as many as the amount of entries
+    // required per C3Park. (kCheckpoint1Interval).
+    // The return value should be the entries in the park.
+    // It should never be 0.
+    // If the return value is negative, there was an error reading the park.
+    int64 ReadC3Park( uint64 parkIndex, uint64* f7Buffer );
+
+    bool ReadP7Entries( uint64 parkIndex, uint64* p7Indices );
 
     uint64 GetFullProofForF7Index( uint64 f7Index, byte* fullProof );
 
@@ -152,7 +160,8 @@ public:
 private:
     IPlotFile& _plot;
 
-    uint64 _c3ParkBuffer[CalculateC3Size()];
-    byte*  _c3DeltasBuffer;
+    uint64  _c3ParkBuffer[CalculateC3Size()];
+    uint64* _p7ParkBuffer;
+    byte*   _c3DeltasBuffer;
 };
 

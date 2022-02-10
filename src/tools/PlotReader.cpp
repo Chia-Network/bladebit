@@ -13,12 +13,19 @@
 PlotReader::PlotReader( IPlotFile& plot )
     : _plot( plot )
     , _c3DeltasBuffer( bbcalloc<byte>( kCheckpoint1Interval ) )
-{}
+    , _p7ParkBuffer  ( nullptr )
+{
+    // Since it's for a bit field, we need to round up to the uint64 field size.
+    const size_t p7AllocSize = RoundUpToNextBoundaryT( CalculatePark7Size( plot.K() ), sizeof( uint64 ) );
+    _p7ParkBuffer = bbmalloc<uint64>( p7AllocSize );
+    memset( _p7ParkBuffer, 0, p7AllocSize );
+}
 
 //-----------------------------------------------------------
 PlotReader::~PlotReader()
 {
     free( _c3DeltasBuffer );
+    free( _p7ParkBuffer );
 }
 
 //-----------------------------------------------------------
@@ -38,7 +45,7 @@ PlotReader::~PlotReader()
 // }
 
 //-----------------------------------------------------------
-bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
+int64 PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
 {
     const uint32 k              = _plot.K();
     const size_t f7SizeBytes    = CDiv( k, 8 );
@@ -51,30 +58,33 @@ bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
     // First we need to read the root F7 entry for the park, 
     // which is at in C1 table.
     if( !_plot.Seek( SeekOrigin::Begin, (int64)c1EntryAddress ) )
-        return false;
+        return -1;
 
+    // #TODO: Ensure the C1 address is within the C1 table bounds.
     uint64 c1 = 0;
     if( _plot.Read( f7SizeBytes, &c1 ) != (ssize_t)f7SizeBytes )
-        return false;
+        return -1;
 
     c1 = Swap64( c1 << ( 64 - k ) );
 
+    // #TODO: Ensure we can read this park. If it's not present, it means
+    //        the C1 entry is the only entry in the park, so just return it.
     // Read the park into our buffer
     if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
-        return false;
+        return -1;
 
     // Read the size of the compressed C3 deltas
     uint16 compressedSize = 0;
     if( _plot.Read( sizeof( uint16 ), &compressedSize ) != (ssize_t)sizeof( uint16 ) )
-        return false;
+        return -1;
 
     compressedSize = Swap16( compressedSize );
     if( compressedSize > c3ParkSize )
-        return false;
+        return -1;
 
     memset( _c3ParkBuffer, 0, sizeof( _c3ParkBuffer ) );
     if( _plot.Read( c3ParkSize - sizeof( uint16 ), _c3ParkBuffer ) != c3ParkSize - sizeof( uint16 ) )
-        return false;
+        return -1;
 
     // Now we can read the f7 deltas from the C3 park
     const size_t deltaCount = FSE_decompress_usingDTable( 
@@ -83,11 +93,12 @@ bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
                                 (const FSE_DTable*)DTable_C3 );
 
     if( FSE_isError( deltaCount ) )
-        return false;           // #TODO: Set error message locally
+        return -1;           // #TODO: Set error message locally
 
+    ASSERT( deltaCount );
     for( uint32 i = 0; i < deltaCount; i++ )
         if( _c3DeltasBuffer[i] == 0xFF )
-            return false;
+            return -1;
 
     // Unpack deltas into absolute values
     memset( f7Buffer, 0, kCheckpoint1Interval * sizeof( uint64 ) );
@@ -98,6 +109,37 @@ bool PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
     f7Buffer++;
     for( int32 i = 0; i < (int32)deltaCount; i++ )
         f7Buffer[i] = f7Buffer[i-1] + _c3DeltasBuffer[i];
+
+    return (int64)deltaCount+1;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::ReadP7Entries( uint64 parkIndex, uint64* p7Indices )
+{
+    const uint32 k              = _plot.K();
+    const uint32 p7EntrySize    = k + 1;
+    const uint64 p7TableAddress = _plot.TableAddress( PlotTable::Table7 );
+    const size_t p7TableMaxSize = _plot.TableSize( PlotTable::Table7 );
+    const size_t parkSizeBytes  = CalculatePark7Size( k );
+
+    const uint64 maxParks       = p7TableMaxSize / parkSizeBytes;
+
+    // Park must be in the range of the maximum table parks encoded
+    if( parkIndex >= maxParks )
+        return false;
+
+    const uint64 parkAddress = p7TableAddress + parkIndex * parkSizeBytes;
+
+    if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
+        return false;
+
+    if( _plot.Read( parkSizeBytes, _p7ParkBuffer ) != parkSizeBytes )
+        return false;
+
+    BitReader parkReader( _p7ParkBuffer, parkSizeBytes * 8 );
+
+    for( uint32 i = 0; i < kEntriesPerPark; i++ )
+        p7Indices[i] = parkReader.ReadBits64( p7EntrySize );
 
     return true;
 }
@@ -395,4 +437,6 @@ int MemoryPlot::GetError()
 {
     return _err;
 }
+
+
 

@@ -270,3 +270,5 @@ void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fi
         sizes.metaBOverflow +
         sizes.crossBucketTotal;
 }
+
+

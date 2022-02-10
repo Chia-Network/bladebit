@@ -1,28 +1,64 @@
 #pragma once
 
+// This is a utility class for reading entries encoded in bits, whic
+// are aligned to uint64 boundaries and written as big-endian.
+// This helps us read values by firest transforming the data back to
+// little endian and making it easy to read variable-sized bit values.
+// The format of the bits is such that the entries are shifted all the way to
+// the left of a field. For example, an initial 32-bit value will be found in the MSbits of the first field.
 class BitReader
 {
-    // bytes must be rounded-up to 64-bit boundaries
+public:
+    // bytesBE must be rounded-up to 64-bit boundaries
+    // This expects the bytes to be encoded as 64-bit big-endian fields.
+    // The last bytes will be shifted to the right then swaped as 64-bits as well.
     //-----------------------------------------------------------
-    inline BitReader( uint64* bytes, size_t sizeBits )
-        : _fields  ( bytes    )
+    inline BitReader( uint64* bytesBE, size_t sizeBits )
+        : _fields  ( bytesBE  )
         , _sizeBits( sizeBits )
         , _position( 0 )
     {
         ASSERT( sizeBits / 64 * 64 == sizeBits );
         ASSERT( sizeBits <= (size_t)std::numeric_limits<ssize_t>::max() );
+
+        const size_t fieldCount = sizeBits / 64;
+
+        for( uint64 i = 0; i < fieldCount; i++ )
+            bytesBE[i] = Swap64( bytesBE[i] );
+        
+        // Also swap any remainder bytes
+        const size_t bitsRemainder = sizeBits - fieldCount * 64;
+        if( bitsRemainder )
+            bytesBE[fieldCount] = Swap64( bytesBE[fieldCount] << ( 64 - bitsRemainder ) );
     }
 
+    // Read 64 bits or less
     //-----------------------------------------------------------
-    bool Seek( size_t bitPosition )
+    uint64 ReadBits64( const uint32 bitCount )
     {
-        if( bitPosition > _sizeBits )
+        ASSERT( bitCount <= 64 );
+        ASSERT( _position + bitCount <= _sizeBits );
+
+        const uint64 fieldIndex    = _position >> 6; // _position / 64
+        // const uint32 bitIndex      = (uint32)( _position - fieldIndex * 64 ); // This is the local bit position inside the current field.
+        const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - _position;
+        const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
+
+        uint64 value = _fields[fieldIndex] >> shift;
+
+        // const uint32 bitsRead = 64 - bitIndex;
+        if( bitsAvailable < bitCount )
         {
-            ASSERT( 0 );
-            return false;
+            // Have to read one more field
+            const uint32 bitsNeeded = bitCount - bitsAvailable;
+            value = ( value << bitsNeeded ) | ( _fields[fieldIndex+1] >> ( 64 - bitsNeeded ) );
         }
-            
-        _position = bitPosition;
+
+        // Mask-out part of the fields we don't need
+        value &= ( ( 1ull << bitCount ) - 1 );
+
+        _position += bitCount;
+        return value;
     }
 
     //-----------------------------------------------------------
@@ -30,45 +66,45 @@ class BitReader
     // storing them into outBytes. This is for compatibility
     // with the way chiapos stores data in their plots
     //-----------------------------------------------------------
-    void ReadBytes( size_t byteCount, byte* outBytes )
-    {
-        ASSERT( byteCount <= (size_t)std::numeric_limits<ssize_t>::max() );
-        ASSERT( byteCount * 8 < _sizeBits );
-        const size_t fieldCount = CDiv( byteCount, 8 );
+    // void ReadBytes( size_t byteCount, byte* outBytes )
+    // {
+    //     ASSERT( byteCount <= (size_t)std::numeric_limits<ssize_t>::max() );
+    //     ASSERT( byteCount * 8 < _sizeBits );
+    //     const size_t fieldCount = CDiv( byteCount, 8 );
         
-        const size_t fieldIndex = _position >> 6; // _position / 64
-        ASSERT( fieldIndex < _position );
+    //     const size_t fieldIndex = _position >> 6; // _position / 64
+    //     ASSERT( fieldIndex < _position );
 
-        const uint32 bitIndex = (uint32)( _position - fieldIndex * 64 ); // This is the local bit position inside the current field.
+    //     const uint32 bitIndex = (uint32)( _position - fieldIndex * 64 ); // This is the local bit position inside the current field.
 
-        // Fast path for when the bit index is 0
-        if( bitIndex == 0 )
-        {
-            const uint64* fieldReader = _fields + fieldIndex;
-            uint64*       fieldWriter = (uint64*)outBytes;
+    //     // Fast path for when the bit index is 0
+    //     if( bitIndex == 0 )
+    //     {
+    //         const uint64* fieldReader = _fields + fieldIndex;
+    //         uint64*       fieldWriter = (uint64*)outBytes;
 
-            const uint64* end = fieldReader + fieldCount;
-            do {
-                *fieldWriter++ = Swap64( *fieldReader++ );
-            } 
-            while( fieldReader < end );
+    //         const uint64* end = fieldReader + fieldCount;
+    //         do {
+    //             *fieldWriter++ = Swap64( *fieldReader++ );
+    //         } 
+    //         while( fieldReader < end );
 
-            // Read remaining bytes that are not field-aligned
-            const size_t bytesRemaining = byteCount - fieldCount * 8;
-            if( bytesRemaining )
-            {
-                const uint64 remainder = Swap64( *fieldReader );
-                memcpy( fieldWriter, &remainder, sizeof( remainder ) );
-            }
-        }
-        else
-        {
-            // #TODO: Implement this when we need it
-            ASSERT( 0 );
-            // for( size_t i = 0; i < fieldCount; i++ )
-            // {}
-        }
-    }
+    //         // Read remaining bytes that are not field-aligned
+    //         const size_t bytesRemaining = byteCount - fieldCount * 8;
+    //         if( bytesRemaining )
+    //         {
+    //             const uint64 remainder = Swap64( *fieldReader );
+    //             memcpy( fieldWriter, &remainder, sizeof( remainder ) );
+    //         }
+    //     }
+    //     else
+    //     {
+    //         // #TODO: Implement this when we need it
+    //         ASSERT( 0 );
+    //         // for( size_t i = 0; i < fieldCount; i++ )
+    //         // {}
+    //     }
+    // }
 
 
 private:

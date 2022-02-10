@@ -1304,7 +1304,7 @@ void DiskPlotPhase3::WritePark7( uint32 bucket, uint32* t6Indices, uint32 bucket
     DiskPlotContext& context = _context;
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
-    const size_t parkSize  = CDiv( (_K + 1) * kEntriesPerPark, 8 );  // #TODO: Move this to its own function
+    const size_t parkSize = CDiv( (_K + 1) * kEntriesPerPark, 8 );  // #TODO: Move this to its own function
 
     if( _park7LeftOversCount )
     {
@@ -1325,6 +1325,8 @@ void DiskPlotPhase3::WritePark7( uint32 bucket, uint32* t6Indices, uint32 bucket
             ASSERT( bucketLength < requiredEntriesToCompletePark );
             return;
         }
+
+        // #TODO: Have to zero-out any entries remaining (in case of the last park)
         
         ASSERT( _park7LeftOversCount == kEntriesPerPark );
         TableWriter::WriteP7Entries( kEntriesPerPark, _park7LeftOvers, xBucketPark );
