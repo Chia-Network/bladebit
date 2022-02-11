@@ -17,6 +17,10 @@ void TestPlotValidate()
 
     PlotReader plot( plotFile );
 
+    uint64 numLinePoint = 0;
+    uint128* linePoints = bbcalloc<uint128>( kEntriesPerPark );
+    plot.ReadLPPark( PlotTable::Table6, 0, linePoints, numLinePoint );
+
     // Test read C3 park
     uint64* f7Entries = bbcalloc<uint64>( kCheckpoint1Interval );
     memset( f7Entries, 0, kCheckpoint1Interval * sizeof( uint64 ) );

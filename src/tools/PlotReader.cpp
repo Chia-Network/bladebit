@@ -12,20 +12,19 @@
 //-----------------------------------------------------------
 PlotReader::PlotReader( IPlotFile& plot )
     : _plot( plot )
-    , _c3DeltasBuffer( bbcalloc<byte>( kCheckpoint1Interval ) )
-    , _p7ParkBuffer  ( nullptr )
 {
-    // Since it's for a bit field, we need to round up to the uint64 field size.
-    const size_t p7AllocSize = RoundUpToNextBoundaryT( CalculatePark7Size( plot.K() ), sizeof( uint64 ) );
-    _p7ParkBuffer = bbmalloc<uint64>( p7AllocSize );
-    memset( _p7ParkBuffer, 0, p7AllocSize );
+    const size_t largestParkSize           = RoundUpToNextBoundaryT( CalculateParkSize( TableId::Table1 ), sizeof( uint64 ) * 2 );
+    const size_t maxDecompressedDeltasSize = RoundUpToNextBoundaryT( (size_t)0x7FFF, sizeof( uint64 ) );
+
+    _parkBuffer   = bbmalloc<uint64>( largestParkSize );
+    _deltasBuffer = bbmalloc<byte>  ( maxDecompressedDeltasSize );
 }
 
 //-----------------------------------------------------------
 PlotReader::~PlotReader()
 {
-    free( _c3DeltasBuffer );
-    free( _p7ParkBuffer );
+    free( _parkBuffer );
+    free( _deltasBuffer );
 }
 
 //-----------------------------------------------------------
@@ -82,14 +81,14 @@ int64 PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
     if( compressedSize > c3ParkSize )
         return -1;
 
-    memset( _c3ParkBuffer, 0, sizeof( _c3ParkBuffer ) );
-    if( _plot.Read( c3ParkSize - sizeof( uint16 ), _c3ParkBuffer ) != c3ParkSize - sizeof( uint16 ) )
+    // memset( _parkBuffer, 0, _parkBufferSize );
+    if( _plot.Read( c3ParkSize - sizeof( uint16 ), _parkBuffer ) != c3ParkSize - sizeof( uint16 ) )
         return -1;
 
     // Now we can read the f7 deltas from the C3 park
     const size_t deltaCount = FSE_decompress_usingDTable( 
-                                _c3DeltasBuffer, kCheckpoint1Interval, 
-                                _c3ParkBuffer, compressedSize, 
+                                _deltasBuffer, kCheckpoint1Interval, 
+                                _parkBuffer, compressedSize, 
                                 (const FSE_DTable*)DTable_C3 );
 
     if( FSE_isError( deltaCount ) )
@@ -97,7 +96,7 @@ int64 PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
 
     ASSERT( deltaCount );
     for( uint32 i = 0; i < deltaCount; i++ )
-        if( _c3DeltasBuffer[i] == 0xFF )
+        if( _deltasBuffer[i] == 0xFF )
             return -1;
 
     // Unpack deltas into absolute values
@@ -108,7 +107,7 @@ int64 PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
 
     f7Buffer++;
     for( int32 i = 0; i < (int32)deltaCount; i++ )
-        f7Buffer[i] = f7Buffer[i-1] + _c3DeltasBuffer[i];
+        f7Buffer[i] = f7Buffer[i-1] + _deltasBuffer[i];
 
     return (int64)deltaCount+1;
 }
@@ -133,15 +132,130 @@ bool PlotReader::ReadP7Entries( uint64 parkIndex, uint64* p7Indices )
     if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
         return false;
 
-    if( _plot.Read( parkSizeBytes, _p7ParkBuffer ) != parkSizeBytes )
+    if( _plot.Read( parkSizeBytes, _parkBuffer ) != parkSizeBytes )
         return false;
 
-    BitReader parkReader( _p7ParkBuffer, parkSizeBytes * 8 );
+    BitReader parkReader( _parkBuffer, parkSizeBytes * 8 );
 
     for( uint32 i = 0; i < kEntriesPerPark; i++ )
         p7Indices[i] = parkReader.ReadBits64( p7EntrySize );
 
     return true;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::ReadLPPark( PlotTable table, uint64 parkIndex, uint128 linePoints[kEntriesPerPark], uint64& outEntryCount )
+{
+    outEntryCount = 0;
+
+    ASSERT( linePoints );
+    ASSERT( table < PlotTable::C1 );
+
+    if( table >= PlotTable::C1 )
+        return false;
+
+    const uint32 k              = _plot.K();
+    const size_t lpSizeBytes    = LinePointSizeBytes( k );
+    const size_t tableMaxSize   = _plot.TableSize( table );
+    const size_t tableAddress   = _plot.TableAddress( table );
+    const size_t parkSize       = CalculateParkSize( (TableId)table );
+
+    const uint64 maxParks       = tableMaxSize / parkSize;
+    if( parkIndex >= maxParks )
+        return false;
+    
+    const size_t parkAddress    = tableAddress + parkIndex * parkSize;
+    
+    if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
+        return false;
+
+    // Read base full line point
+    uint128 baseLinePoint;
+    {
+        uint64 baseLPBytes[CDiv(LinePointSizeBytes( 50 ), 8)] = { 0 };
+
+        if( _plot.Read( lpSizeBytes, baseLPBytes ) != lpSizeBytes )
+            return false;
+
+        const size_t lpSizeBits = LinePointSizeBytes( k ) * 8;
+        BitReader lpReader( baseLPBytes, RoundUpToNextBoundary( lpSizeBits, 8 ) );
+        baseLinePoint = lpReader.ReadBits128( lpSizeBits );
+    }
+
+    // Read stubs
+    const size_t stubsSizeBytes = CDiv( ( kEntriesPerPark - 1 ) * ( k - kStubMinusBits ), 8 );
+    uint64* stubsBuffer = _parkBuffer;
+
+    if( _plot.Read( stubsSizeBytes, stubsBuffer ) != stubsSizeBytes )
+        return false;
+
+    // Read deltas
+    const size_t maxDeltasSizeBytes = CalculateMaxDeltasSize( (TableId)table );
+    byte* compressedDeltaBuffer = ((byte*)_parkBuffer) + RoundUpToNextBoundary( stubsSizeBytes, sizeof( uint64 ) );
+    byte* deltaBuffer = _deltasBuffer;
+    
+    uint16 compressedDeltasSize = 0;
+    if( _plot.Read( 2, &compressedDeltasSize ) != 2 )
+        return false;
+
+    if( !( compressedDeltasSize & 0x8000 ) && compressedDeltasSize > maxDeltasSizeBytes )
+        return false;
+
+    size_t deltaCount = 0;
+    if( compressedDeltasSize & 0x8000 ) 
+    {
+        // Uncompressed
+        compressedDeltasSize &= 0x7fff;
+        if( _plot.Read( compressedDeltasSize, compressedDeltaBuffer ) != compressedDeltasSize )
+            return false;
+
+        deltaCount = compressedDeltasSize;
+    }
+    else
+    {
+        // Compressed
+        if( _plot.Read( compressedDeltasSize, compressedDeltaBuffer ) != compressedDeltasSize )
+            return false;
+
+        // Decompress deltas
+        deltaCount = FSE_decompress_usingDTable( 
+                        deltaBuffer, kEntriesPerPark - 1, 
+                        compressedDeltaBuffer, compressedDeltasSize, 
+                        DTables[(int)table] );
+
+        if( FSE_isError( deltaCount ) )
+            return false;
+    }
+
+    // Decode line points from stubs and deltas
+    linePoints[0] = baseLinePoint;
+    if( deltaCount > 0 )
+    {
+        const uint32 stubBitSize = ( _K - kStubMinusBits );
+
+        BitReader stubReader( stubsBuffer, RoundUpToNextBoundary( stubsSizeBytes * 8, 64 ) );
+        
+        for( uint64 i = 1; i <= deltaCount; i++ )
+        {
+            // Since these entries are still deltafied, we can fit them in 64-bits
+            const uint64 stub = stubReader.ReadBits64( stubBitSize );
+            const uint64 lp   = stub | (((uint64)deltaBuffer[i-1]) << stubBitSize );
+
+            // Get absolute LP from delta
+            linePoints[i] = linePoints[i-1] + (uint128)lp;
+        }
+    }
+
+
+    outEntryCount = deltaCount + 1;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::FetchProofFromP7Entry( uint64 p7Entry, uint64 proof[32] )
+{
+    // Read linepoint
+
+    // for( PlotTable table = PlotTable::Table6 )
 }
 
 ///

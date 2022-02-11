@@ -156,12 +156,15 @@ public:
     uint64 GetFullProofForF7Index( uint64 f7Index, byte* fullProof );
 
     // void   FindF7ParkIndices( uintt64 f7, std::vector<uint64> indices );
+    bool ReadLPPark( PlotTable table, uint64 parkIndex, uint128 linePoints[kEntriesPerPark], uint64& outEntryCount );
+
+    bool FetchProofFromP7Entry( uint64 p7Entry, uint64 proof[32] );
 
 private:
     IPlotFile& _plot;
 
-    uint64  _c3ParkBuffer[CalculateC3Size()];
-    uint64* _p7ParkBuffer;
-    byte*   _c3DeltasBuffer;
+    // size_t  _parkBufferSize;
+    uint64* _parkBuffer    ;        // Buffer for loading compressed park data.
+    byte*   _deltasBuffer  ;        // Buffer for decompressing deltas in parks that have delta. 
 };
 

@@ -40,13 +40,11 @@ public:
         ASSERT( _position + bitCount <= _sizeBits );
 
         const uint64 fieldIndex    = _position >> 6; // _position / 64
-        // const uint32 bitIndex      = (uint32)( _position - fieldIndex * 64 ); // This is the local bit position inside the current field.
         const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - _position;
         const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
 
         uint64 value = _fields[fieldIndex] >> shift;
 
-        // const uint32 bitsRead = 64 - bitIndex;
         if( bitsAvailable < bitCount )
         {
             // Have to read one more field
@@ -55,11 +53,51 @@ public:
         }
 
         // Mask-out part of the fields we don't need
-        value &= ( ( 1ull << bitCount ) - 1 );
+        value &= ( 0xFFFFFFFFFFFFFFFFull >> (64 - bitCount ) );
 
         _position += bitCount;
         return value;
     }
+
+    // Read 128 bits or less
+    //-----------------------------------------------------------
+    uint128 ReadBits128( const uint32 bitCount )
+    {
+        ASSERT( bitCount <= 128 );
+        ASSERT( _position + bitCount <= _sizeBits );
+
+        const uint64 fieldIndex    = _position >> 6; // _position / 64
+        const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - _position;
+        const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
+
+        uint128 value = _fields[fieldIndex] >> shift;
+
+        if( bitsAvailable < bitCount )
+        {
+            // Have to read one more field
+            const uint32 bitsNeeded = bitCount - bitsAvailable;
+
+            if( bitsNeeded > 64 )
+            {
+                // Need data from 2 more fields
+                const uint32 lastFieldBitsNeeded = bitsNeeded - 64;
+                value = ( value << bitsNeeded ) | ( _fields[fieldIndex+1] << lastFieldBitsNeeded );
+                value |= _fields[fieldIndex+2] >> ( 64 - lastFieldBitsNeeded );
+            }
+            else
+            {
+                // Only need data from 1 more field
+                value = ( value << bitsNeeded ) | ( _fields[fieldIndex+1] >> ( 64 - bitsNeeded ) );
+            }
+        }
+
+        // Mask-out part of the fields we don't need
+        value &= ( uint128( 0xFFFFFFFFFFFFFFFFull, 0xFFFFFFFFFFFFFFFFull ) >> ( 128 - bitCount ) );
+
+        _position += bitCount;
+        return value;
+    }
+    
 
     //-----------------------------------------------------------
     // Read bytes, but convert our fields to BigEndian before

@@ -130,8 +130,14 @@ constexpr inline static size_t CalculateC3Size()
     return (size_t)CDiv( kC3BitsPerEntry * kCheckpoint1Interval, 8 );
 }
 
+//-----------------------------------------------------------
 inline static size_t CalculatePark7Size( uint k )
 {
     return CDiv( (k + 1) * (uint64)kEntriesPerPark, 8 );
 }
 
+//-----------------------------------------------------------
+constexpr inline static size_t LinePointSizeBytes( uint32 k )
+{
+    return CDiv( (size_t)k * 2, 8 );
+}
