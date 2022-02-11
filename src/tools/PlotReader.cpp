@@ -144,21 +144,21 @@ bool PlotReader::ReadP7Entries( uint64 parkIndex, uint64* p7Indices )
 }
 
 //-----------------------------------------------------------
-bool PlotReader::ReadLPPark( PlotTable table, uint64 parkIndex, uint128 linePoints[kEntriesPerPark], uint64& outEntryCount )
+bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex, 
+                                       BitReader& outStubs, byte*& outDeltas, 
+                                       uint128& outBaseLinePoint, uint64& outDeltaCounts )
 {
-    outEntryCount = 0;
+    outDeltaCounts = 0;
 
-    ASSERT( linePoints );
-    ASSERT( table < PlotTable::C1 );
-
-    if( table >= PlotTable::C1 )
+    ASSERT( table < TableId::Table7 );
+    if( table >= TableId::Table7 )
         return false;
 
     const uint32 k              = _plot.K();
     const size_t lpSizeBytes    = LinePointSizeBytes( k );
-    const size_t tableMaxSize   = _plot.TableSize( table );
-    const size_t tableAddress   = _plot.TableAddress( table );
-    const size_t parkSize       = CalculateParkSize( (TableId)table );
+    const size_t tableMaxSize   = _plot.TableSize( (PlotTable)table );
+    const size_t tableAddress   = _plot.TableAddress( (PlotTable)table );
+    const size_t parkSize       = CalculateParkSize( table );
 
     const uint64 maxParks       = tableMaxSize / parkSize;
     if( parkIndex >= maxParks )
@@ -226,14 +226,33 @@ bool PlotReader::ReadLPPark( PlotTable table, uint64 parkIndex, uint128 linePoin
         if( FSE_isError( deltaCount ) )
             return false;
     }
+    
+    outStubs         = BitReader( stubsBuffer, RoundUpToNextBoundary( stubsSizeBytes * 8, 64 ) );
+    outBaseLinePoint = baseLinePoint;
+    outDeltas        = deltaBuffer;
+    outDeltaCounts   = deltaCount;
+
+    return true;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints[kEntriesPerPark], uint64& outEntryCount )
+{
+    outEntryCount = 0;
+
+    BitReader stubReader;
+    byte*     deltaBuffer   = nullptr;
+    uint128   baseLinePoint = 0;
+    uint64    deltaCount    = 0;
+
+    if( !ReadLPParkComponents( table, parkIndex, stubReader, deltaBuffer, baseLinePoint, deltaCount ) )
+        return false;
 
     // Decode line points from stubs and deltas
     linePoints[0] = baseLinePoint;
     if( deltaCount > 0 )
     {
         const uint32 stubBitSize = ( _K - kStubMinusBits );
-
-        BitReader stubReader( stubsBuffer, RoundUpToNextBoundary( stubsSizeBytes * 8, 64 ) );
         
         for( uint64 i = 1; i <= deltaCount; i++ )
         {
@@ -246,13 +265,55 @@ bool PlotReader::ReadLPPark( PlotTable table, uint64 parkIndex, uint128 linePoin
         }
     }
 
-
     outEntryCount = deltaCount + 1;
+    return true;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::ReadLP( TableId table, uint64 index, uint128& outLinePoint )
+{
+    outLinePoint = 0;
+
+    BitReader stubReader;
+    byte*     deltaBuffer   = nullptr;
+    uint128   baseLinePoint = 0;
+    uint64    deltaCount    = 0;
+
+    const uint64 parkIndex  = index / kEntriesPerPark;
+
+    if( !ReadLPParkComponents( table, parkIndex, stubReader, deltaBuffer, baseLinePoint, deltaCount ) )
+        return false;
+
+    const uint64 lpLocalIdx = index - parkIndex * kEntriesPerPark;
+
+    if( lpLocalIdx > 0 )
+    {
+        if( lpLocalIdx-1 >= deltaCount )
+            return false;
+
+        const uint64 maxIter     = std::min( lpLocalIdx, deltaCount );
+        const uint32 stubBitSize = ( _K - kStubMinusBits );
+
+        for( uint64 i = 0; i < maxIter; i++ )
+        {
+            // Since these entries are still deltafied, we can fit them in 64-bits
+            const uint64 stub    = stubReader.ReadBits64( stubBitSize );
+            const uint64 lpDelta = stub | (((uint64)deltaBuffer[i]) << stubBitSize );
+
+            // Get absolute LP from delta
+            baseLinePoint += (uint128)lpDelta;
+        }
+    }
+
+    outLinePoint = baseLinePoint;
+    return true;
 }
 
 //-----------------------------------------------------------
 bool PlotReader::FetchProofFromP7Entry( uint64 p7Entry, uint64 proof[32] )
 {
+    // p7Entry is an index into Table 6
+    
     // Read linepoint
 
     // for( PlotTable table = PlotTable::Table6 )

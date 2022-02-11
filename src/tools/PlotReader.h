@@ -4,6 +4,7 @@
 #include "Util.h"
 #include <vector>
 
+class BitReader;
 
 enum class PlotTable
 {
@@ -156,9 +157,18 @@ public:
     uint64 GetFullProofForF7Index( uint64 f7Index, byte* fullProof );
 
     // void   FindF7ParkIndices( uintt64 f7, std::vector<uint64> indices );
-    bool ReadLPPark( PlotTable table, uint64 parkIndex, uint128 linePoints[kEntriesPerPark], uint64& outEntryCount );
+    bool ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints[kEntriesPerPark], uint64& outEntryCount );
+
+    bool ReadLP( TableId table, uint64 index, uint128& outLinePoint );
 
     bool FetchProofFromP7Entry( uint64 p7Entry, uint64 proof[32] );
+
+    inline IPlotFile& PlotFile() const { return _plot; }
+private:
+
+    bool ReadLPParkComponents( TableId table, uint64 parkIndex, 
+                               BitReader& outStubs, byte*& outDeltas, 
+                               uint128& outBaseLinePoint, uint64& outDeltaCounts );
 
 private:
     IPlotFile& _plot;

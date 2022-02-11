@@ -9,6 +9,14 @@
 class BitReader
 {
 public:
+
+    //-----------------------------------------------------------
+    inline BitReader() 
+        : _fields  ( nullptr )
+        , _sizeBits( 0 )
+        , _position( 0 )
+    {}
+
     // bytesBE must be rounded-up to 64-bit boundaries
     // This expects the bytes to be encoded as 64-bit big-endian fields.
     // The last bytes will be shifted to the right then swaped as 64-bits as well.
@@ -34,8 +42,9 @@ public:
 
     // Read 64 bits or less
     //-----------------------------------------------------------
-    uint64 ReadBits64( const uint32 bitCount )
+    inline uint64 ReadBits64( const uint32 bitCount )
     {
+        // #TODO: Use shared static version
         ASSERT( bitCount <= 64 );
         ASSERT( _position + bitCount <= _sizeBits );
 
@@ -61,7 +70,7 @@ public:
 
     // Read 128 bits or less
     //-----------------------------------------------------------
-    uint128 ReadBits128( const uint32 bitCount )
+    inline uint128 ReadBits128( const uint32 bitCount )
     {
         ASSERT( bitCount <= 128 );
         ASSERT( _position + bitCount <= _sizeBits );
@@ -97,53 +106,30 @@ public:
         _position += bitCount;
         return value;
     }
-    
 
     //-----------------------------------------------------------
-    // Read bytes, but convert our fields to BigEndian before
-    // storing them into outBytes. This is for compatibility
-    // with the way chiapos stores data in their plots
-    //-----------------------------------------------------------
-    // void ReadBytes( size_t byteCount, byte* outBytes )
-    // {
-    //     ASSERT( byteCount <= (size_t)std::numeric_limits<ssize_t>::max() );
-    //     ASSERT( byteCount * 8 < _sizeBits );
-    //     const size_t fieldCount = CDiv( byteCount, 8 );
-        
-    //     const size_t fieldIndex = _position >> 6; // _position / 64
-    //     ASSERT( fieldIndex < _position );
+    inline static uint64 ReadBits64( const uint32 bitCount, const uint64* fields, const uint64 position )
+    {
+        ASSERT( bitCount <= 64 );
 
-    //     const uint32 bitIndex = (uint32)( _position - fieldIndex * 64 ); // This is the local bit position inside the current field.
+        const uint64 fieldIndex    = position >> 6; // _position / 64
+        const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - position;
+        const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
 
-    //     // Fast path for when the bit index is 0
-    //     if( bitIndex == 0 )
-    //     {
-    //         const uint64* fieldReader = _fields + fieldIndex;
-    //         uint64*       fieldWriter = (uint64*)outBytes;
+        uint64 value = fields[fieldIndex] >> shift;
 
-    //         const uint64* end = fieldReader + fieldCount;
-    //         do {
-    //             *fieldWriter++ = Swap64( *fieldReader++ );
-    //         } 
-    //         while( fieldReader < end );
+        if( bitsAvailable < bitCount )
+        {
+            // Have to read one more field
+            const uint32 bitsNeeded = bitCount - bitsAvailable;
+            value = ( value << bitsNeeded ) | ( fields[fieldIndex+1] >> ( 64 - bitsNeeded ) );
+        }
 
-    //         // Read remaining bytes that are not field-aligned
-    //         const size_t bytesRemaining = byteCount - fieldCount * 8;
-    //         if( bytesRemaining )
-    //         {
-    //             const uint64 remainder = Swap64( *fieldReader );
-    //             memcpy( fieldWriter, &remainder, sizeof( remainder ) );
-    //         }
-    //     }
-    //     else
-    //     {
-    //         // #TODO: Implement this when we need it
-    //         ASSERT( 0 );
-    //         // for( size_t i = 0; i < fieldCount; i++ )
-    //         // {}
-    //     }
-    // }
+        // Mask-out part of the fields we don't need
+        value &= ( 0xFFFFFFFFFFFFFFFFull >> (64 - bitCount ) );
 
+        return value;
+    }
 
 private:
     uint64* _fields  ;  // Our fields buffer
@@ -151,6 +137,187 @@ private:
     size_t  _sizeBits;  // Size of the how much data we currently have in bits
 };
 
+
+template<size_t BitSize>
+class Bits
+{
+public:
+    //-----------------------------------------------------------
+    inline Bits()
+    {
+        if constexpr ( BitSize )
+            _fields[0] = 0;
+    }
+
+    //-----------------------------------------------------------
+    inline Bits( uint64 value, uint32 sizeBits )
+    {
+        static_assert( BitSize, "Attempting to write to a zero-sized Bits." );
+        
+        _fields[0] = 0;
+        Write( value, sizeBits );
+    }
+
+    //-----------------------------------------------------------
+    inline Bits( const byte* bytesBE, uint32 sizeBits, uint32 bitOffset )
+    {
+        ASSERT( sizeBits <= BitSize );
+
+        const uint64 startByte = bitOffset / 8;
+        bytesBE += startByte;
+
+        const size_t fieldCount = sizeBits / 64;
+
+        for( uint64 i = 0; i < fieldCount; i++ )
+        {
+            uint64 field;
+            memcpy( &field, bytesBE, sizeof( uint64 ) );
+            _fields[i] = Swap64( field );
+            
+            bytes += sizeof( uint64 );
+        }
+        
+        // Also swap any remainder bytes
+        const size_t bitsRemainder = sizeBits - fieldCount * 64;
+        if( bitsRemainder )
+        {
+            const size_t bytesRemainder = CDiv( bitsRemainder, 8 );
+
+            uint64 field;
+            memcpy( &field, bytesBE, bytesRemainder );
+            _fields[fieldCount] = Swap64( field ) >> ( 64 - bitsRemainder ) );
+        }
+
+        _length = sizeBits;
+    }
+
+    //-----------------------------------------------------------
+    template<size_t TBitsSize>
+    inline Bits( const Bits<TBitsSize>& src )
+    {
+        static_assert( TBitsSize <= BitSize, "Bit size mismatch." );
+        _length = src._length;
+        memcpy( _fields, src._fields, CDiv( src._length, 8 ) );
+    }
+
+    //-----------------------------------------------------------
+    inline void Clear()
+    {
+        _length = 0;
+
+        if constexpr ( BitSize )
+            _fields[0] = 0;
+    }
+
+    //-----------------------------------------------------------
+    inline void Write( uint64 value, uint32 bitCount )
+    {
+        ASSERT( bitCount <= 64 );
+        ASSERT( _length + bitCount <= BitSize );
+
+        const uint64 fieldIndex = _length >> 6;
+        const uint32 bitsFree   = ( ( fieldIndex + 1 ) * 64 ) - _length;
+
+        // Shift-up any current bits
+        const uint32 shift  = std::min( bitCount, bitsFree );
+        _fields[fieldIndex] = ( _fields[fieldIndex] << shift ) | ( value >> ( bitCount - shift ) );
+
+        // If we still have bits to write, then write in the next field
+        if( shift < bitCount )
+        {
+            const uint32 remainder = bitCount - shift;
+            const uint64 mask      = 0xFFFFFFFFFFFFFFFFull >> ( 64 - remainder );
+            _fields[fieldIndex+1]  = value & mask;
+        }
+
+        _length += bitCount;
+    }
+
+    //-----------------------------------------------------------
+    template<size_t TBitsSize>
+    inline void Write( const Bits<TBitsSize>& other )
+    {
+        ASSERT( _length + other._length <= BitSize );
+
+        const uint64 fieldCount = other._length >> 6;
+        for( uint64 i = 0; i < fieldCount; i++ )
+            Write( other._fields[i], 64 );
+
+        const uint32 remainderBits = (uint32)( other._length - fieldCount * 64 );
+        if( remainderBits )
+            Write( other._fields[fieldCount], remainderBits );
+    }
+
+    //-----------------------------------------------------------
+    inline uint64 ReadUInt64( uint32 bitCount )
+    {
+        ASSERT( bitCount <= BitSize );
+        const uint64 value = BitReader::ReadBits64( bitCount, _fields, 0 );
+        
+        return value;
+    }
+    
+    //-----------------------------------------------------------
+    template<size_t TR>
+    inline Bits<BitSize>& operator=( const Bits<TR>& r ) const
+    {
+        static_assert( TR <= BitSize, "Bit size mismatch." );
+        
+        _length = r._length;
+        memcpy( _fields, r._fields, CDiv( r._length, 8 ) );
+
+        return *this;
+    }
+
+    //-----------------------------------------------------------
+    template<size_t TR>
+    inline Bits<BitSize> operator+( const Bits<TR>& r ) const
+    {
+        Bits<BitSize> result( *this );
+        result.Write( r );
+
+        return result;
+    }
+
+    //-----------------------------------------------------------
+    template<size_t TR>
+    inline Bits<BitSize>& operator+=( const Bits<TR>& r )
+    {
+        this->Write( r );
+        return *this;;
+    }
+
+    //-----------------------------------------------------------
+    inline void ToBytes( byte* bytes )
+    {
+        const uint64 fieldCount = other._length >> 6;
+        for( uint64 i = 0; i < fieldCount; i++ )
+        {
+            const uint64 field = Swap64( _fields[i] );
+            memcpy( bytes, &field, sizeof( field ) );
+            bytes += sizeof( field );
+        }
+        
+        const uint32 remainderBits = (uint32)( other._length - fieldCount * 64 );
+        if( remainderBits )
+        {
+            const uint64 field = Swap64( _fields[fieldCount] << ( 64 - remainderBits ) );
+            const size_t size  = CDiv( remainderBits, 8 );
+
+            memcpy( bytes, &field, size );
+        }
+    }
+
+    // Length in bits
+    //-----------------------------------------------------------
+    inline size_t Length() const { return _length; }
+
+    inline size_t LengthBytes() const { return CDiv( _length, 8 ); }
+
+private:
+    uint64 _fields[CDiv( CDiv( BitSize, 8 ), 8)];
+    uint64 _length = 0; // In bits
+};
 // class BitView
 // {
 // public:

@@ -44,6 +44,12 @@ void WriteLookupTableThread( LPJob* job );
 inline uint64 GetXEnc( uint64 x );
 inline uint64 SquareToLinePoint( uint64 x, uint64 y );
 
+struct BackPtr
+{
+    uint64 x, y;
+};
+
+inline BackPtr LinePointToSquare( uint128 index );
 
 
 #pragma GCC diagnostic push
@@ -68,6 +74,24 @@ FORCE_INLINE uint64 GetXEnc( uint64 x )
     return r;
 }
 
+//-----------------------------------------------------------
+FORCE_INLINE uint128 GetXEnc128( uint64 x )
+{
+    ASSERT( x );
+    uint64 a = x, b = x - 1;
+
+    // if( a % 2 == 0 )
+    if( (a & 1) == 0 )
+        a >>= 1; // a /= 2;
+    else
+        b >>= 1; // b /= 2;
+
+    const uint128 r = (uint128)a * b;
+    ASSERT( r >= a && r >= b );
+
+    return r;
+}
+
 /// #NOTE: From chiapos:
 // Encodes two max k bit values into one max 2k bit value. This can be thought of
 // mapping points in a two dimensional space into a one dimensional space. The benefits
@@ -85,6 +109,22 @@ FORCE_INLINE uint64 SquareToLinePoint( uint64 x, uint64 y )
 
     return GetXEnc( x ) + y;
 }
+
+FORCE_INLINE BackPtr LinePointToSquare( uint128 index )
+{
+    // Performs a square root, without the use of doubles, 
+    // to use the precision of the uint128_t.
+    uint64 x = 0;
+    for( int i = 63; i >= 0; i-- ) 
+    {
+        uint64 new_x = x + ((uint64)1 << i);
+        if( GetXEnc128( new_x ) <= index )
+            x = new_x;
+    }
+
+    return { x, (uint64)(uint64_t)( index - GetXEnc128( x ) ) };
+}
+
 #pragma GCC diagnostic pop
 
 
