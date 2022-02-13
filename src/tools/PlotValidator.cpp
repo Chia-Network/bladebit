@@ -14,7 +14,7 @@
 #define MAX_META_MULTIPLIER 4
 #define MAX_Y_BIT_SIZE      ( MAX_K_SIZE + kExtraBits )
 #define MAX_META_BIT_SIZE   ( MAX_K_SIZE * MAX_META_MULTIPLIER )
-#define MAX_FX_BIT_SIZE     ( MAX_Y_BIT_SIZE + MAX_META_BIT_SIZE )
+#define MAX_FX_BIT_SIZE     ( MAX_Y_BIT_SIZE + MAX_META_BIT_SIZE + MAX_META_BIT_SIZE )
 
 typedef Bits<MAX_Y_BIT_SIZE>    YBits;
 typedef Bits<MAX_META_BIT_SIZE> MetaBits;
@@ -23,8 +23,8 @@ typedef Bits<MAX_FX_BIT_SIZE>   FxBits;
 
 std::string plotPath = "/mnt/p5510a/plots/plot-k32-2022-02-07-03-50-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot";
 
-bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[32] );
-bool ValidateFullProof( uint64 fullProofXs[32] );
+bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] );
+bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 );
 
 uint64 BytesToUInt64( const byte bytes[8] );
 uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 bitCount );
@@ -40,7 +40,8 @@ void TestPlotValidate()
 {
     LoadLTargets();
 
-    MemoryPlot plotFile;
+    // MemoryPlot plotFile;
+    FilePlot plotFile;
     FatalIf( !plotFile.Open( plotPath.c_str() ), 
         "Failed to open plot at path '%s'.", plotPath.c_str() );
 
@@ -71,7 +72,7 @@ void TestPlotValidate()
     // ASSERT( p7Entries[0] == 3208650999 );
     
     uint64 proofFailCount = 0;
-    uint64 fullProofXs[32];
+    uint64 fullProofXs[PROOF_X_COUNT];
 
     for( uint64 i = 0; i < c3ParkCount; i++ )
     {
@@ -79,7 +80,8 @@ void TestPlotValidate()
 
         const uint64 f7IdxBase = i * kCheckpoint1Interval;
 
-        for( uint32 e = 0; e < kCheckpoint1Interval; i++ )
+        // #TODO: Set e back to zero
+        for( uint32 e = 1; e < kCheckpoint1Interval; e++ )
         {
             const uint64 f7Idx       = f7IdxBase + e;
             const uint64 p7ParkIndex = f7Idx / kEntriesPerPark;
@@ -97,14 +99,25 @@ void TestPlotValidate()
 
             const uint64 t6Index = p7Entries[p7LocalIdx];
             
+            bool failed = false;
+
             if( FetchProof( plot, t6Index, fullProofXs ) )
             {
                 // Now we can validate the proof
+                uint64 outF7;
+
+                if( ValidateFullProof( plot, fullProofXs, outF7 ) )
+                    failed = f7 == outF7;
+                else
+                    failed = true;
             }
             else
+                failed = true;
+
+            if( failed )
             {
                 proofFailCount++;
-                Log::Line( "Proof fetch failed for f7[%llu] = %llu ( 0x%16llx ) ", f7Idx, f7, f7 );
+                Log::Line( "Proof fetch failed for f7[%llu] = %llu ( 0x%016llx ) ", f7Idx, f7, f7 );
             }
             
         }
@@ -112,10 +125,10 @@ void TestPlotValidate()
 }
 
 //-----------------------------------------------------------
-bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[32] )
+bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] )
 {
     uint64 lpIndices[2][PROOF_X_COUNT];
-    memset( lpIndices, 0, sizeof( lpIndices ) );
+    // memset( lpIndices, 0, sizeof( lpIndices ) );
 
     uint64* lpIdxSrc = lpIndices[0];
     uint64* lpIdxDst = lpIndices[1];
@@ -140,23 +153,23 @@ bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[32] )
 
             BackPtr ptr = LinePointToSquare( lp );
 
-            lpIdxDst[dst+0] = ptr.x;
-            lpIdxDst[dst+1] = ptr.y;
+            lpIdxDst[dst+0] = ptr.y;
+            lpIdxDst[dst+1] = ptr.x;
         }
 
         lookupCount <<= 1;
 
         std::swap( lpIdxSrc, lpIdxDst );
-        memset( lpIdxDst, 0, sizeof( uint64 ) * PROOF_X_COUNT );
+        // memset( lpIdxDst, 0, sizeof( uint64 ) * PROOF_X_COUNT );
     }
 
     // Full proof x's will be at the src ptr
-    memcpy( fullProofXs, lpIdxSrc, sizeof( uint64 ) * 32 );
+    memcpy( fullProofXs, lpIdxSrc, sizeof( uint64 ) * PROOF_X_COUNT );
     return true;
 }
 
 //-----------------------------------------------------------
-bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[32] )
+bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 )
 {
     const uint32 k        = plot.PlotFile().K();
     const uint32 yBitSize = k + kExtraBits;
@@ -165,7 +178,6 @@ bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[32] )
     MetaBits meta[PROOF_X_COUNT];
 
     // Convert these x's to f1 values
-    uint64 f1[PROOF_X_COUNT] = {0};
     {
         const uint32 xShift = k - kExtraBits;
         
@@ -189,42 +201,52 @@ bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[32] )
             // Get the starting and end locations of y in bits relative to our block
             const uint64 bitStart = x * k - blockIdx * kF1BlockSizeBits;
 
-            const uint64 y = SliceUInt64FromBits( blocks, bitStart, k );
+            BitReader hashBits( (uint64*)blocks, sizeof( blocks ) * 8 );
+            hashBits.Seek( bitStart );
 
-            fx  [i] = ( y << kExtraBits ) | ( x >> xShift );
+            // uint64 y = SliceUInt64FromBits( blocks, bitStart, k ); // #TODO: Figure out what's wrong with this method.
+            uint64 y = hashBits.ReadBits64( k );
+            y = ( y << kExtraBits ) | ( x >> xShift );
+
+            fx  [i] = y;
             meta[i] = MetaBits( x, k );
         }
     }
 
     // Forward propagate f1 values to get the final f7
     uint32 iterCount = PROOF_X_COUNT;
-    for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
+    for( TableId table = TableId::Table2; table <= TableId::Table7; table++, iterCount >>= 1)
     {
         for( uint32 i = 0, dst = 0; i < iterCount; i+= 2, dst++ )
         {
             uint64 y0 = fx[i+0];
             uint64 y1 = fx[i+1];
 
-            if( y0 > y0 ) 
+            const MetaBits* lMeta = &meta[i+0];
+            const MetaBits* rMeta = &meta[i+1];
+
+            if( y0 > y1 ) 
+            {
                 std::swap( y0, y1 );
+                std::swap( lMeta, rMeta );
+            }
 
             // Must be on the same group
             if( !FxMatch( y0, y1 ) )
                 return false;
 
-
             // FxGen
-            const MetaBits& lMeta = meta[i+0];
-            const MetaBits& rMeta = meta[i+1];
-
             uint64 outY;
             MetaBits outMeta;
-            FxGen( table, k, y0, lMeta, rMeta, outY, outMeta );
+            FxGen( table, k, y0, *lMeta, *rMeta, outY, outMeta );
 
             fx  [dst] = outY;
             meta[dst] = outMeta;
         }
     }
+
+    const uint64 mask = (1ull << k) - 1;
+    outF7 = fx[0] & mask;
 
     return true;
 }
@@ -289,8 +311,7 @@ void FxGen( const TableId table, const uint32 k,
     blake3_hasher_update  ( &hasher, inputBytes, input.LengthBytes() );
     blake3_hasher_finalize( &hasher, hashBytes, sizeof( hashBytes ) );
 
-    outY = SliceUInt64FromBits( hashBytes, 0, sizeof( hashBytes ) * 8 )
-            >> ( 64 - (k + kExtraBits) );
+    outY = BytesToUInt64( hashBytes ) >> ( 64 - (k + kExtraBits) );
 
     if( table >= TableId::Table4 && table < TableId::Table7 )
     {
@@ -305,7 +326,12 @@ void FxGen( const TableId table, const uint32 k,
                 break;
         }
 
-        outMeta = MetaBits( hashBytes, k * multiplier, k + kExtraBits );
+        const uint32 metaBits  = k * multiplier;
+        const uint32 yBits     = k + kExtraBits;
+        const uint32 startByte = yBits / 8 ;
+        const uint32 startBit  = yBits - startByte * 8;
+
+        outMeta = MetaBits( hashBytes + startByte, metaBits, startBit );
     }
 }
 
@@ -337,12 +363,16 @@ inline uint64 BytesToUInt64( const byte bytes[8] )
 inline uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 bitCount )
 {
     ASSERT( bitCount <= 64 );
-
+     
+    // #TODO: This is wrong, it's not treating the bytes as 64-bit fields.
+    //        So that we may have swapped at the wrong position.
+    //        In fact we might have fields that span 2 64-bit values.
+    //        So we need to split it into 2, and do 2 swaps.
     const uint64 startByte = bitOffset / 8;
     bytes += startByte;
 
     // Convert bit offset to be local to the uint64 field
-    bitOffset -= bitOffset / 64;
+    bitOffset -= ( bitOffset >> 6 ) * 64; // bitOffset >> 6 == bitOffset / 64
 
     uint64 field = BytesToUInt64( bytes );
     

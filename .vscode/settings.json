@@ -99,7 +99,8 @@
         "__tuple": "cpp",
         "ios": "cpp",
         "locale": "cpp",
-        "stack": "cpp"
+        "stack": "cpp",
+        "*.include": "cpp"
     },
     "cSpell.words": [
         "Ryzen"

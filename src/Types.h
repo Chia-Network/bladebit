@@ -53,8 +53,7 @@ static_assert( sizeof( int64 ) == 8, "int64 must be 8" );
 static_assert( sizeof( float32 ) == 4, "float32 must be 4" );
 static_assert( sizeof( float64 ) == 8, "float64 must be 8" );
 
-
-#ifdef __uint128_t
+#ifdef __SIZEOF_INT128__
     typedef __uint128_t uint128_t;
 #else
     #include "uint128_t/uint128_t.h"

@@ -540,7 +540,7 @@ bool MemoryPlot::Open( const char* path )
 }
 
 //-----------------------------------------------------------
-bool MemoryPlot::IsOpen()
+bool MemoryPlot::IsOpen() const
 {
     return _bytes.values != nullptr;
 }
@@ -614,4 +614,75 @@ int MemoryPlot::GetError()
 }
 
 
+
+///
+/// FilePlot
+///
+//-----------------------------------------------------------
+FilePlot::FilePlot()
+{
+
+}
+
+//-----------------------------------------------------------
+FilePlot::~FilePlot()
+{
+
+}
+
+//-----------------------------------------------------------
+bool FilePlot::Open( const char* path )
+{
+    if( !_file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::None ) )
+        return false;
+
+    // Read the header
+    int headerError = 0;
+    if( !ReadHeader( headerError ) )
+    {
+        // if( headerError )
+        //     _err = headerError; // #TODO: Set local error
+
+        // if( _err == 0 )
+        //     _err = -1; // #TODO: Set generic plot header read error
+        _file.Close();
+        return false;
+    }
+    
+    return true;
+}
+
+//-----------------------------------------------------------
+bool FilePlot::IsOpen() const
+{
+    return _file.IsOpen();
+}
+
+//-----------------------------------------------------------
+size_t FilePlot::PlotSize() const
+{
+    const ssize_t sz = ((FileStream*)&_file)->Size();
+    if( sz < 0 )
+        return 0;
+
+    return (size_t)sz;
+}
+
+//-----------------------------------------------------------
+ssize_t FilePlot::Read( size_t size, void* buffer )
+{
+    return _file.Read( buffer, size );
+}
+
+//-----------------------------------------------------------
+bool FilePlot::Seek( SeekOrigin origin, int64 offset )
+{
+    return _file.Seek( offset, origin );
+}
+
+//-----------------------------------------------------------
+int FilePlot::GetError()
+{
+    return _file.GetError();
+}
 

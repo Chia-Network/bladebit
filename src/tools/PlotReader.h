@@ -88,7 +88,7 @@ public:
     // Abstract Interface
 public:
     virtual bool Open( const char* path ) = 0;
-    virtual bool IsOpen() = 0;
+    virtual bool IsOpen() const = 0;
 
     // Plot size in bytes
     virtual size_t PlotSize() const = 0;
@@ -119,7 +119,7 @@ public:
     ~MemoryPlot();
 
     bool Open( const char* path ) override;
-    bool IsOpen() override;
+    bool IsOpen() const override;
 
     size_t PlotSize() const override;
     
@@ -128,11 +128,33 @@ public:
     bool Seek( SeekOrigin origin, int64 offset ) override;
 
     int GetError() override;
+
 private:
     Span<byte>  _bytes;  // Plot bytes
     int         _err      = 0;
     ssize_t     _position = 0;
     std::string _plotPath = "";
+};
+
+class FilePlot : public IPlotFile
+{
+public:
+    FilePlot();
+    ~FilePlot();
+
+    bool Open( const char* path ) override;
+    bool IsOpen() const override;
+
+    size_t PlotSize() const override;
+
+    ssize_t Read( size_t size, void* buffer ) override;
+
+    bool Seek( SeekOrigin origin, int64 offset ) override;
+
+    int GetError() override;
+
+private:
+    FileStream _file;
 };
 
 class PlotReader

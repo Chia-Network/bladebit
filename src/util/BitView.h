@@ -101,7 +101,7 @@ public:
         }
 
         // Mask-out part of the fields we don't need
-        value &= ( uint128( 0xFFFFFFFFFFFFFFFFull, 0xFFFFFFFFFFFFFFFFull ) >> ( 128 - bitCount ) );
+        value &= ( ( ( (uint128)0xFFFFFFFFFFFFFFFFull << 64 ) | 0xFFFFFFFFFFFFFFFFull ) >> ( 128 - bitCount ) );
 
         _position += bitCount;
         return value;
@@ -131,10 +131,17 @@ public:
         return value;
     }
 
+    //-----------------------------------------------------------
+    void Seek( uint64 position )
+    {
+        ASSERT( position <= _sizeBits );
+        _position = position;
+    }
+
 private:
     uint64* _fields  ;  // Our fields buffer
-    uint64  _position;  // Read poisition in bits
     size_t  _sizeBits;  // Size of the how much data we currently have in bits
+    uint64  _position;  // Read poisition in bits
 };
 
 
@@ -163,32 +170,59 @@ public:
     {
         ASSERT( sizeBits <= BitSize );
 
-        const uint64 startByte = bitOffset / 8;
-        bytesBE += startByte;
+        const uint64 startField = bitOffset >> 6; // div 64
+        const uint64 endField   = ( startField * 64 + sizeBits ) >> 6; // div 64
+        const uint64 fieldCount = ( endField - startField ) + 1;
 
-        const size_t fieldCount = sizeBits / 64;
+        bytesBE += startField * sizeof( uint64 );
 
-        for( uint64 i = 0; i < fieldCount; i++ )
+        // Make the bit offset local to the starting field
+        bitOffset -= startField * 64;
+
+
+        _length = 0;
+
+        // Write partial initial field
+        // #TODO: Use the field directly when have 64-bit aligned memory
+
         {
             uint64 field;
             memcpy( &field, bytesBE, sizeof( uint64 ) );
-            _fields[i] = Swap64( field );
+            field = Swap64( field );
+
+            const uint32 firstFieldAvail = 64 - bitOffset;
+            const uint32 firstFieldBits  = std::min( firstFieldAvail, sizeBits );
+
+            Write( field, firstFieldBits );
             
-            bytes += sizeof( uint64 );
+            bytesBE += sizeof( uint64 );
         }
-        
-        // Also swap any remainder bytes
-        const size_t bitsRemainder = sizeBits - fieldCount * 64;
-        if( bitsRemainder )
+
+        // Write any full fields
+        const int64 fullFieldCount = (uint64)std::max( 0ll, (int64)fieldCount - 2 );
+        for( int64 i = 0; i < fullFieldCount; i++ )
         {
-            const size_t bytesRemainder = CDiv( bitsRemainder, 8 );
+            uint64 field;
+            memcpy( &field, bytesBE, sizeof( uint64 ) );
+            field = Swap64( field );
+
+            Write( field, 64 );
+
+            bytesBE += sizeof( uint64 );
+        }
+
+        // Write any partial final field
+        if( fieldCount > 1 )
+        {
+            const uint32 lastFieldBits = (uint32)( (sizeBits + bitOffset) - (fieldCount-1) * 64 );
 
             uint64 field;
-            memcpy( &field, bytesBE, bytesRemainder );
-            _fields[fieldCount] = Swap64( field ) >> ( 64 - bitsRemainder ) );
-        }
+            memcpy( &field, bytesBE, sizeof( uint64 ) );
+            field = Swap64( field );
+            field >>= ( 64 - lastFieldBits );
 
-        _length = sizeBits;
+            Write( field, lastFieldBits );
+        }
     }
 
     //-----------------------------------------------------------
@@ -218,15 +252,20 @@ public:
         const uint64 fieldIndex = _length >> 6;
         const uint32 bitsFree   = ( ( fieldIndex + 1 ) * 64 ) - _length;
 
-        // Shift-up any current bits
-        const uint32 shift  = std::min( bitCount, bitsFree );
-        _fields[fieldIndex] = ( _fields[fieldIndex] << shift ) | ( value >> ( bitCount - shift ) );
+        // Determine how many bits to write to this current field
+        const uint32 bitWrite  = std::min( bitCount, bitsFree ) & 63; // Mod 64
+        const uint32 shift     = bitWrite & 63; // Mod 64
+
+        // Clear out our ne value region
+        uint64 mask = ( ( 1ull << (64 - bitWrite) ) - 1 ) << shift;
+
+        _fields[fieldIndex] = ( ( _fields[fieldIndex] << shift ) & mask ) | ( value >> ( bitCount - bitWrite ) );
 
         // If we still have bits to write, then write in the next field
-        if( shift < bitCount )
+        if( bitWrite < bitCount )
         {
             const uint32 remainder = bitCount - shift;
-            const uint64 mask      = 0xFFFFFFFFFFFFFFFFull >> ( 64 - remainder );
+                         mask      = 0xFFFFFFFFFFFFFFFFull >> ( 64 - remainder );
             _fields[fieldIndex+1]  = value & mask;
         }
 
@@ -237,15 +276,18 @@ public:
     template<size_t TBitsSize>
     inline void Write( const Bits<TBitsSize>& other )
     {
-        ASSERT( _length + other._length <= BitSize );
+        const size_t  inLength = other.Length();
+        const uint64* inFields = other.Fields();
 
-        const uint64 fieldCount = other._length >> 6;
+        ASSERT( _length + inLength <= BitSize );
+
+        const uint64 fieldCount = inLength >> 6;
         for( uint64 i = 0; i < fieldCount; i++ )
-            Write( other._fields[i], 64 );
+            Write( inFields[i], 64 );
 
-        const uint32 remainderBits = (uint32)( other._length - fieldCount * 64 );
+        const uint32 remainderBits = (uint32)( inLength - fieldCount * 64 );
         if( remainderBits )
-            Write( other._fields[fieldCount], remainderBits );
+            Write( inFields[fieldCount], remainderBits );
     }
 
     //-----------------------------------------------------------
@@ -290,7 +332,7 @@ public:
     //-----------------------------------------------------------
     inline void ToBytes( byte* bytes )
     {
-        const uint64 fieldCount = other._length >> 6;
+        const uint64 fieldCount = _length >> 6;
         for( uint64 i = 0; i < fieldCount; i++ )
         {
             const uint64 field = Swap64( _fields[i] );
@@ -298,7 +340,7 @@ public:
             bytes += sizeof( field );
         }
         
-        const uint32 remainderBits = (uint32)( other._length - fieldCount * 64 );
+        const uint32 remainderBits = (uint32)( _length - fieldCount * 64 );
         if( remainderBits )
         {
             const uint64 field = Swap64( _fields[fieldCount] << ( 64 - remainderBits ) );
@@ -313,6 +355,8 @@ public:
     inline size_t Length() const { return _length; }
 
     inline size_t LengthBytes() const { return CDiv( _length, 8 ); }
+
+    const uint64* Fields() const { return _fields; }
 
 private:
     uint64 _fields[CDiv( CDiv( BitSize, 8 ), 8)];
