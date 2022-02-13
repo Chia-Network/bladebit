@@ -426,6 +426,15 @@ MemoryPlot::MemoryPlot()
 {}
 
 //-----------------------------------------------------------
+MemoryPlot::MemoryPlot( const MemoryPlot& plotFile )
+{
+    _bytes    = plotFile._bytes;
+    _err      = plotFile._err;
+    _position = plotFile._position;
+    _plotPath = plotFile._plotPath;
+}
+
+//-----------------------------------------------------------
 MemoryPlot::~MemoryPlot()
 {
     if( _bytes.values )
@@ -625,6 +634,15 @@ FilePlot::FilePlot()
 }
 
 //-----------------------------------------------------------
+FilePlot::FilePlot( const FilePlot& file )
+{
+    if( file.IsOpen() )
+        Open( file._plotPath.c_str() ); // #TODO: Seek to same location
+    else
+        _plotPath = "";
+}
+
+//-----------------------------------------------------------
 FilePlot::~FilePlot()
 {
 
@@ -649,6 +667,7 @@ bool FilePlot::Open( const char* path )
         return false;
     }
     
+    _plotPath = path;
     return true;
 }
 

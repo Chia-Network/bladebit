@@ -116,6 +116,7 @@ class MemoryPlot : public IPlotFile
 {
 public:
     MemoryPlot();
+    MemoryPlot( const MemoryPlot& plotFile );
     ~MemoryPlot();
 
     bool Open( const char* path ) override;
@@ -140,6 +141,7 @@ class FilePlot : public IPlotFile
 {
 public:
     FilePlot();
+    FilePlot( const FilePlot& file );
     ~FilePlot();
 
     bool Open( const char* path ) override;
@@ -154,7 +156,8 @@ public:
     int GetError() override;
 
 private:
-    FileStream _file;
+    FileStream  _file;
+    std::string _plotPath = "";
 };
 
 class PlotReader
