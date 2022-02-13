@@ -87,11 +87,14 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     FatalIf( !plotFile->IsOpen(), "Failed to open plot at path '%s'.", options.plotPath.c_str() );
 
     Log::Line( "Validating plot %s", options.plotPath.c_str() );
-    Log::Line( "K  : %u", plotFile->K() );
+    Log::Line( "K       : %u", plotFile->K() );
+
+    const uint64 plotC3ParkCount = plotFile->TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
+    Log::Line( "C3 Parks: %llu", plotC3ParkCount );
+    Log::Line( "" );
 
 
-
-    if( 0 )
+    // if( 0 )
     {
 
         // Duplicate the plot file,     
@@ -106,7 +109,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
             auto& job = jobs[i];
 
             job.logLock   = &logLock;
-            job.plotFile  = plotFile;
+            job.plotFile  = plotFiles[i];
             job.failCount = 0;
         }
 
@@ -159,6 +162,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
 
         for( uint64 i = 0; i < c3ParkCount; i++ )
         {
+            const auto timer = TimerBegin();
             FatalIf( plot.ReadC3Park( i, f7Entries ) < 0, "Could not read C3 park %llu.", i );
 
             const uint64 f7IdxBase = i * kCheckpoint1Interval;
@@ -171,7 +175,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
 
                 if( p7ParkIndex != curPark7 )
                 {
-                    ASSERT( p7ParkIndex == curPark7+1 );
+                    // ASSERT( p7ParkIndex == curPark7+1 );
                     curPark7 = p7ParkIndex;
 
                     FatalIf( !plot.ReadP7Entries( p7ParkIndex, p7Entries ), "Failed to read P7 %llu.", p7ParkIndex );
@@ -195,18 +199,27 @@ bool ValidatePlot( const ValidatePlotOptions& options )
                         failed = true;
                 }
                 else
+                {
                     failed = true;
+                    Log::Line( "Park %llu proof fetch failed for f7[%llu] = %llu ( 0x%016llx ) ", 
+                               i, f7Idx, f7, f7 );
+                }
 
                 if( failed )
                 {
                     proofFailCount++;
-                    Log::Line( "Proof fetch failed for f7[%llu] = %llu ( 0x%016llx ) ", f7Idx, f7, f7 );
                 }
             }
-        
-            Log::Line( "%16llu / %llu C3 Parks Validated.", i, c3ParkCount );
+
+            const double elapsed = TimerEnd( timer );
+            Log::Line( "%16llu / %llu ( %2.lf%% ) C3 Parks Validated. %.2lf seconds elapsed.", 
+                i, c3ParkCount, (double)i / c3ParkCount * 100, elapsed );
         }
+
+        return proofFailCount == 0;
     }
+
+    return false;
 }
 
 
@@ -271,11 +284,14 @@ void ValidateJob::Run()
 
     for( uint64 i = 0; i < c3ParkCount; i++ )
     {
-        const uint64 parkIdx = startC3Park + i;
+        const auto timer = TimerBegin();
 
-        FatalIf( plot.ReadC3Park( parkIdx, f7Entries ) < 0, "Could not read C3 park %llu.", parkIdx );
+        const uint64 c3ParkIdx = startC3Park + i;
 
-        const uint64 f7IdxBase = parkIdx * kCheckpoint1Interval;
+        FatalIf( plot.ReadC3Park( c3ParkIdx, f7Entries ) < 0,
+            "Could not read C3 park %llu.", c3ParkIdx );
+
+        const uint64 f7IdxBase = c3ParkIdx * kCheckpoint1Interval;
 
         for( uint32 e = 0; e < kCheckpoint1Interval; e++ )
         {
@@ -309,16 +325,21 @@ void ValidateJob::Run()
                     failed = true;
             }
             else
+            {
                 failed = true;
+                Log( "Park %llu proof fetch failed for f7[%llu] local(%llu) = %llu ( 0x%016llx ) ", 
+                   c3ParkIdx, f7Idx, e, f7, f7 );
+            }
 
             if( failed )
             {
                 proofFailCount++;
-                Log( "Proof fetch failed for f7[%llu] = %llu ( 0x%016llx ) ", f7Idx, f7, f7 );
             }
         }
-    
-        Log( "%10llu / %llu C3 Parks Validated.", this->JobId(), i, c3ParkCount );
+
+        const double elapsed = TimerEnd( timer );
+        Log( "%10llu / %llu ( %2.lf%% ) C3 Parks Validated. %.2lf seconds elapsed.", 
+                i, c3ParkCount, (double)i / c3ParkCount * 100, elapsed );
     }
 
     // All done

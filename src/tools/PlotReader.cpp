@@ -429,14 +429,29 @@ MemoryPlot::MemoryPlot()
 MemoryPlot::MemoryPlot( const MemoryPlot& plotFile )
 {
     _bytes    = plotFile._bytes;
-    _err      = plotFile._err;
-    _position = plotFile._position;
+    _err      = 0;
+    _position = 0;
+
+    int headerError = 0;
+    if( !ReadHeader( headerError ) )
+    {
+        if( headerError )
+            _err = headerError;
+
+        if( _err == 0 )
+            _err = -1; // #TODO: Set generic plot header read error
+
+        _bytes.values = nullptr;
+        return;
+    }
+
     _plotPath = plotFile._plotPath;
 }
 
 //-----------------------------------------------------------
 MemoryPlot::~MemoryPlot()
 {
+    // #TODO: Don't destroy bytes unless we own them. Use a shared ptr here.
     if( _bytes.values )
         SysHost::VirtualFree( _bytes.values );
 

@@ -3,7 +3,7 @@
 
 struct ValidatePlotOptions
 {
-    std::string plotPath;
-    bool        inRAM;
+    std::string plotPath = "";
+    bool        inRAM    = false;
 };
 
