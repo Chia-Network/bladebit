@@ -45,6 +45,7 @@ struct ValidateJob : MTJob<ValidateJob>
     IPlotFile*  plotFile;
     uint64      failCount;
     std::mutex* logLock;
+    float       startOffset;
 
     void Run() override;
     void Log( const char* msg, ... );
@@ -108,9 +109,10 @@ bool ValidatePlot( const ValidatePlotOptions& options )
         {
             auto& job = jobs[i];
 
-            job.logLock   = &logLock;
-            job.plotFile  = plotFiles[i];
-            job.failCount = 0;
+            job.logLock     = &logLock;
+            job.plotFile    = plotFiles[i];
+            job.startOffset = options.startOffset;
+            job.failCount   = 0;
         }
 
         jobs.Run( threadCount );
@@ -128,7 +130,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     }
 
 
-    // if( 0 )
+    if( 0 )
     {
 
         PlotReader plot( *plotFile );
@@ -141,7 +143,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
         uint64* f7Entries = bbcalloc<uint64>( kCheckpoint1Interval );
         memset( f7Entries, 0, kCheckpoint1Interval * sizeof( uint64 ) );
 
-        // Check how many C3 parks we have
+        // Check how many (potential) C3 parks we have
         const uint64 c3ParkCount = plotFile->TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
 
         // Read the C3 parks
@@ -163,11 +165,14 @@ bool ValidatePlot( const ValidatePlotOptions& options )
         for( uint64 i = 0; i < c3ParkCount; i++ )
         {
             const auto timer = TimerBegin();
-            FatalIf( plot.ReadC3Park( i, f7Entries ) < 0, "Could not read C3 park %llu.", i );
+            
+            const int64 f7EntryCount = plot.ReadC3Park( i, f7Entries );
+            FatalIf( f7EntryCount < 0, "Could not read C3 park %llu.", i );
+            ASSERT( f7EntryCount <= kCheckpoint1Interval );
 
             const uint64 f7IdxBase = i * kCheckpoint1Interval;
 
-            for( uint32 e = 0; e < kCheckpoint1Interval; e++ )
+            for( uint32 e = 0; e < (uint32)f7EntryCount; e++ )
             {
                 const uint64 f7Idx       = f7IdxBase + e;
                 const uint64 p7ParkIndex = f7Idx / kEntriesPerPark;
@@ -213,7 +218,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
 
             const double elapsed = TimerEnd( timer );
             Log::Line( "%16llu / %llu ( %2.lf%% ) C3 Parks Validated. %.2lf seconds elapsed.", 
-                i, c3ParkCount, (double)i / c3ParkCount * 100, elapsed );
+                i+1, c3ParkCount, (double)i / c3ParkCount * 100, elapsed );
         }
 
         return proofFailCount == 0;
@@ -263,6 +268,7 @@ void ValidateJob::Run()
         startC3Park += std::min( trailingParks, (uint64)this->JobId() );
     }
 
+    startC3Park = startOffset == 0.0f ? 0 : std::min( c3ParkCount, (uint64)( c3ParkCount * startOffset ) );
     Log( "Starting park: %-10llu Park count: %llu", startC3Park, c3ParkCount );
 
     ///
@@ -282,18 +288,21 @@ void ValidateJob::Run()
     uint64 proofFailCount = 0;
     uint64 fullProofXs[PROOF_X_COUNT];
 
-    for( uint64 i = 0; i < c3ParkCount; i++ )
+    
+
+    for( uint64 i = startC3Park; i < c3ParkCount; i++ )
     {
         const auto timer = TimerBegin();
 
         const uint64 c3ParkIdx = startC3Park + i;
 
-        FatalIf( plot.ReadC3Park( c3ParkIdx, f7Entries ) < 0,
-            "Could not read C3 park %llu.", c3ParkIdx );
+        const int64 f7EntryCount = plot.ReadC3Park( c3ParkIdx, f7Entries );
+        FatalIf( f7EntryCount < 0, "Could not read C3 park %llu.", c3ParkIdx );
+        ASSERT( f7EntryCount <= kCheckpoint1Interval );
 
         const uint64 f7IdxBase = c3ParkIdx * kCheckpoint1Interval;
 
-        for( uint32 e = 0; e < kCheckpoint1Interval; e++ )
+        for( uint32 e = 0; e < (uint32)f7EntryCount; e++ )
         {
             const uint64 f7Idx       = f7IdxBase + e;
             const uint64 p7ParkIndex = f7Idx / kEntriesPerPark;
@@ -338,8 +347,10 @@ void ValidateJob::Run()
         }
 
         const double elapsed = TimerEnd( timer );
-        Log( "%10llu / %llu ( %2.lf%% ) C3 Parks Validated. %.2lf seconds elapsed.", 
-                i, c3ParkCount, (double)i / c3ParkCount * 100, elapsed );
+        Log( "%10llu / %llu ( %2.lf%% ) C3 Parks Validated | Proofs Failed: %llu | %.2lf seconds elapsed", 
+                i+1, c3ParkCount, 
+                proofFailCount,
+                (double)i / c3ParkCount * 100, elapsed );
     }
 
     // All done
