@@ -203,9 +203,8 @@ void ValidateJob::Run()
     {
         const auto timer = TimerBegin();
 
-        // const uint64 c3ParkIdx = startC3Park + i;
-
         const int64 f7EntryCount = plot.ReadC3Park( c3ParkIdx, f7Entries );
+
         FatalIf( f7EntryCount < 0, "Could not read C3 park %llu.", c3ParkIdx );
         ASSERT( f7EntryCount <= kCheckpoint1Interval );
 
@@ -237,7 +236,8 @@ void ValidateJob::Run()
 
             if( success )
             {
-                // ReorderProof( plot, fullProofXs );
+                // ReorderProof( plot, fullProofXs );   // <-- No need for this for validation
+                
                 // Now we can validate the proof
                 uint64 outF7;
 

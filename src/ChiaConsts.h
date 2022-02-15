@@ -151,7 +151,13 @@ inline static size_t CalculatePark7Size( uint k )
 }
 
 //-----------------------------------------------------------
+constexpr inline static size_t LinePointSizeBits( uint32 k )
+{
+    return (size_t)k * 2;
+}
+
+//-----------------------------------------------------------
 constexpr inline static size_t LinePointSizeBytes( uint32 k )
 {
-    return CDiv( (size_t)k * 2, 8 );
+    return CDiv( LinePointSizeBits( k ), 8 );
 }

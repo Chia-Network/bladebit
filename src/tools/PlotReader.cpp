@@ -51,24 +51,35 @@ int64 PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
     const size_t c3ParkSize     = CalculateC3Size();
     const uint64 c1Address      = _plot.TableAddress( PlotTable::C1 );
     const uint64 c3Address      = _plot.TableAddress( PlotTable::C3 );
+    const size_t c1TableSize    = _plot.TableSize( PlotTable::C1 );
+    const size_t c3TableSize    = _plot.TableSize( PlotTable::C3 );
     const uint64 c1EntryAddress = c1Address + parkIndex * f7SizeBytes;
     const uint64 parkAddress    = c3Address + parkIndex * c3ParkSize;
 
-    // First we need to read the root F7 entry for the park, 
-    // which is at in C1 table.
+
+    // Ensure the C1 address is within the C1 table bounds.
+    if( c1EntryAddress >= c1Address + c1TableSize - f7SizeBytes ) // - f7SizeBytes because the last C1 entry is an empty/dummy one
+        return -1;
+
+    // First we need to read the root F7 entry for the park,  which is in the C1 table.
     if( !_plot.Seek( SeekOrigin::Begin, (int64)c1EntryAddress ) )
         return -1;
 
-    // #TODO: Ensure the C1 address is within the C1 table bounds.
     uint64 c1 = 0;
     if( _plot.Read( f7SizeBytes, &c1 ) != (ssize_t)f7SizeBytes )
         return -1;
 
-    c1 = Swap64( c1 << ( 64 - k ) );
+    c1 = Swap64( c1 ) >> ( 64 - k );
 
-    // #TODO: Ensure we can read this park. If it's not present, it means
-    //        the C1 entry is the only entry in the park, so just return it.
+    // Ensure we can read this park. If it's not present, it means
+    // the C1 entry is the only entry in the park, so just return it.
     // Read the park into our buffer
+    if( parkAddress >= c3Address + c3TableSize )
+    {
+        f7Buffer[0] = c1;
+        return 1;
+    }
+
     if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
         return -1;
 
@@ -132,7 +143,7 @@ bool PlotReader::ReadP7Entries( uint64 parkIndex, uint64* p7Indices )
     if( !_plot.Seek( SeekOrigin::Begin, (int64)parkAddress ) )
         return false;
 
-    if( _plot.Read( parkSizeBytes, _parkBuffer ) != parkSizeBytes )
+    if( _plot.Read( parkSizeBytes, _parkBuffer ) != (ssize_t)parkSizeBytes )
         return false;
 
     BitReader parkReader( _parkBuffer, parkSizeBytes * 8 );
@@ -177,7 +188,8 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
         if( _plot.Read( lpSizeBytes, baseLPBytes ) != (ssize_t)lpSizeBytes )
             return false;
 
-        const size_t lpSizeBits = LinePointSizeBytes( k ) * 8;
+        const size_t lpSizeBits = LinePointSizeBits( k );
+
         BitReader lpReader( baseLPBytes, RoundUpToNextBoundary( lpSizeBits, 64 ) );
         baseLinePoint = lpReader.ReadBits128( lpSizeBits );
     }
@@ -186,13 +198,13 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     const size_t stubsSizeBytes = CDiv( ( kEntriesPerPark - 1 ) * ( k - kStubMinusBits ), 8 );
     uint64* stubsBuffer = _parkBuffer;
 
-    if( _plot.Read( stubsSizeBytes, stubsBuffer ) != stubsSizeBytes )
+    if( _plot.Read( stubsSizeBytes, stubsBuffer ) != (ssize_t)stubsSizeBytes )
         return false;
 
     // Read deltas
     const size_t maxDeltasSizeBytes = CalculateMaxDeltasSize( (TableId)table );
     byte* compressedDeltaBuffer = ((byte*)_parkBuffer) + RoundUpToNextBoundary( stubsSizeBytes, sizeof( uint64 ) );
-    byte* deltaBuffer = _deltasBuffer;
+    byte* deltaBuffer           = _deltasBuffer;
     
     uint16 compressedDeltasSize = 0;
     if( _plot.Read( 2, &compressedDeltasSize ) != 2 )
@@ -313,11 +325,9 @@ bool PlotReader::ReadLP( TableId table, uint64 index, uint128& outLinePoint )
 //-----------------------------------------------------------
 bool PlotReader::FetchProofFromP7Entry( uint64 p7Entry, uint64 proof[32] )
 {
-    // p7Entry is an index into Table 6
-    
-    // Read linepoint
-
-    // for( PlotTable table = PlotTable::Table6 )
+    // #TODO: Implement me
+    ASSERT( 0 );
+    return false;
 }
 
 ///
@@ -337,7 +347,7 @@ bool IPlotFile::ReadHeader( int& error )
         
         if( !MemCmp( magic, kPOSMagic, sizeof( magic ) ) )
         {
-            error -1;       // #TODO: Set actual user error
+            error = -1;       // #TODO: Set actual user error
             return false;
         }
     }
