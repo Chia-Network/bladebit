@@ -102,7 +102,7 @@ inline void LoadLTargets()
 
 // This is the full size of the deltas section in a park. However, it will not be fully filled
 //-----------------------------------------------------------
-inline size_t CalculateMaxDeltasSize( TableId tableId )
+inline constexpr size_t CalculateMaxDeltasSize( TableId tableId )
 {
     if( tableId == TableId::Table1 )
         return CDiv( (size_t)((kEntriesPerPark - 1) * kMaxAverageDeltaTable1), 8 );
@@ -118,6 +118,20 @@ inline size_t CalculateParkSize( TableId tableId )
         CDiv( _K * 2, 8 ) +                                         // LinePoint size
         CDiv( (kEntriesPerPark - 1) * (_K - kStubMinusBits), 8 ) +  // Stub Size 
         CalculateMaxDeltasSize( tableId );                          // Max delta
+
+    // return CalculateLinePointSize(k) + CalculateStubsSize(k) +
+    //         CalculateMaxDeltasSize(k, table_index);
+}
+
+//-----------------------------------------------------------
+inline constexpr size_t CalculateParkSize( const TableId tableId, const uint32 k )
+{
+    ASSERT( k >= 20 );
+
+    return 
+        CDiv( k * 2, 8 ) +                                         // LinePoint size
+        CDiv( (kEntriesPerPark - 1) * (k - kStubMinusBits), 8 ) +  // Stub Size 
+        CalculateMaxDeltasSize( tableId );                         // Max delta
 
     // return CalculateLinePointSize(k) + CalculateStubsSize(k) +
     //         CalculateMaxDeltasSize(k, table_index);

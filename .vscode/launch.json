@@ -99,13 +99,15 @@
 
             "args": [
                 "validate",
-                // "-m",
-                "-o", "99.7",
-                "/mnt/p5510a/plots/plot-k32-2022-02-07-03-50-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                "-m",
+                // "-o", "99.7",
+                "-t", "32",
+                // "/mnt/p5510a/plots/plot-k32-2022-02-07-03-50-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                "/mnt/p5510a/disk_tmp/plot.dat"
             ]
-        }
+        },
 
-        ,{
+        {
             "name"       : "FSEGen",
             
             "type"          : "cppdbg",

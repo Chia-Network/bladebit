@@ -25,7 +25,10 @@ typedef Bits<MAX_FX_BIT_SIZE>   FxBits;
 
 
 void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
+
+template<bool Use64BitLpToSquare>
 bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] );
+
 bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 );
 void ReorderProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT] );
 void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
@@ -56,7 +59,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
 {
     LoadLTargets();
 
-    const uint32 threadCount = SysHost::GetLogicalCPUCount();
+    const uint32 threadCount = options.threadCount;
 
     IPlotFile*  plotFile  = nullptr;
     IPlotFile** plotFiles = new IPlotFile*[threadCount];
@@ -129,7 +132,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
         return proofFailCount == 0;
     }
 
-
+#if 0
     if( 0 )
     {
 
@@ -192,7 +195,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
                 
                 bool failed = false;
 
-                if( FetchProof( plot, t6Index, fullProofXs ) )
+                if( FetchProof<false>( plot, t6Index, fullProofXs ) )
                 {
                     // ReorderProof( plot, fullProofXs );
                     // Now we can validate the proof
@@ -217,12 +220,13 @@ bool ValidatePlot( const ValidatePlotOptions& options )
             }
 
             const double elapsed = TimerEnd( timer );
-            Log::Line( "%16llu / %llu ( %2.lf%% ) C3 Parks Validated. %.2lf seconds elapsed.", 
+            Log::Line( "%10llu / %-10llu ( %.2lf%% ) C3 Parks Validated. %.2lf seconds elapsed.", 
                 i+1, c3ParkCount, (double)i / c3ParkCount * 100, elapsed );
         }
 
         return proofFailCount == 0;
     }
+#endif
 
     return false;
 }
@@ -248,9 +252,11 @@ void ValidateJob::Log( const char* msg, ... )
 void ValidateJob::Run()
 {
     PlotReader plot( *plotFile );
+    
+    const uint32 k = plotFile->K();
 
-    uint64 failCount   = 0;
     uint64 c3ParkCount = 0;
+    uint64 c3ParkEnd   = 0;
     
     const uint32 threadCount     = this->JobCount();
     const uint64 plotC3ParkCount = plotFile->TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
@@ -268,7 +274,11 @@ void ValidateJob::Run()
         startC3Park += std::min( trailingParks, (uint64)this->JobId() );
     }
 
-    startC3Park = startOffset == 0.0f ? 0 : std::min( c3ParkCount, (uint64)( c3ParkCount * startOffset ) );
+    c3ParkEnd = startC3Park + c3ParkCount;
+
+    if( startOffset > 0.0f )
+        startC3Park += std::min( c3ParkCount, (uint64)( c3ParkCount * startOffset ) );
+
     Log( "Starting park: %-10llu Park count: %llu", startC3Park, c3ParkCount );
 
     ///
@@ -288,13 +298,11 @@ void ValidateJob::Run()
     uint64 proofFailCount = 0;
     uint64 fullProofXs[PROOF_X_COUNT];
 
-    
-
-    for( uint64 i = startC3Park; i < c3ParkCount; i++ )
+    for( uint64 c3ParkIdx = startC3Park; c3ParkIdx < c3ParkEnd; c3ParkIdx++ )
     {
         const auto timer = TimerBegin();
 
-        const uint64 c3ParkIdx = startC3Park + i;
+        // const uint64 c3ParkIdx = startC3Park + i;
 
         const int64 f7EntryCount = plot.ReadC3Park( c3ParkIdx, f7Entries );
         FatalIf( f7EntryCount < 0, "Could not read C3 park %llu.", c3ParkIdx );
@@ -317,40 +325,44 @@ void ValidateJob::Run()
             }
 
             const uint64 p7LocalIdx = f7Idx - p7ParkIndex * kEntriesPerPark;
+            const uint64 t6Index    = p7Entries[p7LocalIdx];
 
-            const uint64 t6Index = p7Entries[p7LocalIdx];
-            
-            bool failed = false;
+            bool success = true;
 
-            if( FetchProof( plot, t6Index, fullProofXs ) )
+            if( k <= 32 )
+                success = FetchProof<true>( plot, t6Index, fullProofXs );
+            else
+                success = FetchProof<false>( plot, t6Index, fullProofXs );
+
+            if( success )
             {
                 // ReorderProof( plot, fullProofXs );
                 // Now we can validate the proof
                 uint64 outF7;
 
                 if( ValidateFullProof( plot, fullProofXs, outF7 ) )
-                    failed = f7 != outF7;
+                    success = f7 == outF7;
                 else
-                    failed = true;
+                    success = false;
             }
             else
             {
-                failed = true;
+                success = false;
                 Log( "Park %llu proof fetch failed for f7[%llu] local(%llu) = %llu ( 0x%016llx ) ", 
                    c3ParkIdx, f7Idx, e, f7, f7 );
             }
 
-            if( failed )
+            if( !success )
             {
                 proofFailCount++;
             }
         }
 
         const double elapsed = TimerEnd( timer );
-        Log( "%10llu / %llu ( %2.lf%% ) C3 Parks Validated | Proofs Failed: %llu | %.2lf seconds elapsed", 
-                i+1, c3ParkCount, 
-                proofFailCount,
-                (double)i / c3ParkCount * 100, elapsed );
+        Log( "%10llu..%-10llu ( %3.2lf%% ) C3 Park Validated in %2.2lf seconds | Proofs Failed: %llu", 
+                c3ParkIdx, c3ParkEnd-1, 
+                (double)(c3ParkIdx-startC3Park) / c3ParkCount * 100, elapsed,
+                proofFailCount );
     }
 
     // All done
@@ -360,6 +372,7 @@ void ValidateJob::Run()
 
 
 //-----------------------------------------------------------
+template<bool Use64BitLpToSquare>
 bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] )
 {
     uint64 lpIndices[2][PROOF_X_COUNT];
@@ -386,7 +399,11 @@ bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_
             if( !plot.ReadLP( table, idx, lp ) )
                 return false;
 
-            BackPtr ptr = LinePointToSquare( lp );
+            BackPtr ptr;
+            if constexpr ( Use64BitLpToSquare )
+                ptr = LinePointToSquare64( (uint64)lp );
+            else
+                ptr = LinePointToSquare( lp );
 
             lpIdxDst[dst+0] = ptr.y;
             lpIdxDst[dst+1] = ptr.x;
@@ -406,8 +423,7 @@ bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_
 //-----------------------------------------------------------
 bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 )
 {
-    const uint32 k        = plot.PlotFile().K();
-    const uint32 yBitSize = k + kExtraBits;
+    const uint32 k = plot.PlotFile().K();
 
     uint64   fx  [PROOF_X_COUNT];
     MetaBits meta[PROOF_X_COUNT];
@@ -490,8 +506,7 @@ bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uin
 //-----------------------------------------------------------
 void ReorderProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT] )
 {
-    const uint32 k        = plot.PlotFile().K();
-    const uint32 yBitSize = k + kExtraBits;
+    const uint32 k = plot.PlotFile().K();
 
     uint64   fx  [PROOF_X_COUNT];
     MetaBits meta[PROOF_X_COUNT];
@@ -579,9 +594,6 @@ void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs
 //-----------------------------------------------------------
 bool FxMatch( uint64 yL, uint64 yR )
 {
-    uint8  rMapCounts [kBC];
-    uint16 rMapIndices[kBC];
-
     const uint64 groupL = yL / kBC;
     const uint64 groupR = yR / kBC;
 

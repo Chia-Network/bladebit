@@ -179,12 +179,11 @@ public:
         // Make the bit offset local to the starting field
         bitOffset -= startField * 64;
 
-
-        _length = 0;
+        _fields[0] = 0;
+        _length    = 0;
 
         // Write partial initial field
         // #TODO: Use the field directly when have 64-bit aligned memory
-
         {
             uint64 field;
             memcpy( &field, bytesBE, sizeof( uint64 ) );
@@ -192,7 +191,10 @@ public:
 
             const uint32 firstFieldAvail = 64 - bitOffset;
             const uint32 firstFieldBits  = std::min( firstFieldAvail, sizeBits );
+            const uint64 mask            = ( 0xFFFFFFFFFFFFFFFFull >> ( 64 - firstFieldBits ) );
 
+            field = ( field >> ( firstFieldAvail - firstFieldBits ) & mask );   // Need to mask-out because the field may have offset and less bits than 64
+                                                                                // so we don't want the high-order bits to make it into the stored field
             Write( field, firstFieldBits );
             
             bytesBE += sizeof( uint64 );
@@ -221,6 +223,7 @@ public:
             field = Swap64( field );
             field >>= ( 64 - lastFieldBits );
 
+            _fields[fieldCount-1] = 0;
             Write( field, lastFieldBits );
         }
     }
@@ -256,7 +259,7 @@ public:
         const uint32 bitWrite  = std::min( bitCount, bitsFree ) & 63; // Mod 64
         const uint32 shift     = bitWrite & 63; // Mod 64
 
-        // Clear out our ne value region
+        // Clear out our new value region
         uint64 mask = ( ( 1ull << (64 - bitWrite) ) - 1 ) << shift;
 
         _fields[fieldIndex] = ( ( _fields[fieldIndex] << shift ) & mask ) | ( value >> ( bitCount - bitWrite ) );

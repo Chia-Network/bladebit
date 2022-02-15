@@ -125,6 +125,21 @@ FORCE_INLINE BackPtr LinePointToSquare( uint128 index )
     return { x, (uint64)(uint64_t)( index - GetXEnc128( x ) ) };
 }
 
+FORCE_INLINE BackPtr LinePointToSquare64( uint64 index )
+{
+    // Performs a square root, without the use of doubles, 
+    // to use the precision of the uint128_t.
+    uint64 x = 0;
+    for( int i = 63; i >= 0; i-- ) 
+    {
+        uint64 new_x = x + ((uint64)1 << i);
+        if( GetXEnc( new_x ) <= index )
+            x = new_x;
+    }
+
+    return { x, ( index - GetXEnc( x ) ) };
+}
+
 #pragma GCC diagnostic pop
 
 

@@ -13,7 +13,7 @@
 PlotReader::PlotReader( IPlotFile& plot )
     : _plot( plot )
 {
-    const size_t largestParkSize           = RoundUpToNextBoundaryT( CalculateParkSize( TableId::Table1 ), sizeof( uint64 ) * 2 );
+    const size_t largestParkSize           = RoundUpToNextBoundaryT( CalculateParkSize( TableId::Table1, plot.K() ), sizeof( uint64 ) * 2 );
     const size_t maxDecompressedDeltasSize = RoundUpToNextBoundaryT( (size_t)0x7FFF, sizeof( uint64 ) );
 
     _parkBuffer   = bbmalloc<uint64>( largestParkSize );
@@ -158,7 +158,7 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     const size_t lpSizeBytes    = LinePointSizeBytes( k );
     const size_t tableMaxSize   = _plot.TableSize( (PlotTable)table );
     const size_t tableAddress   = _plot.TableAddress( (PlotTable)table );
-    const size_t parkSize       = CalculateParkSize( table );
+    const size_t parkSize       = CalculateParkSize( table, k );
 
     const uint64 maxParks       = tableMaxSize / parkSize;
     if( parkIndex >= maxParks )
@@ -172,13 +172,13 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     // Read base full line point
     uint128 baseLinePoint;
     {
-        uint64 baseLPBytes[CDiv(LinePointSizeBytes( 50 ), 8)] = { 0 };
+        uint64 baseLPBytes[CDiv(LinePointSizeBytes( 50 ), sizeof(uint64))] = { 0 };
 
-        if( _plot.Read( lpSizeBytes, baseLPBytes ) != lpSizeBytes )
+        if( _plot.Read( lpSizeBytes, baseLPBytes ) != (ssize_t)lpSizeBytes )
             return false;
 
         const size_t lpSizeBits = LinePointSizeBytes( k ) * 8;
-        BitReader lpReader( baseLPBytes, RoundUpToNextBoundary( lpSizeBits, 8 ) );
+        BitReader lpReader( baseLPBytes, RoundUpToNextBoundary( lpSizeBits, 64 ) );
         baseLinePoint = lpReader.ReadBits128( lpSizeBits );
     }
 
@@ -252,7 +252,7 @@ bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints
     linePoints[0] = baseLinePoint;
     if( deltaCount > 0 )
     {
-        const uint32 stubBitSize = ( _K - kStubMinusBits );
+        const uint32 stubBitSize = ( _plot.K() - kStubMinusBits );
         
         for( uint64 i = 1; i <= deltaCount; i++ )
         {
@@ -269,6 +269,7 @@ bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints
     return true;
 }
 
+// #TODO: Add 64-bit outLinePoint (templatize)
 //-----------------------------------------------------------
 bool PlotReader::ReadLP( TableId table, uint64 index, uint128& outLinePoint )
 {
@@ -292,7 +293,7 @@ bool PlotReader::ReadLP( TableId table, uint64 index, uint128& outLinePoint )
             return false;
 
         const uint64 maxIter     = std::min( lpLocalIdx, deltaCount );
-        const uint32 stubBitSize = ( _K - kStubMinusBits );
+        const uint32 stubBitSize = ( _plot.K() - kStubMinusBits );
 
         for( uint64 i = 0; i < maxIter; i++ )
         {
@@ -556,6 +557,9 @@ bool MemoryPlot::Open( const char* path )
         SysHost::VirtualFree( bytes );
         return false;
     }
+
+    // Lock the plot memory into read-only mode
+    SysHost::VirtualProtect( bytes, allocSize, VProtect::Read );
 
     // Save data, good to go
     _plotPath = path;
