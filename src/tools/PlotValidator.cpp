@@ -98,137 +98,35 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     Log::Line( "" );
 
 
-    // if( 0 )
+    // Duplicate the plot file,     
+    ThreadPool pool( threadCount );
+
+    MTJobRunner<ValidateJob> jobs( pool );
+
+    std::mutex logLock;
+    
+    for( uint32 i = 0; i < threadCount; i++ )
     {
+        auto& job = jobs[i];
 
-        // Duplicate the plot file,     
-        ThreadPool pool( threadCount );
-
-        MTJobRunner<ValidateJob> jobs( pool );
-
-        std::mutex logLock;
-        
-        for( uint32 i = 0; i < threadCount; i++ )
-        {
-            auto& job = jobs[i];
-
-            job.logLock     = &logLock;
-            job.plotFile    = plotFiles[i];
-            job.startOffset = options.startOffset;
-            job.failCount   = 0;
-        }
-
-        jobs.Run( threadCount );
-
-        uint64 proofFailCount = 0;
-        for( uint32 i = 0; i < threadCount; i++ )
-            proofFailCount += jobs[i].failCount;
-
-        if( proofFailCount )
-            Log::Line( "Plot has %llu invalid proofs." );
-        else
-            Log::Line( "Perfect plot! All proofs are valid." );
-
-        return proofFailCount == 0;
+        job.logLock     = &logLock;
+        job.plotFile    = plotFiles[i];
+        job.startOffset = options.startOffset;
+        job.failCount   = 0;
     }
 
-#if 0
-    if( 0 )
-    {
+    jobs.Run( threadCount );
 
-        PlotReader plot( *plotFile );
+    uint64 proofFailCount = 0;
+    for( uint32 i = 0; i < threadCount; i++ )
+        proofFailCount += jobs[i].failCount;
 
-        // uint64 numLinePoint = 0;
-        // uint128* linePoints = bbcalloc<uint128>( kEntriesPerPark );
-        // plot.ReadLPPark( PlotTable::Table6, 0, linePoints, numLinePoint );
+    if( proofFailCount )
+        Log::Line( "Plot has %llu invalid proofs." );
+    else
+        Log::Line( "Perfect plot! All proofs are valid." );
 
-        // Test read C3 park
-        uint64* f7Entries = bbcalloc<uint64>( kCheckpoint1Interval );
-        memset( f7Entries, 0, kCheckpoint1Interval * sizeof( uint64 ) );
-
-        // Check how many (potential) C3 parks we have
-        const uint64 c3ParkCount = plotFile->TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
-
-        // Read the C3 parks
-        // FatalIf( plot.ReadC3Park( 0, f7Entries ) < 0, "Could not read C3 park." );
-
-        // Test read p7
-        uint64* p7Entries = bbcalloc<uint64>( kEntriesPerPark );
-        // memset( p7Entries, 0, sizeof( kEntriesPerPark ) * sizeof( uint64 ) );
-
-
-
-        uint64 curPark7 = 0;
-        FatalIf( !plot.ReadP7Entries( 0, p7Entries ), "Failed to read P7 0." );
-        // ASSERT( p7Entries[0] == 3208650999 );
-        
-        uint64 proofFailCount = 0;
-        uint64 fullProofXs[PROOF_X_COUNT];
-
-        for( uint64 i = 0; i < c3ParkCount; i++ )
-        {
-            const auto timer = TimerBegin();
-            
-            const int64 f7EntryCount = plot.ReadC3Park( i, f7Entries );
-            FatalIf( f7EntryCount < 0, "Could not read C3 park %llu.", i );
-            ASSERT( f7EntryCount <= kCheckpoint1Interval );
-
-            const uint64 f7IdxBase = i * kCheckpoint1Interval;
-
-            for( uint32 e = 0; e < (uint32)f7EntryCount; e++ )
-            {
-                const uint64 f7Idx       = f7IdxBase + e;
-                const uint64 p7ParkIndex = f7Idx / kEntriesPerPark;
-                const uint64 f7          = f7Entries[e];
-
-                if( p7ParkIndex != curPark7 )
-                {
-                    // ASSERT( p7ParkIndex == curPark7+1 );
-                    curPark7 = p7ParkIndex;
-
-                    FatalIf( !plot.ReadP7Entries( p7ParkIndex, p7Entries ), "Failed to read P7 %llu.", p7ParkIndex );
-                }
-
-                const uint64 p7LocalIdx = f7Idx - p7ParkIndex * kEntriesPerPark;
-
-                const uint64 t6Index = p7Entries[p7LocalIdx];
-                
-                bool failed = false;
-
-                if( FetchProof<false>( plot, t6Index, fullProofXs ) )
-                {
-                    // ReorderProof( plot, fullProofXs );
-                    // Now we can validate the proof
-                    uint64 outF7;
-
-                    if( ValidateFullProof( plot, fullProofXs, outF7 ) )
-                        failed = f7 != outF7;
-                    else
-                        failed = true;
-                }
-                else
-                {
-                    failed = true;
-                    Log::Line( "Park %llu proof fetch failed for f7[%llu] = %llu ( 0x%016llx ) ", 
-                               i, f7Idx, f7, f7 );
-                }
-
-                if( failed )
-                {
-                    proofFailCount++;
-                }
-            }
-
-            const double elapsed = TimerEnd( timer );
-            Log::Line( "%10llu / %-10llu ( %.2lf%% ) C3 Parks Validated. %.2lf seconds elapsed.", 
-                i+1, c3ParkCount, (double)i / c3ParkCount * 100, elapsed );
-        }
-
-        return proofFailCount == 0;
-    }
-#endif
-
-    return false;
+    return proofFailCount == 0;
 }
 
 
@@ -277,9 +175,12 @@ void ValidateJob::Run()
     c3ParkEnd = startC3Park + c3ParkCount;
 
     if( startOffset > 0.0f )
+    {
         startC3Park += std::min( c3ParkCount, (uint64)( c3ParkCount * startOffset ) );
+        c3ParkCount = c3ParkEnd - startC3Park;
+    }
 
-    Log( "Starting park: %-10llu Park count: %llu", startC3Park, c3ParkCount );
+    Log( "Park range: %10llu..%-10llu  Park count: %llu", startC3Park, c3ParkEnd, c3ParkCount );
 
     ///
     /// Start validating C3 parks
