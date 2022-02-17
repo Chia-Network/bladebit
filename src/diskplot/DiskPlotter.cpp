@@ -250,7 +250,7 @@ void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fi
         sizes.crossBucketPairsLeft  +
         sizes.crossBucketPairsRight;
 
-    sizes.crossBucketTotal = 
+    sizes.totalSize = 
         sizes.yIO           +
         sizes.sortKeyIO     +
         sizes.mapIO         +

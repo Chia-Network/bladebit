@@ -90,6 +90,39 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     size_t heapSize = cx.heapSize + cx.ioHeapSize;
 
     _diskQueue->ResetHeap( heapSize, heap );
+
+    _diskQueue->InitFileSet( FileId::Y0              , "y0"           , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::Y1              , "y1"           , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::META_A_0        , "meta_a0"      , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::META_A_1        , "meta_a1"      , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::META_B_0        , "meta_b0"      , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::META_B_1        , "meta_b1"      , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::X               , "x"            , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::F7              , "f7"           , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::T2_L            , "table_2_l"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T2_R            , "table_2_r"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T3_L            , "table_3_l"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T3_R            , "table_3_r"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T4_L            , "table_4_l"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T4_R            , "table_4_r"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T5_L            , "table_5_l"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T5_R            , "table_5_r"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T6_L            , "table_6_l"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T6_R            , "table_6_r"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T7_L            , "table_7_l"    , 1                  );
+    _diskQueue->InitFileSet( FileId::T7_R            , "table_7_r"    , 1                  );
+    _diskQueue->InitFileSet( FileId::SORT_KEY2       , "table_2_key"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::SORT_KEY3       , "table_3_key"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::SORT_KEY4       , "table_4_key"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::SORT_KEY5       , "table_5_key"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::SORT_KEY6       , "table_6_key"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::SORT_KEY7       , "table_7_key"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::MAP2            , "table_2_map"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::MAP3            , "table_3_map"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::MAP4            , "table_4_map"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::MAP5            , "table_5_map"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::MAP6            , "table_6_map"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::MAP7            , "table_7_map"  , BB_DP_BUCKET_COUNT );
 }
 
 //-----------------------------------------------------------
@@ -97,7 +130,7 @@ void DiskPlotPhase1::Run()
 {
     DiskPlotContext& cx = _cx;
 
-    #if BB_DP_DBG_SKIP_PHASE_1
+    #if _DEBUG && BB_DP_DBG_SKIP_PHASE_1
     {
         FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 

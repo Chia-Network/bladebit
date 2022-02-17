@@ -15,13 +15,14 @@ public:
     inline void* Alloc( size_t size, size_t alignment )
     {
         // Start address must be aligned to the specified alignment
-        const size_t padding = RoundUpToNextBoundaryT( _size, alignment );
+        const size_t paddedSize = RoundUpToNextBoundaryT( _size, alignment );
         
         ASSERT( size > 0 );
-        ASSERT( _capacity - (_size + padding) >= size );
+        ASSERT( _size < _capacity ); 
+        ASSERT( _capacity - paddedSize >= size );
 
-        void* ptr = reinterpret_cast<void*>( _buffer + padding );
-        _size += padding + size;
+        void* ptr = reinterpret_cast<void*>( _buffer + paddedSize );
+        _size = paddedSize + size;
 
         return ptr;
     }
@@ -30,7 +31,7 @@ public:
     template<typename T>
     inline T* AllocT( size_t size, size_t alignment = alignof( T ) )
     {
-        return reinterpret_cast<T*>( Alloc( size, alignement ) );
+        return reinterpret_cast<T*>( Alloc( size, alignment ) );
     }
 
     //-----------------------------------------------------------

@@ -59,6 +59,14 @@ DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
     : _context( context )
 {
     memset( _bucketBuffers, 0, sizeof( _bucketBuffers ) );
+
+    DiskBufferQueue& ioQueue = *context.ioQueue;
+
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_2, "table_2_marks", 1 );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_3, "table_3_marks", 1 );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_4, "table_4_marks", 1 );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_5, "table_5_marks", 1 );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_6, "table_6_marks", 1 );
 }
 
 //-----------------------------------------------------------
@@ -93,10 +101,8 @@ void DiskPlotPhase2::Run()
     _phase3Data.bitFieldSize   = bitFieldSize;
     _phase3Data.maxTableLength = largestTableLength;
 
-    #if BB_DP_DBG_SKIP_PHASE_2
-    {
+    #if _DEBUG && BB_DP_DBG_SKIP_PHASE_2
         return;
-    }
     #endif
 
     // Reserve the remainder of the heap for reading R table backpointers
