@@ -58,8 +58,6 @@ class DiskPlotPhase1
 
     struct Bucket
     {
-        byte*   fpBuffer; // Root allocation
-
         uint32* y0     ;
         uint32* y1     ;
         uint32* sortKey0;
@@ -90,9 +88,9 @@ class DiskPlotPhase1
         Fence   backPointersFence;  // Fence used for writing table backpointers
 
         // Used for overflows
-        OverflowBuffer yOverflow;
-        OverflowBuffer metaAOverflow;
-        OverflowBuffer metaBOverflow;
+        // OverflowBuffer yOverflow;
+        // OverflowBuffer metaAOverflow;
+        // OverflowBuffer metaBOverflow;
 
         AdjacentBucketInfo crossBucketInfo;
     };

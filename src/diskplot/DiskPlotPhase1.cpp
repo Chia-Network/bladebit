@@ -9,6 +9,7 @@
 #include "jobs/FxGenBucketized.h"
 #include "jobs/LookupMapJob.h"
 #include "plotshared/TableWriter.h"
+#include "util/StackAllocator.h"
 
 // Test
 #include "io/FileStream.h"
@@ -319,11 +320,8 @@ void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
     Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)sizes.totalSize BtoMB );
     
     // These are already allocated as a single buffer, we assign the pointers to their regions here.
-    // #if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
-    #if BB_DP_DBG_PROTECT_FP_BUFFERS
+    #if _DEBUG && BB_DP_DBG_PROTECT_FP_BUFFERS
     {
-        bucket.fpBuffer = nullptr;
-
         bucket.y0                          = AllocProtect<uint32>( sizes.yIO / 2       );
         bucket.y1                          = AllocProtect<uint32>( sizes.yIO / 2       );
         bucket.sortKey0                    = AllocProtect<uint32>( sizes.sortKeyIO / 2 );
@@ -347,65 +345,41 @@ void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
         bucket.crossBucketInfo.pairs.left  = AllocProtect<uint32>( sizes.crossBucketPairsLeft  );
         bucket.crossBucketInfo.pairs.right = AllocProtect<uint16>( sizes.crossBucketPairsRight );
 
-        bucket.yOverflow    .Init( AllocProtect<void>( sizes.yOverflow     ), fileBlockSize );
-        bucket.metaAOverflow.Init( AllocProtect<void>( sizes.metaAOverflow ), fileBlockSize );
-        bucket.metaBOverflow.Init( AllocProtect<void>( sizes.metaBOverflow ), fileBlockSize );
+        // bucket.yOverflow    .Init( AllocProtect<void>( sizes.yOverflow     ), fileBlockSize );
+        // bucket.metaAOverflow.Init( AllocProtect<void>( sizes.metaAOverflow ), fileBlockSize );
+        // bucket.metaBOverflow.Init( AllocProtect<void>( sizes.metaBOverflow ), fileBlockSize );
 
     }
     #else
     {
-        // #TODO: Remove this. Allocating here temporarily for testing.
-        // Temp test:
-        bucket.yTmp     = bbvirtalloc<uint32>( ySize    );
-        bucket.metaATmp = bbvirtalloc<uint64>( metaSize );
-        bucket.metaBTmp = bucket.metaATmp + maxBucketCount;
+        StackAllocator allocator( _cx.heapBuffer, _cx.totalHeapSize );
 
-        // #TODO: Remove this as well. Testing allocating here for now. It should be allocated as part of the IO heap.
-        bucket.yOverflow    .Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
-        bucket.metaAOverflow.Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
-        bucket.metaBOverflow.Init( bbvirtalloc<void>( fileBlockSize * BB_DP_BUCKET_COUNT * 2 ), fileBlockSize );
+        bucket.y0                          = allocator.AllocT<uint32>( sizes.yIO / 2       );
+        bucket.y1                          = allocator.AllocT<uint32>( sizes.yIO / 2       );
+        bucket.sortKey0                    = allocator.AllocT<uint32>( sizes.sortKeyIO / 2 );
+        bucket.sortKey1                    = allocator.AllocT<uint32>( sizes.sortKeyIO / 2 );
+        bucket.map                         = allocator.AllocT<uint64>( sizes.mapIO         );
+        bucket.metaA0                      = allocator.AllocT<uint64>( sizes.metaAIO / 2   );
+        bucket.metaA1                      = allocator.AllocT<uint64>( sizes.metaAIO / 2   );
+        bucket.metaB0                      = allocator.AllocT<uint64>( sizes.metaBIO / 2   );
+        bucket.metaB1                      = allocator.AllocT<uint64>( sizes.metaBIO / 2   );
+        bucket.pairs.left                  = allocator.AllocT<uint32>( sizes.pairsLeftIO   );
+        bucket.pairs.right                 = allocator.AllocT<uint16>( sizes.pairsRightIO  );
+        bucket.groupBoundaries             = allocator.AllocT<uint32>( sizes.groupsSize    );
 
-        // #TODO: Remove these also. Testing the allocation here for now
-        bucket.crossBucketInfo.y           = bbcvirtalloc<uint32>( kBC * 6 );
-        bucket.crossBucketInfo.metaA       = bbcvirtalloc<uint64>( kBC * 6 );
-        bucket.crossBucketInfo.metaB       = bbcvirtalloc<uint64>( kBC * 6 );
-        bucket.crossBucketInfo.pairs.left  = bbcvirtalloc<uint32>( kBC );
-        bucket.crossBucketInfo.pairs.right = bbcvirtalloc<uint16>( kBC );
+        bucket.yTmp                        = allocator.AllocT<uint32>( sizes.yTemp    );
+        bucket.metaATmp                    = allocator.AllocT<uint64>( sizes.metaATmp );
+        bucket.metaBTmp                    = allocator.AllocT<uint64>( sizes.metaBTmp );
 
-        bucket.fpBuffer = _cx.heapBuffer;
+        bucket.crossBucketInfo.y           = allocator.AllocT<uint32>( sizes.crossBucketY          );
+        bucket.crossBucketInfo.metaA       = allocator.AllocT<uint64>( sizes.crossBucketMetaA      );
+        bucket.crossBucketInfo.metaB       = allocator.AllocT<uint64>( sizes.crossBucketMetaB      );
+        bucket.crossBucketInfo.pairs.left  = allocator.AllocT<uint32>( sizes.crossBucketPairsLeft  );
+        bucket.crossBucketInfo.pairs.right = allocator.AllocT<uint16>( sizes.crossBucketPairsRight );
 
-        byte* ptr = bucket.fpBuffer;
-
-        // Offset by yGroupExtra so that we're aligned to file block size for reading,
-        // but can store the previous bucket's 2 groups worth of y values just before that.
-
-        bucket.y0 = (uint32*)ptr; 
-        bucket.y1 = bucket.y0 + maxBucketCount;
-        ptr += ySize;
-
-        bucket.sortKey = (uint32*)ptr;
-        ptr += sortKeySize;
-
-        // #TODO: Refactor all this
-        bucket.map = nullptr;
-
-        bucket.map = (uint32*)ptr;
-        ptr += mapSize;
-
-        bucket.metaA0 = (uint64*)ptr;
-        bucket.metaA1 = bucket.metaA0 + maxBucketCount;
-        bucket.metaB0 = bucket.metaA1 + maxBucketCount;
-        bucket.metaB1 = bucket.metaB0 + maxBucketCount;
-        ptr += metaSize;
-        ASSERT( ptr == (byte*)( bucket.metaB1 + maxBucketCount ) );
-
-        bucket.pairs.left = (uint32*)ptr;
-        ptr += pairsLSize;
-
-        bucket.pairs.right = (uint16*)ptr;
-        ptr += pairsRSize;
-
-        bucket.groupBoundaries =  (uint32*)ptr;
+        // bucket.yOverflow    .Init( allocator.AllocT<void>( sizes.yOverflow     ), fileBlockSize );
+        // bucket.metaAOverflow.Init( allocator.AllocT<void>( sizes.metaAOverflow ), fileBlockSize );
+        // bucket.metaBOverflow.Init( allocator.AllocT<void>( sizes.metaBOverflow ), fileBlockSize );
     }
     #endif
 

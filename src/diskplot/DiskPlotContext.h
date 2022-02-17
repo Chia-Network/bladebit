@@ -53,6 +53,7 @@ struct DiskPlotContext
 
     DiskBufferQueue* ioQueue;
 
+    size_t       totalHeapSize;     // Complete size of our heap allocation (ioHeapSize + heapSize)
     size_t       heapSize;          // Size in bytes of our working heap. Some parts are preallocated.
     byte*        heapBuffer;        // Buffer allocated for in-memory work
 

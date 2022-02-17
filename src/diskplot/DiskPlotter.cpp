@@ -39,6 +39,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.ioHeapSize    = ioHeapFullSize;
     _cx.ioBufferCount = ioBufferCount;
     _cx.useDirectIO   = cfg.enableDirectIO;
+    _cx.totalHeapSize = _cx.heapSize + _cx.ioHeapSize;
 
     _cx.threadCount   = cfg.workThreadCount;
     _cx.ioThreadCount = cfg.ioThreadCount;
@@ -53,11 +54,9 @@ DiskPlotter::DiskPlotter( const Config cfg )
     Log::Line( "IO buffer count: %u"       , _cx.ioBufferCount );
     Log::Line( "Unbuffered IO  : %s"       , _cx.useDirectIO ? "true" : "false" );
 
-    const size_t allocationSize = _cx.heapSize + _cx.ioHeapSize;
-
     // Log::Line( "Allocating heap of %llu MiB.", _cx.heapSize BtoMB );
-    Log::Line( "Allocating a heap of %llu MiB.", allocationSize BtoMB );
-    _cx.heapBuffer = (byte*)SysHost::VirtualAlloc( allocationSize );
+    Log::Line( "Allocating a heap of %llu MiB.", _cx.totalHeapSize BtoMB );
+    _cx.heapBuffer = (byte*)SysHost::VirtualAlloc( _cx.totalHeapSize );
     FatalIf( !_cx.heapBuffer, "Failed to allocated heap buffer. Make sure you have enough free memory." );
     
     _cx.ioHeap = _cx.heapBuffer + _cx.heapSize;
@@ -67,7 +66,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
 
     // Initialize our Thread Pool and IO Queue
     _cx.threadPool = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
-    _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, allocationSize, _cx.ioThreadCount, _cx.useDirectIO );
+    _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, _cx.totalHeapSize, _cx.ioThreadCount, _cx.useDirectIO );
 
     
     // #TODO: Remove this (test)

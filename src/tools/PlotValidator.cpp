@@ -271,7 +271,6 @@ void ValidateJob::Run()
 }
 
 
-
 //-----------------------------------------------------------
 template<bool Use64BitLpToSquare>
 bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] )
