@@ -1,15 +1,15 @@
-#include "memplot/CTables.h"
+#include "plotting/CTables.h"
 #include "ChiaConsts.h"
 #include "util/Log.h"
 #include "util/BitView.h"
 #include "io/FileStream.h"
 #include "PlotTools.h"
 #include "PlotReader.h"
-#include "plotshared/PlotTools.h"
-#include "memplot/LPGen.h"
+#include "plotting/PlotTools.h"
+#include "plotmem/LPGen.h"
 #include "pos/chacha8.h"
 #include "b3/blake3.h"
-#include "plotshared/MTJob.h"
+#include "plotting/MTJob.h"
 #include <mutex>
 
 #define PROOF_X_COUNT       64

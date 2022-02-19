@@ -4,10 +4,10 @@
 #include <thread>
 
 #include "Version.h"
-#include "Util.h"
+#include "util/Util.h"
 #include "util/Log.h"
 #include "SysHost.h"
-#include "memplot/MemPlotter.h"
+#include "plotmem/MemPlotter.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wreturn-type"

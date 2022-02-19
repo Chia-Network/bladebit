@@ -1,5 +1,5 @@
 #include "Semaphore.h"
-#include "Util.h"
+#include "util/Util.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"

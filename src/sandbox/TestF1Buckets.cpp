@@ -1,9 +1,9 @@
 #include "Sandbox.h"
-#include "diskplot/jobs/F1GenBucketized.h"
-#include "diskplot/DiskPlotConfig.h"
-#include "Util.h"
+#include "plotdisk/jobs/F1GenBucketized.h"
+#include "plotdisk/DiskPlotConfig.h"
+#include "util/Util.h"
 #include "util/Log.h"
-#include "diskplot/DiskPlotDebug.h"
+#include "plotdisk/DiskPlotDebug.h"
 #include "io/FileStream.h"
 #include "algorithm/RadixSort.h"
 

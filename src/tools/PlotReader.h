@@ -1,7 +1,7 @@
 #pragma once
-#include "plotshared/PlotTools.h"
+#include "plotting/PlotTools.h"
 #include "io/FileStream.h"
-#include "Util.h"
+#include "util/Util.h"
 #include <vector>
 
 class BitReader;

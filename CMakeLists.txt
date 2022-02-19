@@ -21,7 +21,13 @@ set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules
 )
 
-# Grab BLS
+
+#
+# Grab Dependencies
+#
+set(platform_libs)
+
+# BLS
 include(FetchContent)
 
 FetchContent_Declare(
@@ -34,6 +40,20 @@ set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")
 set(BUILD_BLS_TESTS "0" CACHE STRING "")
 set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
+
+# Threads
+find_package(Threads REQUIRED)
+
+# NUMA
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    find_package(NUMA REQUIRED)
+    set(platform_libs ${NUMA_LIBRARY} gmp)
+endif()
+
+# Catch
+# TODO: Add configuration var to disable this
+include(cmake_modules/FindCatch2.cmake)
+
 
 # Config
 set(CMAKE_C_FLAGS_RELEASE_INIT)
@@ -167,8 +187,9 @@ else()
 
 endif()
 
-
-# Main Sources
+#
+# Sources
+#
 file(GLOB_RECURSE bb_sources
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     CONFIGURE_DEPENDS
@@ -188,16 +209,29 @@ file(GLOB_RECURSE bb_headers
     src/*.inl
 )
 
-
-# Configure dependent on config/platform/architecture
-list(FILTER bb_sources EXCLUDE REGEX "src/main\.cpp")
+# Ignore some sources
+list(FILTER bb_sources EXCLUDE REGEX "src/main\\.cpp")
 list(FILTER bb_sources EXCLUDE REGEX "src/tools/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/sandbox/.+")
-list(FILTER bb_sources EXCLUDE REGEX "src/(memplot|plot128|diskplot)")
-list(FILTER bb_sources EXCLUDE REGEX "src/(test|platform)/.+")
+list(FILTER bb_sources EXCLUDE REGEX "src/platform/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
 list(FILTER bb_sources EXCLUDE REGEX "src/uint128_t/.+")
 
+
+# Project-specific sources
+file(GLOB_RECURSE src_tests RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+    CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    tests/*.cpp
+)
+
+file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
+    CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    src/sandbox/*.cpp
+    src/sandbox/*.h
+)
+
+
+# Configure dependent on config/platform/architecture
 # Architecture
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "AMD64")
 
@@ -267,110 +301,62 @@ else()
     message( FATAL_ERROR "Unsupported operating system '${CMAKE_SYSTEM_NAME}'" )
 endif()
 
-# Project-specific sources
-file(GLOB_RECURSE src_memplot RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
-    CONFIGURE_DEPENDS LIST_DIRECTORIES false
-    src/memplot/*.cpp
-)
-set(src_memplot ${src_memplot} src/main.cpp ${bb_sources})
 
-file(GLOB_RECURSE src_plot128 RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
-    CONFIGURE_DEPENDS LIST_DIRECTORIES false
-    src/plot128/*.cpp
-)
-set(src_plot128 ${src_plot128} ${bb_sources})
-
-file(GLOB_RECURSE src_diskplot RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
-    CONFIGURE_DEPENDS LIST_DIRECTORIES false
-    src/diskplot/*.cpp
-)
-set(src_diskplot ${src_diskplot} ${bb_sources})
-
-file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
-    CONFIGURE_DEPENDS LIST_DIRECTORIES false
-    src/test/*.cpp
-)
-
-file(GLOB_RECURSE headers_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
-    CONFIGURE_DEPENDS LIST_DIRECTORIES false
-    src/test/*.h
-)
-
-
-# Exe
-find_package(Threads REQUIRED)
-
-set(platform_libs)
-
-if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    find_package(NUMA REQUIRED)
-    set(platform_libs ${NUMA_LIBRARY} gmp)
-endif()
-
+#
+# Targets
+#
 set(bb_include_dirs 
     ${INCLUDE_DIRECTORIES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 # BladeBit
-add_executable(bladebit      ${src_memplot} ${bb_headers})
-add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/test/test_main.cpp ${bb_sources} ${src_dev} ${bb_headers} ${headers_dev})
-add_executable(bladebit_128  ${src_plot128} ${bb_headers})
-add_executable(bladebit_disk ${src_diskplot} ${bb_headers})
+add_library(lib_bladebit ${bb_sources} ${bb_headers})
+set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit)
+target_link_libraries(lib_bladebit INTERFACE Threads::Threads bls ${platform_libs})
+target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
+target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
+target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
+
+add_executable(bladebit src/main.cpp ${bb_headers})
+target_link_libraries(bladebit PRIVATE lib_bladebit)
+
+add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/sandbox/sandbox_main.cpp ${src_dev} ${bb_headers})
+target_link_libraries(bladebit_dev PRIVATE lib_bladebit)
 
 # Tools
 add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
+target_link_libraries(fsegen PRIVATE lib_bladebit)
+
 add_executable(plot_tool 
     src/tools/PlotTools_Main.cpp 
-    src/tools/PlotReader.cpp        # TODO: Move this out to the plotting/ folder
+    src/tools/PlotReader.cpp
     src/tools/PlotValidator.cpp
     src/tools/PlotComparer.cpp 
-    ${bb_sources} ${bb_headers})
+    ${bb_headers}
+)
+target_link_libraries(plot_tool PRIVATE lib_bladebit)
 
-macro(config_proj tgt)
+# Tests
+add_executable(tests ${src_tests} ${bb_headers})
+target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 
+# macro(config_proj tgt)
+#     message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
+#     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+#     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+#     target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
+#     target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
     
-    message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
-    # if (CMAKE_GENERATOR MATCHES "Visual Studio")
-        target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-        target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-        target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
-        target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
-    # else()
-    #     if(${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    #         target_compile_options(${tgt} PRIVATE ${c_opts} ${debug_c_opts})
-    #         target_link_options(${tgt} PRIVATE ${link_opts} ${debug_link_opts})
-    #     else()
-    #         target_compile_options(${tgt} PRIVATE ${c_opts} ${release_c_opts})
-    #         target_link_options(${tgt} PRIVATE ${link_opts} ${release_link_opts})
-    #     endif()
-    # endif()
+#     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
+# endmacro()
+# Configure targets
 
-    # Strip debug symbols to separate file
-    # if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    #     add_custom_command(
-    #         TARGET ${tgt}
-    #         POST_BUILD
-    #         COMMAND "/usr/bin/env" "bash" "strip-debug-symbols.sh" "build/${tgt}"
-    #         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    #     )
-    # endif()
-
-
-    target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
-    target_link_libraries(${tgt} Threads::Threads bls ${platform_libs})
-endmacro()
-
-config_proj(bladebit)
-config_proj(bladebit_dev)
-# config_proj(bladebit_128)
-config_proj(bladebit_disk)
-
-# Tools
-config_proj(fsegen)
-config_proj(plot_tool)
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
     FILES ${src_full} ${bb_headers}
 )
+

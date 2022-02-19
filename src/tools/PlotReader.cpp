@@ -1,9 +1,9 @@
 #include "PlotReader.h"
 #include "ChiaConsts.h"
 #include "util/BitView.h"
-#include "plotshared/PlotTools.h"
-#include "memplot/CTables.h"
-#include "DTables.h"
+#include "plotting/PlotTools.h"
+#include "plotting/CTables.h"
+#include ""plotting/DTables.h""
 
 ///
 /// Plot Reader

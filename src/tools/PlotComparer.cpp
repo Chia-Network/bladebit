@@ -1,8 +1,8 @@
 #include "io/FileStream.h"
 #include "ChiaConsts.h"
-#include "Util.h"
+#include "util/Util.h"
 #include "util/Log.h"
-#include "plotshared/PlotTools.h"
+#include "plotting/PlotTools.h"
 #include <vector>
 
 class PlotInfo;

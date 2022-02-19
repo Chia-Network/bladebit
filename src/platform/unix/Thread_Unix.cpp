@@ -1,6 +1,6 @@
-#include "../../threading/Thread.h"
-#include "../../Util.h"
-#include "../../Globals.h"
+#include "threading/Thread.h"
+#include "util/Util.h"
+#include "Globals.h"
 #include "SysHost.h"
 #include "util/Log.h"
 

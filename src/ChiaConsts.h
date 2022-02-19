@@ -1,6 +1,6 @@
 #pragma once
-#include "Util.h"
-#include "plotshared/Tables.h"
+#include "util/Util.h"
+#include "plotting/Tables.h"
 
 // Hard-coded k to 32
 #define _K 32
