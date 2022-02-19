@@ -48,8 +48,6 @@ void ProducerThread( void* param )
         _signal.Signal();
     }
 
-    while( _queue.Count() );
-
     _exitThread = true;
     _signal.Signal();
 }
@@ -67,20 +65,29 @@ void ConsumerThread( void* param )
     {
         _signal.Wait();
 
-        if( _exitThread )
-            return;
-
-        const int count = _queue.Dequeue( buffer, CAPACITY );
-        ENSURE( count <= CAPACITY );
-
-        for( int i = 0; i < count; i++ )
+        // Take all entries until there's no more
+        for( ;; )
         {
-            ENSURE( buffer[i] == next + i );
-        }
+            const int count = _queue.Dequeue( buffer, CAPACITY );
+            ENSURE( count <= CAPACITY );
 
-        next += count;
-        if( next % INTERVAL == 0 )
-            Log::Line( "Count: %d", next );
+            if( count == 0 )
+            {
+                if( _exitThread )
+                    return;
+
+                break;
+            }
+
+            for( int i = 0; i < count; i++ )
+            {
+                ENSURE( buffer[i] == next + i );
+            }
+
+            next += count;
+            if( next % INTERVAL == 0 )
+                Log::Line( "Count: %d", next );
+        }
     }
 }
 

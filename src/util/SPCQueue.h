@@ -73,10 +73,24 @@ public:
 
     int Dequeue( T* values, int capacity );
 
-    inline int Count() const
-    {
-        return _producerState->committedCount.load( std::memory_order_relaxed );
-    }
+    // Returns the amount of entries currently comitted for dequeuing.
+    // The value returned here may or may not be accurate
+    // as a thread may have enqueued or dequeued entries immediately
+    // before/after the comitted counts are retrieved.
+    // This should only be called from the consumer or the producer thread.
+    // Calling it from any other thread is underfined behavior.
+    // #TODO: Not sure if we can actually implement this in a safe manner,
+    //        even from the consumer or producer thread.
+    // inline int64 Count() const
+    // {
+    //     int64 producerCount = _producerState->committedCount.load( std::memory_order_relaxed );
+
+    //     const auto* oldState = _newState.load( std::memory_order_relaxed );
+    //     if( oldState )
+    //         producerCount += oldState->committedCount.load( std::memory_order_relaxed );
+
+    //     return producerCount;
+    // }
 
 private:
 
@@ -91,13 +105,13 @@ private:
 private:
 
     // Producer
-    int              _writePosition     = 0;    // Current write position in our buffer.
-    int              _pendingCount      = 0;    // Elements not yet committed (published) to the consumer thread
-    int              _oldPendingCount   = 0;    // Pending count before we resized the buffer and switched to a new state
+    int              _writePosition     = 0;     // Current write position in our buffer.
+    int              _pendingCount      = 0;     // Elements not yet committed (published) to the consumer thread
+    int              _oldPendingCount   = 0;     // Pending count before we resized the buffer and switched to a new state
     ConsumerState*   _producerState;
     ConsumerState    _states[2];
     int              _nextState         = 1;
-    bool             _pendingState      = false;    // Avoid atomic _newState check during Commit()
+    bool             _pendingState      = false; // Avoid atomic _newState check during Commit()
 
     // Shared
     std::atomic<ConsumerState*> _newState = nullptr;

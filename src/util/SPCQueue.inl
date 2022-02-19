@@ -354,3 +354,4 @@ int GrowableSPCQueue<T, _growSize>::Dequeue( T* values, int capacity )
     ASSERT( count >= 0 );
     return count;
 }
+
