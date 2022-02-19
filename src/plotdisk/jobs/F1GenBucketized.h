@@ -1,5 +1,5 @@
 #pragma once
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 #include "plotdisk/DiskPlotConfig.h"
 
 class ThreadPool;

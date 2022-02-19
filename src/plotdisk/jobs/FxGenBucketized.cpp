@@ -1,6 +1,6 @@
 #include "FxGenBucketized.h"
 #include "threading/ThreadPool.h"
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 #include "plotdisk/DiskBufferQueue.h"
 
 #pragma GCC diagnostic push

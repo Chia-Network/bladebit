@@ -1,6 +1,6 @@
 #pragma once
 #include "plotdisk/DiskPlotContext.h"
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 #include "threading/Fence.h"
 
 template<uint BucketCount>

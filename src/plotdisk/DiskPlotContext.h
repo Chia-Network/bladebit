@@ -2,7 +2,7 @@
 #include "DiskPlotConfig.h"
 #include "DiskBufferQueue.h"
 #include "threading/ThreadPool.h"
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 #include "plotting/PlotTypes.h"
 #include "ChiaConsts.h"
 

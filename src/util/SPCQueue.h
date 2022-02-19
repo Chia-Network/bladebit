@@ -82,7 +82,7 @@ private:
 
     struct ConsumerState
     {
-        byte*            buffer;         // Element buffer
+        T*               buffer;         // Element buffer
         int              capacity;       // Buffer capacity
         std::atomic<int> committedCount; // How many elements are ready to be read
     };
@@ -100,7 +100,7 @@ private:
     bool             _pendingState      = false;    // Avoid atomic _newState check during Commit()
 
     // Shared
-    std::atomic<ConsumerState> _newState = nullptr;
+    std::atomic<ConsumerState*> _newState = nullptr;
 
     // Consumer
     ConsumerState*   _consumerState;

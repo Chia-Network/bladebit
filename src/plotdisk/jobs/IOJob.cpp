@@ -1,6 +1,6 @@
 #include "IOJob.h"
 #include "threading/ThreadPool.h"
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 #include "io/FileStream.h"
 #include "util/Util.h"
 

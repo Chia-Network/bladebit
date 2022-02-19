@@ -3,7 +3,7 @@
 #include "io/FileStream.h"
 #include "threading/Fence.h"
 #include "threading/ThreadPool.h"
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 #include "plotting/WorkHeap.h"
 #include "plotting/Tables.h"
 #include "FileId.h"

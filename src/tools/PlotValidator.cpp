@@ -9,7 +9,7 @@
 #include "plotmem/LPGen.h"
 #include "pos/chacha8.h"
 #include "b3/blake3.h"
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 #include <mutex>
 
 #define PROOF_X_COUNT       64

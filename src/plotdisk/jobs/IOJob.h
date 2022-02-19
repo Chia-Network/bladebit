@@ -1,6 +1,6 @@
 #pragma once
 
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 
 class FileStream;
 class ThreadPool;

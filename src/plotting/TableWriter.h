@@ -1,7 +1,7 @@
 #pragma once
 #include "ChiaConsts.h"
 #include "threading/ThreadPool.h"
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 #include "plotting/CTables.h"
 
 struct TableWriter

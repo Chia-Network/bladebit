@@ -38,7 +38,26 @@
                 "-v",
                 "${workspaceFolder}/.sandbox"
             ]
+        },
+
+        {
+            "name"         : "Debug Tests",
+            
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_tests_debug",
+            "console"       : "internalConsole",
+
+            "program": "${workspaceRoot}/build/tests",
+            
+            "environment": [],
+
+            "args": [
+            ]
         }
+
 
         ,{
             "name"       : "Bladebit Disk",

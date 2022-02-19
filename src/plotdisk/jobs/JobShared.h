@@ -1,7 +1,7 @@
 #pragma once
 
 #include "plotdisk/DiskPlotConfig.h"
-#include "plotting/MTJob.h"
+#include "threading/MTJob.h"
 
 // template<typename TJob>
 // struct BucketJob : MTJob<TJob>

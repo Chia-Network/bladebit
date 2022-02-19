@@ -129,7 +129,7 @@ GrowableSPCQueue<T,_growSize>::GrowableSPCQueue(size_t capacity )
              "GrowableSPCQueue capacity cannot exceed %d.",
              std::numeric_limits<int>::max() );
 
-    ZeroMem( _states, sizeof( _states ) );
+    memset( _states, 0, sizeof( _states ) );
 
     if( capacity > 0 )
     {
@@ -152,19 +152,15 @@ GrowableSPCQueue<T,_growSize>::~GrowableSPCQueue()
     if( _producerState->buffer )
         free( _producerState->buffer );
 
-    auto* newState = _newState.load( std::memory_order_acquire );
-    if( newState )
-    {
-        ASSERT( newState->buffer );
-        free( newState->buffer );
-    }
+    if( _consumerState->buffer != _producerState->buffer )
+        free( _consumerState->buffer );
 }
 
 //-----------------------------------------------------------
 template<typename T, size_t _growSize>
 bool GrowableSPCQueue<T,_growSize>::Write(T*& outValue )
 {
-    const int count = _producerState->pendingCount + _producerState->committedCount.load( std::memory_order_acquire );
+    const int count = _pendingCount + _producerState->committedCount.load( std::memory_order_acquire );
     ASSERT( count <= _producerState->capacity );
 
     if( count < _producerState->capacity )
@@ -172,7 +168,7 @@ bool GrowableSPCQueue<T,_growSize>::Write(T*& outValue )
         outValue = &_producerState->buffer[_writePosition];
 
         ++_writePosition %= _producerState->capacity;
-        _producerState->pendingCount++;
+        _pendingCount++;
 
         return true;
     }
@@ -219,12 +215,12 @@ bool GrowableSPCQueue<T,_growSize>::Write(T*& outValue )
     T* newBuffer = bbcalloc<T>( newCapacity );
 
     // Set our new state
-    _producerState = _states+_nextState;
-    _nextState   = (++_nextState) % 2;
+    _producerState = _states + _nextState;
+    _nextState     = (++_nextState) % 2;
 
-    ZeroMem( _producerState );
-    _producerState->capacity       = newCapacity;
     _producerState->buffer         = newBuffer;
+    _producerState->capacity       = newCapacity;
+    _producerState->committedCount = 0;
 
     _oldPendingCount = _pendingCount;
     _pendingCount    = 0;
@@ -295,10 +291,11 @@ bool GrowableSPCQueue<T, _growSize>::Enqueue(const T& value )
 
 //-----------------------------------------------------------
 template<typename T, size_t _growSize>
-int GrowableSPCQueue<T, _growSize>::Dequeue(T* values, int capacity )
+int GrowableSPCQueue<T, _growSize>::Dequeue( T* values, int capacity )
 {
     ASSERT( values );
     ASSERT( capacity > 0 );
+    ASSERT( _consumerState );
 
     int curCount = _consumerState->committedCount.load( std::memory_order_acquire );
     int count    = std::min( capacity, curCount );
@@ -306,7 +303,7 @@ int GrowableSPCQueue<T, _growSize>::Dequeue(T* values, int capacity )
     if( count > 0 )
     {
         const size_t bufferCapacity = _consumerState->capacity;
-        byte*  consumerBuffer = _consumerState->buffer;
+        T* consumerBuffer = _consumerState->buffer;
 
         const int readPos = _readPosition;
         _readPosition = ( readPos + count ) % (int)bufferCapacity;
@@ -318,9 +315,10 @@ int GrowableSPCQueue<T, _growSize>::Dequeue(T* values, int capacity )
         const int remainder = count - copyCount;
         if( remainder > 0 )
         {
-#if _DEBUG
-            Log::Debug( "[0x%p] Wrap", this );
-#endif
+            #if _DEBUG
+                Log::Debug( "[0x%p] Wrap", this );
+            #endif
+
             bbmemcpy_t( values + copyCount, consumerBuffer, (size_t)remainder );
         }
 
@@ -338,6 +336,7 @@ int GrowableSPCQueue<T, _growSize>::Dequeue(T* values, int capacity )
     {
         // Delete the current state's buffer
         free( _consumerState->buffer );
+        _consumerState->buffer = nullptr;
 
         // Publish to the producer that we've changed states
         _newState.store( nullptr, std::memory_order_release );

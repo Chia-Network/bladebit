@@ -70,6 +70,35 @@
 			}
 		}
 
+		// Build Tests Debug
+		,{
+			"type"   : "shell",
+			"label"  : "build_tests_debug",
+			"command": "cmake",
+			
+			"args": [
+				"--build", ".",
+				"--target", "tests",
+				"--config", "Debug",
+				"-j", "24"
+			],
+
+			"problemMatcher": [ "$gcc" ],
+			
+			"windows":{
+				"problemMatcher":[ "$msCompile" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+
 		// Build Disk Debug
 		,{
 			"type"   : "shell",
