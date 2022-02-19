@@ -1,5 +1,6 @@
 #pragma once
 #include "threading/AutoResetSignal.h"
+#include "Util.h"
 
 class SPCQueueIterator
 {
@@ -13,7 +14,7 @@ class SPCQueueIterator
     void Next();
 };
 
-// Single Producer-Consumer Queue
+// Statically Fixed-Size Single Producer-Consumer Queue
 template<typename T, int Capacity>
 class SPCQueue
 {
@@ -47,6 +48,65 @@ private:
     int              _readPosition   = 0;
     T                _buffer[Capacity];
 };
+
+
+// Dynamically-Sized Single Producer-Consumer Queue
+template<typename T, size_t _growSize = 64>
+class GrowableSPCQueue
+{
+public:
+
+    explicit GrowableSPCQueue(size_t capacity );
+    GrowableSPCQueue();
+    ~GrowableSPCQueue();
+
+    // Grab an entry from the heap buffer to encode
+    // the item into the queue, but not commit it for consumption yet.
+    // Use Commit() to publish the uncommitted (written) commands presently in the queue.
+    bool Write( T*& outValue );
+
+    // Publish pending commands to be visible for reading.
+    void Commit();
+
+    // Does Write() and Commit() in a single call.
+    bool Enqueue( const T& value );
+
+    int Dequeue( T* values, int capacity );
+
+    inline int Count() const
+    {
+        return _producerState->committedCount.load( std::memory_order_relaxed );
+    }
+
+private:
+
+    struct ConsumerState
+    {
+        byte*            buffer;         // Element buffer
+        int              capacity;       // Buffer capacity
+        std::atomic<int> committedCount; // How many elements are ready to be read
+    };
+
+
+private:
+
+    // Producer
+    int              _writePosition     = 0;    // Current write position in our buffer.
+    int              _pendingCount      = 0;    // Elements not yet committed (published) to the consumer thread
+    int              _oldPendingCount   = 0;    // Pending count before we resized the buffer and switched to a new state
+    ConsumerState*   _producerState;
+    ConsumerState    _states[2];
+    int              _nextState         = 1;
+    bool             _pendingState      = false;    // Avoid atomic _newState check during Commit()
+
+    // Shared
+    std::atomic<ConsumerState> _newState = nullptr;
+
+    // Consumer
+    ConsumerState*   _consumerState;
+    int              _readPosition      = 0;
+};
+
 
 #include "SPCQueue.inl"
 

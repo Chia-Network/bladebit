@@ -29,12 +29,16 @@
           <option name="fileUrl" value="file://$PROJECT_DIR$/src/Config.h" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="4334" />
+          <option name="caretOffset" value="7514" />
           <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotPhase1.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="9216" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/diskplot/DiskPlotPhase2.cpp" />
+          <option name="caretOffset" value="9329" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotshared/SPCQueue.inl" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="2299" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotshared/SPCQueue.h" />
         </OpenedFileInfo>
       </list>
     </option>
