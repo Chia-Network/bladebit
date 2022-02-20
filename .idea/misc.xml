@@ -5,52 +5,72 @@
     <option name="openedFilesInfos">
       <list>
         <OpenedFileInfo>
-          <option name="caretOffset" value="5401" />
+          <option name="caretOffset" value="2107" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotConfig.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="45310" />
           <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotPhase3.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="1840" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotContext.h" />
+          <option name="caretOffset" value="5324" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskBufferQueue.h" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="579" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotPhase2.h" />
+          <option name="caretOffset" value="1629" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskBufferQueue.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="489" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/Config.h" />
+          <option name="caretOffset" value="1293" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotPhase3.h" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="7514" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotPhase1.cpp" />
+          <option name="caretOffset" value="428" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/main.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="771" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotting/SPCQueue.h" />
+          <option name="caretOffset" value="2093" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/tools/PlotValidator.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="9056" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotting/SPCQueue.inl" />
+          <option name="caretOffset" value="1795" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/tools/PlotTools_Main.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="7888" />
+          <option name="caretOffset" value="7810" />
           <option name="fileUrl" value="file://$PROJECT_DIR$/CMakeLists.txt" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="245" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/cmake_modules/FindNUMA.cmake" />
+          <option name="caretOffset" value="22130" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/main_old.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="199" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/cmake_modules/FindCatch2.cmake" />
+          <option name="caretOffset" value="4007" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/main_diskplot.h" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="357" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/test/Test_LookupMap.cpp" />
+          <option name="caretOffset" value="368" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/util/CliParser.h" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="14" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotConfig.h" />
+          <option name="caretOffset" value="1066" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/util/Util.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="217" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotmem/MemPlotter.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="5928" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/bech32/segwit_addr.c" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="4081" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/bech32/segwit_addr.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="381" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/util/KeyTools.h" />
         </OpenedFileInfo>
       </list>
     </option>

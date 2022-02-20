@@ -1,4 +1,4 @@
-# BladeBit Chia Plotter
+ # BladeBit Chia Plotter
 
 A fast **RAM-only**, **k32-only**, Chia plotter.
 

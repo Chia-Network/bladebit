@@ -49,8 +49,10 @@
 // #define BB_DP_DBG_SKIP_TO_C_TABLES 1
 
 
-// Skip Phase 3 to the specific table (must have the files on disk ready)
 #if _DEBUG
+    // Skip Phase 3 to the specific table (must have the files on disk ready)
     // #define BB_DBG_SKIP_P3_S1 1
     // #define BB_DP_DBG_P3_START_TABLE Table7
+
+    // #define BB_DP_DBG_P3_KEEP_FILES 1
 #endif

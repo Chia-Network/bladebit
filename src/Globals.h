@@ -205,4 +205,4 @@ struct Span
 
 };
 
-typedef Span<unsigned char> ByteSpan;
+typedef Span<uint8_t> ByteSpan;

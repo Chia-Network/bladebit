@@ -327,7 +327,10 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
 
         // Read R Table marks
         if( rTable < TableId::Table7 )
+        {
             ioQueue.ReadFile( markedEntriesFileId, 0, _markedEntries, _phase3Data.bitFieldSize );
+            DeleteFile( markedEntriesFileId, 0 );
+        }
 
         // Read R Table 1st bucket
         ioQueue.ReadFile( rPtrsRId, 0, _rTablePairs[0].left , rBucketLength * sizeof( uint32 ) );
@@ -386,6 +389,11 @@ void DiskPlotPhase3::TableFirstStep( const TableId rTable )
         std::swap( _rMap[0]       , _rMap[1] );
         std::swap( _rTablePairs[0], _rTablePairs[1] );
     }
+
+    DeleteFile( lMapId  , 0 );
+    DeleteFile( rPtrsRId, 0 );
+    DeleteFile( rPtrsLId, 0 );
+    DeleteFile( rMapId  , 0 );
 }
 
 //-----------------------------------------------------------
@@ -763,7 +771,7 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
     }
     ASSERT( lastBucketWithEntries > 0 );
 
-    // Use a capture lampda for now, but change this to a non-capturing one later maybe
+    // Use a capture lambda for now, but change this to a non-capturing one later maybe
     auto LoadBucket = [&]( uint32 bucket, bool forceLoad ) -> BucketBuffers
     {
         const uint32 bucketLength = _lpBucketCounts[bucket];
@@ -781,9 +789,11 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
         const uint32 fenceIdx = bucket * Step2FenceId::FENCE_COUNT;
 
         ioQueue.ReadFile( lpId , bucket, linePoints, lpBucketSize  );
+        DeleteFile( lpId, bucket );
         ioQueue.SignalFence( readFence, Step2FenceId::LPLoaded + fenceIdx );
 
         ioQueue.ReadFile( keyId, bucket, key, mapBucketSize );
+        DeleteFile( keyId, bucket );
         ioQueue.SignalFence( readFence, Step2FenceId::MapLoaded + fenceIdx );
         
         ioQueue.CommitCommands();
@@ -1203,7 +1213,7 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
         ioQueue.SignalFence( readFence, bucket + 1 );
         ioQueue.CommitCommands();
 
-        if( bucket == 0 )
+        if( bucket == 0 && rTable < TableId::Table7 )
             ioQueue.SeekFile( mapId, 0, 0, SeekOrigin::Begin ); // Seek to the start to re-use this file for writing the unpacked map
         else
             ioQueue.DeleteFile( mapId, bucket );
@@ -1381,5 +1391,26 @@ void DiskPlotPhase3::WritePark7( uint32 bucket, uint32* t6Indices, uint32 bucket
 
     context.plotTableSizes[(int)TableId::Table7] += sizeWritten;
 }
+
+//-----------------------------------------------------------
+void DiskPlotPhase3::DeleteFile( FileId fileId, uint32 bucket )
+{
+#if BB_DP_DBG_P3_KEEP_FILES
+    return;
+#endif
+
+    _context.ioQueue->DeleteFile( fileId, bucket );
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase3::DeleteBucket( FileId fileId )
+{
+#if BB_DP_DBG_P3_KEEP_FILES
+    return;
+#endif
+
+    _context.ioQueue->DeleteBucket( fileId );
+}
+
 
 

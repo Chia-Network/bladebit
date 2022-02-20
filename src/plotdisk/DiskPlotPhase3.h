@@ -37,6 +37,9 @@ private:
 
     void WritePark7( uint32 bucket, uint32* t6Indices, uint32 entryCount );
 
+    void DeleteFile( FileId fileId, uint32 bucket );
+    void DeleteBucket( FileId fileId );
+
 private:
     DiskPlotContext& _context;
     

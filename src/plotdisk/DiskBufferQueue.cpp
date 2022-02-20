@@ -19,8 +19,11 @@ DiskBufferQueue::DiskBufferQueue(
     : _workDir       ( workDir     )
     , _workHeap      ( workBufferSize, workBuffer )
     , _useDirectIO   ( useDirectIO )
-    , _threadPool    ( ioThreadCount, ThreadPool::Mode::Fixed, true )
+    // , _threadPool    ( ioThreadCount, ThreadPool::Mode::Fixed, true )
     , _dispatchThread()
+    , _deleterThread ()
+    , _deleteSignal  ()
+    , _deleteQueue   ( 128 )
 {
     ASSERT( workDir );
 
@@ -40,13 +43,23 @@ DiskBufferQueue::DiskBufferQueue(
         _workDir += "/";
     }
 
+    // Initialize file deleter thread
+    _deleterThread.Run( DeleterThreadMain, this );
+
     // Initialize I/O thread
     _dispatchThread.Run( CommandThreadMain, this );
+
 }
 
 //-----------------------------------------------------------
 DiskBufferQueue::~DiskBufferQueue()
 {
+    _deleterExit = true;
+    _deleteSignal.Signal();
+    _deleterThread.WaitForExit();
+
+    // #TODO: Wait for command thread
+
     // #TODO: Delete our file sets
     free( _filePathBuffer );
 }
@@ -441,14 +454,14 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd DeleteFile" );
             #endif
-            CmdDeleteFile( cmd );
+             CmdDeleteFile( cmd );  // Dispatch to deleter thread
         break;
 
         case Command::DeleteBucket:
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd DeleteBucket" );
             #endif
-            CmdDeleteBucket( cmd );
+             CmdDeleteBucket( cmd ); // Dispatch to deleter thread
         break;
 
 
@@ -643,38 +656,23 @@ void DiskBufferQueue::ReadFromFile( FileStream& file, size_t size, byte* buffer,
 //----------------------------------------------------------
 void DiskBufferQueue::CmdDeleteFile( const Command& cmd )
 {
-    FileSet&    fileBuckets = _files[(int)cmd.deleteFile.fileId];
-    FileStream& file        = fileBuckets.files[cmd.deleteFile.bucket];
-    file.Close();
+    FileDeleteCommand delCmd;
+    delCmd.fileId = cmd.deleteFile.fileId;
+    delCmd.bucket = (int64)cmd.deleteFile.bucket;
+    while( !_deleteQueue.Enqueue( delCmd ) );
 
-    char* basePath = _filePathBuffer + _workDir.length();
-    sprintf( basePath, "%s_%u.tmp", fileBuckets.name, cmd.deleteFile.bucket );
-    
-    const int r = remove( _filePathBuffer );
-
-    if( r )
-        Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", _filePathBuffer, r, r );
+    _deleteSignal.Signal();
 }
 
 //----------------------------------------------------------
 void DiskBufferQueue::CmdDeleteBucket( const Command& cmd )
 {
-    FileSet& fileBuckets = _files[(int)cmd.deleteFile.fileId];
-
-    char* basePath = _filePathBuffer + _workDir.length();
-
-    for( size_t i = 0; i < fileBuckets.files.length; i++ )
-    {
-        FileStream& file = fileBuckets.files[i];
-        file.Close();
-
-        sprintf( basePath, "%s_%u.tmp", fileBuckets.name, (uint)i );
+    FileDeleteCommand delCmd;
+    delCmd.fileId = cmd.deleteFile.fileId;
+    delCmd.bucket = -1;
+    while( !_deleteQueue.Enqueue( delCmd ) );
     
-        const int r = remove( _filePathBuffer );
-
-        if( r )
-            Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", _filePathBuffer, r, r );
-    }
+    _deleteSignal.Signal();
 }
 
 //-----------------------------------------------------------
@@ -722,8 +720,82 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
 ///
 /// File-Deleter Thread
 ///
-// void DeleteMain()
-// {
+//-----------------------------------------------------------
+void DiskBufferQueue::DeleterThreadMain( DiskBufferQueue* self )
+{
+    self->DeleterMain();
+}
 
-// }
+//-----------------------------------------------------------
+void DiskBufferQueue::DeleterMain()
+{
+    const int BUFFER_SIZE = 1024;
+    FileDeleteCommand commands[BUFFER_SIZE];
+
+    for( ;; )
+    {
+        _deleteSignal.Wait();
+
+        // Keep grabbing commands until there's none more
+        for( ;; )
+        {
+            const int count = _deleteQueue.Dequeue( commands, BUFFER_SIZE );
+
+            if( count == 0 )
+            {
+                if( _deleterExit )
+                    return;
+
+                break;
+            }
+
+            for( int i = 0; i < count; i++ )
+            {
+                auto& cmd = commands[i];
+
+                if( cmd.bucket < 0 )
+                    DeleteBucketNow( cmd.fileId );
+                else
+                    DeleteFileNow( cmd.fileId, (uint32)cmd.bucket );
+            }
+        }
+    }
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::DeleteFileNow( const FileId fileId, uint32 bucket )
+{
+    FileSet&    fileBuckets = _files[(int)fileId];
+    FileStream& file        = fileBuckets.files[bucket];
+    file.Close();
+
+    char* basePath = _filePathBuffer + _workDir.length();
+    sprintf( basePath, "%s_%u.tmp", fileBuckets.name, bucket );
+    
+    const int r = remove( _filePathBuffer );
+
+    if( r )
+        Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", _filePathBuffer, r, r );
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::DeleteBucketNow( const FileId fileId )
+{
+    FileSet& fileBuckets = _files[(int)fileId];
+
+    char* basePath = _filePathBuffer + _workDir.length();
+
+    for( size_t i = 0; i < fileBuckets.files.length; i++ )
+    {
+        FileStream& file = fileBuckets.files[i];
+        file.Close();
+
+        sprintf( basePath, "%s_%u.tmp", fileBuckets.name, (uint)i );
+    
+        const int r = remove( _filePathBuffer );
+
+        if( r )
+            Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", _filePathBuffer, r, r );
+    }
+}
 

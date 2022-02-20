@@ -102,6 +102,12 @@ class DiskBufferQueue
         };
     };
 
+    struct FileDeleteCommand
+    {
+        FileId fileId;
+        int64  bucket;  // If < 0, delete all buckets
+    };
+
 public:
 
     DiskBufferQueue( const char* workDir, byte* workBuffer, 
@@ -171,9 +177,11 @@ private:
     Command* GetCommandObject( Command::CommandType type );
 
     static void CommandThreadMain( DiskBufferQueue* self );
-    static void DeleterThreadMain( DiskBufferQueue* self );
-
     void CommandMain();
+
+    static void DeleterThreadMain( DiskBufferQueue* self );
+    void DeleterMain();
+
     void ExecuteCommand( Command& cmd );
 
     void CmdWriteBuckets( const Command& cmd );
@@ -186,6 +194,9 @@ private:
 
     void CmdDeleteFile( const Command& cmd );
     void CmdDeleteBucket( const Command& cmd );
+
+    void DeleteFileNow( const FileId fileId, uint32 bucket );
+    void DeleteBucketNow( const FileId fileId );
 
     static const char* DbgGetCommandName( Command::CommandType type );
 
@@ -208,19 +219,20 @@ private:
 
     // I/O thread stuff
     Thread            _dispatchThread;
-    // Thread            _deleterThread;       // For deleting files.
-    // AutoResetSignal   _deleteSignal         // We do this in a separate thread as to not
-    // SPCQueue<4096                                        // block other commands when the kernel is emptyion out
-                                            // cached IO buffers for the files.
-
     
     SPCQueue<Command, BB_DISK_QUEUE_MAX_CMDS> _commands;
 
     bool              _useDirectIO;
-    ThreadPool        _threadPool;
+    // ThreadPool        _threadPool;
 
     AutoResetSignal   _cmdReadySignal;
     AutoResetSignal   _cmdConsumedSignal;
 
+    // File deleter thread
+    Thread            _deleterThread;                   // For deleting files.
+    AutoResetSignal   _deleteSignal;                    // We do this in a separate thread as to not
+    GrowableSPCQueue<FileDeleteCommand> _deleteQueue;   // block other commands when the kernel is clearing cached IO buffers for the files.
+    bool              _deleterExit = false;
 
+    
 };
