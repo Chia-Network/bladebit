@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string.h>
+#include <vector>
 #include "Platform.h"
 #include "SysHost.h"
 
@@ -396,4 +397,16 @@ inline int BytesToHexStr( const byte* src, size_t srcSize,
 
     return ret;
 }
+
+//-----------------------------------------------------------
+inline std::vector<uint8_t> BytesConcat( std::vector<uint8_t> a, std::vector<uint8_t> b, std::vector<uint8_t> c )
+{
+    a.insert( a.end(), b.begin(), b.end() );
+    a.insert( a.end(), c.begin(), c.end() );
+    return a;
+}
+
+std::string HexToString( const byte* bytes, size_t length );
+std::vector<uint8_t> HexStringToBytes( const char* hexStr );
+std::vector<uint8_t> HexStringToBytes( const std::string& hexStr );
 

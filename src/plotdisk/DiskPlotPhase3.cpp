@@ -853,6 +853,14 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
         entryOffset += bucketLength;
     }
 
+    // Delete the reset of the buckets
+    for( uint32 bucket = lastBucketWithEntries; bucket < BB_DPP3_LP_BUCKET_COUNT; bucket++ )
+    {
+        ioQueue.DeleteFile( lpId , bucket );
+        ioQueue.DeleteFile( keyId, bucket );
+    }
+    ioQueue.CommitCommands();
+
     // Set the table offset for the next table
     context.plotTablePointers[(int)rTable] = context.plotTablePointers[(int)rTable-1] + context.plotTableSizes[(int)rTable-1];
 }

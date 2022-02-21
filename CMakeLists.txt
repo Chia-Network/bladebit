@@ -15,7 +15,6 @@ message("Config: ${CMAKE_BUILD_TYPE}")
 
 project(bladebit)
 
-
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH}
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules
@@ -156,7 +155,7 @@ else()
     set(c_opts --include=pch.h -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
 
     set(release_c_opts 
-        -O3 -flto
+        -O3 #-flto
         -D_NDEBUG=1
         -DNDEBUG=1
         ${release_c_opts})
@@ -175,8 +174,16 @@ else()
 
     # GCC
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-    
-        set(c_opts -march=native -fmax-errors=5 ${c_opts})
+
+        set(c_opts -fmax-errors=5 ${c_opts})
+
+        # Avoid ranlib error: plugin needed to handle lto objectR "gcc-ar")
+        # set(c_opts -ffat-lto-objects ${c_opts})
+        
+        # Build with native architecture when not building release packages
+        if(NOT DEFINED $ENV{CI})
+            set(c_opts -march=native ${c_opts})
+        endif()
 
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
@@ -310,11 +317,24 @@ set(bb_include_dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+# macro(config_proj tgt)
+#     message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
+#     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+#     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+#     target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
+#     target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
+    
+#     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
+# endmacro()
+
+
+
 # BladeBit
 add_library(lib_bladebit ${bb_sources} ${bb_headers})
 set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit)
-target_link_libraries(lib_bladebit INTERFACE Threads::Threads bls ${platform_libs})
+target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
 target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
+
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
 target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)

@@ -1,6 +1,7 @@
 #include "DiskPlotter.h"
 #include "util/Log.h"
 #include "util/Util.h"
+#include "util/CliParser.h"
 
 #include "DiskPlotPhase1.h"
 #include "DiskPlotPhase2.h"
@@ -10,6 +11,10 @@
 // #TEST
 // #TODO: Remove
 #include "sandbox/Sandbox.h"
+
+
+size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg );
+
 
 //-----------------------------------------------------------
 // DiskPlotter::DiskPlotter()
@@ -25,12 +30,14 @@ DiskPlotter::DiskPlotter( const Config cfg )
     ZeroMem( &_cx );
 
     ASSERT( cfg.tmpPath );
+
+    GlobalPlotConfig& gCfg = *cfg.globalCfg;
     
     const size_t bucketsCountsSize = RoundUpToNextBoundaryT( BB_DP_BUCKET_COUNT * sizeof( uint32 ), cfg.expectedTmpDirBlockSize );
     const uint32 ioBufferCount     = cfg.ioBufferCount;
     const size_t ioHeapFullSize    = ( cfg.ioBufferSize + bucketsCountsSize ) * ioBufferCount;
 
-    GetHeapRequiredSize( _fpBufferSizes, cfg.expectedTmpDirBlockSize, cfg.workThreadCount );
+    GetHeapRequiredSize( _fpBufferSizes, cfg.expectedTmpDirBlockSize, gCfg.threadCount );
 
     _cx.bufferSizes   = &_fpBufferSizes;
     _cx.tmpPath       = cfg.tmpPath;
@@ -41,59 +48,32 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.useDirectIO   = cfg.enableDirectIO;
     _cx.totalHeapSize = _cx.heapSize + _cx.ioHeapSize;
 
-    _cx.threadCount   = cfg.workThreadCount;
+    _cx.threadCount   = gCfg.threadCount;
     _cx.ioThreadCount = cfg.ioThreadCount;
 
     static_assert( sizeof( DiskPlotContext::writeIntervals ) == sizeof( Config::writeIntervals ), "Write interval array sizes do not match." );
     memcpy( _cx.writeIntervals, cfg.writeIntervals, sizeof( _cx.writeIntervals ) );
 
-    Log::Line( "Work Heap size : %.2lf MiB", (double)_cx.heapSize BtoMB );
-    Log::Line( "Work threads   : %u"       , _cx.threadCount   );
-    Log::Line( "IO threads     : %u"       , _cx.ioThreadCount );
-    Log::Line( "IO buffer size : %llu MiB (%llu MiB total)", _cx.ioBufferSize BtoMB, _cx.ioBufferSize * _cx.ioBufferCount BtoMB );
-    Log::Line( "IO buffer count: %u"       , _cx.ioBufferCount );
-    Log::Line( "Unbuffered IO  : %s"       , _cx.useDirectIO ? "true" : "false" );
+    Log::Line( "[Disk PLotter]" );
+    Log::Line( " Work Heap size : %.2lf MiB", (double)_cx.heapSize BtoMB );
+    Log::Line( " Work threads   : %u"       , _cx.threadCount   );
+    Log::Line( " IO threads     : %u"       , _cx.ioThreadCount );
+    Log::Line( " IO buffer size : %llu MiB (%llu MiB total)", _cx.ioBufferSize BtoMB, _cx.ioBufferSize * _cx.ioBufferCount BtoMB );
+    Log::Line( " IO buffer count: %u"       , _cx.ioBufferCount );
+    Log::Line( " Unbuffered IO  : %s"       , _cx.useDirectIO ? "true" : "false" );
 
     // Log::Line( "Allocating heap of %llu MiB.", _cx.heapSize BtoMB );
-    Log::Line( "Allocating a heap of %llu MiB.", _cx.totalHeapSize BtoMB );
+    Log::Line( " Allocating a heap of %llu MiB.", _cx.totalHeapSize BtoMB );
     _cx.heapBuffer = (byte*)SysHost::VirtualAlloc( _cx.totalHeapSize );
     FatalIf( !_cx.heapBuffer, "Failed to allocated heap buffer. Make sure you have enough free memory." );
     
     _cx.ioHeap = _cx.heapBuffer + _cx.heapSize;
-    // Log::Line( "Allocating IO buffers." );
-    // _cx.ioHeap = (byte*)SysHost::VirtualAlloc( ioHeapFullSize );
-    // FatalIf( !_cx.ioHeap, "Failed to allocated work buffer. Make sure you have enough free memory." );
+
+    // #TODO: Check for warm start
 
     // Initialize our Thread Pool and IO Queue
-    _cx.threadPool = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, false );
+    _cx.threadPool = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
     _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, _cx.totalHeapSize, _cx.ioThreadCount, _cx.useDirectIO );
-
-    
-    // #TODO: Remove this (test)
-    // static byte plotId[32] = {
-    //     22, 24, 11, 3, 1, 15, 11, 6, 
-    //     23, 22, 22, 24, 11, 3, 1, 15,
-    //     11, 6, 23, 22, 22, 24, 11, 3,
-    //     1, 15, 11, 6, 23, 22, 5, 28
-    // };
-
-    // static const uint plotMemoSize     = 128;
-    // static byte plotMemo[plotMemoSize] = { 0 };
-
-    // {
-    //     const char refPlotId  [] = "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835";
-    //     const char refPlotMemo[] = "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef01b7bf8a22a9ac82a003e07b551c851ea683839f3e1beb8ac9ede57d2c020669";
-
-    //     memset( plotId  , 0, sizeof( plotId   ) );
-    //     memset( plotMemo, 0, sizeof( plotMemo ) );
-
-    //     HexStrToBytes( refPlotId  , sizeof( refPlotId   )-1, plotId  , sizeof( plotId   ) );
-    //     HexStrToBytes( refPlotMemo, sizeof( refPlotMemo )-1, plotMemo, sizeof( plotMemo ) );
-    // }
-
-    // _cx.plotId       = plotId;
-    // _cx.plotMemoSize = plotMemoSize;
-    // _cx.plotMemo     = plotMemo;
 }
 
 //-----------------------------------------------------------
@@ -105,7 +85,7 @@ void DiskPlotter::Plot( const PlotRequest& req )
     memset( _cx.bucketCounts        , 0, sizeof( _cx.bucketCounts ) );
     memset( _cx.entryCounts         , 0, sizeof( _cx.entryCounts ) );
     memset( _cx.ptrTableBucketCounts, 0, sizeof( _cx.ptrTableBucketCounts ) );
-    // #TODO: Reset the rest of the state, including the heap
+    // #TODO: Reset the rest of the state, including the heap & the ioQueue
 
 
     Log::Line( "Started plot." );
@@ -202,6 +182,114 @@ void DiskPlotter::Plot( const PlotRequest& req )
 }
 
 //-----------------------------------------------------------
+void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
+{
+    // #TODO: Have these defined in the config ehader
+    const size_t f1DefaultWriteInterval    = 128ull MB;
+    size_t       fxDefaultWriteInterval    = 64ull  MB;
+    size_t       matchDefaultWriteInterval = 64ull  MB;
+    const uint   minBufferCount            = 3;
+
+    // Parse fx and match per-table
+    auto checkFx = [&]() {
+        
+        const char*  a       = cli.Arg();
+        const size_t minSize = sizeof( "--fx" ) - 1;
+        const size_t len     = strlen( a );
+
+        if( len >= minSize && memcmp( "--fx", a, minSize ) == 0 )
+        {
+            if( len == minSize )
+            {
+                // Set the default value
+                cli.NextArg();
+                fxDefaultWriteInterval = cli.ReadSize( "--fx" );
+                return true;
+            }
+            else
+            {
+                // Set the value for a table (--fx2, --fx4...)
+                const char intChar = a[minSize];
+                
+                // Expect an integer from 2-7 (inclusive) to come immediately after --fx
+                if( intChar >= '2' && intChar <= '7' )
+                {
+                    const int tableId = (int)intChar - '0';
+                    cfg.writeIntervals[tableId].fxGen = cli.ReadSize( "--f[n]" );
+                    
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    };
+
+    while( cli.HasArgs() )
+    {
+        if( cli.ReadValue( cfg.writeIntervals[0].fxGen, "--f1" ) ) 
+            continue;
+        if( cli.ReadValue( cfg.ioBufferCount, "-b", "--buffer-count" ) ) 
+            continue;
+        if( cli.ReadValue( cfg.tmpPath, "-t", "--temp" ) )
+            continue;
+        if( checkFx() )
+            continue;
+        else
+            break;
+    }
+
+    // Validate some parameters
+    cfg.ioBufferCount = std::max( minBufferCount, cfg.ioBufferCount );
+
+    const size_t diskBlockSize = ValidateTmpPathAndGetBlockSize( cfg );
+
+    const size_t minBucketSize = BB_DP_MAX_ENTRIES_PER_BUCKET * sizeof( uint32 );
+
+    size_t maxWriteInterval = 0;
+
+    for( TableId table = TableId::Table1; table < TableId::_Count; table++ )
+    {
+        auto& writeInterval = cfg.writeIntervals[(int)table];
+
+        if( writeInterval.fxGen == 0 )
+            writeInterval.fxGen = table == TableId::Table1 ? f1DefaultWriteInterval : fxDefaultWriteInterval;
+
+        if( writeInterval.matching == 0 )
+            writeInterval.matching = matchDefaultWriteInterval;
+
+        // Ensure the intervals are <= than the minimum write size of a bucket (table 7)
+        // and >= disk block size of the temporary directory.
+        FatalIf( writeInterval.fxGen    > minBucketSize, "f%d write interval must be less or equal than %llu bytes.", (int)table+1, minBucketSize );
+        FatalIf( writeInterval.matching > minBucketSize, "Table %d match write interval must be less or equal than %llu bytes.", (int)table+1, minBucketSize );
+        FatalIf( writeInterval.fxGen    < diskBlockSize, "f%d write interval must be greater or equal than the tmp directory block size of %llu bytes.", (int)table+1, diskBlockSize );
+        FatalIf( writeInterval.matching < diskBlockSize, "Table %d match write interval must be greater or equal than the tmp directory block size of %llu bytes.", (int)table + 1, minBucketSize );
+
+        // Round up the size to the block size
+        writeInterval.fxGen    = RoundUpToNextBoundaryT( writeInterval.fxGen   , diskBlockSize );
+        writeInterval.matching = RoundUpToNextBoundaryT( writeInterval.matching, diskBlockSize );
+
+        maxWriteInterval = std::max( maxWriteInterval, writeInterval.fxGen    );
+        maxWriteInterval = std::max( maxWriteInterval, writeInterval.matching );
+    }
+
+    cfg.ioBufferSize = maxWriteInterval;
+
+    FatalIf( cfg.ioBufferCount < 3, "IO buffer (write interval buffers) cont must be 3 or more." );
+    
+
+    const uint sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
+
+    if( cfg.ioThreadCount == 0 )
+        cfg.ioThreadCount = 1;        // #TODO: figure out a reasonable default. Probably 1 or 2 for current consumer NVMes running on PCIe3...
+    else if( cfg.ioThreadCount > sysLogicalCoreCount )
+    {
+        Log::Line( "Warning: Limiting disk queue threads to %u, which is the system's logical CPU count.", sysLogicalCoreCount );
+        cfg.ioThreadCount = sysLogicalCoreCount;
+    }
+}
+
+//-----------------------------------------------------------
 void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fileBlockSize, const uint threadCount )
 {
     ZeroMem( &sizes );
@@ -268,6 +356,55 @@ void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fi
         sizes.metaAOverflow +
         sizes.metaBOverflow +
         sizes.crossBucketTotal;
+}
+
+//-----------------------------------------------------------
+size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
+{
+    FatalIf( cfg.tmpPath == nullptr, "No temporary path specified." );
+
+    size_t pathLen = strlen( cfg.tmpPath );
+    FatalIf( pathLen < 1, "Invalid temporary path." );
+
+    char* tmpPath = bbmalloc<char>( pathLen + 2 );
+    memcpy( tmpPath, cfg.tmpPath, pathLen );
+
+    if( cfg.tmpPath[pathLen - 1] != '/'
+    #ifdef _WIN32
+        && cfg.tmpPath[pathLen - 1] != '\\'
+    #endif
+        )
+    {
+        tmpPath[pathLen++] = '/';
+    }
+
+    tmpPath[pathLen] = (char)0;
+    cfg.tmpPath = tmpPath;
+
+    // Open a file in the temp dir to obtain the block size
+    uint64 randNum = 0;
+    SysHost::Random( (byte*)&randNum, sizeof( randNum ) );
+
+    char* randFileName = bbmalloc<char>( pathLen + 32 );
+    
+    int r = snprintf( randFileName, pathLen + 32, "%s.%llx.blk", tmpPath, randNum );
+    FatalIf( r < 1, "Unexpected error validating temp directory." );
+
+    FileStream tmpFile;
+
+    if( !tmpFile.Open( randFileName, FileMode::Create, FileAccess::ReadWrite ) )
+    {
+        int err = tmpFile.GetError();
+        Fatal( "Failed to open a file in the temp directory with error %d (0x%x).", err, err );
+    }
+    
+
+    cfg.expectedTmpDirBlockSize = tmpFile.BlockSize();
+
+    remove( randFileName );
+    free( randFileName );
+
+    return cfg.expectedTmpDirBlockSize;
 }
 
 

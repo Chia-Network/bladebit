@@ -1,5 +1,4 @@
 #pragma once
-
 #include "ChiaConsts.h"
 
 #define BB_DP_MAX_JOBS 256u

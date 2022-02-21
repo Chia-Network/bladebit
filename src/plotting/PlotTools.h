@@ -1,5 +1,6 @@
 #pragma once
 #include "ChiaConsts.h"
+#include "util/KeyTools.h"
 
 #define BB_PLOT_ID_LEN 32
 #define BB_PLOT_ID_HEX_LEN (BB_PLOT_ID_LEN * 2)
@@ -14,6 +15,18 @@ struct PlotTools
     static void GenPlotFileName( const byte plotId[BB_PLOT_ID_LEN], char outPlotFileName[BB_PLOT_FILE_LEN] );
     static void PlotIdToString( const byte plotId[BB_PLOT_ID_LEN], char plotIdString[BB_PLOT_ID_HEX_LEN+1] );
 
+    static bool PlotStringToId( const char plotIdString[BB_PLOT_ID_HEX_LEN+1], byte plotId[BB_PLOT_ID_LEN] );
+
+    static bls::G1Element GeneratePlotPublicKey( const bls::G1Element& localPk, bls::G1Element& farmerPk, const bool includeTaproot );
+
+    static void GeneratePlotIdAndMemo( 
+        byte            plotId  [BB_PLOT_ID_LEN], 
+        byte            plotMemo[BB_PLOT_MEMO_MAX_SIZE], 
+        uint16&         outMemoSize,
+        bls::G1Element& farmerPK,
+        bls::G1Element* poolPK,
+        PuzzleHash*     contractPuzzleHash
+    );
     // static void PlotIdToStringTmp( const byte* plotId, const byte plotIdString[BB_PLOT_FILE_LEN_TMP] );
 
     // //-----------------------------------------------------------

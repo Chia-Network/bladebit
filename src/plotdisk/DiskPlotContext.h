@@ -4,6 +4,7 @@
 #include "threading/ThreadPool.h"
 #include "threading/MTJob.h"
 #include "plotting/PlotTypes.h"
+#include "plotting/Tables.h"
 #include "ChiaConsts.h"
 
 // Write intervals are expressed in bytes

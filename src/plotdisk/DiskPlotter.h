@@ -1,21 +1,23 @@
 #pragma once
 
 #include "DiskPlotContext.h"
+#include "plotting/GlobalPlotConfig.h"
+class CliParser;
 
 class DiskPlotter
 {
 public:
     struct Config
     {
-        const char*       tmpPath;
-        size_t            workHeapSize;
-        size_t            expectedTmpDirBlockSize;
-        uint              workThreadCount;
-        uint              ioThreadCount;
-        size_t            ioBufferSize;
-        uint              ioBufferCount;
-        DiskWriteInterval writeIntervals[(uint)TableId::_Count];
-        bool              enableDirectIO;
+        GlobalPlotConfig* globalCfg                = nullptr;
+        const char*       tmpPath                  = nullptr;
+        size_t            workHeapSize             = 0;
+        size_t            expectedTmpDirBlockSize  = 0;
+        uint32            ioThreadCount            = 0;
+        size_t            ioBufferSize             = 0;
+        uint32            ioBufferCount            = 0;
+        DiskWriteInterval writeIntervals[(uint)TableId::_Count] = { 0 };
+        bool              enableDirectIO           = false;
     };
 
     struct PlotRequest
@@ -34,6 +36,7 @@ public:
 
     static void GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fileBlockSize, const uint threadCount );
     
+    static void ParseCommandLine( CliParser& cli, Config& cfg );
 
 private:
     DiskPlotContext   _cx;

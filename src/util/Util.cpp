@@ -62,3 +62,44 @@ bool AssertLog( int line, const char* file, const char* func )
     Log::FlushError();
     return true;
 }
+
+//-----------------------------------------------------------
+std::string HexToString( const byte* bytes, size_t length )
+{
+    ASSERT( length );
+
+    const size_t slen = length * 2 + 1;
+    char* buffer      = (char*)malloc( slen );
+    memset( buffer, 0, slen );
+
+    size_t numEncoded;
+    BytesToHexStr( bytes, length, buffer, slen, numEncoded );
+
+    std::string str( buffer );
+    free( buffer );
+
+    return str;
+}
+
+//-----------------------------------------------------------
+std::vector<uint8_t> HexStringToBytes( const char* hexStr )
+{
+    const size_t len  = strlen( hexStr );
+
+    byte* buffer = (byte*)malloc( len / 2 );
+
+    HexStrToBytes( hexStr, len, buffer, len / 2 );
+    std::vector<uint8_t> ret( buffer, buffer + len / 2 );
+
+    free( buffer );
+    return ret;
+}
+
+//-----------------------------------------------------------
+std::vector<uint8_t> HexStringToBytes( const std::string& hexStr )
+{
+    return HexStringToBytes( hexStr.c_str() );
+}
+
+
+

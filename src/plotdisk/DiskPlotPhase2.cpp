@@ -307,9 +307,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
     if( rMapId != FileId::None )
     {
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            queue.SeekFile( rMapId, i, 0, SeekOrigin::Begin );
-        
+        queue.SeekBucket( rMapId, 0, SeekOrigin::Begin );
         queue.CommitCommands();
     }
 
@@ -354,6 +352,10 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
 
             // Write the map back to disk & release the buffer
             queue.ReleaseBuffer( _bucketBuffers[bucket].map );
+            
+            if( bucket > 0 )
+                queue.DeleteFile( rMapId, bucket );
+
             queue.WriteFile( rMapId, 0, map, bucketEntryCount * sizeof( uint32 ) );
             queue.SignalFence( *_mapWriteFence );
             queue.CommitCommands();
@@ -485,7 +487,7 @@ void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& out
 }
 
 
-
+// #TODO: Consolidate this job w/ Phase3 again
 struct UnpackMapJob : MTJob<UnpackMapJob>
 {
     uint32        bucket;
