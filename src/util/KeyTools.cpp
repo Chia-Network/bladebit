@@ -80,9 +80,28 @@ bool PuzzleHash::FromAddress( PuzzleHash& hash, const char address[CHIA_ADDRESS_
     if( !address )
         return false;
 
-    size_t programSize = CHIA_PUZZLE_HASH_SIZE;
-    int witver = 0;
+    if( strlen( address ) != CHIA_ADDRESS_LENGTH )
+        return false;
 
-    return segwit_addr_decode( &witver, hash.data, &programSize, "xch", address ) == 1;
+    char hrp [CHIA_ADDRESS_LENGTH-5] = { 0 };
+    byte data[CHIA_ADDRESS_LENGTH-8];
+
+    size_t dataLen = 0;
+    if( bech32_decode( hrp, hash.data, &dataLen, address ) != BECH32_ENCODING_BECH32M )
+        return false;
+
+    if( memcmp( "xch", hrp, sizeof( "xch" ) ) != 0 )
+        return false;
+
+    byte decoded[40];
+    size_t decodedSize = 0;
+    if( !bech32_convert_bits( decoded, &decodedSize, 8, data, dataLen, 5, 0 ) )
+        return false;
+
+    if( decodedSize != CHIA_PUZZLE_HASH_SIZE )
+        return false;
+    
+    memcpy( hash.data, decoded, CHIA_PUZZLE_HASH_SIZE );
+    return true;
 }
 
