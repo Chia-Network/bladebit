@@ -42,6 +42,14 @@ void Fence::Wait()
 }
 
 //-----------------------------------------------------------
+void Fence::Wait( Duration& accumulator )
+{
+    const auto startTime = TimerBegin();
+    _signal.Wait();
+    accumulator += TimerEndTicks( startTime );
+}
+
+//-----------------------------------------------------------
 void Fence::Wait( uint32 value )
 {
     // while( _value.load( std::memory_order_relaxed ) < value )
@@ -49,4 +57,14 @@ void Fence::Wait( uint32 value )
         _signal.Wait();
 }
 
+//-----------------------------------------------------------
+void Fence::Wait( uint32 value, Duration& accumulator )
+{
+    while( _value < value )
+    {
+        const auto startTime = TimerBegin();
+        _signal.Wait();
+        accumulator += TimerEndTicks( startTime );
+    }
+}
 

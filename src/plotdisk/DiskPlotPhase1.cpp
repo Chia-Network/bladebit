@@ -238,6 +238,9 @@ void DiskPlotPhase1::Run()
 
     ForwardPropagate();
 
+    Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf", 
+            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ) );
+
     // Check all table counts
     #if _DEBUG
     for( int table = (int)TableId::Table1; table <= (int)TableId::Table7; table++ )
@@ -672,13 +675,16 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
         // Ensure we finished writing X before swapping buffers
         if( tableId == TableId::Table2 )
-            bucket.mapFence.Wait();
+            bucket.mapFence.Wait( _writeWaitTime );
 
         // Swap are front/back buffers
         std::swap( bucket.y0      , bucket.y1       );
         std::swap( bucket.metaA0  , bucket.metaA1   );
         std::swap( bucket.metaB0  , bucket.metaB1   );
         std::swap( bucket.sortKey0, bucket.sortKey1 );
+
+        Log::Line( "  IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf", 
+            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ) );
     }
 
     // Reset-it for the next map start
@@ -731,7 +737,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             fxMetaOutB = nullptr;
 
             // Ensure Meta A has been loaded (which for table to is just x)
-            bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx );
+            bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx, _readWaitTime );
         }
         else
         {
@@ -739,7 +745,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             SortKeyGen::Generate<BB_MAX_JOBS>( threadPool, entryCount, sortKey );
 
             // Ensure Y as been loaded
-            bucket.fence.Wait( FPFenceId::YLoaded + fenceIdx );
+            bucket.fence.Wait( FPFenceId::YLoaded + fenceIdx, _readWaitTime );
         }
 
         uint32* yTemp       = (uint32*)bucket.metaB1;
@@ -755,7 +761,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         // Write reverse lookup map back to disk as a direct lookup to its final index
         if constexpr ( tableId > TableId::Table2 )
         {
-            bucket.fence.Wait( FPFenceId::SortKeyLoaded + fenceIdx );
+            bucket.fence.Wait( FPFenceId::SortKeyLoaded + fenceIdx, _readWaitTime );
 
             // Use meta tmp for the temp lookup index buffer
             const uint32* lookupIdx    = bucket.sortKey0;
@@ -823,14 +829,14 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     {
         using TMetaA = typename TableMetaIn<tableId>::MetaA;
 
-        bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx );
+        bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx, _readWaitTime );
         SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
 
         if constexpr ( MetaInBSize > 0 )
         {
             using TMetaB = typename TableMetaIn<tableId>::MetaB;
 
-            bucket.fence.Wait( FPFenceId::MetaBLoaded + fenceIdx );
+            bucket.fence.Wait( FPFenceId::MetaBLoaded + fenceIdx, _readWaitTime );
             SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
         }
 
@@ -1049,7 +1055,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
         if( bucketsLoaded < BucketCount )
             LoadNextBucket();
 
-        readFence.Wait( nextBucket );
+        readFence.Wait( nextBucket, _readWaitTime );
 
         ioQueue.DeleteFile( FileId::F7, bucket );
         ioQueue.CommitCommands();

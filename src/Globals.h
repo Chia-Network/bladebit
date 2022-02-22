@@ -52,7 +52,12 @@
 #define TimerEnd( startTime ) \
     (std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - (startTime) ).count() / 1000.0)
 
+#define TimerEndTicks( startTime ) \
+    (std::chrono::steady_clock::now() - (startTime))
 
+#define TicksToSeconds( duration ) \
+    ( std::chrono::duration_cast<std::chrono::nanoseconds>( (duration) ).count() * 1e-9 )
+    
 
 #define ImplementFlagOps( FlagType ) \
 inline FlagType operator | ( FlagType lhs, FlagType rhs )                                               \

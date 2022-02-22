@@ -60,3 +60,5 @@ static_assert( sizeof( float64 ) == 8, "float64 must be 8" );
 #endif
 
 typedef uint128_t uint128;
+
+typedef std::chrono::steady_clock::duration Duration;

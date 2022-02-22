@@ -109,11 +109,10 @@ class DiskBufferQueue
     };
 
 public:
-
     DiskBufferQueue( const char* workDir, byte* workBuffer, 
                      size_t workBufferSize, uint ioThreadCount,
                      bool useDirectIO );
-    
+
     ~DiskBufferQueue();
 
     bool InitFileSet( FileId fileId, const char* name, uint bucketCount );
@@ -171,6 +170,10 @@ public:
     inline size_t PlotHeaderSize() const { return _plotHeaderSize; }
 
     inline uint64 PlotTablePointersAddress() const { return _plotTablesPointers; }
+
+    inline double IOBufferWaitTime() const { return TicksToSeconds( _ioBufferWaitTime ); }
+    inline void ResetIOBufferWaitCounter() { _ioBufferWaitTime = Duration::zero(); }
+
     
 private:
 
@@ -214,8 +217,9 @@ private:
 
     size_t           _plotHeaderSize     = 0;
     byte*            _plotHeaderbuffer   = nullptr;
-    uint64           _plotTablesPointers = 0;            // Offset in the plot file to the tables pointer table
+    uint64           _plotTablesPointers = 0;               // Offset in the plot file to the tables pointer table
 
+    Duration         _ioBufferWaitTime = Duration::zero();  // Total time spent waiting for IO buffers.
 
     // I/O thread stuff
     Thread            _dispatchThread;

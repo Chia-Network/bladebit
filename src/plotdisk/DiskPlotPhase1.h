@@ -176,6 +176,9 @@ private:
 
     Bucket*       _bucket;
     DoubleBuffer* _bucketBuffers;
+    
+    Duration      _readWaitTime     = Duration::zero();
+    Duration      _writeWaitTime    = Duration::zero();
 };
 
 

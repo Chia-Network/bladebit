@@ -21,8 +21,14 @@ public:
     // Wait until the fence is signalled with any value
     void Wait();
 
+    // Wait until the fence is signalled with any value
+    void Wait( Duration& accumulator );
+
     // Wait until the fence reaches or passes the specified value
     void Wait( uint32 value );
+
+    // Wait until the fence reaches or passes the specified value
+    void Wait( uint32 value, Duration& accumulator );
 
 private:
     // std::atomic<uint32> _value;
