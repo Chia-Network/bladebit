@@ -37,7 +37,7 @@ void WorkHeap::ResetHeap( const size_t heapSize, void* heapBuffer )
 }
 
 //-----------------------------------------------------------
-byte* WorkHeap::Alloc( size_t size, size_t alignment, bool blockUntilFreeBuffer )
+byte* WorkHeap::Alloc( size_t size, size_t alignment, bool blockUntilFreeBuffer, Duration* accumulator )
 {
     ASSERT( size );
     size = alignment * CDivT( size, alignment );
@@ -119,12 +119,17 @@ byte* WorkHeap::Alloc( size_t size, size_t alignment, bool blockUntilFreeBuffer 
             return nullptr;
 
         // No buffer found, we have to wait until buffers are released and then try again
-        Log::Line( "*************************** No Buffers available waiting..." );
+        // Log::Line( "*************************** No Buffers available waiting..." );
         auto timer = TimerBegin();
-
         _releaseSignal.Wait();
 
-        Log::Line( " *************************** Waited %.6lf seconds for a buffer.", TimerEnd( timer ) );
+        if( accumulator )
+        {
+            (*accumulator) += TimerEndTicks( timer );
+        }
+
+
+        // Log::Line( " *************************** Waited %.6lf seconds for a buffer.", TimerEnd( timer ) );
     }
 }
 

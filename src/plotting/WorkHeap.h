@@ -38,7 +38,7 @@ public:
     // Allocate a buffer on the heap.
     // If no space is available it will block until
     // some space has become available again.
-    byte* Alloc( size_t size, size_t alignment = sizeof( intptr_t ), bool blockUntilFreeBuffer = true );
+    byte* Alloc( size_t size, size_t alignment = sizeof( intptr_t ), bool blockUntilFreeBuffer = true, Duration* accumulator = nullptr );
 
     // Add a to the pending release list.
     // The buffer won't actually be released until an allocation

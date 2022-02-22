@@ -238,8 +238,8 @@ void DiskPlotPhase1::Run()
 
     ForwardPropagate();
 
-    Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf", 
-            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ) );
+    Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
+            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
 
     // Check all table counts
     #if _DEBUG
@@ -484,7 +484,8 @@ void DiskPlotPhase1::ForwardPropagate()
         const double tableElapsed = TimerEnd( tableTimer );
         Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
         Log::Line( "Table %u has %llu entries.", table+1, _cx.entryCounts[(int)table] );
-
+        Log::Line( "Table %u IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
+            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
         // if( table > TableId::Table1 )
         // {
         //     uint64 entryCount = 0;

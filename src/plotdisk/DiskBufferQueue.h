@@ -140,7 +140,10 @@ public:
     // Obtain a buffer allocated from the work heap.
     // May block until there's a buffer available if there was none.
     // This assumes a single consumer.
-    inline byte* GetBuffer( size_t size, bool blockUntilFreeBuffer = true ) { return _workHeap.Alloc( size, _blockSize, blockUntilFreeBuffer ); }
+    inline byte* GetBuffer( size_t size, bool blockUntilFreeBuffer = true )
+    { 
+        return _workHeap.Alloc( size, _blockSize, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
+    }
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
     // These returns the buffer back to the queue so that it is in use.
