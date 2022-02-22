@@ -145,6 +145,8 @@ public:
         return _workHeap.Alloc( size, _blockSize, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
     }
 
+    // byte* GetBufferForId()
+
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
     // These returns the buffer back to the queue so that it is in use.
     // This command is serialized and should be added after 

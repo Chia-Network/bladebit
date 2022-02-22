@@ -238,9 +238,6 @@ void DiskPlotPhase1::Run()
 
     ForwardPropagate();
 
-    Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
-            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
-
     // Check all table counts
     #if _DEBUG
     for( int table = (int)TableId::Table1; table <= (int)TableId::Table7; table++ )
@@ -287,6 +284,9 @@ void DiskPlotPhase1::Run()
     #endif
 
     SortAndCompressTable7();
+
+    Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
+            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
 }
 
 
