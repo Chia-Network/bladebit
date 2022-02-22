@@ -240,7 +240,7 @@ void DiskPlotPhase2::Run()
 
         // Ensure the last table finished writing to the bitfield
         if( table < TableId::Table7 )
-            bitFieldFence.Wait();
+            bitFieldFence.Wait( _context.writeWaitTime );
 
         // Submit l marking table for writing
         queue.WriteFile( lTableFileId, 0, lMarkingTable, bitFieldSize );
@@ -253,6 +253,8 @@ void DiskPlotPhase2::Run()
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
+        Log::Line( " Table %u IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", table,
+            TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 
         // #TEST:
         // if( table < TableId::Table7 )
@@ -282,12 +284,15 @@ void DiskPlotPhase2::Run()
         // }
     }
 
-    bitFieldFence.Wait();
+    bitFieldFence.Wait( _context.writeWaitTime );
     queue.CompletePendingReleases();
 
     // Unpack table 2 and 7's map here to to make Phase 3 easier, though this will issue more read/writes
     UnpackTableMap( TableId::Table7 );
     UnpackTableMap( TableId::Table2 );
+
+    Log::Line( " Phase 2 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
+            TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 }
 
 //-----------------------------------------------------------
@@ -318,7 +323,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
     _bucketsLoaded = 0;
     _bucketReadFence->Reset( 0 );
 
-    const uint32 threadCount = context.threadCount;
+    const uint32 threadCount = context.p2ThreadCount;
 
     uint64 lTableEntryOffset     = 0;
     uint32 pairBucket            = 0;   // Pair bucket we are processing (may be different than 'bucket' which refers to the map bucket)
@@ -339,10 +344,10 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
         if( rMapId != FileId::None )
         {
             // Wait for the map to finish loading
-            _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId );
+            _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId, _context.readWaitTime );
 
             // Ensure the map buffer isn't being used anymore (we use the tmp map buffer for this)
-            _mapWriteFence->Wait();
+            _mapWriteFence->Wait( _context.writeWaitTime );
 
             // Sort the lookup map and strip out the origin index
             // const auto stripTimer = TimerBegin();
@@ -362,7 +367,7 @@ void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTab
         }
 
         // Wait for the pairs to finish loading
-        _bucketReadFence->Wait( FenceId::PairsLoaded + waitFenceId );
+        _bucketReadFence->Wait( FenceId::PairsLoaded + waitFenceId, _context.readWaitTime );
 
         // Mark the entries on this bucket
         MTJobRunner<MarkJob> jobs( *context.threadPool );
@@ -551,7 +556,7 @@ uint32* DiskPlotPhase2::UnpackMap( uint64* map, uint32 entryCount, const uint32 
     auto& context = _context;
 
     UnpackMapJob::RunJob( 
-            *context.threadPool, context.threadCount,
+            *context.threadPool, context.p2ThreadCount,
             bucket, entryCount, map, _tmpMap );
 
     return _tmpMap;
@@ -639,7 +644,7 @@ void DiskPlotPhase2::UnpackTableMap( TableId table )
         }
 
         // Ensure the bucket has finished loading
-        fence.Wait( bucket + 1 );
+        fence.Wait( bucket + 1, _context.readWaitTime );
 
         // Unpack the map to its target position given its origin index
         uint64* map = buckets[bucket];
@@ -647,7 +652,7 @@ void DiskPlotPhase2::UnpackTableMap( TableId table )
         // const auto jobTimer = TimerBegin();
 
         UnpackMapJob::RunJob( 
-            *context.threadPool, context.threadCount,
+            *context.threadPool, context.p2ThreadCount,
             bucket, bucketEntryCount, map, writeBucket );
         
         // const auto jobElapsed = TimerEnd( jobTimer );

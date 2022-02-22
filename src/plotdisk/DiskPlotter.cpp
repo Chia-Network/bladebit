@@ -48,15 +48,25 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.useDirectIO   = cfg.enableDirectIO;
     _cx.totalHeapSize = _cx.heapSize + _cx.ioHeapSize;
 
-    _cx.threadCount   = gCfg.threadCount;
+    const uint sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
+
+    // _cx.threadCount   = gCfg.threadCount;
     _cx.ioThreadCount = cfg.ioThreadCount;
+    _cx.f1ThreadCount = cfg.f1ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.f1ThreadCount, sysLogicalCoreCount );
+    _cx.fpThreadCount = cfg.fpThreadCount == 0 ? gCfg.threadCount : std::min( cfg.fpThreadCount, sysLogicalCoreCount );
+    _cx.p2ThreadCount = cfg.p2ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p2ThreadCount, sysLogicalCoreCount );
+    _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
 
     static_assert( sizeof( DiskPlotContext::writeIntervals ) == sizeof( Config::writeIntervals ), "Write interval array sizes do not match." );
     memcpy( _cx.writeIntervals, cfg.writeIntervals, sizeof( _cx.writeIntervals ) );
 
     Log::Line( "[Disk PLotter]" );
     Log::Line( " Work Heap size : %.2lf MiB", (double)_cx.heapSize BtoMB );
-    Log::Line( " Work threads   : %u"       , _cx.threadCount   );
+    // Log::Line( " Work threads   : %u"       , _cx.threadCount   );
+    Log::Line( " F1 threads     : %u"       , _cx.f1ThreadCount   );
+    Log::Line( " FP threads     : %u"       , _cx.fpThreadCount   );
+    Log::Line( " P2 threads     : %u"       , _cx.p2ThreadCount   );
+    Log::Line( " P3 threads     : %u"       , _cx.p3ThreadCount   );
     Log::Line( " IO threads     : %u"       , _cx.ioThreadCount );
     Log::Line( " IO buffer size : %llu MiB (%llu MiB total)", _cx.ioBufferSize BtoMB, _cx.ioBufferSize * _cx.ioBufferCount BtoMB );
     Log::Line( " IO buffer count: %u"       , _cx.ioBufferCount );
@@ -72,7 +82,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     // #TODO: Check for warm start
 
     // Initialize our Thread Pool and IO Queue
-    _cx.threadPool = new ThreadPool( _cx.threadCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
+    _cx.threadPool = new ThreadPool( sysLogicalCoreCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
     _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, _cx.totalHeapSize, _cx.ioThreadCount, _cx.useDirectIO );
 }
 
@@ -196,7 +206,7 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
         const char*  a       = cli.Arg();
         const size_t minSize = sizeof( "--fx" ) - 1;
         const size_t len     = strlen( a );
-
+    
         if( len >= minSize && memcmp( "--fx", a, minSize ) == 0 )
         {
             if( len == minSize )
@@ -234,6 +244,14 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
         if( cli.ReadValue( cfg.tmpPath, "-t", "--temp" ) )
             continue;
         if( checkFx() )
+            continue;
+        if( cli.ReadValue( cfg.f1ThreadCount, "--f1-threads" ) )
+            continue;
+        if( cli.ReadValue( cfg.fpThreadCount, "--fp-threads" ) )
+            continue;
+        if( cli.ReadValue( cfg.p2ThreadCount, "--p2-threads" ) )
+            continue;
+        if( cli.ReadValue( cfg.p3ThreadCount, "--p3-threads" ) )
             continue;
         else
             break;
@@ -286,7 +304,7 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
     {
         Log::Line( "Warning: Limiting disk queue threads to %u, which is the system's logical CPU count.", sysLogicalCoreCount );
         cfg.ioThreadCount = sysLogicalCoreCount;
-    }
+    } 
 }
 
 //-----------------------------------------------------------

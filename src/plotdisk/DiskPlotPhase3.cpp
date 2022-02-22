@@ -230,6 +230,9 @@ void DiskPlotPhase3::Run()
         const auto elapsed = TimerEnd( timer );
         Log::Line( "Finished compression in %.2lf seconds.", elapsed );
     }
+
+    Log::Line( "Phase3 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
+            TicksToSeconds( _context.readWaitTime ), TicksToSeconds( _context.writeWaitTime ), _context.ioQueue->IOBufferWaitTime() );
 }
 
 //-----------------------------------------------------------
@@ -255,6 +258,8 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     // convert pairs to LPs, then distribute
     // the LPs to buckets, along with the key.
     TableFirstStep( rTable );
+    Log::Line( "  Step 1 IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
+            TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 
     // Validate linePoints
     // #if _DEBUG
@@ -266,6 +271,8 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     // write a reverse lookup map given the sorted key,
     // then compress and write the rTable to disk.
     TableSecondStep( rTable );
+    Log::Line( "  Step 2 IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
+            TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 
     // Unpack map to be used as the L table for the next table iteration
     TableThirdStep( rTable );
@@ -274,6 +281,9 @@ void DiskPlotPhase3::ProcessTable( const TableId rTable )
     const uint64 oldEntryCount = context.entryCounts[(int)rTable];
     Log::Line( " Table %u now has %llu / %llu ( %.2lf%% ) entries.", rTable,
                 _prunedEntryCount, oldEntryCount, (double)_prunedEntryCount / oldEntryCount * 100 );
+
+    Log::Line( " Table %u IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", rTable,
+            TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 
     // context.entryCounts[(int)rTable] = _prunedEntryCount;
     _tablePrunedEntryCount[(int)rTable] = _prunedEntryCount;
@@ -409,7 +419,7 @@ void DiskPlotPhase3::BucketFirstStep( const TableId rTable, const uint32 bucket 
     const uint32  bucketEntryCountR = context.ptrTableBucketCounts[(int)rTable][bucket];
 
     // Wait for the bucket to be loaded
-    readFence.Wait( bucket + 1 );
+    readFence.Wait( bucket + 1, context.readWaitTime );
 
     #if _DEBUG
     {
@@ -442,7 +452,7 @@ uint32 DiskPlotPhase3::PointersToLinePoints(
     const Pairs pairs, const uint32* rMapIn, 
     uint32* rMapOut, uint64* outLinePoints )
 {
-    const uint32 threadCount = _context.threadCount;
+    const uint32 threadCount = _context.p3ThreadCount;
 
     uint32 bucketCounts[BB_DPP3_LP_BUCKET_COUNT];
 
@@ -824,7 +834,7 @@ void DiskPlotPhase3::TableSecondStep( const TableId rTable )
         if( bucketLength > 0 )
         {
             const uint32 fenceIdx = bucket * Step2FenceId::FENCE_COUNT;
-            readFence.Wait( Step2FenceId::MapLoaded + fenceIdx );
+            readFence.Wait( Step2FenceId::MapLoaded + fenceIdx, context.readWaitTime );
 
             uint64* linePoints = buffers[bucket].linePoints;
             uint32* key        = buffers[bucket].key;
@@ -901,7 +911,7 @@ void DiskPlotPhase3::WriteLPReverseLookup(
     uint64* outMap       = (uint64*)ioQueue.GetBuffer( bufferSize );
     uint32* bucketCounts = (uint32*)ioQueue.GetBuffer( sizeof( uint32 ) * BucketSize );
 
-    const uint32 threadCount = _context.threadCount;
+    const uint32 threadCount = _context.p3ThreadCount;
 
     MTJobRunner<WriteLPMapJob> jobs( *_context.threadPool );
 
@@ -1265,7 +1275,7 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
         if( entryCount < 1 )
             continue;
 
-        readFence.Wait( nextBucket );
+        readFence.Wait( nextBucket, context.readWaitTime );
 
         // Unpack the map
         const uint64* inMap = buffers[bucket];
@@ -1290,7 +1300,7 @@ void DiskPlotPhase3::TableThirdStep( const TableId rTable )
         #endif
 
         LPUnpackMapJob::RunJob( 
-            *context.threadPool, context.threadCount, 
+            *context.threadPool, context.p3ThreadCount, 
             bucket, entryCount, inMap, writeBuffer );
 
         ioQueue.ReleaseBuffer( (void*)inMap );
@@ -1390,7 +1400,7 @@ void DiskPlotPhase3::WritePark7( uint32 bucket, uint32* t6Indices, uint32 bucket
     byte* parkBuffer = (byte*)ioQueue.GetBuffer( parkSize * parkCount );
 
     const size_t sizeWritten = TableWriter::WriteP7<BB_MAX_JOBS>( *context.threadPool, 
-                                context.threadCount, bucketLength, t6Indices, parkBuffer );
+                                context.p3ThreadCount, bucketLength, t6Indices, parkBuffer );
     ASSERT( sizeWritten <= parkSize * parkCount  );
 
     ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );

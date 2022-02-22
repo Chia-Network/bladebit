@@ -286,7 +286,7 @@ void DiskPlotPhase1::Run()
     SortAndCompressTable7();
 
     Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
-            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
+            TicksToSeconds( _cx.readWaitTime ), TicksToSeconds( _cx.writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
 }
 
 
@@ -303,7 +303,7 @@ void DiskPlotPhase1::GenF1()
     auto timer = TimerBegin();
     
     F1GenBucketized::GenerateF1Disk( 
-        cx.plotId, pool, cx.threadCount, *_diskQueue, 
+        cx.plotId, pool, cx.f1ThreadCount, *_diskQueue, 
         cx.writeIntervals[(int)TableId::Table1].fxGen, 
         cx.bucketCounts[0] );
     
@@ -351,10 +351,6 @@ inline T* AllocProtect( size_t size )
 //-----------------------------------------------------------
 void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
 {
-    const uint32 maxBucketCount = BB_DP_MAX_ENTRIES_PER_BUCKET;
-    const uint32 threadCount    = _cx.threadCount;
-    const size_t fileBlockSize  = _diskQueue->BlockSize();
-
     DiskFPBufferSizes& sizes = *_cx.bufferSizes;
 
     Log::Line( "Reserving %.2lf MiB for forward propagation.", (double)sizes.totalSize BtoMB );
@@ -429,9 +425,7 @@ void DiskPlotPhase1::AllocateFPBuffers( Bucket& bucket )
 //-----------------------------------------------------------
 void DiskPlotPhase1::ForwardPropagate()
 {
-    DiskBufferQueue& ioQueue     = *_diskQueue;
-    ThreadPool&      threadPool  = *_cx.threadPool;
-    const uint       threadCount = _cx.threadCount;
+    DiskBufferQueue& ioQueue = *_diskQueue;
 
     uint   maxBucketCount = 0;
     size_t maxBucketSize  = 0;
@@ -484,8 +478,8 @@ void DiskPlotPhase1::ForwardPropagate()
         const double tableElapsed = TimerEnd( tableTimer );
         Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
         Log::Line( "Table %u has %llu entries.", table+1, _cx.entryCounts[(int)table] );
-        Log::Line( "Table %u IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
-            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
+        Log::Line( "Table %u IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", table+1,
+            TicksToSeconds( _cx.readWaitTime ), TicksToSeconds( _cx.writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
         // if( table > TableId::Table1 )
         // {
         //     uint64 entryCount = 0;
@@ -676,7 +670,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
         // Ensure we finished writing X before swapping buffers
         if( tableId == TableId::Table2 )
-            bucket.mapFence.Wait( _writeWaitTime );
+            bucket.mapFence.Wait( _cx.writeWaitTime );
 
         // Swap are front/back buffers
         std::swap( bucket.y0      , bucket.y1       );
@@ -685,7 +679,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
         std::swap( bucket.sortKey0, bucket.sortKey1 );
 
         Log::Line( "  IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf", 
-            TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ) );
+            TicksToSeconds( _cx.readWaitTime ), TicksToSeconds( _cx.writeWaitTime ) );
     }
 
     // Reset-it for the next map start
@@ -704,7 +698,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     DiskPlotContext& cx          = _cx;
     DiskBufferQueue& ioQueue     = *_diskQueue;
     ThreadPool&      threadPool  = *cx.threadPool;
-    const uint32     threadCount = cx.threadCount;
+    const uint32     threadCount = cx.fpThreadCount;
 
     uint crossBucketMatches = 0;
 
@@ -738,7 +732,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             fxMetaOutB = nullptr;
 
             // Ensure Meta A has been loaded (which for table to is just x)
-            bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx, _readWaitTime );
+            bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx, _cx.readWaitTime );
         }
         else
         {
@@ -746,7 +740,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             SortKeyGen::Generate<BB_MAX_JOBS>( threadPool, entryCount, sortKey );
 
             // Ensure Y as been loaded
-            bucket.fence.Wait( FPFenceId::YLoaded + fenceIdx, _readWaitTime );
+            bucket.fence.Wait( FPFenceId::YLoaded + fenceIdx, _cx.readWaitTime );
         }
 
         uint32* yTemp       = (uint32*)bucket.metaB1;
@@ -762,7 +756,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         // Write reverse lookup map back to disk as a direct lookup to its final index
         if constexpr ( tableId > TableId::Table2 )
         {
-            bucket.fence.Wait( FPFenceId::SortKeyLoaded + fenceIdx, _readWaitTime );
+            bucket.fence.Wait( FPFenceId::SortKeyLoaded + fenceIdx, _cx.readWaitTime );
 
             // Use meta tmp for the temp lookup index buffer
             const uint32* lookupIdx    = bucket.sortKey0;
@@ -830,14 +824,14 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     {
         using TMetaA = typename TableMetaIn<tableId>::MetaA;
 
-        bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx, _readWaitTime );
+        bucket.fence.Wait( FPFenceId::MetaALoaded + fenceIdx, _cx.readWaitTime );
         SortKeyGen::Sort<BB_MAX_JOBS, TMetaA>( threadPool, (int64)entryCount, sortKey, (const TMetaA*)bucket.metaA0, (TMetaA*)fxMetaInA );
 
         if constexpr ( MetaInBSize > 0 )
         {
             using TMetaB = typename TableMetaIn<tableId>::MetaB;
 
-            bucket.fence.Wait( FPFenceId::MetaBLoaded + fenceIdx, _readWaitTime );
+            bucket.fence.Wait( FPFenceId::MetaBLoaded + fenceIdx, _cx.readWaitTime );
             SortKeyGen::Sort<BB_MAX_JOBS, TMetaB>( threadPool, (int64)entryCount, sortKey, (const TMetaB*)bucket.metaB0, (TMetaB*)fxMetaInB );
         }
 
@@ -899,7 +893,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             ioQueue,
             chunkSize,
             threadPool,
-            cx.threadCount,
+            threadCount,
             bucketIdx,
             matchCount,
             sortKeyOffset,
@@ -1056,7 +1050,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
         if( bucketsLoaded < BucketCount )
             LoadNextBucket();
 
-        readFence.Wait( nextBucket, _readWaitTime );
+        readFence.Wait( nextBucket, _cx.readWaitTime );
 
         ioQueue.DeleteFile( FileId::F7, bucket );
         ioQueue.CommitCommands();
@@ -1087,7 +1081,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
         // write plot header and addresses.
         // We will set the addersses to these tables accordingly.
         ThreadPool&  pool        = *context.threadPool;
-        const uint32 threadCount = context.threadCount;
+        const uint32 threadCount = context.fpThreadCount;
 
         // Write C1
         {
@@ -1179,7 +1173,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
             // #NOTE: This function uses re-writes our f7 buffer, so ensure it is done after
             //        that buffer is no longer needed.
             const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_MAX_JOBS>( *context.threadPool, 
-                                            context.threadCount, c3BucketLength, c3F7, c3Buffer );
+                                            context.fpThreadCount, c3BucketLength, c3F7, c3Buffer );
             ASSERT( sizeWritten == c3BufferSize );
 
             c3TableSizeBytes += sizeWritten;
@@ -1246,7 +1240,7 @@ void DiskPlotPhase1::WriteReverseMap( TableId tableId, const uint32 bucketIdx, c
     DiskBufferQueue& ioQueue       = *_cx.ioQueue;
 
     Bucket&       bucket           = *_bucket;
-    const uint32  threadCount      = _cx.threadCount;
+    const uint32  threadCount      = _cx.fpThreadCount;
     const uint32  entriesPerThread = count / threadCount;
 
     // This offset must be based on the previous table as these
@@ -1649,7 +1643,7 @@ uint32 DiskPlotPhase1::ProcessCrossBucketGroups( const uint32 *prevBucketY, cons
 //-----------------------------------------------------------
 uint32 DiskPlotPhase1::MatchBucket( TableId table, uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] )
 {
-    const uint32 threadCount = _cx.threadCount;
+    const uint32 threadCount = _cx.fpThreadCount;
 
     // #TODO: Can we use yTmp as group boundaries?
     // bucket.groupBoundaries = bucket.yTemp;
@@ -1721,7 +1715,7 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
     auto& cx = _cx;
 
     ThreadPool& pool               = *cx.threadPool;
-    const uint  threadCount        = _cx.threadCount;
+    const uint  threadCount        = _cx.fpThreadCount;
     const uint  maxGroupsPerThread = maxGroups / threadCount - 1;   // -1 because we need to add an extra end index to check R group 
                                                                     // without adding an extra 'if'
     MTJobRunner<ScanGroupJob> jobs( pool );
@@ -1822,7 +1816,7 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
     jobs[threadCount-1].endIndex = entryCount;
 
     // Run the scan job
-    const double elapsed = jobs.Run();
+    const double elapsed = jobs.Run( threadCount );
     Log::Verbose( "  Finished group scan in %.2lf seconds." );
 
     // Get the total group count
@@ -1861,7 +1855,7 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
     Log::Verbose( "  Matching groups." );
 
     auto&      cx          = _cx;
-    const uint threadCount = cx.threadCount;
+    const uint threadCount = cx.fpThreadCount;
 
     MTJobRunner<MatchJob> jobs( *cx.threadPool );
 
@@ -1878,7 +1872,7 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
         job.copyFence       = &_bucket->backPointersFence;
     }
 
-    const double elapsed = jobs.Run();
+    const double elapsed = jobs.Run( threadCount );
 
     uint32 matches = groupInfos[0].entryCount;
     for( uint i = 1; i < threadCount; i++ )
@@ -1892,7 +1886,7 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
 void ScanGroupJob::Run()
 {
     const uint32 maxGroups = this->maxGroups;
-    
+
     uint32* groupBoundaries = this->groupBoundaries;
     uint32  groupCount      = 0;
 
@@ -2166,7 +2160,6 @@ RETURN:
     bbmemcpy_t( dstL, pairs.left , pairCount );
     bbmemcpy_t( dstR, pairs.right, pairCount );
 }
-
 
 
 

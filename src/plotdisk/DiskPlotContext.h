@@ -68,8 +68,12 @@ struct DiskPlotContext
     byte*        ioHeap;            // Full allocation of the IO heap
     uint         ioBufferCount;     // How many single IO buffers can we allocate
 
-    uint         threadCount;       // How many threads to use for in-memory plot work
-    uint         ioThreadCount;     // How many threads to use for the disk buffer writer/reader
+    // uint32       threadCount;       // How many threads to use for in-memory plot work
+    uint32       ioThreadCount;     // How many threads to use for the disk buffer writer/reader
+    uint32       f1ThreadCount;     // How many threads to use for f1 generation
+    uint32       fpThreadCount;     // How many threads to use for forward propagation
+    uint32       p2ThreadCount;     // How many threads to use for Phase 2
+    uint32       p3ThreadCount;     // How many threads to use for Phase 3
     bool         useDirectIO;       // Use unbuffered (direct-IO) when performing temp read/writes?
 
     const byte*  plotId;
@@ -95,6 +99,9 @@ struct DiskPlotContext
     uint64       plotTableSizes   [10];
 
     DiskFPBufferSizes* bufferSizes;
+
+    Duration readWaitTime;
+    Duration writeWaitTime;
 };
 
 struct Phase3Data

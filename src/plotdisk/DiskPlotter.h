@@ -18,6 +18,11 @@ public:
         uint32            ioBufferCount            = 0;
         DiskWriteInterval writeIntervals[(uint)TableId::_Count] = { 0 };
         bool              enableDirectIO           = false;
+
+        uint32            f1ThreadCount            = 0;
+        uint32            fpThreadCount            = 0;
+        uint32            p2ThreadCount            = 0;
+        uint32            p3ThreadCount            = 0;
     };
 
     struct PlotRequest
