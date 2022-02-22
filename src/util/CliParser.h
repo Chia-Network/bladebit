@@ -43,6 +43,18 @@ public:
     }
 
     //-----------------------------------------------------------
+    inline bool ArgConsume( const char* paramA, const char* paramB = nullptr )
+    {
+        if( ArgMatch( paramA, paramB ) )
+        {
+            NextArg();
+            return true;
+        }
+        
+        return false;
+    }
+
+    //-----------------------------------------------------------
     inline bool ReadSwitch( bool& value, const char* paramA, const char* paramB = nullptr )
     {
         if( ArgMatch( paramA, paramB ) )

@@ -149,11 +149,11 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             continue;
         else if( cli.ReadSwitch( cfg.disableCpuAffinity, "--no-cpu-affinity" ) )
             continue;
-        else if( cli.ArgMatch( "-v", "--verbose" ) )
+        else if( cli.ArgConsume( "-v", "--verbose" ) )
         {
             Log::SetVerbose( true );
         }
-        else if( cli.ArgMatch( "--memory" ) )
+        else if( cli.ArgConsume( "--memory" ) )
         {
             // #TODO: We should move the required part to the memplot command
             // #TODO: Get this value from Memplotter
@@ -167,7 +167,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
 
             exit( 0 );
         }
-        else if( cli.ArgMatch( "--memory-json" ) )
+        else if( cli.ArgConsume( "--memory-json" ) )
         {
             // #TODO: Get this value from Memplotter
             const size_t requiredMem  = 416ull GB;
@@ -179,19 +179,19 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
 
             exit( 0 );
         }
-        else if( cli.ArgMatch( "--version" ) )
+        else if( cli.ArgConsume( "--version" ) )
         {
             Log::Line( BLADEBIT_VERSION_STR );
             exit( 0 );
         }
-        else if( cli.ArgMatch( "-h", "--help" ) )
+        else if( cli.ArgConsume( "-h", "--help" ) )
         {
             // #TODO: Print Help
             Log::Line( "Unimplemented!" );
             exit( 0 );
         }
         // Commands
-        else if( cli.ArgMatch( "help" ) )
+        else if( cli.ArgConsume( "help" ) )
         {
             if( cli.HasArgs() )
             {
@@ -208,7 +208,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
         // {
 
         // }
-        else if( cli.ArgMatch( "diskplot" ) )
+        else if( cli.ArgConsume( "diskplot" ) )
         {
             // Increase the file size limit on linux
             #if PLATFORM_IS_LINUX
@@ -229,8 +229,6 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
 
             #endif
 
-            
-            cli.NextArg();
             DiskPlotter::Config diskCfg;
             DiskPlotter::ParseCommandLine( cli, diskCfg );
 

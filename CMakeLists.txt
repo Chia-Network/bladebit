@@ -169,7 +169,7 @@ else()
     set(dev_c_opts 
         ${dev_c_opts})
 
-    set(link_opts -g -rdynamic
+    set(link_opts -g -rdynamic #flto
         ${link_opts})
 
     # GCC
@@ -363,16 +363,6 @@ target_link_libraries(plot_tool PRIVATE lib_bladebit)
 add_executable(tests ${src_tests} ${bb_headers})
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 
-# macro(config_proj tgt)
-#     message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
-#     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-#     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-#     target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
-#     target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
-    
-#     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
-# endmacro()
-# Configure targets
 
 
 # Pretty source view for IDE projects

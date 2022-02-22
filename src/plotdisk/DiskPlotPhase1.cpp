@@ -186,6 +186,7 @@ void DiskPlotPhase1::Run()
 
 #if !BB_DP_DBG_READ_EXISTING_F1
     GenF1();
+    _cx.entryCounts[0] = 1ull << _K;
 #else
     {
         size_t pathLen = strlen( cx.tmpPath );
@@ -237,7 +238,8 @@ void DiskPlotPhase1::Run()
 
     ForwardPropagate();
 
-    // Calculate all table counts
+    // Check all table counts
+    #if _DEBUG
     for( int table = (int)TableId::Table1; table <= (int)TableId::Table7; table++ )
     {
         uint64 entryCount = 0;
@@ -245,8 +247,10 @@ void DiskPlotPhase1::Run()
         for( int bucket = 0; bucket < (int)BB_DP_BUCKET_COUNT; bucket++ )
             entryCount += cx.bucketCounts[table][bucket];
 
-        cx.entryCounts[table] = entryCount;
+        // cx.entryCounts[table] = entryCount;
+        ASSERT( entryCount == cx.entryCounts[table] );
     }
+    #endif
 
     #if _DEBUG
     {
@@ -439,18 +443,6 @@ void DiskPlotPhase1::ForwardPropagate()
     maxBucketSize   = maxBucketCount * sizeof( uint32 );
     _maxBucketCount = maxBucketCount;
 
-    // #TODO: We need to have a maximum size here, and just allocate that.
-    //        we don't want to allocate per-table as we might not be able to do
-    //        so due to fragmentation and the other buffers allocated after this big chunk.
-    //        Therefore, it's better to have a set size
-    // 
-    // #TODO: Create a separate heap... Grab the section out of the working heap we need, and then create
-    //        a new heap strictly with the space that will go to IO. No need to have these show up in the 
-    //        heap as it will slow down deallocation.
-    // 
-    // Allocate buffers we need for forward propagation
-//     DoubleBuffer bucketBuffers;
-
     Bucket bucket;
     _bucket = &bucket;
 
@@ -488,6 +480,17 @@ void DiskPlotPhase1::ForwardPropagate()
 
         const double tableElapsed = TimerEnd( tableTimer );
         Log::Line( "Finished forward propagating table %d in %.2lf seconds.", (int)table + 1, tableElapsed );
+        Log::Line( "Table %u has %llu entries.", table+1, _cx.entryCounts[(int)table] );
+
+        // if( table > TableId::Table1 )
+        // {
+        //     uint64 entryCount = 0;
+        //     for( int bucket = 0; bucket < (int)BB_DP_BUCKET_COUNT; bucket++ )
+        //         entryCount += _cx.bucketCounts[(int)table][bucket];
+
+        //     _cx.entryCounts[(int)table] = entryCount;
+        //     Log::Line( "Table %u has %llu entries.", table+1, _cx.entryCounts[(int)table] );
+        // }
 
         #if _DEBUG && BB_DP_DBG_VALIDATE_FX
         // if( 0 )
@@ -689,6 +692,8 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     constexpr size_t MetaInASize = TableMetaIn<tableId>::SizeA;
     constexpr size_t MetaInBSize = TableMetaIn<tableId>::SizeB;
 
+    constexpr uint64 MaxTableEntries = 1ull << _K;
+
     DiskPlotContext& cx          = _cx;
     DiskBufferQueue& ioQueue     = *_diskQueue;
     ThreadPool&      threadPool  = *cx.threadPool;
@@ -712,7 +717,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     // uint32* sortKey = bucket.sortKey;
     uint32* sortKey = bucket.yTmp;
     {
-        Log::Line( "  Sorting bucket y." );
+        Log::Verbose( "  Sorting bucket y." );
         auto timer = TimerBegin();
 
         if constexpr ( tableId == TableId::Table2 )
@@ -785,7 +790,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
             bucket.ioFence.Signal();
 
         double elapsed = TimerEnd( timer );
-        Log::Line( "  Sorted bucket y in %.2lf seconds.", elapsed );
+        Log::Verbose( "  Sorted bucket y in %.2lf seconds.", elapsed );
     }
 
     ///
@@ -796,6 +801,19 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
 
     cx.ptrTableBucketCounts[(int)tableId][bucketIdx] = matchCount; // Store how many entries generated (used for L/R pointers,
                                                                    // since we don't sort them yet).
+
+
+    cx.entryCounts[(int)tableId] += matchCount;
+    if( bucketIdx == BB_DP_BUCKET_COUNT-1 && cx.entryCounts[(int)tableId] > MaxTableEntries )
+    {
+        // For now, simply truncate entries if we overflow them
+        const uint32 overflowedCount = (uint32)( cx.entryCounts[(int)tableId] - MaxTableEntries );
+
+        cx.entryCounts[(int)tableId] = MaxTableEntries;
+        cx.ptrTableBucketCounts[(int)tableId][bucketIdx] -= overflowedCount;
+
+        matchCount -= overflowedCount;
+    }
 
     ///
     /// Sort metadata with the key
@@ -833,11 +851,28 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     /// 
     if( bucketIdx > 0 )
     {
-        // Generate matches that were 
-        crossBucketMatches = ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount, bucket.y0, fxMetaInA, fxMetaInB );
+        // Only do this if we haven't overflowed (can happen in the last bucket)
+        if( cx.entryCounts[(int)tableId] < MaxTableEntries )
+        {
+            // Generate matches that were 
+            crossBucketMatches = ProcessAdjoiningBuckets<tableId>( bucketIdx, bucket, entryCount, bucket.y0, fxMetaInA, fxMetaInB );
 
-        // Add these matches to the previous bucket
-        cx.ptrTableBucketCounts[(int)tableId][bucketIdx-1] += crossBucketMatches;
+            // Add these matches to the previous bucket
+            cx.ptrTableBucketCounts[(int)tableId][bucketIdx-1] += crossBucketMatches;
+
+            
+            cx.entryCounts[(int)tableId] += crossBucketMatches;
+            if( cx.entryCounts[(int)tableId] > MaxTableEntries )
+            {
+                ASSERT( bucketIdx == BB_DP_BUCKET_COUNT-1 );
+
+                // For now, simply truncate entries if we overflow them
+                const uint32 overflowedCount = (uint32)( cx.entryCounts[(int)tableId] - MaxTableEntries );
+
+                cx.entryCounts[(int)tableId] = MaxTableEntries;
+                cx.ptrTableBucketCounts[(int)tableId][bucketIdx] -= overflowedCount;
+            }
+        }
 
         // Write the pending matches from this bucket now that we've written the cross-bucket entries
         WritePendingBackPointers( bucket.pairs, tableId, bucketIdx, matchCount );
@@ -847,7 +882,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
     /// FX
     ///
     {
-        Log::Line( "  Generating fx..." );
+        Log::Verbose( "  Generating fx..." );
         const auto timer = TimerBegin();
 
         const size_t chunkSize     = cx.writeIntervals[(int)tableId].fxGen;
@@ -869,7 +904,7 @@ uint32 DiskPlotPhase1::ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket,
         );
 
         const double elapsed = TimerEnd( timer );
-        Log::Line( "  Finished generating fx in %.2lf seconds.", elapsed );
+        Log::Verbose( "  Finished generating fx in %.2lf seconds.", elapsed );
     }
 
     ///
@@ -1101,9 +1136,10 @@ void DiskPlotPhase1::SortAndCompressTable7()
             }
             
             
+            // #TODO: Remove this
             // Dump f7's that have the value of 0xFFFFFFFF for now,
-            // for bladebit ram compatibility (testing)
-            // #TODO: Remove this when plots test equal
+            // this is just for compatibility with RAM bladebit for testing
+            // plots against it.
             if( isLastBucket )
             {
                 while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
@@ -1673,7 +1709,7 @@ inline FileId GetBackPointersFileIdForTable( TableId table )
 //-----------------------------------------------------------
 uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] )
 {
-    Log::Line( "  Scanning for groups." );
+    Log::Verbose( "  Scanning for groups." );
 
     auto& cx = _cx;
 
@@ -1780,7 +1816,7 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
 
     // Run the scan job
     const double elapsed = jobs.Run();
-    Log::Line( "  Finished group scan in %.2lf seconds." );
+    Log::Verbose( "  Finished group scan in %.2lf seconds." );
 
     // Get the total group count
     uint groupCount = 0;
@@ -1807,7 +1843,7 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
     groupInfos[threadCount-1].groupCount      = lastJob.groupCount;
     groupInfos[threadCount-1].startIndex      = lastJob.startIndex;
 
-    Log::Line( "  Found %u groups.", groupCount );
+    // Log::Line( "  Found %u groups.", groupCount );
 
     return groupCount;
 }
@@ -1815,7 +1851,7 @@ uint32 DiskPlotPhase1::ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32
 //-----------------------------------------------------------
 uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], Pairs dstPairs )
 {
-    Log::Line( "  Matching groups." );
+    Log::Verbose( "  Matching groups." );
 
     auto&      cx          = _cx;
     const uint threadCount = cx.threadCount;
@@ -1841,7 +1877,7 @@ uint32 DiskPlotPhase1::Match( uint bucketIdx, uint maxPairsPerThread, const uint
     for( uint i = 1; i < threadCount; i++ )
         matches += groupInfos[i].entryCount;
 
-    Log::Line( "  Found %u matches in %.2lf seconds.", matches, elapsed );
+    Log::Verbose( "  Found %u matches in %.2lf seconds.", matches, elapsed );
     return matches;
 }
 

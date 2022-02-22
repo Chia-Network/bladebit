@@ -246,7 +246,6 @@ inline size_t TableWriter::WriteC12Parallel(
         parkWriter      += entriesPerThread;
     }
 
-    // pool.RunJob( WriteC12Thread<CInterval>, jobs, threadCount );
     jobs.Run( threadCount );
 
     // Write trailing entries, if any
@@ -263,7 +262,7 @@ inline size_t TableWriter::WriteC12Parallel(
         //  To work around this, we can add a trailing entry with the maximum k32 value size.
         //  This will force chiapos to stop at that point as the f7 is lesser than max k32 value.
         //  #IMPORTANT: This means that we can't have any f7's that are 0xFFFFFFFF!.
-        // parkWriter[trailingEntries] = 0xFFFFFFFF;
+        parkWriter[trailingEntries] = 0xFFFFFFFF;
     }
     else
     {

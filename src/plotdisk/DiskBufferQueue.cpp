@@ -286,6 +286,7 @@ void DiskBufferQueue::WaitForFence( Fence& fence )
 //-----------------------------------------------------------
 void DiskBufferQueue::DeleteFile( FileId id, uint bucket )
 {
+    // Log::Line( "DeleteFile( %u : %u )", id, bucket );
     Command* cmd = GetCommandObject( Command::DeleteFile );
     cmd->deleteFile.fileId = id;
     cmd->deleteFile.bucket = bucket;
@@ -294,6 +295,7 @@ void DiskBufferQueue::DeleteFile( FileId id, uint bucket )
 //-----------------------------------------------------------
 void DiskBufferQueue::DeleteBucket( FileId id )
 {
+    // Log::Line( "DeleteBucket( %u )", id );
     // #TODO: This command must be run in another helper thread in order
     //        to not block while the kernel buffers are being
     //        cleared (when not using direct IO). Otherwise
