@@ -16,7 +16,7 @@ inline FILE* Log::GetOutStream()
     if( _outStream == nullptr )
     {
         _outStream = stdout;
-        //setvbuf( stdout, NULL, _IONBF, 0 );
+        setvbuf( stdout, NULL, _IONBF, 0 );
     }
 
     return _outStream;
@@ -28,7 +28,7 @@ inline FILE* Log::GetErrStream()
     if( _errStream == nullptr )
     {
         _errStream = stderr;
-        //setvbuf( stderr, NULL, _IONBF, 0 );
+        setvbuf( stderr, NULL, _IONBF, 0 );
     }
 
     return _errStream;
