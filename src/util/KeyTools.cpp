@@ -87,7 +87,7 @@ bool PuzzleHash::FromAddress( PuzzleHash& hash, const char address[CHIA_ADDRESS_
     byte data[CHIA_ADDRESS_LENGTH-8];
 
     size_t dataLen = 0;
-    if( bech32_decode( hrp, hash.data, &dataLen, address ) != BECH32_ENCODING_BECH32M )
+    if( bech32_decode( hrp, data, &dataLen, address ) != BECH32_ENCODING_BECH32M )
         return false;
 
     if( memcmp( "xch", hrp, sizeof( "xch" ) ) != 0 )
