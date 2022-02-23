@@ -75,6 +75,7 @@
                 "-t", "/mnt/p5510a/disk_tmp",
                 "--f1-threads", "3",
                 "--fp-threads", "26",
+                "-c-threads" , "18",
                 "--p2-threads", "8",
                 "--p3-threads", "10",
                 "--f1", "256MB",

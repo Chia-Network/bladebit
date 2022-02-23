@@ -199,7 +199,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
                 if( cli.ArgMatch( "diskplot" ) )
                     DiskPlotter::PrintUsage();
                 else
-                    FatalErrorMsg( "Unknown command '%s'.", cli.Arg() );
+                    Fatal( "Unknown command '%s'.", cli.Arg() );
 
                 exit( 0 );
             }

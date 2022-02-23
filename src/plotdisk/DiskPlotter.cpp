@@ -262,6 +262,10 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
             PrintUsage();
             exit( 0 );
         }
+        else if( cli.Arg()[0] == '-' )
+        {
+            Fatal( "Unexpected argument '%s'.", cli.Arg() );
+        }
         else
             break;
     }

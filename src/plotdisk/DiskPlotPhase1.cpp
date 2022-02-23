@@ -1080,7 +1080,6 @@ void DiskPlotPhase1::SortAndCompressTable7()
         // and write them to the plot file as the first 3 tables
         // write plot header and addresses.
         // We will set the addersses to these tables accordingly.
-        ThreadPool&  pool        = *context.threadPool;
         const uint32 threadCount = context.cThreadCount;
 
         // Write C1
