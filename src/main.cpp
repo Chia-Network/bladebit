@@ -236,6 +236,8 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             {
                 if( cli.ArgMatch( "diskplot" ) )
                     DiskPlotter::PrintUsage();
+                if( cli.ArgMatch( "iotest" ) )
+                    IOTestPrintUsage();
                 else
                     Fatal( "Unknown command '%s'.", cli.Arg() );
 
