@@ -10,6 +10,8 @@
 #include "pos/chacha8.h"
 #include "b3/blake3.h"
 #include "threading/MTJob.h"
+#include "util/CliParser.h"
+#include "plotting/GlobalPlotConfig.h"
 #include <mutex>
 
 #define PROOF_X_COUNT       64
@@ -42,6 +44,8 @@ void FxGen( const TableId table, const uint32 k,
             const uint64 y, const MetaBits& metaL, const MetaBits& metaR,
             uint64& outY, MetaBits& outMeta );
 
+void PlotValidatorPrintUsage();
+bool ValidatePlot( const ValidatePlotOptions& options );
 
 struct ValidateJob : MTJob<ValidateJob>
 {
@@ -53,6 +57,43 @@ struct ValidateJob : MTJob<ValidateJob>
     void Run() override;
     void Log( const char* msg, ... );
 };
+
+//-----------------------------------------------------------
+void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
+{
+    ValidatePlotOptions opts;
+
+    while( cli.HasArgs() )
+    {
+        if( cli.ReadSwitch( opts.inRAM, "-m", "--in-ram" ) )
+            continue;
+        else if( cli.ReadValue( opts.startOffset, "-o", "--offset" ) )
+            continue;
+        else if( cli.ArgConsume( "-h", "--help" ) )
+        {
+            PlotValidatorPrintUsage();
+            exit( 0 );
+        }
+        else if( cli.IsLastArg() )
+        {
+            opts.plotPath = cli.ArgConsume();
+        }
+        else
+        {
+            Fatal( "Unexpected argument '%s'.", cli.Arg() );
+        }
+    }
+
+    const uint32 maxThreads = SysHost::GetLogicalCPUCount();
+
+    opts.threadCount = gCfg.threadCount == 0 ? maxThreads : std::min( maxThreads, gCfg.threadCount );
+    opts.startOffset = std::max( std::min( opts.startOffset / 100.f, 100.f ), 0.f );
+
+    ValidatePlot( opts );
+
+    exit( 0 );
+}
+
 
 //-----------------------------------------------------------
 bool ValidatePlot( const ValidatePlotOptions& options )
@@ -619,3 +660,27 @@ inline uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 b
     return field;
 }
 
+//-----------------------------------------------------------
+const char USAGE[] = R"(validate [OPTIONS] <plot_path>
+
+Validates all of a plot's values to ensure they all contain valid proofs.
+
+[NOTES]
+You can specify the thread count in the bladebit global option '-t'.
+
+[ARGUMENTS]
+<plot_path>   : Path to the plot file to be validated.
+
+[OPTIOINS]
+ -m, --in-ram : Loads the whole plot file into memory before validating.
+
+ -o, --offset : Percentage offset at which to start validating.
+                Ex (start at 50%): bladebit validate -o 50 /path/to/my/plot
+
+ -h, --help   : Print this help message and exit.
+)";
+
+void PlotValidatorPrintUsage()
+{
+    Log::Line( USAGE );
+}

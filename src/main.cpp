@@ -11,8 +11,12 @@ static void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[
 static void PrintUsage();
 
 // See IOTester.cpp
-void IOTestMain( CliParser& cli );
+void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli );
 void IOTestPrintUsage();
+
+// PlotValidator.cpp
+void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli );
+void PlotValidatorPrintUsage();
 
 struct Plotter 
 {
@@ -227,7 +231,12 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
         }
         else if( cli.ArgConsume( "iotest" ) )
         {
-            IOTestMain( cli );
+            IOTestMain( cfg, cli );
+            exit( 0 );
+        }
+        else if( cli.ArgConsume( "validate" ) )
+        {
+            PlotValidatorMain( cfg, cli );
             exit( 0 );
         }
         else if( cli.ArgConsume( "help" ) )
@@ -238,6 +247,8 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
                     DiskPlotter::PrintUsage();
                 if( cli.ArgMatch( "iotest" ) )
                     IOTestPrintUsage();
+                if( cli.ArgMatch( "validate" ) )
+                    PlotValidatorPrintUsage();
                 else
                     Fatal( "Unknown command '%s'.", cli.Arg() );
 
@@ -360,6 +371,7 @@ R"(
 [COMMANDS]
  diskplot   : Create a plot by making use of a disk.
  iotest     : Perform a write and read test on a specified disk.
+ validate   : Validates all entries in a plot to ensure they all evaluate to a valid proof.
  help       : Output this help message, or help for a specific command, if specified.
 
 [GLOBAL_OPTIONS]:

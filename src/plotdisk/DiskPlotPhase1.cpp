@@ -958,6 +958,8 @@ void DiskPlotPhase1::SortAndCompressTable7()
     DiskPlotContext& context = _cx;
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
+    ioQueue.ResetHeap( context.totalHeapSize, context.heapBuffer );
+
     // Load F7 buckets and sort them
     const uint32 BucketCount = BB_DP_BUCKET_COUNT;
 

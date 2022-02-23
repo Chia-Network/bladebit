@@ -218,7 +218,7 @@ file(GLOB_RECURSE bb_headers
 
 # Ignore some sources
 list(FILTER bb_sources EXCLUDE REGEX "src/main\\.cpp")
-list(FILTER bb_sources EXCLUDE REGEX "src/tools/.+")
+# list(FILTER bb_sources EXCLUDE REGEX "src/tools/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/sandbox/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/platform/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
@@ -327,8 +327,6 @@ set(bb_include_dirs
 #     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
 # endmacro()
 
-
-
 # BladeBit
 add_library(lib_bladebit ${bb_sources} ${bb_headers})
 set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit)
@@ -340,8 +338,7 @@ target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c
 target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
 target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
 
-add_executable(bladebit ${bb_headers} src/main.cpp 
-    src/tools/IOTester.cpp )
+add_executable(bladebit ${bb_headers} src/main.cpp)
 target_link_libraries(bladebit PRIVATE lib_bladebit)
 
 add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/sandbox/sandbox_main.cpp ${src_dev} ${bb_headers})
@@ -351,14 +348,14 @@ target_link_libraries(bladebit_dev PRIVATE lib_bladebit)
 add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
 target_link_libraries(fsegen PRIVATE lib_bladebit)
 
-add_executable(plot_tool 
-    src/tools/PlotTools_Main.cpp 
-    src/tools/PlotReader.cpp
-    src/tools/PlotValidator.cpp
-    src/tools/PlotComparer.cpp 
-    ${bb_headers}
-)
-target_link_libraries(plot_tool PRIVATE lib_bladebit)
+# add_executable(plot_tool 
+#     src/tools/PlotTools_Main.cpp 
+#     src/tools/PlotReader.cpp
+#     src/tools/PlotValidator.cpp
+#     src/tools/PlotComparer.cpp 
+#     ${bb_headers}
+# )
+# target_link_libraries(plot_tool PRIVATE lib_bladebit)
 
 # Tests
 add_executable(tests ${src_tests} ${bb_headers})

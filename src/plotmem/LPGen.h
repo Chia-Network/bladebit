@@ -33,6 +33,11 @@ struct LPJob : public SyncedJob
     uint32* map;
 };
 
+struct BackPtr
+{
+    uint64 x, y;
+};
+
 template<bool PruneTable>
 void ProcessTableThread( LPJob* job );
 
@@ -43,13 +48,10 @@ void WriteLookupTableThread( LPJob* job );
 // Calculates x * (x-1) / 2. Division is done before multiplication.
 inline uint64 GetXEnc( uint64 x );
 inline uint64 SquareToLinePoint( uint64 x, uint64 y );
-
-struct BackPtr
-{
-    uint64 x, y;
-};
+inline uint128 GetXEnc128( uint64 x );
 
 inline BackPtr LinePointToSquare( uint128 index );
+inline BackPtr LinePointToSquare64( uint64 index );
 
 
 #pragma GCC diagnostic push

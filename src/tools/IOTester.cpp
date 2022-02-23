@@ -3,6 +3,7 @@
 #include "util/Util.h"
 #include "io/HybridStream.h"
 #include "plotdisk/jobs/IOJob.h"
+#include "plotting/GlobalPlotConfig.h"
 
 void IOTestPrintUsage();
 
@@ -10,7 +11,7 @@ static void InitPages( void* mem, size_t size );
 
 
 //-----------------------------------------------------------
-void IOTestMain( CliParser& cli )
+void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
 {
     size_t      writeSize  = 4ull GB;
     const char* testDir    = nullptr;
@@ -161,9 +162,11 @@ void InitPages( void* mem, size_t size )
 
 
 //-----------------------------------------------------------
-static const char* USAGE = R"(
-iotest [ARGUMENTS] <test_dir>
+static const char* USAGE = R"(iotest [OPTIONS] <test_dir>
 
+Performs read/write test on the specified disk path.
+
+[OPTIONS]
  -s, --size <size>  : Size to write. Default is 4GB.
                       Ex: 512MB 1GB 16GB
 
