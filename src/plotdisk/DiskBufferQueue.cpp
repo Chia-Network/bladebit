@@ -593,7 +593,7 @@ inline void DiskBufferQueue::WriteToFile( FileStream& file, size_t size, const b
 
             ssize_t sizeWritten = file.Write( blockBuffer, blockSize );
 
-            if( sizeWritten < 1 )
+            if( sizeWritten < remainder )
             {
                 const int err = file.GetError();
                 Fatal( "Failed to write block to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );

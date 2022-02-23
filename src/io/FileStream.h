@@ -1,5 +1,6 @@
 #pragma once
 #include "Platform.h"
+#include "IStream.h"
 
 enum class FileAccess : uint16
 {
@@ -26,14 +27,7 @@ enum class FileFlags : uint32
 ImplementFlagOps( FileFlags );
 
 
-enum class SeekOrigin : int32
-{
-    Begin  = 0,
-    Current,
-    End
-};
-
-class FileStream
+class FileStream : public IStream
 {
 public:
     inline FileStream() {}
@@ -50,28 +44,28 @@ public:
     static bool Open( const char* path, FileStream& file, FileMode mode, FileAccess access, FileFlags flags = FileFlags::None );
     bool Open( const char* path, FileMode mode, FileAccess access, FileFlags flags = FileFlags::None );
 
-    ssize_t Read( void* buffer, size_t size );
-    ssize_t Write( const void* buffer, size_t size );
+    ssize_t Read( void* buffer, size_t size ) override;
+    ssize_t Write( const void* buffer, size_t size ) override;
 
     bool Reserve( ssize_t size );
-    
-    bool Seek( int64 offset, SeekOrigin origin );
 
-    bool Flush();
+    bool Seek( int64 offset, SeekOrigin origin ) override;
 
-    inline size_t BlockSize()
+    bool Flush() override;
+
+    inline size_t BlockSize() const override
     {
         return _blockSize;
     }
 
-    ssize_t Size();
+    ssize_t Size() override;
 
     void Close();
 
     bool IsOpen() const;
     static bool Exists( const char* path );
 
-    inline int GetError()
+    inline int GetError() override
     {
         int err = _error;
         _error = 0;

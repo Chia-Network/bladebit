@@ -1,12 +1,12 @@
 #include "IOJob.h"
 #include "threading/ThreadPool.h"
 #include "threading/MTJob.h"
-#include "io/FileStream.h"
 #include "util/Util.h"
+#include "io/IStream.h"
 
 //-----------------------------------------------------------
 double IOWriteJob::WriteWithThreads( 
-        uint threadCount, ThreadPool& pool, FileStream* files, 
+        uint threadCount, ThreadPool& pool, IStream* files, 
         const byte* bufferToWrite, size_t sizeToWrite,
         byte** blockBuffers, const size_t blockSize,
         int& error )
@@ -79,7 +79,7 @@ void IOWriteJob::Run()
 }
 
 //-----------------------------------------------------------
-void IOWriteJob::WriteToFile( FileStream& file, const byte* buffer, const size_t size,
+void IOWriteJob::WriteToFile( IStream& file, const byte* buffer, const size_t size,
                               byte* blockBuffer, const size_t blockSize, int& error )                 
 {
     error = 0;
@@ -120,7 +120,7 @@ void IOWriteJob::WriteToFile( FileStream& file, const byte* buffer, const size_t
 }
 
 //-----------------------------------------------------------
-bool IOWriteJob::ReadFromFile( FileStream& file, byte* buffer, const size_t size,
+bool IOWriteJob::ReadFromFile( IStream& file, byte* buffer, const size_t size,
                                byte* blockBuffer, const size_t blockSize, int& error )
 {
     /// #NOTE: All our buffers should be block aligned so we should be able to freely read all blocks to them...

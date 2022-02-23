@@ -1,10 +1,12 @@
 #include "util/CliParser.h"
 #include "util/Log.h"
 #include "util/Util.h"
-#include "io/FileStream.h"
+#include "io/HybridStream.h"
 #include "plotdisk/jobs/IOJob.h"
 
 void IOTestPrintUsage();
+
+static void InitPages( void* mem, size_t size );
 
 
 //-----------------------------------------------------------
@@ -13,6 +15,7 @@ void IOTestMain( CliParser& cli )
     size_t      writeSize  = 4ull GB;
     const char* testDir    = nullptr;
     bool        noDirectIO = false;
+    size_t      memReserve = 0;
 
     while( cli.HasArgs() )
     {
@@ -21,6 +24,8 @@ void IOTestMain( CliParser& cli )
             FatalIf( writeSize < 1, "Write size must be > 0." );
         }
         else if( cli.ReadSwitch( noDirectIO, "-d", "--no-direct-io" ) )
+            continue;
+        else if( cli.ReadValue( memReserve, "-m", "--memory" ) )
             continue;
         else if( cli.ArgConsume( "-h", "--help" ) )
         {
@@ -65,12 +70,32 @@ void IOTestMain( CliParser& cli )
         flags |= FileFlags::NoBuffering;
 
     Log::Line( "Performing test with file %s", filePath );
-    FileStream file;
-    FatalIf( !file.Open( filePath, FileMode::Create, FileAccess::ReadWrite, flags ), 
-        "Failed to open temporary test file at path '%s'.", testDir );
+    IStream* file = nullptr;
+
+    // FileStream file;
+    if( memReserve > 0 )
+    {
+        Log::Line( "Reserving memory cache..." );
+        byte* cache = bbvirtalloc<byte>( memReserve );
+        InitPages( cache, memReserve );
+
+        auto* memFile = new HybridStream();
+        FatalIf( !memFile->Open( cache, memReserve, filePath, FileMode::Create, FileAccess::ReadWrite, flags ), 
+            "Failed to open temporary test file at path '%s'.", testDir );
+
+        file = memFile;
+    }
+    else
+    {
+        auto* diskFile = new FileStream();
+        FatalIf( !diskFile->Open( filePath, FileMode::Create, FileAccess::ReadWrite, flags ), 
+            "Failed to open temporary test file at path '%s'.", testDir );
+
+        file = diskFile;
+    }
     
     // Begin test
-    const size_t fsBlockSize = file.BlockSize();
+    const size_t fsBlockSize = file->BlockSize();
     FatalIf( fsBlockSize < 1, "Invalid file system block size of 0." );
 
     const size_t totalWriteSize = RoundUpToNextBoundaryT( writeSize, fsBlockSize );
@@ -82,26 +107,15 @@ void IOTestMain( CliParser& cli )
     byte* buffer = bbvirtalloc<byte>( totalWriteSize );
     byte* block  = bbvirtalloc<byte>( fsBlockSize    );
 
-    // Let's touch all pages
-    // #TODO: Use job from Memplot to do this mult-threaded
-    {
-        const size_t pageSize = SysHost::GetPageSize();
-              byte* page = buffer;
-        const byte* end  = page + totalWriteSize;
-
-        while( page < end )
-        {
-            *page = 0;
-            page += pageSize;
-        }
-    }
+    InitPages( buffer, totalWriteSize );
+    
 
     // Write
     Log::Line( "" );
     Log::Line( "Writing..." );
     int err = 0;
     auto timer = TimerBegin();
-    IOWriteJob::WriteToFile( file, buffer, totalWriteSize, block, fsBlockSize, err );
+    IOWriteJob::WriteToFile( *file, buffer, totalWriteSize, block, fsBlockSize, err );
     FatalIf( err, "Failed to write with error %d (0x%x).", err, err );
     auto elapsed = TimerEnd( timer );
 
@@ -111,23 +125,38 @@ void IOTestMain( CliParser& cli )
     // Read
     Log::Line( "" );
     Log::Line( "Reading..." );
-    if( !file.Seek( 0, SeekOrigin::Begin ) )
+    if( !file->Seek( 0, SeekOrigin::Begin ) )
     {
-        err = file.GetError();
+        err = file->GetError();
         Fatal( "Seek failed on test file with error%d (0x%x).", err, err );
     }
 
     err = 0;
     timer = TimerBegin();
-    IOWriteJob::ReadFromFile( file, buffer, totalWriteSize, block, fsBlockSize, err );
+    IOWriteJob::ReadFromFile( *file, buffer, totalWriteSize, block, fsBlockSize, err );
     FatalIf( err, "Failed to read with error %d (0x%x)", err, err );
     elapsed = TimerEnd( timer );
 
     Log::Line( "Read %.2lf MiB in %.2lf seconds @ %.2lf MiB/s .", 
                 sizeMB, elapsed, totalWriteSize / elapsed BtoMB );
 
-    file.Close();
+    delete file;
     remove( filePath );
+}
+
+//-----------------------------------------------------------
+void InitPages( void* mem, size_t size )
+{
+    // #TODO: Use job from Memplot to do this mult-threaded
+    const size_t pageSize = SysHost::GetPageSize();
+          byte* page = (byte*)mem;
+    const byte* end  = page + size;
+
+    while( page < end )
+    {
+        *page = 0;
+        page += pageSize;
+    }
 }
 
 
@@ -135,10 +164,12 @@ void IOTestMain( CliParser& cli )
 static const char* USAGE = R"(
 iotest [ARGUMENTS] <test_dir>
 
- -s, --size         : Size to write. Default is 4GB.
+ -s, --size <size>  : Size to write. Default is 4GB.
                       Ex: 512MB 1GB 16GB
 
  -d, --no-direct-io : Disable direct IO, which enables OS IO buffering.
+
+ -m, --memory <size>: Reserve memory size to use as IO cache for the file.
  
  -h, --help         : Print this help message and exit.
 )";
