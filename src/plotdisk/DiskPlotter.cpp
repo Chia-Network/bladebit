@@ -54,6 +54,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.ioThreadCount = cfg.ioThreadCount;
     _cx.f1ThreadCount = cfg.f1ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.f1ThreadCount, sysLogicalCoreCount );
     _cx.fpThreadCount = cfg.fpThreadCount == 0 ? gCfg.threadCount : std::min( cfg.fpThreadCount, sysLogicalCoreCount );
+    _cx.cThreadCount  = cfg.cThreadCount  == 0 ? gCfg.threadCount : std::min( cfg.cThreadCount , sysLogicalCoreCount );
     _cx.p2ThreadCount = cfg.p2ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p2ThreadCount, sysLogicalCoreCount );
     _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
 
@@ -63,10 +64,11 @@ DiskPlotter::DiskPlotter( const Config cfg )
     Log::Line( "[Disk PLotter]" );
     Log::Line( " Work Heap size : %.2lf MiB", (double)_cx.heapSize BtoMB );
     // Log::Line( " Work threads   : %u"       , _cx.threadCount   );
-    Log::Line( " F1 threads     : %u"       , _cx.f1ThreadCount   );
-    Log::Line( " FP threads     : %u"       , _cx.fpThreadCount   );
-    Log::Line( " P2 threads     : %u"       , _cx.p2ThreadCount   );
-    Log::Line( " P3 threads     : %u"       , _cx.p3ThreadCount   );
+    Log::Line( " F1 threads     : %u"       , _cx.f1ThreadCount );
+    Log::Line( " FP threads     : %u"       , _cx.fpThreadCount );
+    Log::Line( " C  threads     : %u"       , _cx.cThreadCount  );
+    Log::Line( " P2 threads     : %u"       , _cx.p2ThreadCount );
+    Log::Line( " P3 threads     : %u"       , _cx.p3ThreadCount );
     Log::Line( " IO threads     : %u"       , _cx.ioThreadCount );
     Log::Line( " IO buffer size : %llu MiB (%llu MiB total)", _cx.ioBufferSize BtoMB, _cx.ioBufferSize * _cx.ioBufferCount BtoMB );
     Log::Line( " IO buffer count: %u"       , _cx.ioBufferCount );
@@ -249,10 +251,17 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
             continue;
         if( cli.ReadValue( cfg.fpThreadCount, "--fp-threads" ) )
             continue;
+        if( cli.ReadValue( cfg.cThreadCount, "--c-threads" ) )
+            continue;
         if( cli.ReadValue( cfg.p2ThreadCount, "--p2-threads" ) )
             continue;
         if( cli.ReadValue( cfg.p3ThreadCount, "--p3-threads" ) )
             continue;
+        if( cli.ArgConsume( "-h", "--help" ) )
+        {
+            PrintUsage();
+            exit( 0 );
+        }
         else
             break;
     }
@@ -426,3 +435,66 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
 }
 
 
+static const char* USAGE = R"(diskplot [OPTIONS] <out_dir>
+
+Creates a plots by making use of a disk to temporarily store and read values.
+
+<out_dir> : The output directory where the plot will be copied to after completion.
+
+[OPTIONS]
+ --f1 <size>      : The buffer size, or write interval, during f1 generation.
+                    You can use the suffix KB or MB to specify kibibytes and
+                    mebibytes, respectively.
+                    Maximum: 256MB.
+
+ --fx[n] <size>   : The buffer size, or write interval, during forward propagation
+                    for generation each table. 
+                    [n]: Specify a table number between 2-7 (inclusive) to
+                    override that specific table's write interval.
+                    Maximum: 256MB.
+
+ -b <n>           : The number of IO buffers to reserve. The minimum is 3
+                    for triple buffering. This will serve as a multiple
+                    for the largest buffer specified out of --f1 and --fx.
+
+ -t, --temp <dir> : The temporary directory to use when plotting.
+                    *REQUIRED*
+
+ --f1-threads <n> : Override the thread count for F1 generation.
+
+ --fp-threads <n> : Override the thread count for forwrd propagation.
+
+ --c-threads <n>  : Override the thread count for C table processing.
+                    (Equivalent to Phase 4 in chiapos, but performed 
+                    at the end of Phase 1.)
+
+--p2-threads <n>  : Override the thread count for Phase 2.
+
+--p3-threads <n>  : Override the thread count for Phase 3.
+
+-h, --help        : Print this help text and exit.
+
+
+[NOTES]
+If you don't specify any thread count overrides, the default thread count
+specified in the global options will be used.
+
+Phases 2 and 3 are typically more I/O bound that Phase 1 as these
+phases perform less computational work than Phase 1 and thus the CPU
+finishes the currently loaded workload quicker and will proceed to
+grab another buffer from disk with a shorter frequency. Because of this
+you would typically lower the thread count for this threads if you are
+incurring I/O waits.
+
+[EXAMPLES]
+bladebit -t 24 -f ... -c ... diskplot --f1 256MB --fx 256MB -t /my/temporary/plot/dir
+ --f1-threads 3 --c-threads 8 --p2-threads 12 --p3-threads 8 /my/output/dir
+
+bladebit -t 8 -f ... -c ... diskplot --f1 64MB --fx 128MB -t /my/temporary/plot/dir /my/output/dir
+)";
+
+//-----------------------------------------------------------
+void DiskPlotter::PrintUsage()
+{
+    Log::Line( USAGE );
+}

@@ -1081,7 +1081,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
         // write plot header and addresses.
         // We will set the addersses to these tables accordingly.
         ThreadPool&  pool        = *context.threadPool;
-        const uint32 threadCount = context.fpThreadCount;
+        const uint32 threadCount = context.cThreadCount;
 
         // Write C1
         {
@@ -1173,7 +1173,7 @@ void DiskPlotPhase1::SortAndCompressTable7()
             // #NOTE: This function uses re-writes our f7 buffer, so ensure it is done after
             //        that buffer is no longer needed.
             const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_MAX_JOBS>( *context.threadPool, 
-                                            context.fpThreadCount, c3BucketLength, c3F7, c3Buffer );
+                                            threadCount, c3BucketLength, c3F7, c3Buffer );
             ASSERT( sizeWritten == c3BufferSize );
 
             c3TableSizeBytes += sizeWritten;

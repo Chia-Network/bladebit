@@ -21,6 +21,7 @@ public:
 
         uint32            f1ThreadCount            = 0;
         uint32            fpThreadCount            = 0;
+        uint32            cThreadCount             = 0;
         uint32            p2ThreadCount            = 0;
         uint32            p3ThreadCount            = 0;
     };
@@ -43,6 +44,7 @@ public:
     
     static void ParseCommandLine( CliParser& cli, Config& cfg );
 
+    static void PrintUsage();
 private:
     DiskPlotContext   _cx;
     DiskFPBufferSizes _fpBufferSizes;

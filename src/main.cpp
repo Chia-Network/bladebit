@@ -8,6 +8,7 @@
 #endif
 
 static void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] );
+static void PrintUsage();
 
 struct Plotter 
 {
@@ -186,22 +187,27 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
         }
         else if( cli.ArgConsume( "-h", "--help" ) )
         {
-            // #TODO: Print Help
-            Log::Line( "Unimplemented!" );
+            PrintUsage();
             exit( 0 );
         }
+
         // Commands
         else if( cli.ArgConsume( "help" ) )
         {
             if( cli.HasArgs() )
             {
-                // const char* cmd = cli.Arg();
+                if( cli.ArgMatch( "diskplot" ) )
+                    DiskPlotter::PrintUsage();
+                else
+                    FatalErrorMsg( "Unknown command '%s'.", cli.Arg() );
 
-                // #TODO: Print help for a specific command
+                exit( 0 );
             }
 
-            // #TODO: Print main help
-            Log::Line( "Unimplemented!" );
+            Log::Line( "help [<command>]" );
+            Log::Line( "Display help text for a command." );
+            Log::Line( "" );
+            PrintUsage();
             exit( 0 );
         }
         // else if( cli.ArgMatch( "memplot" ) )
@@ -336,3 +342,73 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
     Log::Line( "" );
 }
 
+
+//-----------------------------------------------------------
+static const char* USAGE = "bladebit [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS]\n"
+R"(
+[COMMANDS]
+ diskplot   : Create a plot by making use of a disk.
+ help       : Output this help message, or help for a specific command, if specified.
+
+[GLOBAL_OPTIONS]:
+ -h, --help           : Shows this message and exits.
+
+ -t, --threads        : Maximum number of threads to use.
+                        By default, this is set to the maximum number of logical cpus present.
+ 
+ -n, --count          : Number of plots to create. Default = 1.
+
+ -f, --farmer-key     : Farmer public key, specified in hexadecimal format.
+                        *REQUIRED*
+
+ -c, --pool-contract  : Pool contract address.
+                        Use this if you are creating pool plots.
+                        *A pool contract address or a pool public key must be specified.*
+
+ -p, --pool-key       : Pool public key, specified in hexadecimal format.
+                        Use this if you are creating OG plots.
+                        Only used if a pool contract address is not specified.
+
+ -w, --warm-start     : Touch all pages of buffer allocations before starting to plot.
+
+ -i, --plot-id        : Specify a plot id for debugging.
+
+ --memo               : Specify a plot memo for debugging.
+
+ --show-memo          : Output the memo of the next plot the be plotted.
+
+ -v, --verbose        : Enable verbose output.
+
+ -m, --no-numa        : Disable automatic NUMA aware memory binding.
+                        If you set this parameter in a NUMA system you
+                        will likely get degraded performance.
+
+ --no-cpu-affinity    : Disable assigning automatic thread affinity.
+                        This is useful when running multiple simultaneous
+                        instances of Bladebit as you can manually
+                        assign thread affinity yourself when launching Bladebit.
+ 
+ --memory             : Display system memory available, in bytes, and the 
+                        required memory to run Bladebit, in bytes.
+ 
+ --memory-json        : Same as --memory, but formats the output as json.
+
+ --version            : Display current version.
+
+
+[EXAMPLES]
+bladebit --help
+
+bladebiy help diskplot
+
+bladebit -t 24 -f ... -c ... diskplot --f1 256MB --fx 256MB -t /my/temporary/plot/dir
+ --f1-threads 3 --c-threads 8 --p2-threads 12 --p3-threads 8 /my/output/dir
+
+bladebit -t 8 -f ... -c ... diskplot --f1 64MB --fx 128MB -t /my/temporary/plot/dir /my/output/dir
+)";
+
+//-----------------------------------------------------------
+void PrintUsage()
+{
+    Log::Line( USAGE );
+}
