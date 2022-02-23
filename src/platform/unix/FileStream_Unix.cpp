@@ -121,6 +121,7 @@ void FileStream::Close()
 //-----------------------------------------------------------
 ssize_t FileStream::Size()
 {
+    // #TODO: Cache size and only invalidate on write or seek
     struct stat fs;
     int r = fstat( _fd, &fs );
 

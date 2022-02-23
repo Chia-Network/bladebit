@@ -43,7 +43,8 @@ ssize_t HybridStream::Read( void* buffer, size_t size )
     // #TODO: Prevent overflow ssize_t max
 
     // Bring down to our max read size
-    size = std::min( size, (size_t)std::numeric_limits<ssize_t>::max() );
+    const size_t maxRead = (size_t)(std::numeric_limits<ssize_t>::max() - Size() );
+    size = std::min( size, maxRead );
 
     // Check if we can read from memory
     size_t read = 0;
@@ -83,14 +84,16 @@ ssize_t HybridStream::Write( const void* buffer, size_t size )
 
     ASSERT( buffer );
     if( !buffer )
-        return -14; // EFAULT
+    {
+        _error = -14; // EFAULT
+        return _error;
+    }
 
     // #TODO: Check if read-only
 
-    // #TODO: Prevent overflow ssize_t max
-
     // Bring down to our max write size
-    size = std::min( size, (size_t)std::numeric_limits<ssize_t>::max() );
+    const size_t maxWrite = (size_t)(std::numeric_limits<ssize_t>::max() - Size() );
+    size = std::min( size, maxWrite );
 
     // See if we can write to our memory region
     size_t written = 0;
