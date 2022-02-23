@@ -89,6 +89,26 @@
         },
 
         {
+            "name"         : "IOTest",
+            
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_debug",
+            "console"       : "internalConsole",
+            "program"       : "${workspaceFolder}/build/bladebit",
+            
+            "environment": [],
+            
+            "args": [
+                "iotest", 
+                "-s", "64MB",
+                "/mnt/p5510a/disk_tmp"
+            ]
+        },
+
+        {
             "name"         : "Debug Tests",
             
             "type"          : "cppdbg",

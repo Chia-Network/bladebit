@@ -55,6 +55,15 @@ public:
     }
 
     //-----------------------------------------------------------
+    inline const char* ArgConsume()
+    {
+        const char* arg = Arg();
+        NextArg();
+
+        return arg;
+    }
+
+    //-----------------------------------------------------------
     inline bool ReadSwitch( bool& value, const char* paramA, const char* paramB = nullptr )
     {
         if( ArgMatch( paramA, paramB ) )

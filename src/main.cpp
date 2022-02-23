@@ -10,6 +10,10 @@
 static void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] );
 static void PrintUsage();
 
+// See IOTester.cpp
+void IOTestMain( CliParser& cli );
+void IOTestPrintUsage();
+
 struct Plotter 
 {
     union {
@@ -192,28 +196,6 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
         }
 
         // Commands
-        else if( cli.ArgConsume( "help" ) )
-        {
-            if( cli.HasArgs() )
-            {
-                if( cli.ArgMatch( "diskplot" ) )
-                    DiskPlotter::PrintUsage();
-                else
-                    Fatal( "Unknown command '%s'.", cli.Arg() );
-
-                exit( 0 );
-            }
-
-            Log::Line( "help [<command>]" );
-            Log::Line( "Display help text for a command." );
-            Log::Line( "" );
-            PrintUsage();
-            exit( 0 );
-        }
-        // else if( cli.ArgMatch( "memplot" ) )
-        // {
-
-        // }
         else if( cli.ArgConsume( "diskplot" ) )
         {
             // Increase the file size limit on linux
@@ -243,6 +225,33 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
 
             break;
         }
+        else if( cli.ArgConsume( "iotest" ) )
+        {
+            IOTestMain( cli );
+            exit( 0 );
+        }
+        else if( cli.ArgConsume( "help" ) )
+        {
+            if( cli.HasArgs() )
+            {
+                if( cli.ArgMatch( "diskplot" ) )
+                    DiskPlotter::PrintUsage();
+                else
+                    Fatal( "Unknown command '%s'.", cli.Arg() );
+
+                exit( 0 );
+            }
+
+            Log::Line( "help [<command>]" );
+            Log::Line( "Display help text for a command." );
+            Log::Line( "" );
+            PrintUsage();
+            exit( 0 );
+        }
+        // else if( cli.ArgMatch( "memplot" ) )
+        // {
+
+        // }
         else
         {
             Fatal( "Unexpected argument '%s'", cli.Arg() );
@@ -348,6 +357,7 @@ static const char* USAGE = "bladebit [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS
 R"(
 [COMMANDS]
  diskplot   : Create a plot by making use of a disk.
+ iotest     : Perform a write and read test on a specified disk.
  help       : Output this help message, or help for a specific command, if specified.
 
 [GLOBAL_OPTIONS]:
