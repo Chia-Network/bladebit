@@ -72,7 +72,7 @@ uint64* LoadLookupMap( TableId table, uint32 bucket, uint64& outEntryCount, uint
     byte* blockBuffer = bbvirtalloc<byte>( file.BlockSize() );
 
     int err = 0;
-    FatalIf( !IOWriteJob::ReadFromFile( file, (byte*)map, entryCount * sizeof( uint64 ), blockBuffer, file.BlockSize(), err ), "Failed to read map table." );
+    FatalIf( !IOJob::ReadFromFile( file, (byte*)map, entryCount * sizeof( uint64 ), blockBuffer, file.BlockSize(), err ), "Failed to read map table." );
 
     SysHost::VirtualFree( blockBuffer );
     return map;
@@ -128,8 +128,8 @@ void LoadPairsTable( TableId table, uint32*& lPtr, uint16*& rPtr )
     byte* blockBuffer = bbvirtalloc<byte>( lFile.BlockSize() );
 
     int err = 0;
-    FatalIf( !IOWriteJob::ReadFromFile( lFile, (byte*)lPtr, entryCount * sizeof( uint32 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read L table." );
-    FatalIf( !IOWriteJob::ReadFromFile( rFile, (byte*)rPtr, entryCount * sizeof( uint16 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read R table." );
+    FatalIf( !IOJob::ReadFromFile( lFile, (byte*)lPtr, entryCount * sizeof( uint32 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read L table." );
+    FatalIf( !IOJob::ReadFromFile( rFile, (byte*)rPtr, entryCount * sizeof( uint16 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read R table." );
 
     SysHost::VirtualFree( blockBuffer );
 }
@@ -425,7 +425,7 @@ void TestBackPointersWithReference()
 
             ASSERT( file.BlockSize() == 4096 );
             int err = 0;
-            if( !IOWriteJob::ReadFromFile( file, (byte*)refTableBuf, tableEntryCount * sizeof( RefPair ),
+            if( !IOJob::ReadFromFile( file, (byte*)refTableBuf, tableEntryCount * sizeof( RefPair ),
                                            blockBuffer, file.BlockSize(), err ) )
             {
                 Fatal( "Failed to read reference table file with error %d", err );

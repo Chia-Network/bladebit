@@ -22,8 +22,8 @@ void LoadTable( TableId table, uint32*& lPtr, uint16*& rPtr, uint64 entryCount )
     byte* blockBuffer = bbvirtalloc<byte>( lFile.BlockSize() );
 
     int err = 0;
-    FatalIf( !IOWriteJob::ReadFromFile( lFile, (byte*)lPtr, entryCount * sizeof( uint32 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read L table." );
-    FatalIf( !IOWriteJob::ReadFromFile( rFile, (byte*)rPtr, entryCount * sizeof( uint16 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read R table." );
+    FatalIf( !IOJob::ReadFromFile( lFile, (byte*)lPtr, entryCount * sizeof( uint32 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read L table." );
+    FatalIf( !IOJob::ReadFromFile( rFile, (byte*)rPtr, entryCount * sizeof( uint16 ), blockBuffer, lFile.BlockSize(), err ), "Failed to read R table." );
 
     SysHost::VirtualFree( blockBuffer );
 }

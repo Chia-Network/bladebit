@@ -498,7 +498,7 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
         
         refLPCount = *(uint64*)blockBuffer;
         int err = 0;
-        FatalIf( !IOWriteJob::ReadFromFile( file, (byte*)refLinePoints,
+        FatalIf( !IOJob::ReadFromFile( file, (byte*)refLinePoints,
             refLPCount * sizeof( uint64 ), blockBuffer, file.BlockSize(), err ),
             "Failed to read LP table with error: %d : %s", err, path );
     }

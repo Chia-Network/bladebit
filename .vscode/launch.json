@@ -102,8 +102,11 @@
             "environment": [],
             
             "args": [
+                "-t", "8",
                 "iotest", 
-                "-s", "64MB",
+                // "-s", "64MB"
+                "-s", "32G",
+                "-m", "32G",
                 "/mnt/p5510a/disk_tmp"
             ]
         },

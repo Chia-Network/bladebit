@@ -12,6 +12,7 @@ enum class SeekOrigin : int32
 class IStream
 {
 public:
+    inline virtual ~IStream() {}
 
     virtual ssize_t Read( void* buffer, size_t size ) = 0;
 

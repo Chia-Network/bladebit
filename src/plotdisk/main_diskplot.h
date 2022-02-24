@@ -59,7 +59,7 @@ int WriteTest( int argc, const char* argv[] )
 
     Log::Line( "Writing..." );
     int error = 0;
-    double elapsed = IOWriteJob::WriteWithThreads( 
+    double elapsed = IOJob::WriteWithThreads( 
         threadCount, pool, files, buffer, bufferSize, blockBuffers, files[0].BlockSize(), error );
 
     if( error )
@@ -75,7 +75,7 @@ int WriteTest( int argc, const char* argv[] )
     
     Log::Line( "Reading..." );
     auto readTimer = TimerBegin();
-    IOWriteJob::ReadFromFile( files[0], buffer, bufferSize, blockBuffers[0], files[0].BlockSize(), error );
+    IOJob::ReadFromFile( files[0], buffer, bufferSize, blockBuffers[0], files[0].BlockSize(), error );
     elapsed = TimerEnd( readTimer );
 
     FatalIf( error, "Error reading: %d, (0x%x)", error, error );
