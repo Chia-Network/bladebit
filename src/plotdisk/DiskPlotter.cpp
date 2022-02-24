@@ -2,15 +2,12 @@
 #include "util/Log.h"
 #include "util/Util.h"
 #include "util/CliParser.h"
+#include "util/jobs/MemJobs.h"
 
 #include "DiskPlotPhase1.h"
 #include "DiskPlotPhase2.h"
 #include "DiskPlotPhase3.h"
 #include "SysHost.h"
-
-// #TEST
-// #TODO: Remove
-#include "sandbox/Sandbox.h"
 
 
 size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg );
@@ -63,6 +60,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
 
     Log::Line( "[Disk PLotter]" );
     Log::Line( " Work Heap size : %.2lf MiB", (double)_cx.heapSize BtoMB );
+    Log::Line( " Cache size     : %.2lf MiB", (double)_cx.cacheSize BtoMB );
     // Log::Line( " Work threads   : %u"       , _cx.threadCount   );
     Log::Line( " F1 threads     : %u"       , _cx.f1ThreadCount );
     Log::Line( " FP threads     : %u"       , _cx.fpThreadCount );
@@ -74,18 +72,28 @@ DiskPlotter::DiskPlotter( const Config cfg )
     Log::Line( " IO buffer count: %u"       , _cx.ioBufferCount );
     Log::Line( " Unbuffered IO  : %s"       , _cx.useDirectIO ? "true" : "false" );
 
-    // Log::Line( "Allocating heap of %llu MiB.", _cx.heapSize BtoMB );
     Log::Line( " Allocating a heap of %llu MiB.", _cx.totalHeapSize BtoMB );
     _cx.heapBuffer = (byte*)SysHost::VirtualAlloc( _cx.totalHeapSize );
     FatalIf( !_cx.heapBuffer, "Failed to allocated heap buffer. Make sure you have enough free memory." );
-    
     _cx.ioHeap = _cx.heapBuffer + _cx.heapSize;
 
-    // #TODO: Check for warm start
-
+    if( _cx.cacheSize )
+        _cx.cache = bbvirtalloc<byte>( _cx.cacheSize );
+  
     // Initialize our Thread Pool and IO Queue
     _cx.threadPool = new ThreadPool( sysLogicalCoreCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
     _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, _cx.totalHeapSize, _cx.ioThreadCount, _cx.useDirectIO );
+
+    if( cfg.globalCfg->warmStart )
+    {
+        Log::Line( "Warm start: Pre-faulting memory pages..." );
+
+        const uint32 threadCount = cfg.globalCfg->threadCount == 0 ? sysLogicalCoreCount :
+                                    std::min( cfg.globalCfg->threadCount, sysLogicalCoreCount );
+
+        FaultMemoryPages::RunJob( *_cx.threadPool, threadCount, _cx.heapBuffer, _cx.totalHeapSize );
+        FaultMemoryPages::RunJob( *_cx.threadPool, threadCount, _cx.cache, _cx.cacheSize );
+    }
 }
 
 //-----------------------------------------------------------
@@ -244,6 +252,8 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
         if( cli.ReadValue( cfg.ioBufferCount, "-b", "--buffer-count" ) ) 
             continue;
         if( cli.ReadValue( cfg.tmpPath, "-t", "--temp" ) )
+            continue;
+        if( cli.ReadValue( cfg.cacheSize, "--cache" ) )
             continue;
         if( checkFx() )
             continue;
@@ -463,6 +473,10 @@ Creates a plots by making use of a disk to temporarily store and read values.
 
  -t, --temp <dir> : The temporary directory to use when plotting.
                     *REQUIRED*
+
+ --cache <n>      : Size of cache to reserve for IO. This is memory
+                    reserved for files that incurr frequent I/O.
+                    You need about 96GiB for high-performance Phase 1 calculations.
 
  --f1-threads <n> : Override the thread count for F1 generation.
 

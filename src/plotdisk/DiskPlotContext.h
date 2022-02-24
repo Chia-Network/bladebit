@@ -57,6 +57,9 @@ struct DiskPlotContext
     size_t       totalHeapSize;     // Complete size of our heap allocation (ioHeapSize + heapSize)
     size_t       heapSize;          // Size in bytes of our working heap. Some parts are preallocated.
     byte*        heapBuffer;        // Buffer allocated for in-memory work
+    
+    size_t       cacheSize;         // Size of memory cache to reserve for IO (region in file that never gets written to disk).
+    byte*        cache;
 
     // Write intervals are expressed in bytes
     size_t       f1WriteInterval;

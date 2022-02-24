@@ -16,6 +16,7 @@ public:
         uint32            ioThreadCount            = 0;
         size_t            ioBufferSize             = 0;
         uint32            ioBufferCount            = 0;
+        size_t            cacheSize                = 0;
         DiskWriteInterval writeIntervals[(uint)TableId::_Count] = { 0 };
         bool              enableDirectIO           = false;
 
