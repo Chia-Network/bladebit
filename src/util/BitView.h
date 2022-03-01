@@ -21,23 +21,25 @@ public:
     // This expects the bytes to be encoded as 64-bit big-endian fields.
     // The last bytes will be shifted to the right then swaped as 64-bits as well.
     //-----------------------------------------------------------
-    inline BitReader( uint64* bytesBE, size_t sizeBits )
-        : _fields  ( bytesBE  )
-        , _sizeBits( sizeBits )
-        , _position( 0 )
+    inline BitReader( const uint64* bits, size_t sizeBits, uint64 bitOffset = 0 )
+        : _fields  ( bits      )
+        , _sizeBits( sizeBits  )
+        , _position( bitOffset )
     {
-        ASSERT( sizeBits / 64 * 64 == sizeBits );
-        ASSERT( sizeBits <= (size_t)std::numeric_limits<ssize_t>::max() );
+        // #TODO: Fix plot tool now that we're not initializing BE bytes
 
-        const size_t fieldCount = sizeBits / 64;
+        // ASSERT( sizeBits / 64 * 64 == sizeBits );
+        // ASSERT( sizeBits <= (size_t)std::numeric_limits<ssize_t>::max() );
 
-        for( uint64 i = 0; i < fieldCount; i++ )
-            bytesBE[i] = Swap64( bytesBE[i] );
+        // const size_t fieldCount = sizeBits / 64;
+
+        // for( uint64 i = 0; i < fieldCount; i++ )
+        //     bytesBE[i] = Swap64( bytesBE[i] );
         
-        // Also swap any remainder bytes
-        const size_t bitsRemainder = sizeBits - fieldCount * 64;
-        if( bitsRemainder )
-            bytesBE[fieldCount] = Swap64( bytesBE[fieldCount] << ( 64 - bitsRemainder ) );
+        // // Also swap any remainder bytes
+        // const size_t bitsRemainder = sizeBits - fieldCount * 64;
+        // if( bitsRemainder )
+        //     bytesBE[fieldCount] = Swap64( bytesBE[fieldCount] << ( 64 - bitsRemainder ) );
     }
 
     // Read 64 bits or less
@@ -46,7 +48,7 @@ public:
     {
         // #TODO: Use shared static version
         ASSERT( bitCount <= 64 );
-        ASSERT( _position + bitCount <= _sizeBits );
+        // ASSERT( _position + bitCount <= _sizeBits );
 
         const uint64 fieldIndex    = _position >> 6; // _position / 64
         const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - _position;
@@ -139,11 +141,71 @@ public:
     }
 
 private:
-    uint64* _fields  ;  // Our fields buffer
-    size_t  _sizeBits;  // Size of the how much data we currently have in bits
-    uint64  _position;  // Read poisition in bits
+    const uint64* _fields  ;  // Our fields buffer
+    size_t        _sizeBits;  // Size of the how much data we currently have in bits
+    uint64        _position;  // Read poisition in bits
 };
 
+
+class BitWriter
+{
+public:
+
+    //-----------------------------------------------------------
+    inline BitWriter( uint64* fields, size_t capacity, uint64 startBitOffset = 0 )
+        : _fields  ( fields   )
+        , _capacity( capacity )
+        , _position( startBitOffset )
+    {}
+
+    //-----------------------------------------------------------
+    inline BitWriter()
+        : _fields  ( nullptr )
+        , _capacity( 0 )
+        , _position( 0 )
+    {}
+
+    //-----------------------------------------------------------
+    inline void Write( const uint64 value, const uint32 bitCount )
+    {
+        WriteBits64( _fields, _position, value, bitCount );
+        _position += bitCount;
+    }
+
+    //-----------------------------------------------------------
+    // dstOffset: Offset in bits as to where to start writing in fields
+    //-----------------------------------------------------------
+    inline static void WriteBits64( uint64* fields, const uint64 dstOffset, const uint64 value, const uint32 bitCount )
+    {
+        ASSERT( bitCount <= 64 );
+        ASSERT( dstOffset + bitCount > dstOffset );
+
+        const uint64 fieldIndex = dstOffset >> 6;
+        const uint32 bitsFree   = ( ( fieldIndex + 1 ) * 64 ) - dstOffset;
+
+        // Determine how many bits to write to this current field
+        const uint32 bitWrite  = std::min( bitCount, bitsFree );// & 63; // Mod 64
+        const uint32 shift     = bitWrite & 63; // Mod 64
+
+        // Clear out our new value region
+        uint64 mask = ( ( 1ull << (64 - bitWrite) ) - 1 ) << shift;
+
+        fields[fieldIndex] = ( ( fields[fieldIndex] << shift ) & mask ) | ( value >> ( bitCount - bitWrite ) );
+
+        // If we still have bits to write, then write in the next field
+        if( bitWrite < bitCount )
+        {
+            const uint32 remainder = bitCount - shift;
+                         mask      = 0xFFFFFFFFFFFFFFFFull >> ( 64 - remainder );
+            fields[fieldIndex+1]   = value & mask;
+        }
+    }
+
+private:
+    uint64* _fields  ;  // Our fields buffer
+    size_t  _capacity;  // How many bits can we hold
+    uint64  _position;  // Write poisition in bits
+};
 
 template<size_t BitSize>
 class Bits
@@ -249,29 +311,7 @@ public:
     //-----------------------------------------------------------
     inline void Write( uint64 value, uint32 bitCount )
     {
-        ASSERT( bitCount <= 64 );
-        ASSERT( _length + bitCount <= BitSize );
-
-        const uint64 fieldIndex = _length >> 6;
-        const uint32 bitsFree   = ( ( fieldIndex + 1 ) * 64 ) - _length;
-
-        // Determine how many bits to write to this current field
-        const uint32 bitWrite  = std::min( bitCount, bitsFree ) & 63; // Mod 64
-        const uint32 shift     = bitWrite & 63; // Mod 64
-
-        // Clear out our new value region
-        uint64 mask = ( ( 1ull << (64 - bitWrite) ) - 1 ) << shift;
-
-        _fields[fieldIndex] = ( ( _fields[fieldIndex] << shift ) & mask ) | ( value >> ( bitCount - bitWrite ) );
-
-        // If we still have bits to write, then write in the next field
-        if( bitWrite < bitCount )
-        {
-            const uint32 remainder = bitCount - shift;
-                         mask      = 0xFFFFFFFFFFFFFFFFull >> ( 64 - remainder );
-            _fields[fieldIndex+1]  = value & mask;
-        }
-
+        BitWriter::WriteBits64( _fields, _length, value, bitCount );
         _length += bitCount;
     }
 

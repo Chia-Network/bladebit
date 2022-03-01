@@ -1,6 +1,6 @@
 #pragma once
 
-#include "io/FileStream.h"
+#include "io/IStream.h"
 #include "threading/Fence.h"
 #include "threading/ThreadPool.h"
 #include "threading/MTJob.h"
@@ -9,31 +9,49 @@
 #include "FileId.h"
 
 class Thread;
+class IIOTransform;
+
+enum FileSetOptions
+{
+    None       = 0,
+    DirectIO   = 1 << 0,    // Use direct IO/unbuffered file IO
+    Cachable   = 1 << 1,    // Use a in-memory cache for the file
+};
+ImplementFlagOps( FileSetOptions );
+
+struct FileSetInitData
+{
+    void*  cache;
+    size_t cacheSize;
+};
 
 struct FileSet
 {
-    const char*      name;
-    Span<FileStream> files;
+    const char*    name         = nullptr;
+    Span<IStream*> files;
+    void*          blockBuffers = nullptr;
+    IIOTransform*  transform    = nullptr;
+    FileSetOptions options      = FileSetOptions::None;
 };
 
-struct WriteBucketsJob : MTJob<WriteBucketsJob>
-{
-    FileSet*       fileSet;
-    const uint*    sizes;
-    const byte*    buffers;
+// struct WriteBucketsJob : MTJob<WriteBucketsJob>
+// {
+//     FileSet*       fileSet;
+//     const uint*    sizes;
+//     const byte*    buffers;
 
-    void Run() override;
-};
+//     void Run() override;
+// };
 
-struct WriteToFileJob : MTJob<WriteToFileJob>
-{
-    const byte* buffer;
-    byte*       blockBuffer;
-    size_t      size;
-    FileStream* file;
+// struct WriteToFileJob : MTJob<WriteToFileJob>
+// {
+//     const byte* buffer;
+//     byte*       blockBuffer;
+//     size_t      size;
+//     FileStream* file;
 
-    void Run() override;
-};
+//     void Run() override;
+// };
 
 
 class DiskBufferQueue
@@ -115,6 +133,8 @@ public:
 
     ~DiskBufferQueue();
 
+    bool InitFileSet( FileId fileId, const char* name, uint bucketCount, const FileSetOptions options, const FileSetInitData* optsData  );
+
     bool InitFileSet( FileId fileId, const char* name, uint bucketCount );
 
     void OpenPlotFile( const char* fileName, const byte* plotId, const byte* plotMemo, uint16 plotMemoSize );
@@ -142,7 +162,7 @@ public:
     // This assumes a single consumer.
     inline byte* GetBuffer( size_t size, bool blockUntilFreeBuffer = true )
     { 
-        return _workHeap.Alloc( size, _blockSize, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
+        return _workHeap.Alloc( size, 1 /*_blockSize*/, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
     }
 
     // byte* GetBufferForId()
@@ -197,8 +217,8 @@ private:
     void CmdReadFile( const Command& cmd );
     void CmdSeekBucket( const Command& cmd );
 
-    void WriteToFile( FileStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
-    void ReadFromFile( FileStream& file, size_t size, byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
+    void WriteToFile( IStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
+    void ReadFromFile( IStream& file, size_t size, byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
 
     void CmdDeleteFile( const Command& cmd );
     void CmdDeleteBucket( const Command& cmd );
@@ -215,7 +235,6 @@ private:
     
     // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];
-    byte*            _blockBuffer    = nullptr;
     size_t           _blockSize      = 0;
     
     char*            _filePathBuffer = nullptr; // For deleting files

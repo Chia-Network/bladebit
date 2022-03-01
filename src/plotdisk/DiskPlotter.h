@@ -13,6 +13,7 @@ public:
         const char*       tmpPath                  = nullptr;
         size_t            workHeapSize             = 0;
         size_t            expectedTmpDirBlockSize  = 0;
+        uint32            numBuckets               = 256;
         uint32            ioThreadCount            = 0;
         size_t            ioBufferSize             = 0;
         uint32            ioBufferCount            = 0;

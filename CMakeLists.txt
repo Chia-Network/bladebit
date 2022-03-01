@@ -218,7 +218,7 @@ file(GLOB_RECURSE bb_headers
 
 # Ignore some sources
 list(FILTER bb_sources EXCLUDE REGEX "src/main\\.cpp")
-# list(FILTER bb_sources EXCLUDE REGEX "src/tools/.+")
+list(FILTER bb_sources EXCLUDE REGEX "src/tools/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/sandbox/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/platform/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")
@@ -360,8 +360,6 @@ target_link_libraries(fsegen PRIVATE lib_bladebit)
 # Tests
 add_executable(tests ${src_tests} ${bb_headers})
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
-
-
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 

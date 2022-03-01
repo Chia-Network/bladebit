@@ -6,6 +6,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
 
+/*
 struct FxBucketJob : MTJob<FxBucketJob>
 {
     // Inputs
@@ -777,7 +778,6 @@ inline void FxBucketJob::CalculatePrefixSum(
             pfxSum[i] -= entryPadding[i];
     }
 }
-
-
+*/
 #pragma GCC diagnostic pop
 

@@ -1,5 +1,4 @@
 #pragma once
-#include "threading/MTJob.h"
 #include "plotdisk/DiskPlotConfig.h"
 
 class ThreadPool;
@@ -9,23 +8,13 @@ struct chacha8_ctx;
 // Bucketized, multi-threaded F1 Generation
 struct F1GenBucketized
 {
-    // Generate the whole thing in memory
-    static void GenerateF1Mem( 
-        const byte* plotId,
-        ThreadPool& pool, 
-        uint        threadCount,
-        byte*       blocks,         // Has to be big enough to hold a whole K set 
-        uint32*     yBuckets,
-        uint32*     xBuckets,
-        uint32      bucketCounts[BB_DP_BUCKET_COUNT]
-    );
-
     static void GenerateF1Disk(
         const byte*      plotId,
         ThreadPool&      pool, 
-        uint             threadCount,
+        uint32           threadCount,
         DiskBufferQueue& diskQueue,
         const size_t     chunkSize,
-        uint32           bucketCounts[BB_DP_BUCKET_COUNT]
+        uint32*          bucketCounts,
+        const uint32     numBuckets
     );    
 };

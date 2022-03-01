@@ -91,38 +91,31 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 
     _diskQueue->ResetHeap( heapSize, heap );
 
-    _diskQueue->InitFileSet( FileId::Y0              , "y0"           , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::Y1              , "y1"           , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::META_A_0        , "meta_a0"      , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::META_A_1        , "meta_a1"      , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::META_B_0        , "meta_b0"      , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::META_B_1        , "meta_b1"      , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::X               , "x"            , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::F7              , "f7"           , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::T2_L            , "table_2_l"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T2_R            , "table_2_r"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T3_L            , "table_3_l"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T3_R            , "table_3_r"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T4_L            , "table_4_l"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T4_R            , "table_4_r"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T5_L            , "table_5_l"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T5_R            , "table_5_r"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T6_L            , "table_6_l"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T6_R            , "table_6_r"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T7_L            , "table_7_l"    , 1                  );
-    _diskQueue->InitFileSet( FileId::T7_R            , "table_7_r"    , 1                  );
-    _diskQueue->InitFileSet( FileId::SORT_KEY2       , "table_2_key"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::SORT_KEY3       , "table_3_key"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::SORT_KEY4       , "table_4_key"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::SORT_KEY5       , "table_5_key"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::SORT_KEY6       , "table_6_key"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::SORT_KEY7       , "table_7_key"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::MAP2            , "table_2_map"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::MAP3            , "table_3_map"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::MAP4            , "table_4_map"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::MAP5            , "table_5_map"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::MAP6            , "table_6_map"  , BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::MAP7            , "table_7_map"  , BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::FX0, "fx_0", BB_DP_BUCKET_COUNT );
+    _diskQueue->InitFileSet( FileId::FX1, "fx_1", BB_DP_BUCKET_COUNT );
+    
+    // _diskQueue->InitFileSet( FileId::T2              , "table_1"      , 1                  );
+    // _diskQueue->InitFileSet( FileId::T2              , "table_2"      , 1                  );
+    // _diskQueue->InitFileSet( FileId::T3              , "table_3"      , 1                  );
+    // _diskQueue->InitFileSet( FileId::T4              , "table_4"      , 1                  );
+    // _diskQueue->InitFileSet( FileId::T5              , "table_5"      , 1                  );
+    // _diskQueue->InitFileSet( FileId::T6              , "table_6"      , 1                  );
+    // _diskQueue->InitFileSet( FileId::T7              , "table_7"      , 1                  );
+
+    // _diskQueue->InitFileSet( FileId::F7              , "f7"           , BB_DP_BUCKET_COUNT );
+
+    // _diskQueue->InitFileSet( FileId::SORT_KEY2       , "table_2_key"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::SORT_KEY3       , "table_3_key"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::SORT_KEY4       , "table_4_key"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::SORT_KEY5       , "table_5_key"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::SORT_KEY6       , "table_6_key"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::SORT_KEY7       , "table_7_key"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::MAP2            , "table_2_map"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::MAP3            , "table_3_map"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::MAP4            , "table_4_map"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::MAP5            , "table_5_map"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::MAP6            , "table_6_map"  , BB_DP_BUCKET_COUNT );
+    // _diskQueue->InitFileSet( FileId::MAP7            , "table_7_map"  , BB_DP_BUCKET_COUNT );
 }
 
 //-----------------------------------------------------------
@@ -233,10 +226,9 @@ void DiskPlotPhase1::Run()
     #endif
 
     // Re-create the disk queue with the io buffer only (remove working heap section)
-    // #TODO: Remove this, this is for now while testing.
     _diskQueue->ResetHeap( cx.ioHeapSize, cx.ioHeap );
 
-    ForwardPropagate();
+    // ForwardPropagate();
 
     // Check all table counts
     #if _DEBUG
@@ -283,7 +275,7 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
-    SortAndCompressTable7();
+    // SortAndCompressTable7();
 
     Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
             TicksToSeconds( _cx.readWaitTime ), TicksToSeconds( _cx.writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
@@ -303,15 +295,18 @@ void DiskPlotPhase1::GenF1()
     auto timer = TimerBegin();
     
     F1GenBucketized::GenerateF1Disk( 
-        cx.plotId, pool, cx.f1ThreadCount, *_diskQueue, 
-        cx.writeIntervals[(int)TableId::Table1].fxGen, 
-        cx.bucketCounts[0] );
+        cx.plotId, pool, 
+        cx.f1ThreadCount, 
+        *_diskQueue, 
+        cx.writeIntervals[(int)TableId::Table1].fxGen,
+        cx.bucketCounts[0],
+        cx.numBuckets );
     
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
 }
 
-
+/*
 ///
 /// Forward Propagate Tables
 ///
@@ -2184,3 +2179,5 @@ void OverflowBuffer::Init( void* bucketBuffers, const size_t fileBlockSize )
     memset( sizes, 0, sizeof( sizes ) );
 }
 
+
+*/

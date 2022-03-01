@@ -62,6 +62,7 @@ struct DiskPlotContext
     byte*        cache;
 
     // Write intervals are expressed in bytes
+    uint32       numBuckets;
     size_t       f1WriteInterval;
     size_t       matchWriteInterval;
     DiskWriteInterval writeIntervals[(uint)TableId::_Count];

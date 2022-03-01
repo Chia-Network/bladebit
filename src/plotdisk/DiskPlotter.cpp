@@ -3,10 +3,11 @@
 #include "util/Util.h"
 #include "util/CliParser.h"
 #include "util/jobs/MemJobs.h"
+#include "io/FileStream.h"
 
 #include "DiskPlotPhase1.h"
-#include "DiskPlotPhase2.h"
-#include "DiskPlotPhase3.h"
+// #include "DiskPlotPhase2.h"
+// #include "DiskPlotPhase3.h"
 #include "SysHost.h"
 
 
@@ -38,6 +39,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
 
     _cx.bufferSizes   = &_fpBufferSizes;
     _cx.tmpPath       = cfg.tmpPath;
+    _cx.numBuckets    = cfg.numBuckets;
     _cx.heapSize      = _fpBufferSizes.totalSize;
     _cx.ioBufferSize  = cfg.ioBufferSize;
     _cx.ioHeapSize    = ioHeapFullSize;
@@ -119,8 +121,8 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
     // #TODO: I think we can get rid of this structure.
     //        If not, place it on the context.
-    Phase3Data p3Data;
-    ZeroMem( &p3Data );
+    // Phase3Data p3Data;
+    // ZeroMem( &p3Data );
 
     {
         Log::Line( "Running Phase 1" );
@@ -133,69 +135,69 @@ void DiskPlotter::Plot( const PlotRequest& req )
         Log::Line( "Finished Phase 1 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
     }
 
-    {
-        Log::Line( "Running Phase 2" );
-        const auto timer = TimerBegin();
+    // {
+    //     Log::Line( "Running Phase 2" );
+    //     const auto timer = TimerBegin();
 
-        DiskPlotPhase2 phase2( _cx );
-        phase2.Run();
+    //     DiskPlotPhase2 phase2( _cx );
+    //     phase2.Run();
 
-        const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+    //     const double elapsed = TimerEnd( timer );
+    //     Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
 
-        p3Data = phase2.GetPhase3Data();
-    }
+    //     p3Data = phase2.GetPhase3Data();
+    // }
 
-    {
-        Log::Line( "Running Phase 3" );
-        const auto timer = TimerBegin();
+    // {
+    //     Log::Line( "Running Phase 3" );
+    //     const auto timer = TimerBegin();
 
-        DiskPlotPhase3 phase3( _cx, p3Data );
-        phase3.Run();
+    //     DiskPlotPhase3 phase3( _cx, p3Data );
+    //     phase3.Run();
 
-        const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 3 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
-    }
+    //     const double elapsed = TimerEnd( timer );
+    //     Log::Line( "Finished Phase 3 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+    // }
 
-    {
-        // Now we need to update the table sizes on the file
-        Log::Line( "Waiting for plot file to complete pending writes..." );
-        const auto timer = TimerBegin();
+    // {
+    //     // Now we need to update the table sizes on the file
+    //     Log::Line( "Waiting for plot file to complete pending writes..." );
+    //     const auto timer = TimerBegin();
 
-        // Update the table pointers location
-        DiskBufferQueue& ioQueue = *_cx.ioQueue;
-        ASSERT( sizeof( _cx.plotTablePointers ) == sizeof( uint64 ) * 10 );
+    //     // Update the table pointers location
+    //     DiskBufferQueue& ioQueue = *_cx.ioQueue;
+    //     ASSERT( sizeof( _cx.plotTablePointers ) == sizeof( uint64 ) * 10 );
 
-        // Convert them to big endian
-        for( int i = 0; i < 10; i++ )
-            _cx.plotTablePointers[i] = Swap64( _cx.plotTablePointers[i] );
+    //     // Convert them to big endian
+    //     for( int i = 0; i < 10; i++ )
+    //         _cx.plotTablePointers[i] = Swap64( _cx.plotTablePointers[i] );
 
-        const int64 tablePtrsStart = (int64)ioQueue.PlotTablePointersAddress();
-        ioQueue.SeekFile( FileId::PLOT, 0, tablePtrsStart, SeekOrigin::Begin );
-        ioQueue.WriteFile( FileId::PLOT, 0, _cx.plotTablePointers, sizeof( _cx.plotTablePointers ) );
+    //     const int64 tablePtrsStart = (int64)ioQueue.PlotTablePointersAddress();
+    //     ioQueue.SeekFile( FileId::PLOT, 0, tablePtrsStart, SeekOrigin::Begin );
+    //     ioQueue.WriteFile( FileId::PLOT, 0, _cx.plotTablePointers, sizeof( _cx.plotTablePointers ) );
         
-        // Wait for all IO commands to finish
-        Fence fence;
-        ioQueue.SignalFence( fence );
-        ioQueue.CommitCommands();
-        fence.Wait();
+    //     // Wait for all IO commands to finish
+    //     Fence fence;
+    //     ioQueue.SignalFence( fence );
+    //     ioQueue.CommitCommands();
+    //     fence.Wait();
         
-        const double elapsed = TimerEnd( timer );
-        Log::Line( "Completed pending writes in %.2lf seconds.", elapsed );
-        Log::Line( "Finished writing plot %s.", req.plotFileName );
-        Log::Line( "Final plot table pointers: " );
+    //     const double elapsed = TimerEnd( timer );
+    //     Log::Line( "Completed pending writes in %.2lf seconds.", elapsed );
+    //     Log::Line( "Finished writing plot %s.", req.plotFileName );
+    //     Log::Line( "Final plot table pointers: " );
 
-        for( int i = 0; i < 10; i++ )
-        {
-            const uint64 addy = Swap64( _cx.plotTablePointers[i] );
+    //     for( int i = 0; i < 10; i++ )
+    //     {
+    //         const uint64 addy = Swap64( _cx.plotTablePointers[i] );
 
-            if( i < 7 )
-                Log::Line( " Table %d: %16lu ( 0x%016lx )", i+1, addy, addy );
-            else
-                Log::Line( " C %d    : %16lu ( 0x%016lx )", i-6, addy, addy );
-        }
-        Log::Line( "" );
-    }
+    //         if( i < 7 )
+    //             Log::Line( " Table %d: %16lu ( 0x%016lx )", i+1, addy, addy );
+    //         else
+    //             Log::Line( " C %d    : %16lu ( 0x%016lx )", i-6, addy, addy );
+    //     }
+    //     Log::Line( "" );
+    // }
 
     double plotElapsed = TimerEnd( plotTimer );
     Log::Line( "Finished plotting in %.2lf seconds ( %.2lf minutes ).", plotElapsed, plotElapsed / 60 );
@@ -250,6 +252,8 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
         if( cli.ReadValue( cfg.writeIntervals[0].fxGen, "--f1" ) ) 
             continue;
         if( cli.ReadValue( cfg.ioBufferCount, "-b", "--buffer-count" ) ) 
+            continue;
+        if( cli.ReadValue( cfg.numBuckets, "--buckets" ) ) 
             continue;
         if( cli.ReadValue( cfg.tmpPath, "-t", "--temp" ) )
             continue;
@@ -317,7 +321,12 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
     cfg.ioBufferSize = maxWriteInterval;
 
     FatalIf( cfg.ioBufferCount < 3, "IO buffer (write interval buffers) cont must be 3 or more." );
-    
+
+    FatalIf( cfg.numBuckets < BB_DP_MIN_BUCKET_COUNT || cfg.numBuckets > BB_DP_MAX_BUCKET_COUNT,
+        "Buckets must be between %u and %u, inclusive.", (uint)BB_DP_MIN_BUCKET_COUNT, (uint)BB_DP_MAX_BUCKET_COUNT );
+
+    // Buckets must be power of 2
+    FatalIf( cfg.numBuckets & ( cfg.numBuckets - 1 ) != 0, "Buckets must be power of 2." );
 
     const uint sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
 

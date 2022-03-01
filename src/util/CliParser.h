@@ -168,7 +168,7 @@ public:
             return false;
 
         const char* arg = _argv[_i-2];
-        int r = sscanf( strValue, "%llf", &value );
+        int r = sscanf( strValue, "%lf", &value );
         FatalIf( r != 1, "Invalid float64 value for argument '%s'.", arg );
 
         return true;

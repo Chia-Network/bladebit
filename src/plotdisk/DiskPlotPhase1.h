@@ -31,15 +31,6 @@ struct AdjacentBucketInfo
 };
 
 
-struct OverflowBuffer
-{
-    void Init( void* bucketBuffers, const size_t fileBlockSize );
-
-    uint32       sizes  [BB_DP_BUCKET_COUNT];
-    DoubleBuffer buffers[BB_DP_BUCKET_COUNT];
-};
-
-
 class DiskPlotPhase1
 {   
     // Fence Ids used when performing forward propagation
@@ -174,43 +165,9 @@ private:
 //     uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
     uint32 _maxBucketCount;
 
-    Bucket*       _bucket;
-    DoubleBuffer* _bucketBuffers;
+    Bucket* _bucket;
 };
 
-
-struct GenF1Job : MTJob<GenF1Job>
-{
-    const byte* key;
-    
-    uint32  blocksPerChunk;     // Total number of blocks for each chunk
-    uint32  chunkCount;         // 
-    uint32  blockCount;         // Block that this particular thread will process from the total blocks per chunk
-    uint32  bucketBufferSize;
-    uint32  trailingBlocks;     // Blocks not included in the last chunk
-    uint32  x;
-    byte*   buffer;
-
-    uint32* counts;         // Each thread's entry count per bucket
-    uint32* bucketCounts;   // Total counts per for all buckets. Used by the control thread
-    uint32* buckets;        // Set by the control thread when writing entries to buckets
-    uint32* xBuffer;        // Buffer for sort key. Also set by the control thread
-    
-    // To be used by the control thread:
-    byte*   remaindersBuffer;
-
-    DiskBufferQueue* diskQueue;
-
-    void Run() override;
-
-private:
-
-
-    void SaveBlockRemainders( uint32* yBuffer, uint32* xBuffer, const uint32* bucketCounts, 
-                              DoubleBuffer* remainderBuffers, uint32* remainderSizes );
-
-    void WriteFinalBlockRemainders( DoubleBuffer* remainderBuffers, uint32* remainderSizes );
-};
 
 struct ScanGroupJob : MTJob<ScanGroupJob>
 {

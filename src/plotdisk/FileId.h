@@ -4,19 +4,21 @@
 enum class FileId
 {
     None = 0,
-    Y0, Y1,
-    META_A_0, META_B_0,
-    META_A_1, META_B_1,
-    X,
+
+    // Phase 1 fx, key, metadata
+    FX0, FX1,
+
+    // Table 7 fx values
     F7,
 
     // Back pointers
-    T2_L, T2_R, 
-    T3_L, T3_R, 
-    T4_L, T4_R, 
-    T5_L, T5_R, 
-    T6_L, T6_R, 
-    T7_L, T7_R, 
+    T1, // 1  : X values
+    T2, // 2-7: Back pointers
+    T3,
+    T4,
+    T5,
+    T6,
+    T7,
 
     // Sort key used to convert to map (during Phase 1)
     SORT_KEY2,
@@ -100,12 +102,12 @@ inline FileId TableIdToBackPointerFileId( const TableId table )
 {
     switch( table )
     {
-        case TableId::Table2: return FileId::T2_L;
-        case TableId::Table3: return FileId::T3_L;
-        case TableId::Table4: return FileId::T4_L;
-        case TableId::Table5: return FileId::T5_L;
-        case TableId::Table6: return FileId::T6_L;
-        case TableId::Table7: return FileId::T7_L;
+        case TableId::Table2: return FileId::T2;
+        case TableId::Table3: return FileId::T3;
+        case TableId::Table4: return FileId::T4;
+        case TableId::Table5: return FileId::T5;
+        case TableId::Table6: return FileId::T6;
+        case TableId::Table7: return FileId::T7;
 
         default:
             ASSERT( 0 );

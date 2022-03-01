@@ -3,8 +3,11 @@
 
 #define BB_DP_MAX_JOBS 256u
 
-#define BB_DP_MIN_RAM_SIZE              5ull GB //( 3 GB + 9 MB )
-#define BB_DP_BUCKET_COUNT              ( 1u << kExtraBits ) // 64 with kExtraBits == 6
+#define BB_DP_BUCKET_COUNT              ( 1u << kExtraBits ) // 64 with kExtraBits == 6 // #TODO: Remove this and make buckets configurable
+
+#define BB_DP_MIN_BUCKET_COUNT 64
+#define BB_DP_MAX_BUCKET_COUNT 1024
+
 #define BB_DP_ENTRIES_PER_BUCKET        ( ( 1ull << _K ) / BB_DP_BUCKET_COUNT )
 #define BB_DP_XTRA_ENTRIES_PER_BUCKET   18000000u
 #define BB_DP_MAX_ENTRIES_PER_BUCKET    ( BB_DP_ENTRIES_PER_BUCKET + BB_DP_XTRA_ENTRIES_PER_BUCKET )   // 67108864 per bucket if k=32, but

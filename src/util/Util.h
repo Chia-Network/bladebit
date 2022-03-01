@@ -119,6 +119,13 @@ inline void* bballoca( size_t size )
 }
 
 //-----------------------------------------------------------
+inline void bbvirtfree( void* ptr )
+{
+    ASSERT( ptr );
+    SysHost::VirtualFree( ptr );
+}
+
+//-----------------------------------------------------------
 template<typename T>
 inline T* bbvirtalloc( size_t size )
 {
