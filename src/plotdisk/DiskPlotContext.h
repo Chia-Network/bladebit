@@ -7,6 +7,7 @@
 #include "plotting/Tables.h"
 #include "ChiaConsts.h"
 
+
 // Write intervals are expressed in bytes
 struct DiskWriteInterval
 {

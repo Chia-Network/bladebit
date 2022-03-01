@@ -150,4 +150,3 @@ void PlotTools::GeneratePlotIdAndMemo(
         outMemoSize = (uint16)phMemoSize;
     }
 }
-

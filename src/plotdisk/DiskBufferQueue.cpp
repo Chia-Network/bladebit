@@ -1,11 +1,10 @@
 #include "DiskBufferQueue.h"
-#include "util/Util.h"
 #include "io/FileStream.h"
 #include "io/HybridStream.h"
 #include "plotdisk/DiskPlotConfig.h"
-#include "SysHost.h"
-
+#include "plotdisk/IOTransforms.h"
 #include "jobs/IOJob.h"
+#include "util/Util.h"
 #include "util/Log.h"
 
 
@@ -156,6 +155,12 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     }
 
     return true;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::SetTransform( FileId fileId, IIOTransform& transform )
+{
+    _files[(int)fileId].transform = &transform;
 }
 
 //-----------------------------------------------------------
@@ -370,6 +375,8 @@ void DiskBufferQueue::CommitCommands()
 //-----------------------------------------------------------
 void DiskBufferQueue::CommandThreadMain( DiskBufferQueue* self )
 {
+    // #TODO: Remove this, test
+    SysHost::SetCurrentThreadAffinityCpuId( SysHost::GetLogicalCPUCount() - 1 );
     self->CommandMain();
 }
 
@@ -503,16 +510,29 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     const uint*  sizes       = cmd.buckets.sizes;
     const byte*  buffers     = cmd.buckets.buffers;
 
-    FileSet&     fileBuckets = _files[(int)fileId];
+    FileSet&     fileSet     = _files[(int)fileId];
     // ASSERT( IsFlagSet( fileBuckets.files[0]->GetFileAccess(), FileAccess::ReadWrite ) );
 
-    const uint   bucketCount = (uint)fileBuckets.files.length;
+    const uint32 bucketCount = (uint32)fileSet.files.length;
 
     Log::Debug( "  >>> Write 0x%p", buffers );
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
     const size_t blockSize = _blockSize;
     const byte*  buffer    = buffers;
+
+    // if( fileSet.transform )
+    // {
+    //     IIOTransform::TransformData data = {
+    //         .buffer      = (void*)buffers,
+    //         .numBuckets  = bucketCount,
+    //         .bucketSizes = (uint32*)sizes
+    //     };
+
+    //     // #TODO: Profile time elapsed here
+    //     fileSet.transform->Write( data );
+    // }
+
     
     for( uint i = 0; i < bucketCount; i++ )
     {
@@ -520,10 +540,11 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
         
         // Only write up-to the block-aligned boundary.
         // The caller is in charge of writing any remainders manually
+        // #TODO: Remove the direct IO size adjust
         const size_t writeSize = _useDirectIO == false ? bufferSize :
                                  bufferSize / blockSize * blockSize;
 
-        WriteToFile( *fileBuckets.files[i], writeSize, buffer, (byte*)fileBuckets.blockBuffers, fileBuckets.name, i );
+        WriteToFile( *fileSet.files[i], writeSize, buffer, (byte*)fileSet.blockBuffers, fileSet.name, i );
         // ASSERT( IsFlagSet( fileBuckets.files[i].GetFileAccess(), FileAccess::ReadWrite ) );
         // Each bucket buffer must start at the next block-aligned boundary
         const size_t bufferOffset = _useDirectIO == false ? bufferSize :

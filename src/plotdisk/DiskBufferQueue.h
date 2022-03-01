@@ -137,6 +137,8 @@ public:
 
     bool InitFileSet( FileId fileId, const char* name, uint bucketCount );
 
+    void SetTransform( FileId fileId, IIOTransform& transform );
+
     void OpenPlotFile( const char* fileName, const byte* plotId, const byte* plotMemo, uint16 plotMemoSize );
 
     void ResetHeap( const size_t heapSize, void* heapBuffer );

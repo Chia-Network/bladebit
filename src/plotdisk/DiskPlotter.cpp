@@ -35,7 +35,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     const uint32 ioBufferCount     = cfg.ioBufferCount;
     const size_t ioHeapFullSize    = ( cfg.ioBufferSize + bucketsCountsSize ) * ioBufferCount;
 
-    GetHeapRequiredSize( _fpBufferSizes, cfg.expectedTmpDirBlockSize, gCfg.threadCount );
+    GetHeapRequiredSize( _fpBufferSizes, cfg.expectedTmpDirBlockSize, gCfg.threadCount, cfg.numBuckets );
 
     _cx.bufferSizes   = &_fpBufferSizes;
     _cx.tmpPath       = cfg.tmpPath;
@@ -63,7 +63,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     Log::Line( "[Disk PLotter]" );
     Log::Line( " Work Heap size : %.2lf MiB", (double)_cx.heapSize BtoMB );
     Log::Line( " Cache size     : %.2lf MiB", (double)_cx.cacheSize BtoMB );
-    // Log::Line( " Work threads   : %u"       , _cx.threadCount   );
+    Log::Line( " Bucket count   : %u"       , _cx.numBuckets    );
     Log::Line( " F1 threads     : %u"       , _cx.f1ThreadCount );
     Log::Line( " FP threads     : %u"       , _cx.fpThreadCount );
     Log::Line( " C  threads     : %u"       , _cx.cThreadCount  );
@@ -289,7 +289,7 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
 
     const size_t diskBlockSize = ValidateTmpPathAndGetBlockSize( cfg );
 
-    const size_t minBucketSize = BB_DP_MAX_ENTRIES_PER_BUCKET * sizeof( uint32 );
+    const size_t minBucketSize = BB_DP_MIN_BUCKET_COUNT * sizeof( uint32 );
 
     size_t maxWriteInterval = 0;
 
@@ -328,7 +328,7 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
     // Buckets must be power of 2
     FatalIf( cfg.numBuckets & ( cfg.numBuckets - 1 ) != 0, "Buckets must be power of 2." );
 
-    const uint sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
+    const uint32 sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
 
     if( cfg.ioThreadCount == 0 )
         cfg.ioThreadCount = 1;        // #TODO: figure out a reasonable default. Probably 1 or 2 for current consumer NVMes running on PCIe3...
@@ -336,17 +336,37 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
     {
         Log::Line( "Warning: Limiting disk queue threads to %u, which is the system's logical CPU count.", sysLogicalCoreCount );
         cfg.ioThreadCount = sysLogicalCoreCount;
-    } 
+    }
+
+    const uint32 defaultThreads = cfg.globalCfg->threadCount == 0 ? sysLogicalCoreCount :
+                                 std::min( sysLogicalCoreCount, cfg.globalCfg->threadCount );
+    
+    auto validateThreads = [&]( uint32& targetValue ) {
+            targetValue = targetValue == 0 ? defaultThreads : std::min( sysLogicalCoreCount, targetValue );
+    };
+
+    validateThreads( cfg.f1ThreadCount );
+    validateThreads( cfg.fpThreadCount );
+    validateThreads( cfg.cThreadCount  );
+    validateThreads( cfg.p2ThreadCount );
+    validateThreads( cfg.p3ThreadCount );
 }
 
 //-----------------------------------------------------------
-void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fileBlockSize, const uint threadCount )
+void DiskPlotter::GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fileBlockSize, const uint32 threadCount, const uint32 bucketCount )
 {
     ZeroMem( &sizes );
 
-    const uint maxBucketEntries = BB_DP_MAX_ENTRIES_PER_BUCKET;
+    const uint32 k        = _K;
+    const uint64 kEntries = 1ull << k;
+
+    const size_t entriesPerBucket = kEntries / bucketCount;
+    const size_t maxBucketEntries = (uint64)std::ceil( entriesPerBucket * BB_DP_XTRA_ENTRIES_PER_BUCKET );
 
     sizes.fileBlockSize = fileBlockSize;
+
+    // Figure out the required memory to process our buckets
+    const size_t p1EntryMax = ( k + k * 4 ) / 8;
 
     const size_t ySize       = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ), fileBlockSize );
     const size_t sortKeySize = RoundUpToNextBoundaryT( maxBucketEntries * sizeof( uint32 ), fileBlockSize );

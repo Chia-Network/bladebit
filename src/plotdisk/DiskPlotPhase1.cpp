@@ -179,7 +179,6 @@ void DiskPlotPhase1::Run()
 
 #if !BB_DP_DBG_READ_EXISTING_F1
     GenF1();
-    _cx.entryCounts[0] = 1ull << _K;
 #else
     {
         size_t pathLen = strlen( cx.tmpPath );
@@ -226,6 +225,7 @@ void DiskPlotPhase1::Run()
     #endif
 
     // Re-create the disk queue with the io buffer only (remove working heap section)
+    exit( 0 );
     _diskQueue->ResetHeap( cx.ioHeapSize, cx.ioHeap );
 
     // ForwardPropagate();
@@ -297,10 +297,12 @@ void DiskPlotPhase1::GenF1()
     F1GenBucketized::GenerateF1Disk( 
         cx.plotId, pool, 
         cx.f1ThreadCount, 
-        *_diskQueue, 
-        cx.writeIntervals[(int)TableId::Table1].fxGen,
+        *_diskQueue,
         cx.bucketCounts[0],
-        cx.numBuckets );
+        cx.numBuckets,
+        FileId::FX1 );
+    
+    _cx.entryCounts[0] = 1ull << _K;
     
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );

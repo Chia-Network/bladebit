@@ -42,7 +42,7 @@ public:
 
     void Plot( const PlotRequest& req );
 
-    static void GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fileBlockSize, const uint threadCount );
+    static void GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fileBlockSize, const uint32 threadCount, const uint32 bucketCount );
     
     static void ParseCommandLine( CliParser& cli, Config& cfg );
 

@@ -227,9 +227,9 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             #endif
 
             DiskPlotter::Config diskCfg;
+            diskCfg.globalCfg = &cfg;
             DiskPlotter::ParseCommandLine( cli, diskCfg );
 
-            diskCfg.globalCfg = &cfg;
             _plotter.disk = new DiskPlotter( diskCfg );
 
             break;

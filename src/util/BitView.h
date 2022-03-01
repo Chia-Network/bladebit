@@ -1,4 +1,5 @@
 #pragma once
+#include "util/Util.h"
 
 // This is a utility class for reading entries encoded in bits, whic
 // are aligned to uint64 boundaries and written as big-endian.

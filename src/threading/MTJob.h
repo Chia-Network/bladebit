@@ -234,7 +234,7 @@ template<typename TJob>
 inline bool MTJobSyncT<TJob>::ReduceThreadCount( uint newThreadCount )
 {
     ASSERT( newThreadCount < _jobCount );
-    ASSERT( newThreadCount > 0 );
+    ASSERT( newThreadCount >= 0 );
 
     // Does this thread need to synchronize?
     // If not, don't participate

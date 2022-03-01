@@ -1,5 +1,6 @@
 #pragma once
 #include "threading/MTJob.h"
+#include "util/Util.h"
 
 struct FaultMemoryPages : MTJob<FaultMemoryPages>
 {

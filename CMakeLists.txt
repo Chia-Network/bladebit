@@ -218,7 +218,7 @@ file(GLOB_RECURSE bb_headers
 
 # Ignore some sources
 list(FILTER bb_sources EXCLUDE REGEX "src/main\\.cpp")
-list(FILTER bb_sources EXCLUDE REGEX "src/tools/.+")
+list(FILTER bb_sources EXCLUDE REGEX "src/tools/FSETableGenerator.cpp")
 list(FILTER bb_sources EXCLUDE REGEX "src/sandbox/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/platform/.+")
 list(FILTER bb_sources EXCLUDE REGEX "src/b3/blake3_(avx|sse).+")

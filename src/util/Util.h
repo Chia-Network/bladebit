@@ -126,7 +126,7 @@ inline void bbvirtfree( void* ptr )
 }
 
 //-----------------------------------------------------------
-template<typename T>
+template<typename T = void>
 inline T* bbvirtalloc( size_t size )
 {
     void* ptr = SysHost::VirtualAlloc( size, false );
@@ -176,6 +176,13 @@ constexpr inline T RoundUpToNextBoundaryT( T value, T boundary )
 inline bool MemCmp( const void* a, const void* b, size_t size )
 {
     return memcmp( a, b, size ) == 0;
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T bbclamp( const T value, const T min, const T max )
+{
+    return value < min ? min : value > max ? max : value;
 }
 
 const char HEX_TO_BIN[256] = {
