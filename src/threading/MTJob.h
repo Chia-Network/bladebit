@@ -7,6 +7,8 @@
     #include "util/Log.h"
 #endif
 
+#include <functional>
+
 template<typename TJob, uint MaxJobs>
 struct MTJobRunner;
 
@@ -71,6 +73,9 @@ struct MTJobSyncT
     #endif
 };
 
+template<typename F, typename... Args>
+static void RunAnonymous( F&& f, Args&&... args );
+
 struct MTJobSync : public MTJobSyncT<MTJobSync> {};
 
 template<typename TJob>
@@ -95,6 +100,7 @@ struct MTJobRunner
     double Run( uint32 threadCount );
 
     inline TJob& operator[]( uint64 index ) { return this->_jobs[index]; }
+    inline TJob& operator[]( int64  index ) { return this->_jobs[index]; }
     inline TJob& operator[]( uint index   ) { return this->_jobs[index]; }
     inline TJob& operator[]( int index    ) { return this->_jobs[index]; }
 
@@ -106,6 +112,38 @@ private:
 private:
     TJob        _jobs[MaxJobs];
     ThreadPool& _pool;
+};
+
+
+struct AnonMTJob : public MTJob<AnonMTJob>
+{
+    std::function<void(AnonMTJob*)>* func;
+
+    inline void Run() override { (*func)( this ); }
+
+    // Run anononymous job, from a lambda, for example
+    template<typename F,
+        std::enable_if_t<
+        std::is_invocable_r_v<void, F, AnonMTJob*>>* = nullptr>
+    inline static void Run( ThreadPool& pool, const uint32 threadCount, F&& func )
+    {
+        std::function<void(AnonMTJob*)> f = func;
+        
+        MTJobRunner<AnonMTJob> jobs( pool );
+        for( uint32 i = 0; i< threadCount; i++ )
+        {
+            auto& job = jobs[i];
+            job.func = &f;
+        }
+
+        jobs.Run( threadCount );
+    }
+
+    template<typename F>
+    inline static void Run( ThreadPool& pool, F&& func )
+    {
+        Run( pool, pool.ThreadCount(), func );
+    }
 };
 
 

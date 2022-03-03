@@ -47,6 +47,50 @@ void _Fatal( const char* message, ... );
 #define FatalIf( cond, message, ... ) if( (cond) ) { Fatal( message, ## __VA_ARGS__ ); }
 
 
+
+// Divide a by b and apply ceiling if needed.
+//-----------------------------------------------------------
+template <typename T>
+constexpr inline T CDiv( T a, int b )
+{
+    return ( a + (T)b - 1 ) / (T)b;
+}
+
+//-----------------------------------------------------------
+template <typename T>
+constexpr inline T CDivT( T a, T b )
+{
+    return ( a + b - (T)1 ) / b;
+}
+
+// Round up a number to the next upper boundary.
+// For example, if we want to round up some bytes to the next 8-byte boundary.
+//-----------------------------------------------------------
+template<typename T>
+constexpr inline T RoundUpToNextBoundary( T value, int boundary )
+{
+    return value + ( boundary - ( value % boundary ) ) % boundary;
+}
+
+template<typename T>
+constexpr inline T RoundUpToNextBoundaryT( T value, T boundary )
+{
+    return value + ( boundary - ( value % boundary ) ) % boundary;
+}
+
+//-----------------------------------------------------------
+inline bool MemCmp( const void* a, const void* b, size_t size )
+{
+    return memcmp( a, b, size ) == 0;
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T bbclamp( const T value, const T min, const T max )
+{
+    return value < min ? min : value > max ? max : value;
+}
+
 //-----------------------------------------------------------
 template<typename T>
 inline void ZeroMem( T* ptr )
@@ -141,49 +185,40 @@ inline T* bbcvirtalloc( size_t count )
     return bbvirtalloc<T>( sizeof( T ) * count );
 }
 
-
-// Divide a by b and apply ceiling if needed.
+// Allocate virtual memory with protected boundary pages
+// #NOTE: Only free with bbvirtfreebounded
 //-----------------------------------------------------------
-template <typename T>
-constexpr inline T CDiv( T a, int b )
+template<typename T = void>
+inline T* bbvirtallocbounded( size_t size )
 {
-    return ( a + (T)b - 1 ) / (T)b;
-}
+    const size_t pageSize = SysHost::GetPageSize();
+    size = RoundUpToNextBoundaryT<size_t>( size, pageSize ) + pageSize * 2;
 
-//-----------------------------------------------------------
-template <typename T>
-constexpr inline T CDivT( T a, T b )
-{
-    return ( a + b - (T)1 ) / b;
-}
+    auto* ptr = (byte*)SysHost::VirtualAlloc( size, false );
+    FatalIf( !ptr, "VirtualAlloc failed." );
 
-// Round up a number to the next upper boundary.
-// For example, if we want to round up some bytes to the next 8-byte boundary.
-//-----------------------------------------------------------
-template<typename T>
-constexpr inline T RoundUpToNextBoundary( T value, int boundary )
-{
-    return value + ( boundary - ( value % boundary ) ) % boundary;
-}
+    SysHost::VirtualProtect( ptr, pageSize, VProtect::NoAccess );
+    SysHost::VirtualProtect( ptr + size - pageSize, pageSize, VProtect::NoAccess );
 
-template<typename T>
-constexpr inline T RoundUpToNextBoundaryT( T value, T boundary )
-{
-    return value + ( boundary - ( value % boundary ) ) % boundary;
-}
-
-//-----------------------------------------------------------
-inline bool MemCmp( const void* a, const void* b, size_t size )
-{
-    return memcmp( a, b, size ) == 0;
+    return reinterpret_cast<T*>( ptr + pageSize );
 }
 
 //-----------------------------------------------------------
 template<typename T>
-inline T bbclamp( const T value, const T min, const T max )
+inline T* bbcvirtallocbounded( size_t count )
 {
-    return value < min ? min : value > max ? max : value;
+    return bbvirtallocbounded<T>( sizeof( T ) * count );
 }
+
+
+//-----------------------------------------------------------
+inline void bbvirtfreebounded( void* ptr )
+{
+    ASSERT( ptr );
+    SysHost::VirtualFree( ((byte*)ptr) - SysHost::GetPageSize() );
+}
+
+
 
 const char HEX_TO_BIN[256] = {
     0,   // 0	00	NUL

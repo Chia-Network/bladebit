@@ -375,9 +375,28 @@ void DiskBufferQueue::CommitCommands()
 //-----------------------------------------------------------
 void DiskBufferQueue::CommandThreadMain( DiskBufferQueue* self )
 {
-    // #TODO: Remove this, test
+    // #TODO: Remove this, testing
     SysHost::SetCurrentThreadAffinityCpuId( SysHost::GetLogicalCPUCount() - 1 );
     self->CommandMain();
+}
+
+//-----------------------------------------------------------
+byte* DiskBufferQueue::GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer )
+{
+    if( !IsFlagSet( _files[(int)fileId].options, FileSetOptions::DirectIO ) )
+        return GetBuffer( size, blockUntilFreeBuffer );
+
+    const size_t blockOffset = _files[(int)fileId].blockOffsets[bucket];
+    const size_t blockSize   = _files[(int)fileId].files[bucket]->BlockSize();
+
+    size_t allocSize = RoundUpToNextBoundaryT( size, blockOffset );
+    if( blockOffset > 0 )
+        allocSize += blockSize;
+    
+    byte* buffer = _workHeap.Alloc( allocSize, blockSize, blockUntilFreeBuffer, &_ioBufferWaitTime );
+    buffer += blockOffset;
+    
+    return buffer;
 }
 
 

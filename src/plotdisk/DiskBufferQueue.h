@@ -30,6 +30,7 @@ struct FileSet
     const char*    name         = nullptr;
     Span<IStream*> files;
     void*          blockBuffers = nullptr;
+    size_t*        blockOffsets = nullptr;
     IIOTransform*  transform    = nullptr;
     FileSetOptions options      = FileSetOptions::None;
 };
@@ -167,7 +168,7 @@ public:
         return _workHeap.Alloc( size, 1 /*_blockSize*/, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
     }
 
-    // byte* GetBufferForId()
+    byte* GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer = true );
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
     // These returns the buffer back to the queue so that it is in use.

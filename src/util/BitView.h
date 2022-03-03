@@ -135,10 +135,34 @@ public:
     }
 
     //-----------------------------------------------------------
-    void Seek( uint64 position )
+    inline void Bump( uint32 bitCount )
+    {
+        ASSERT( _position + bitCount > _position );
+        _position += bitCount;
+    }
+
+
+    //-----------------------------------------------------------
+    inline void Seek( uint64 position )
     {
         ASSERT( position <= _sizeBits );
         _position = position;
+    }
+
+    //-----------------------------------------------------------
+    inline void SeekRelative( int64 offset )
+    {
+        if( offset < 0 )
+        {
+            const auto subtrahend = (uint64)std::abs( offset );
+            ASSERT( subtrahend <= _position );
+
+            _position -= subtrahend;
+        }
+        else
+        {
+            Seek( _position + (uint64)offset );
+        }
     }
 
 private:
@@ -189,9 +213,10 @@ public:
         const uint32 shift     = bitWrite & 63; // Mod 64
 
         // Clear out our new value region
-        uint64 mask = ( ( 1ull << (64 - bitWrite) ) - 1 ) << shift;
+        // uint64 mask = ( ( 1ull << (64 - bitWrite) ) - 1 ) << shift;
+        uint64 mask = 0xFFFFFFFFFFFFFFFFull >> ( 64 - bitWrite );
 
-        fields[fieldIndex] = ( ( fields[fieldIndex] << shift ) & mask ) | ( value >> ( bitCount - bitWrite ) );
+        fields[fieldIndex] = ( ( fields[fieldIndex] << shift ) & (~mask) ) | ( ( value >> ( bitCount - bitWrite ) & mask ) );
 
         // If we still have bits to write, then write in the next field
         if( bitWrite < bitCount )

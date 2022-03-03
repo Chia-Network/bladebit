@@ -71,13 +71,13 @@ void F1GenBucketized::GenerateF1Disk(
     const uint64 blocksPerBucketPerThread = blocksPerBucket / threadCount;
     
     const uint32 bitsSaved        = (uint32)log2( numBuckets ) - kExtraBits;
-    const size_t bitsPerEntry     = k * 2 - bitsSaved;                         // Bits per entry when the entry is serialized
+    // const size_t bitsPerEntry     = k * 2 - bitsSaved;                         // Bits per entry when the entry is serialized
     
     uint64 trailingBlocks = blockCount - blocksPerThread * threadCount;
 
     // Working buffer allocation size
     const size_t blockBufferSize = RoundUpToNextBoundary( blocksPerBucketPerThread * kF1BlockSize, sizeof( uint64 ) );
-    const size_t writeBufferSize = blocksPerBucketPerThread * entriesPerBlock * threadCount * sizeof( uint64 );  // y (-extraBits) + x
+    const size_t writeBufferSize = blocksPerBucketPerThread * entriesPerBlock * threadCount * sizeof( uint64 );  // y - extraBits + x
 
     // Allocate our buffers
     uint64* entries    = (uint64*)diskQueue.GetBuffer( writeBufferSize );
@@ -146,8 +146,6 @@ void F1GenBucketized::GenerateF1Disk(
 //-----------------------------------------------------------
 void F1DiskBucketJob::Run()
 {
-    DiskBufferQueue& diskQueue = *this->diskQueue;
-
     const uint32 k = _K;
     static_assert( k == 32, "Only k32 supported for now." );
 
