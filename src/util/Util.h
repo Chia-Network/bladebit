@@ -5,6 +5,7 @@
 #include <vector>
 #include "Platform.h"
 #include "SysHost.h"
+#include "Log.h"
 
 #ifdef _MSC_VER
     #define Swap16( x ) _byteswap_ushort( x )
@@ -204,12 +205,39 @@ inline T* bbvirtallocbounded( size_t size )
 }
 
 //-----------------------------------------------------------
+template<typename T = void>
+inline T* bbvirtallocboundednuma( size_t size )
+{
+    T* ptr = bbvirtallocbounded<T>( size );
+    if( SysHost::GetNUMAInfo() )
+    {
+        if( !SysHost::NumaSetMemoryInterleavedMode( ptr, size ) )
+            Log::Error( "Warning: Failed to bind NUMA memory." );
+    }
+   
+   return ptr;
+}
+
+//-----------------------------------------------------------
 template<typename T>
 inline T* bbcvirtallocbounded( size_t count )
 {
     return bbvirtallocbounded<T>( sizeof( T ) * count );
 }
 
+//-----------------------------------------------------------
+template<typename T = void>
+inline T* bbcvirtallocboundednuma( size_t count )
+{
+    T* ptr = bbcvirtallocbounded<T>( count );
+    if( SysHost::GetNUMAInfo() )
+    {
+        if( !SysHost::NumaSetMemoryInterleavedMode( ptr, count * sizeof( T ) ) )
+            Log::Error( "Warning: Failed to bind NUMA memory." );
+    }
+   
+   return ptr;
+}
 
 //-----------------------------------------------------------
 inline void bbvirtfreebounded( void* ptr )

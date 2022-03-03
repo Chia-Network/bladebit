@@ -7,6 +7,7 @@
 #include "plotting/PlotTools.h"
 #include "plotting/PackEntries.h"
 #include "plotting/Tables.h"
+#include "plotting/GenSortKey.h"
 #include "pos/chacha8.h"
 #include "plotdisk/DiskPlotConfig.h"
 #include "algorithm/RadixSort.h"
@@ -93,7 +94,7 @@ TEST_CASE( "FxSort", "[fx]" )
 {
     const uint32 k                = _K;
     const uint64 maxEntries       = 1ull << k;
-    const uint64 maxBucketEntries = maxEntries / 64;//maxEntries / 64;
+    const uint64 maxBucketEntries = maxEntries / 16;//maxEntries / 64;
     const uint32 threadCount      = SysHost::GetLogicalCPUCount();
     const char   seedHex[]        = "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73";
 
@@ -102,17 +103,19 @@ TEST_CASE( "FxSort", "[fx]" )
 
     ThreadPool pool( threadCount );
 
-    Log::Line( "Allocating" );
-    _ySrc    = bbcvirtallocbounded<uint64>( maxBucketEntries + 128 );
-    _mapSrc  = bbcvirtallocbounded<uint64>( maxBucketEntries + 128 );
-    _metaSrc = bbcvirtallocbounded<uint64>( maxBucketEntries + 128 );
-    _yDst    = bbcvirtallocbounded<uint64>( maxBucketEntries + 128 );
-    _mapDst  = bbcvirtallocbounded<uint64>( maxBucketEntries + 128 );
-    _metaDst = bbcvirtallocbounded<uint64>( maxBucketEntries + 128 );
-
     const size_t compressedEntriesAlloc = RoundUpToNextBoundary( maxBucketEntries * 24, 24 );
-    _entries    = bbvirtallocbounded<uint64>( compressedEntriesAlloc );
-    _entriesTmp = bbvirtallocbounded<uint64>( compressedEntriesAlloc );
+    const size_t totalMemory            = ( (maxBucketEntries + 128) * 6 * sizeof( uint64 ) ) + ( compressedEntriesAlloc * 2 );
+    Log::Line( "Allocating %.2lf GiB of memory.", (double)totalMemory BtoGB );
+
+    _ySrc       = bbcvirtallocboundednuma<uint64>( maxBucketEntries + 128 );
+    _mapSrc     = bbcvirtallocboundednuma<uint64>( maxBucketEntries + 128 );
+    _metaSrc    = bbcvirtallocboundednuma<uint64>( maxBucketEntries + 128 );
+    _yDst       = bbcvirtallocboundednuma<uint64>( maxBucketEntries + 128 );
+    _mapDst     = bbcvirtallocboundednuma<uint64>( maxBucketEntries + 128 );
+    _metaDst    = bbcvirtallocboundednuma<uint64>( maxBucketEntries + 128 );
+    
+    _entries    = bbvirtallocboundednuma<uint64>( compressedEntriesAlloc );
+    _entriesTmp = bbvirtallocboundednuma<uint64>( compressedEntriesAlloc );
 
     FaultMemoryPages::RunJob( pool, threadCount, _ySrc      , maxBucketEntries * sizeof( uint64 ) );
     FaultMemoryPages::RunJob( pool, threadCount, _mapSrc    , maxBucketEntries * sizeof( uint64 ) );
@@ -127,13 +130,17 @@ TEST_CASE( "FxSort", "[fx]" )
     
     // TestBucketForTable<TableId::Table2>( pool, seed, 5, maxBucketEntries, 256 );
 
-    for( uint32 t = 16; t <= threadCount; t++ )
+    // for( uint32 t = 32; t <= threadCount; t++ )
+    const uint32 t = SysHost::GetLogicalCPUCount();
     {
         Log::Line( "[Threads: %u]", t );
         Log::Line( "----------------------------------------" );
         for( uint32 i = 0; i < 4; i++ )
         {
-            TestBucketForTable<TableId::Table2>( pool, seed, t, maxEntries / (int64)buckets[i], buckets[i] );
+            // const int64 entryCount = maxEntries;
+            // const int64 entryCount = maxEntries / (int64)buckets[i];;
+            const int64 entryCount = maxBucketEntries;
+            TestBucketForTable<TableId::Table2>( pool, seed, t, entryCount , buckets[i] );
             Log::Line( "" );
         }
         Log::Line( "" );
@@ -200,6 +207,9 @@ void TestBucketForTable( ThreadPool& pool, byte seed[BB_PLOT_ID_LEN], const uint
     AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
         const auto id = self->JobId();
         FakeFxGen( entryCounts[id], seed, ySrc+offsets[id], mapSrc+offsets[id], metaSrc+offsets[id], sizeof( uint64 ) );
+
+        for( int64 i = offsets[id]; i < ends[id]; i++ )
+            mapSrc[i] = (uint32)i;
     });
     Log::Line( " Elasped: %.2lfs", TimerEnd( timer ) );
 
@@ -283,42 +293,148 @@ void TestBucketForTable( ThreadPool& pool, byte seed[BB_PLOT_ID_LEN], const uint
             const uint64 yRef = ySrc[i];
             const uint64 y    = entries[j] & yMask;
             ENSURE( yRef == y );
+
+            const uint64 mapRef = mapSrc[i];
+            const uint64 map    = entries[j] >> yBits;
+            ENSURE( mapRef == map );
         }
     });
     Log::Line( " Elapsed: %.2lfs", TimerEnd( timer ) );
-
-    Log::Line( "Sorting source entries" );
+    
+    /// 
+    /// Sort with separate components
+    ///
+    Log::Line( "Sorting components with key" );
     timer = TimerBegin();
-    RadixSort256::Sort<BB_MAX_JOBS, uint64, 4>( pool, ySrc, yDst, (uint64)entryCount );
-    Log::Line( " Elapsed: %.2lfs", TimerEnd( timer ) );
-    
-    
+    {
+        auto stimer = timer;
+        Log::Line( "Creating a sort key" );
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+            
+            const auto id = self->JobId();
+            for( int64 i = offsets[id]; i < ends[id]; i++ )
+                ySrc[i] = ( ySrc[i] & 0xFFFFFFFFull ) | ( (uint64)i << 32 );
+        });
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+        
+        Log::Line( "Sorting source entries" );
+        stimer = TimerBegin();
+        RadixSort256::Sort<BB_MAX_JOBS, uint64, 4>( pool, threadCount, ySrc, yDst, (uint64)entryCount );
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+
+        Log::Line( "Unpacking sort key." );
+        stimer = TimerBegin();
+
+        uint32* sortKey = (uint32*)yDst;
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+            
+            const auto id = self->JobId();
+            for( int64 i = offsets[id]; i < ends[id]; i++ )
+                sortKey[i] = (uint32)( ySrc[i] >> 32 );
+        });
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+        Log::Line( "Masking y entries" );
+        stimer = TimerBegin();
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+
+            const uint32 id = self->JobId();
+            for( int64 i = offsets[id]; i < ends[id]; i++ )
+                ySrc[i] = ySrc[i] & yMask;
+        });
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+        Log::Line( "Sorting map on Y" );
+        stimer = TimerBegin();
+        // SortKeyGen::Sort<BB_MAX_JOBS>( pool, threadCount, entryCount, sortKey, mapSrc, mapDst );
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+
+            const uint32 id = self->JobId();
+            for( int64 i = offsets[id]; i < ends[id]; i++ )
+                mapDst[i] = mapSrc[sortKey[i]];
+        });
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+        Log::Line( "Sorting meta on Y" );
+        stimer = TimerBegin();
+        SortKeyGen::Sort<BB_MAX_JOBS>( pool, threadCount, entryCount, sortKey, metaSrc, metaDst );
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+    }
+    Log::Line( "  Component Sort Elapsed: %.2lfs", TimerEnd( timer ) );
+
+
+    ///
+    /// Sort with packed components
+    ///
     Log::Line( "Sorting packed entries" );
     timer = TimerBegin();
-    FxSortJob::Sort<TableId::Table2>( pool, threadCount, entries, entriesTmp, entryCount, k - yBits );
-    Log::Line( " Elapsed: %.2lfs", TimerEnd( timer ) );
+    {
+        auto stimer = timer;
+        FxSortJob::Sort<TableId::Table2>( pool, threadCount, entries, entriesTmp, entryCount, k - yBits );
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+        Log::Line( "Unpacking Y" );
+        stimer = TimerBegin();
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+
+            const uint32 id          = self->JobId();
+            const uint32 entrySize64 = unpackedEntrySize / 8 / sizeof( uint64 );
+
+            for( int64 i = offsets[id], j = offsets[id]*entrySize64; i < ends[id]; i++, j += entrySize64 )
+                yDst[i] = entries[j] & yMask;
+        });
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+        Log::Line( "Unpacking Map" );
+        stimer = TimerBegin();
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+
+            const uint32 id          = self->JobId();
+            const uint32 entrySize64 = unpackedEntrySize / 8 / sizeof( uint64 );
+
+            for( int64 i = offsets[id], j = offsets[id]*entrySize64; i < ends[id]; i++, j += entrySize64 )
+                mapSrc[i] = entries[j] >> yBits;
+        });
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+        Log::Line( "Unpacking Meta" );
+        stimer = TimerBegin();
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+
+            const uint32 id          = self->JobId();
+            const uint32 entrySize64 = unpackedEntrySize / 8 / sizeof( uint64 );
+
+            for( int64 i = offsets[id], j = offsets[id]*entrySize64+1; i < ends[id]; i++, j += entrySize64 )
+                metaSrc[i] = entries[j];
+        });
+        Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+    }
+    Log::Line( " Packed Entry Sort Elapsed: %.2lfs", TimerEnd( timer ) );
 
     // Ensure we are sorted
     Log::Line( "Validating sorted entries" );
     timer = TimerBegin();
     AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
         
-        const auto   id          = self->JobId();
-        const uint32 entrySize64 = unpackedEntrySize / 8 / sizeof( uint64 );
+        const auto id = self->JobId();
 
-        for( int64 i = offsets[id], j = offsets[id]*entrySize64; i < ends[id]; i++, j += entrySize64 )
+        for( int64 i = offsets[id]; i < ends[id]; i++ )
         {
             const uint64 yRef = ySrc[i];
-            const uint64 y    = entries[j] & yMask;
+            const uint64 y    = yDst[i];
             ENSURE( yRef == y );
+
+            const uint64 mapRef = mapDst[i];
+            const uint64 map    = mapSrc[i];
+            ENSURE( mapRef == map );
+
+            const uint64 metaRef = metaDst[i];
+            const uint64 meta    = metaSrc[i];
+            ENSURE( metaRef == meta );
         }
     });
-    // for( int64 i = 0, j = 0; i < entryCount; i++, j+=2 )
-    // {
-    //     const uint64 yRef = ySrc[i];
-    //     const uint64 y    = entries[j] & yMask;
-    //     ENSURE( yRef == y );
-    // }
+    
     Log::Line( " Elapsed: %.2lfs", TimerEnd( timer ) );
 }
 
@@ -331,9 +447,8 @@ void FakeFxGen( const int64 entryCount, byte seed[BB_PLOT_ID_LEN], uint64* y, ui
     const uint64 blockCount = CDiv( (size_t)entryCount * sizeof( uint64 ), kF1BlockSize );
 
     chacha8_get_keystream( &chacha, 0, blockCount, (uint8_t*)y    );
-    chacha8_get_keystream( &chacha, 0, blockCount, (uint8_t*)map  );
     chacha8_get_keystream( &chacha, 0, blockCount, (uint8_t*)meta );
-
+    // chacha8_get_keystream( &chacha, 0, blockCount, (uint8_t*)map  );
 }
 
 //-----------------------------------------------------------
