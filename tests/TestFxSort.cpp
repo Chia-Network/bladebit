@@ -125,7 +125,7 @@ TEST_CASE( "FxSort", "[fx]" )
 
     uint32 buckets[] = { 128, 256, 512, 1024 };
     
-    TestBucketForTable<TableId::Table2>( pool, seed, 5, maxBucketEntries, 256 );
+    // TestBucketForTable<TableId::Table2>( pool, seed, 5, maxBucketEntries, 256 );
 
     for( uint32 t = 4; t <= threadCount; t++ )
     {
