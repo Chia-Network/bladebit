@@ -1,12 +1,6 @@
 #pragma once
 #include "util/Util.h"
 
-// This is a utility class for reading entries encoded in bits, whic
-// are aligned to uint64 boundaries and written as big-endian.
-// This helps us read values by firest transforming the data back to
-// little endian and making it easy to read variable-sized bit values.
-// The format of the bits is such that the entries are shifted all the way to
-// the left of a field. For example, an initial 32-bit value will be found in the MSbits of the first field.
 class BitReader
 {
 public:
@@ -47,25 +41,9 @@ public:
     //-----------------------------------------------------------
     inline uint64 ReadBits64( const uint32 bitCount )
     {
-        // #TODO: Use shared static version
-        ASSERT( bitCount <= 64 );
         // ASSERT( _position + bitCount <= _sizeBits );
 
-        const uint64 fieldIndex    = _position >> 6; // _position / 64
-        const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - _position;
-        const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
-
-        uint64 value = _fields[fieldIndex] >> shift;
-
-        if( bitsAvailable < bitCount )
-        {
-            // Have to read one more field
-            const uint32 bitsNeeded = bitCount - bitsAvailable;
-            value = ( value << bitsNeeded ) | ( _fields[fieldIndex+1] >> ( 64 - bitsNeeded ) );
-        }
-
-        // Mask-out part of the fields we don't need
-        value &= ( 0xFFFFFFFFFFFFFFFFull >> (64 - bitCount ) );
+        const auto value = ReadBits64( bitCount, _fields, _position );
 
         _position += bitCount;
         return value;
@@ -75,6 +53,7 @@ public:
     //-----------------------------------------------------------
     inline uint128 ReadBits128( const uint32 bitCount )
     {
+        ASSERT( 0 );    // #TODO: Update to support changed encoding
         ASSERT( bitCount <= 128 );
         ASSERT( _position + bitCount <= _sizeBits );
 
@@ -115,23 +94,21 @@ public:
     {
         ASSERT( bitCount <= 64 );
 
-        const uint64 fieldIndex    = position >> 6; // _position / 64
-        const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - position;
-        const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
+        const uint64 fieldIndex    = position >> 6; // position / 64
+        const uint32 fieldBits     = position - fieldIndex * 64; 
+        const uint32 bitsAvailable = 64 - fieldBits;
 
-        uint64 value = fields[fieldIndex] >> shift;
+        uint64 value = fields[fieldIndex] >> fieldBits;
 
         if( bitsAvailable < bitCount )
         {
             // Have to read one more field
-            const uint32 bitsNeeded = bitCount - bitsAvailable;
-            value = ( value << bitsNeeded ) | ( fields[fieldIndex+1] >> ( 64 - bitsNeeded ) );
+            const uint64 mask = ( 1ull << bitsAvailable ) - 1 ;
+            value = ( value & mask ) | ( fields[fieldIndex+1] << bitsAvailable );
         }
 
-        // Mask-out part of the fields we don't need
-        value &= ( 0xFFFFFFFFFFFFFFFFull >> (64 - bitCount ) );
-
-        return value;
+        // Mask-out part of the value we don't need
+        return value & ( 0xFFFFFFFFFFFFFFFFull >> (64 - bitCount) );
     }
 
     //-----------------------------------------------------------
@@ -140,7 +117,6 @@ public:
         ASSERT( _position + bitCount > _position );
         _position += bitCount;
     }
-
 
     //-----------------------------------------------------------
     inline void Seek( uint64 position )
@@ -206,6 +182,39 @@ public:
         ASSERT( dstOffset + bitCount > dstOffset );
 
         const uint64 fieldIndex = dstOffset >> 6;
+        const uint32 fieldBits  = (uint32)( dstOffset - fieldIndex * 64 );
+        const uint32 bitsFree   = 64 - fieldBits;
+
+        // Determine how many bits to write to this current field
+        const uint32 bitWrite  = std::min( bitCount, bitsFree );// & 63; // Mod 64
+        // const uint32 shift     = bitWrite & 63; // Mod 64
+
+        // Clear out our new value region
+        // uint64 mask = ( ( 1ull << (64 - bitWrite) ) - 1 ) << shift;
+        uint64 mask = ( 0xFFFFFFFFFFFFFFFFull >> ( 64 - bitWrite ) ) << fieldBits;
+
+        fields[fieldIndex] = ( fields[fieldIndex] & (~mask) ) | ( ( value << fieldBits ) & mask );
+
+        // If we still have bits to write, then write in the next field
+        if( bitWrite < bitCount )
+        {
+            const uint32 remainder = bitCount - bitWrite;
+                         mask      = 0xFFFFFFFFFFFFFFFFull >> ( 64 - remainder );
+            fields[fieldIndex+1]   = ( fields[fieldIndex+1] & (~mask) ) | ( ( value >> bitWrite ) & mask );
+        }
+    }
+
+    /*
+    Chiapos compatible method. Disabling this here for now since this makes it hard to use in a multi-threaded manner
+    //-----------------------------------------------------------
+    // dstOffset: Offset in bits as to where to start writing in fields
+    //-----------------------------------------------------------
+    inline static void WriteBits64( uint64* fields, const uint64 dstOffset, const uint64 value, const uint32 bitCount )
+    {
+        ASSERT( bitCount <= 64 );
+        ASSERT( dstOffset + bitCount > dstOffset );
+
+        const uint64 fieldIndex = dstOffset >> 6;
         const uint32 bitsFree   = ( ( fieldIndex + 1 ) * 64 ) - dstOffset;
 
         // Determine how many bits to write to this current field
@@ -226,6 +235,7 @@ public:
             fields[fieldIndex+1]   = value & mask;
         }
     }
+    */
 
 private:
     uint64* _fields  ;  // Our fields buffer
