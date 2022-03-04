@@ -98,7 +98,7 @@ TEST_CASE( "FxSort", "[fx]" )
 {
     const uint32 k                = _K;
     const uint64 maxEntries       = 1ull << k;
-    const uint64 maxBucketEntries = maxEntries / 4;//maxEntries / 64;
+    const uint64 maxBucketEntries = maxEntries / 32;
     const uint32 threadCount      = SysHost::GetLogicalCPUCount();
     const char   seedHex[]        = "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73";
 
@@ -138,7 +138,7 @@ TEST_CASE( "FxSort", "[fx]" )
     // TestBucketForTable<TableId::Table2>( pool, seed, 5, maxBucketEntries, 256 );
 
     // for( uint32 t = 32; t <= threadCount; t++ )
-    const uint32 t = 32;//SysHost::GetLogicalCPUCount();
+    const uint32 t = SysHost::GetLogicalCPUCount();
     {
         Log::Line( "[Threads: %u]", t );
         for( TableId table = TableId::Table2; table < TableId::Table6; table++ )
