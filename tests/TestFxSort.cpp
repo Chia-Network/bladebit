@@ -23,7 +23,7 @@ template<> struct FpEntry<TableId::Table1> { uint64 ykey; };              // x, 
 template<> struct FpEntry<TableId::Table2> { uint64 ykey; uint64 meta; }; // meta, key, y
 template<> struct FpEntry<TableId::Table3> { uint64 ykey; Meta4  meta; };
 template<> struct FpEntry<TableId::Table4> { uint64 ykey; Meta4  meta; };
-template<> struct FpEntry<TableId::Table5> { uint64 ykey; Meta4  meta; }; // It should be 20, but we use an extra 4 to round up to 64 bits.
+template<> struct FpEntry<TableId::Table5> { uint64 ykey; Meta3  meta; }; // It should be 20, but we use an extra 4 to round up to 64 bits.
 template<> struct FpEntry<TableId::Table6> { uint64 ykey; uint64 meta; };
 template<> struct FpEntry<TableId::Table7> { uint64 ykey; };
 
@@ -43,9 +43,6 @@ static_assert( sizeof( T5Entry ) == 24 );
 static_assert( sizeof( T6Entry ) == 16 );
 static_assert( sizeof( T7Entry ) == 8  );
 
-
-static void TestBucket( uint32 bucketCount, uint32 k );
-static void FakeFxGen( const int64 entryCount, byte seed[BB_PLOT_ID_LEN],  uint64* y, uint64* map, uint64* meta, const size_t metaSize );
 
 template<typename T, typename TJob, typename TBuckets = uint64>
 static void FxSort( PrefixSumJob<TJob,uint64>* self, const int64 entryCount, const int64 offset, T* entries, T* tmpEntries, const uint32 entryBitSize );
@@ -149,12 +146,22 @@ TEST_CASE( "FxSort", "[fx]" )
             Log::Line( "[Table: %u]", table+1 );
             Log::Line( "----------------------------------------" );
             
-            for( uint32 i = 0; i < sizeof( buckets ) / sizeof( decltype( buckets ) ); i++ )
+            for( uint32 i = 0; i < sizeof( buckets ) / sizeof( buckets[0] ); i++ )
             {
                 // const int64 entryCount = maxEntries;
                 // const int64 entryCount = maxEntries / (int64)buckets[i];;
                 const int64 entryCount = maxBucketEntries;
-                TestBucketForTable<TableId::Table3>( pool, seed, t, entryCount , buckets[i] );
+                switch ( table )
+                {
+                    case TableId::Table2: TestBucketForTable<TableId::Table2>( pool, seed, t, entryCount , buckets[i] ); break;
+                    case TableId::Table3: TestBucketForTable<TableId::Table3>( pool, seed, t, entryCount , buckets[i] ); break;
+                    case TableId::Table4: TestBucketForTable<TableId::Table4>( pool, seed, t, entryCount , buckets[i] ); break;
+                    case TableId::Table5: TestBucketForTable<TableId::Table5>( pool, seed, t, entryCount , buckets[i] ); break;
+                    default:
+                        ASSERT( 0 );
+                        break;
+                }
+                
                 Log::Line( "" );
             }
             Log::Line( "" );
@@ -206,7 +213,7 @@ void TestBucketForTable( ThreadPool& pool, byte seed[BB_PLOT_ID_LEN], const uint
     Log::Line( " Entry Count   : %lld", entryCount );
     Log::Line( " Entries/Thread: %lld", entryCount / (int64)threadCount );
     Log::Line( " Entry Size    : %u bits", entrySizeBits );
-    Log::Line( " Unpacked Size : %u bits (%u) bytes", unpackedEntrySize, unpackedEntrySize / 8 );
+    Log::Line( " Unpacked Size : %u bits (%u bytes)", unpackedEntrySize, unpackedEntrySize / 8 );
 
     uint64* ySrc       = _ySrc;
     uint64* mapSrc     = _mapSrc;
@@ -221,7 +228,6 @@ void TestBucketForTable( ThreadPool& pool, byte seed[BB_PLOT_ID_LEN], const uint
     auto timer = TimerBegin();
     AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
         const auto id = self->JobId();
-        // FakeFxGen( entryCounts[id], seed, ySrc+offsets[id], mapSrc+offsets[id], metaSrc+offsets[id], sizeof( uint64 ) );
         
         const uint64 totalYBlocks = entryCount * sizeof( uint64 ) / kF1BlockSize;
         const uint64 totalMBlocks = entryCount * sizeof( TMeta  ) / kF1BlockSize;
@@ -294,7 +300,20 @@ void TestBucketForTable( ThreadPool& pool, byte seed[BB_PLOT_ID_LEN], const uint
             const uint64 y    = reader.ReadBits64( yBits );
             ENSURE( yRef == y );
 
-            reader.Bump( yBump );
+            const uint64 mapRef = mapSrc[i];
+            const uint64 map    = reader.ReadBits64( mapBits );
+            ENSURE( mapRef == map );
+
+            if constexpr ( TableMetaOut<table>::Multiplier > 0 )
+            {
+                const uint32* metaRef = (uint32*)(((TMeta*)metaSrc)+i);
+
+                for( size_t m = 0; m < TableMetaOut<table>::Multiplier; m++ )
+                {
+                    const uint32 meta = (uint32)reader.ReadBits64( 32 );
+                    ENSURE( metaRef[m] == meta );
+                }
+            }
         }
     });
     Log::Line( " Elapsed: %.2lfs", TimerEnd( timer ) );
@@ -326,9 +345,11 @@ void TestBucketForTable( ThreadPool& pool, byte seed[BB_PLOT_ID_LEN], const uint
 
             if constexpr ( TableMetaOut<table>::Multiplier != 0 )
             {
+                const size_t validMetaSize = TableMetaOut<table>::Multiplier * ( k / 8 );
+
                 const TMeta metaRef = ((TMeta*)metaSrc)[i];
                 const TMeta meta    = e[i].meta;
-                ENSURE( memcmp( &metaRef, &meta, sizeof( TMeta ) ) == 0 );
+                ENSURE( memcmp( &metaRef, &meta, validMetaSize ) == 0 );
             }
         }
     });
@@ -337,19 +358,71 @@ void TestBucketForTable( ThreadPool& pool, byte seed[BB_PLOT_ID_LEN], const uint
     /// 
     /// Sort with separate components
     ///
+    Log::Line( "" );
     Log::Line( "Sorting components with key" );
     Log::Line( "---------------------------" );
     timer = TimerBegin();
     {
-        auto stimer = timer;
-        Log::Line( "Creating a sort key" );
+        ///
+        /// Unpack Components first
+        ///
+        Log::Line( "Unpacking Y" );
+        auto stimer = TimerBegin();
         AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
-            
-            const auto id = self->JobId();
+
+            const uint32 id    = self->JobId();
+            const Entry* input = (Entry*)entries;
+
             for( int64 i = offsets[id]; i < ends[id]; i++ )
-                ySrc[i] = ( ySrc[i] & 0xFFFFFFFFull ) | ( (uint64)i << 32 );
+            {
+                ySrc[i] = (input[i].ykey & yMask) | ( (uint64)i << 32 );
+                mapSrc[i] = input[i].ykey >> yBits;
+            }
         });
         Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+        // Log::Line( "Unpacking Map" );
+        // stimer = TimerBegin();
+        // AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+
+        //     const uint32 id    = self->JobId();
+        //     const Entry* input = (Entry*)entries;
+
+        //     for( int64 i = offsets[id]; i < ends[id]; i++ )
+        //         mapSrc[i] = input[i].ykey >> yBits;
+        // });
+        // Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+
+        if constexpr ( TableMetaOut<table>::Multiplier != 0 )
+        {
+            Log::Line( "Unpacking Meta" );
+            stimer = TimerBegin();
+            AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+
+                const uint32 id    = self->JobId();
+                const Entry* input = (Entry*)entries;
+                
+                TMeta* metaOut = (TMeta*)metaSrc;
+
+                for( int64 i = offsets[id]; i < ends[id]; i++ )
+                    metaOut[i] = input[i].meta;
+            });
+            Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
+        }
+
+
+        ///
+        /// Sort
+        ///
+        // auto stimer = timer;
+        // Log::Line( "Creating a sort key" );
+        // AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+            
+        //     const auto id = self->JobId();
+        //     for( int64 i = offsets[id]; i < ends[id]; i++ )
+        //         ySrc[i] = ( ySrc[i] & 0xFFFFFFFFull ) | ( (uint64)i << 32 );
+        // });
+        // Log::Line( " Elapsed: %.2lfs", TimerEnd( stimer ) );
         
         Log::Line( "Sorting source entries" );
         stimer = TimerBegin();
@@ -411,6 +484,7 @@ void TestBucketForTable( ThreadPool& pool, byte seed[BB_PLOT_ID_LEN], const uint
     ///
     /// Sort with packed components
     ///
+    Log::Line( "" );
     Log::Line( "Sorting packed entries" );
     Log::Line( "---------------------------" );
     timer = TimerBegin();
@@ -519,43 +593,6 @@ void PackEntry( BitWriter& writer, const uint32 yBits, const uint64 y, const uin
 }
 
 //-----------------------------------------------------------
-// template<TableId table>
-// void PackEntry( BitWriter& writer, const uint32 yBits, const uint64 y, const uint64 map, typename TableMetaType<table>::MetaOut* meta )
-// {
-//     writer.Write( y   , yBits );
-//     writer.Write( map , _K+1  );
-
-//     const uint64* meta64 = (uint64*)meta;
-//     if constexpr ( TableMetaOut<table>::Multiplier == 2 )
-//     {
-//         writer.Write( *meta64, 64 );
-//     }
-//     else if constexpr ( TableMetaOut<table>::Multiplier == 3 )
-//     {
-//         writer.Write( meta64[0], 64 );
-//         writer.Write( meta64[1], 32 );
-//     }
-//     else if constexpr ( TableMetaOut<table>::Multiplier == 4 )
-//     {
-//         writer.Write( meta64[0], 64 );
-//         writer.Write( meta64[1], 64 );
-//     }
-// }
-
-//-----------------------------------------------------------
-void FakeFxGen( const int64 entryCount, byte seed[BB_PLOT_ID_LEN], uint64* y, uint64* map, uint64* meta, const size_t metaSize )
-{
-    chacha8_ctx chacha;
-    chacha8_keysetup( &chacha, seed, 256, NULL );
-
-    const uint64 blockCount = CDiv( (size_t)entryCount * sizeof( uint64 ), kF1BlockSize );
-
-    chacha8_get_keystream( &chacha, 0, blockCount, (uint8_t*)y    );
-    chacha8_get_keystream( &chacha, 0, blockCount, (uint8_t*)meta );
-    // chacha8_get_keystream( &chacha, 0, blockCount, (uint8_t*)map  );
-}
-
-//-----------------------------------------------------------
 template<TableId table>
 void FxSortJob::Sort( ThreadPool& pool, const uint32 threadCount, void* input, void* tmp, const int64 entryCount, const uint32 remainderBits  )
 {
@@ -658,6 +695,7 @@ void FxSort( PrefixSumJob<TJob, uint64>* self, const int64 entryCount, const int
         {
             const T       value  = *src;
             const uint64  bucket = (value.ykey >> shift) & mask;
+            // const uint32  bucket = ( *(uint32*)&value >> shift ) & mask;
             const BucketT dstIdx = --pfxSum[bucket];
             
             output[dstIdx] = value;
