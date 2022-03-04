@@ -46,7 +46,7 @@ find_package(Threads REQUIRED)
 # NUMA
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     find_package(NUMA REQUIRED)
-    set(platform_libs ${NUMA_LIBRARY} gmp)
+    set(platform_libs ${NUMA_LIBRARY})
 endif()
 
 # Catch
