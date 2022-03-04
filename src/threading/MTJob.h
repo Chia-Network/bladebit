@@ -374,3 +374,36 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
     }
 }
 
+
+//-----------------------------------------------------------
+template<typename TCount = uint32>
+struct AnonPrefixSumJob : public PrefixSumJob<AnonPrefixSumJob, TCount>
+{
+    std::function<void(AnonPrefixSumJob*)>* func;
+
+    inline void Run() override { (*func)( this ); }
+
+    // Run anononymous job, from a lambda, for example
+    template<typename F,
+        std::enable_if_t<
+        std::is_invocable_r_v<void, F, AnonPrefixSumJob*>>* = nullptr>
+    inline static void Run( ThreadPool& pool, const uint32 threadCount, F&& func )
+    {
+        std::function<void(AnonPrefixSumJob*)> f = func;
+        
+        MTJobRunner<AnonPrefixSumJob> jobs( pool );
+        for( uint32 i = 0; i< threadCount; i++ )
+        {
+            auto& job = jobs[i];
+            job.func = &f;
+        }
+
+        jobs.Run( threadCount );
+    }
+
+    template<typename F>
+    inline static void Run( ThreadPool& pool, F&& func )
+    {
+        Run( pool, pool.ThreadCount(), func );
+    }
+};

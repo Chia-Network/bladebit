@@ -5,16 +5,23 @@
 
 #define BB_DP_BUCKET_COUNT              ( 1u << kExtraBits ) // 64 with kExtraBits == 6 // #TODO: Remove this and make buckets configurable
 
-#define BB_DP_MIN_BUCKET_COUNT 64
+#define BB_DP_MIN_BUCKET_COUNT 128      // Below 128 we can't fit y+map in a qword.
 #define BB_DP_MAX_BUCKET_COUNT 1024
 
 #define BB_DP_ENTRIES_PER_BUCKET        ( ( 1ull << _K ) / BB_DP_BUCKET_COUNT )
-#define BB_DP_XTRA_ENTRIES_PER_BUCKET   1.08
+#define BB_DP_XTRA_ENTRIES_PER_BUCKET   1.1
 
 
-#define BB_DP_MAX_BC_GROUP_PER_BUCKET 300000        // There's around 284,190 groups per bucket
+#define BB_DP_MAX_BC_GROUP_PER_BUCKET 300000        // There's around 284,190 groups per bucket (of bucket size 64)
+#define BB_DP_MAX_BC_GROUP_PER_K_32   (BB_DP_MAX_BC_GROUP_PER_BUCKET * 64ull)
 #define BB_DP_XTRA_MATCHES_PER_THREAD 1024
 
+// How many extra entries to load from the next bucket to ensure we have enough to hold the 2 groups's
+// worth of entries. This is so that we can besure that we can complete matches from groups from the previous
+// bucket that continue on to the next bucket. There's around 280-320 entries per group on k32. This should be enough
+#define BB_DP_CROSS_BUCKET_MAX_ENTRIES 1024
+
+// #TODO: Increase this, or make the disk queue dynamic. Might need it for buckets = 1024
 #define BB_DISK_QUEUE_MAX_CMDS 4096 //1024
 
 // Use at 256 buckets for line points so that

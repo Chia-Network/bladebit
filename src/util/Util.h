@@ -48,6 +48,16 @@ void _Fatal( const char* message, ... );
 #define FatalIf( cond, message, ... ) if( (cond) ) { Fatal( message, ## __VA_ARGS__ ); }
 
 
+//-----------------------------------------------------------
+template <typename T>
+constexpr inline T bblog2( T x )
+{
+    T r = 0;
+    while( x >>= 1 )
+        r++;
+    return r;
+}
+
 
 // Divide a by b and apply ceiling if needed.
 //-----------------------------------------------------------
