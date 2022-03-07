@@ -326,7 +326,7 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
         "Buckets must be between %u and %u, inclusive.", (uint)BB_DP_MIN_BUCKET_COUNT, (uint)BB_DP_MAX_BUCKET_COUNT );
 
     // Buckets must be power of 2
-    FatalIf( cfg.numBuckets & ( cfg.numBuckets - 1 ) != 0, "Buckets must be power of 2." );
+    FatalIf( ( cfg.numBuckets & ( cfg.numBuckets - 1 ) ) != 0, "Buckets must be power of 2." );
 
     const uint32 sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
 

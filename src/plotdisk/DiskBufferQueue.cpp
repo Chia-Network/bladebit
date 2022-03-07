@@ -49,7 +49,6 @@ DiskBufferQueue::DiskBufferQueue(
 
     // Initialize I/O thread
     _dispatchThread.Run( CommandThreadMain, this );
-
 }
 
 //-----------------------------------------------------------
@@ -65,6 +64,12 @@ DiskBufferQueue::~DiskBufferQueue()
     free( _filePathBuffer );
 }
 
+//-----------------------------------------------------------
+size_t DiskBufferQueue::BlockSize( FileId fileId ) const
+{
+    ASSERT( _files[(int)fileId].files[0] );
+    return _files[(int)fileId].files[0]->BlockSize();
+}
 //-----------------------------------------------------------
 void DiskBufferQueue::ResetHeap( const size_t heapSize, void* heapBuffer )
 {

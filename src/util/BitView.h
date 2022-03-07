@@ -204,6 +204,12 @@ public:
         }
     }
 
+    //-----------------------------------------------------------
+    inline uint64* Fields() const { return _fields; }
+
+    //-----------------------------------------------------------
+    inline uint64  Position() const { return _position; }
+
     /*
     Chiapos compatible method. Disabling this here for now since this makes it hard to use in a multi-threaded manner
     //-----------------------------------------------------------

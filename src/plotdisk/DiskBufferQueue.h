@@ -27,12 +27,12 @@ struct FileSetInitData
 
 struct FileSet
 {
-    const char*    name         = nullptr;
+    const char*    name             = nullptr;
     Span<IStream*> files;
-    void*          blockBuffers = nullptr;
-    size_t*        blockOffsets = nullptr;
-    IIOTransform*  transform    = nullptr;
-    FileSetOptions options      = FileSetOptions::None;
+    void*          blockBuffers     = nullptr;
+    size_t*        blockOffsetsBits = nullptr;  // Saved in bits since the user might write in bits
+    IIOTransform*  transform        = nullptr;
+    FileSetOptions options          = FileSetOptions::None;
 };
 
 // struct WriteBucketsJob : MTJob<WriteBucketsJob>
@@ -168,6 +168,11 @@ public:
         return _workHeap.Alloc( size, 1 /*_blockSize*/, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
     }
 
+    inline byte* GetBuffer( const size_t size, const size_t alignment, bool blockUntilFreeBuffer = true )
+    { 
+        return _workHeap.Alloc( size, alignment, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
+    }
+
     byte* GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer = true );
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
@@ -191,6 +196,8 @@ public:
     void CompletePendingReleases();
 
     inline size_t BlockSize()     const { return _blockSize; }
+    inline size_t BlockSize( FileId fileId ) const;
+    
     inline bool   UseDirectIO()   const { return _useDirectIO; }
 
     inline const WorkHeap& Heap() const { return _workHeap; }

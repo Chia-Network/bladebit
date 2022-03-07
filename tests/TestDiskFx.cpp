@@ -14,7 +14,7 @@ struct TableTest
         using Fp   = DiskFp<table,numBuckets>;
         
         // const size_t bits = DiskFp<table,numBuckets>::EntryInSizePackedBits;
-        const size_t bits           = Info::EntryOutSizePackedBits;
+        const size_t bits           = Info::EntrySizePackedBits;
         const size_t bufferFullSize = 0;
 
         const int64 maxEntries = Info::MaxBucketEntries;

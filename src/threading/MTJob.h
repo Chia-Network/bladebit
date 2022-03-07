@@ -377,7 +377,7 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
 
 //-----------------------------------------------------------
 template<typename TCount = uint32>
-struct AnonPrefixSumJob : public PrefixSumJob<AnonPrefixSumJob, TCount>
+struct AnonPrefixSumJob : public PrefixSumJob<AnonPrefixSumJob<TCount>, TCount>
 {
     std::function<void(AnonPrefixSumJob*)>* func;
 
@@ -386,12 +386,12 @@ struct AnonPrefixSumJob : public PrefixSumJob<AnonPrefixSumJob, TCount>
     // Run anononymous job, from a lambda, for example
     template<typename F,
         std::enable_if_t<
-        std::is_invocable_r_v<void, F, AnonPrefixSumJob*>>* = nullptr>
+        std::is_invocable_r_v<void, F, AnonPrefixSumJob<TCount>*>>* = nullptr>
     inline static void Run( ThreadPool& pool, const uint32 threadCount, F&& func )
     {
-        std::function<void(AnonPrefixSumJob*)> f = func;
+        std::function<void(AnonPrefixSumJob<TCount>*)> f = func;
         
-        MTJobRunner<AnonPrefixSumJob> jobs( pool );
+        MTJobRunner<AnonPrefixSumJob<TCount>> jobs( pool );
         for( uint32 i = 0; i< threadCount; i++ )
         {
             auto& job = jobs[i];
@@ -407,3 +407,27 @@ struct AnonPrefixSumJob : public PrefixSumJob<AnonPrefixSumJob, TCount>
         Run( pool, pool.ThreadCount(), func );
     }
 };
+
+
+//-----------------------------------------------------------
+template<typename TJob, typename T>
+inline void GetThreadOffsets( MTJob<TJob>* job, const T totalCount, T& count, T& offset, T& end )
+{
+    GetThreadOffsets( job->JobId(), job->JobCount(), totalCount, count, offset, end );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline void GetThreadOffsets( const uint32 id, const uint32 threadCount, const T totalCount, T& count, T& offset, T& end )
+{
+    const T countPerThread = totalCount / (T)threadCount;
+    const T remainder      = totalCount - countPerThread * (T)threadCount;
+
+    count  = countPerThread;
+    offset = (T)id * countPerThread;
+
+    if( id == threadCount-1 )
+        count += remainder;
+    
+    end = offset + count;
+}
