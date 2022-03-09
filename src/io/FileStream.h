@@ -90,8 +90,7 @@ private:
     }
 
 private:
-    size_t     _writePosition = 0;
-    size_t     _readPosition  = 0;
+    size_t     _position      = 0;
     FileAccess _access        = FileAccess::None;
     FileFlags  _flags         = FileFlags::None;
     int        _error         = 0;

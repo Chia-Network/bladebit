@@ -61,15 +61,15 @@ struct DiskF1
             const uint32 threadCount      = self->JobCount();
             const uint32 id               = self->JobId();
             const uint32 kMinusKExtraBits = _k - kExtraBits;
-            const uint32 bucketBitShift   = _k - bblog2( _numBuckets );
+            const uint32 bucketBits       = bblog2( _numBuckets );
+            const uint32 bucketBitShift   = _k - bucketBits;
             
             const int32 entriesPerBlock  = kF1BlockSizeBits / (int32)_k;
             const int64 blocksPerThread  = CDiv( _entriesPerThread, entriesPerBlock );
 
             const size_t entrySizeBits   = Info::YBitSize + _k;    // y + x
 
-            // uint32* blocks  = _context.heapBuffer + ( (size_t)blocksPerThread * kF1BlockSize ) * id;
-            uint32* blocks  = _blocks + (size_t)blocksPerThread * (uint32)entriesPerBlock * id;
+            uint32* blocks  = _blocks + (size_t)blocksPerThread * (size_t)entriesPerBlock * id;
             uint64* entries = _entries;
 
             int64 tableEntryCount = 1ll << _k;
@@ -94,11 +94,13 @@ struct DiskF1
                 if( self->IsLastThread() )
                     entriesPerThread = bucketEntryCount - entriesPerThread * (int64)( threadCount - 1 );
 
-                const uint64 chachaBlock = x / kF1BlockSize;
+                const uint64 chachaBlock = x / entriesPerBlock;
                 const uint64 blockCount  = (uint64)CDivT( entriesPerThread, (int64)entriesPerBlock );
 
                 // ChaCha gen
                 chacha8_get_keystream( &chacha, chachaBlock, blockCount, (byte*)blocks );
+
+                const uint32* yBlocks = blocks + (x - chachaBlock * entriesPerBlock);
 
                 // Distribue to buckets
                 uint64 counts     [_numBuckets];
@@ -107,7 +109,7 @@ struct DiskF1
 
                 memset( counts, 0, sizeof( counts ) );
                 for( int64 i = 0; i < entriesPerThread; i++ )
-                    counts[Swap32( blocks[i] ) >> bucketBitShift] ++;
+                    counts[Swap32( yBlocks[i] ) >> bucketBitShift] ++;
 
                 self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
 
@@ -122,6 +124,8 @@ struct DiskF1
                     for( uint32 i = 0; i < _numBuckets; i++ )
                         totalCounts[i] *= entrySizeBits;
                     
+                    _sharedTotalCounts = totalCounts;
+
                     bitWriter.BeginWriteBuckets( totalCounts );
                     self->ReleaseThreads();
                 }
@@ -135,23 +139,31 @@ struct DiskF1
 
                 for( int64 i = 0; i < entriesPerThread; i++ )
                 {
-                          uint64 y   = Swap32( blocks[i] );
+                          uint64 y   = Swap32( yBlocks[i] );
                     const uint32 dst = --pfxSum[y >> bucketBitShift];
 
                     // Store bit-compressed already
                     const uint64 xi = ( x + (uint64)i );
-                    y = ( ( y << kExtraBits ) | ( xi >> kMinusKExtraBits ) ) & yMask;
-                    entries[dst] = ( xi << yBits ) | y;
-                    // entries[dst] = ( y << kExtraBits ) | ( ( x + (uint64)i ) >> kMinusKExtraBits );
+
+                    // y = ( ( y << kExtraBits ) | ( xi >> kMinusKExtraBits ) ) & yMask;
+                    y = ( y << kExtraBits ) | ( xi >> kMinusKExtraBits );
+                    // if( y == 48940937727 ) BBDebugBreak();
+                    entries[dst] = y;
+                    // entries[dst] = ( xi << yBits ) | y;
                 }
                 
+                // self->SyncThreads();
 
                 // Bit-compress each bucket
+                uint64 bitsWritten = 0;
+
                 for( uint32 i = 0; i < _numBuckets; i++ )
                 {
-                    const uint64 offset = pfxSum[i];
+                    const uint64 offset    = pfxSum[i];
+                    const uint64 bitOffset = offset * entrySizeBits - bitsWritten;
+                    bitsWritten += _sharedTotalCounts[i];
 
-                    BitWriter writer = bitWriter.GetWriter( bucket, offset * 8 );
+                    BitWriter writer = bitWriter.GetWriter( i, bitOffset );
                     
                     const uint64* entry = entries + offset;
                     const uint64* end   = entry + counts[i];
@@ -170,11 +182,43 @@ struct DiskF1
                         entry++;
                     }
                 }
-                
-                self->SyncThreads();
 
+                // {
+                //     self->SyncThreads();
+                //     if( self->IsControlThread() )
+                //     {
+                //         const uint64* entry = entries;
+
+                //         for( uint32 b = 0; b < _numBuckets; b++ )
+                //         {
+                //             // const size_t offsetBits = bitWriter.RemainderBits( b );
+                //             BitWriter writer = bitWriter.GetWriter( b, 0 );
+                //             BitReader reader( writer.Fields(), totalCounts[b], writer.Position() );
+
+                //             const int64 bucketEntries = (int64)(totalCounts[b]/entrySizeBits);
+
+                //             for( int64 i = 0; i < bucketEntries; i++ )
+                //             {
+                //                 const auto y0 = entry[i];
+                //                 const auto y1 = reader.ReadBits64( entrySizeBits );
+
+                //                 ASSERT( y0 == y1 );
+                //             }
+                //             entry += bucketEntries;
+                //         }
+                //     }
+                //     self->SyncThreads();
+                // }
+
+                // Write to disk
                 if( self->IsControlThread() )
+                {
+                    self->LockThreads();
                     bitWriter.Submit();
+                    self->ReleaseThreads();
+                }
+                else
+                    self->WaitForRelease();
 
                 // Next bucket
                 tableEntryCount -= bucketEntryCount;
@@ -184,6 +228,14 @@ struct DiskF1
             if( self->IsControlThread() )
                 bitWriter.SubmitLeftOvers();
         });
+
+        // Ensure the left-over finish writing
+        {
+            Fence fence;
+            _context.ioQueue->SignalFence( fence );
+            _context.ioQueue->CommitCommands();
+            fence.Wait();
+        }
     }
 
 private:
@@ -194,4 +246,7 @@ private:
     uint64*          _entries;  // Work buffer for distributed bucket entries
     FileId           _fileId;
     BitBucketWriter<_numBuckets>  _bitWriter;
+
+    
+    const uint64*    _sharedTotalCounts = nullptr;
 };

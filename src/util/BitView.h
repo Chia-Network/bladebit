@@ -157,7 +157,9 @@ public:
         : _fields  ( fields   )
         , _capacity( capacity )
         , _position( startBitOffset )
-    {}
+    {
+        ASSERT( _position <= _capacity );
+    }
 
     //-----------------------------------------------------------
     inline BitWriter( const BitWriter& src )
@@ -211,6 +213,7 @@ public:
     //-----------------------------------------------------------
     inline void Write( const uint64 value, const uint32 bitCount )
     {
+        ASSERT( _capacity - _position >= bitCount );
         WriteBits64( _fields, _position, value, bitCount );
         _position += bitCount;
     }

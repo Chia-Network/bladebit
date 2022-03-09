@@ -86,8 +86,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     
     file._fd            = fd;
     file._blockSize     = (size_t)blockSize;
-    file._writePosition = 0;
-    file._readPosition  = 0;
+    file._position      = 0;
     file._access        = access;
     file._flags         = flags;
     file._error         = 0;
@@ -111,8 +110,7 @@ void FileStream::Close()
     #endif
 
     _fd            = -1;
-    _writePosition = 0;
-    _readPosition  = 0;
+    _position      = 0;
     _access        = FileAccess::None;
     _error         = 0;
     _blockSize     = 0;
@@ -160,7 +158,7 @@ ssize_t FileStream::Read( void* buffer, size_t size )
 
     const ssize_t sizeRead = read( _fd, buffer, size );
     if( sizeRead > 0 )
-        _readPosition += (size_t)sizeRead;
+        _position += (size_t)sizeRead;
     else
         _error = errno;
 
@@ -199,7 +197,7 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
     ssize_t written = write( _fd, buffer, size );
     
     if( written >= 0 )
-        _writePosition += (size_t)written;
+        _position += (size_t)written;
     else 
         _error = errno;
     
@@ -247,6 +245,7 @@ bool FileStream::Seek( int64 offset, SeekOrigin origin )
         return false;
     }
 
+    _position = (size_t)r;
     return true;
 }
 

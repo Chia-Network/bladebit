@@ -103,11 +103,16 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     fileSet.blockBuffers = nullptr;
     fileSet.options      = options;
 
+    const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable );
+    ASSERT( !isCachable || optsData );
+
+    const size_t cacheSize = isCachable ? optsData->cacheSize / bucketCount : 0;
+    byte* cache = isCachable ? (byte*)optsData->cache : nullptr;
+
     // #TODO: Try using a single file and opening multiple handles to that file as buckets...
     for( uint i = 0; i < bucketCount; i++ )
     {
         IStream* file = nullptr;
-        const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable );
         
         if( isCachable )
             file = new HybridStream();
@@ -132,10 +137,10 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 
         if( isCachable )
         {
-            ASSERT( optsData );
-            ASSERT( optsData->cache );
+            const size_t lastCache = i == bucketCount - 1 ? optsData->cacheSize - cacheSize * bucketCount : 0;
 
-            opened = static_cast<HybridStream*>( file )->Open( optsData->cache, optsData->cacheSize, pathBuffer, fileMode, FileAccess::ReadWrite, flags );
+            opened = static_cast<HybridStream*>( file )->Open( cache, cacheSize + lastCache, pathBuffer, fileMode, FileAccess::ReadWrite, flags );
+            cache += cacheSize;
         }
         else
             opened = static_cast<FileStream*>( file )->Open( pathBuffer, fileMode, FileAccess::ReadWrite, flags );
