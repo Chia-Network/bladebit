@@ -132,7 +132,8 @@
                 // "F1CompressToBits"
                 // "F1GenBucketized"
                 // "FxSort"
-                "FxDisk"
+                // "FxDisk"
+                "F1Disk"
             ]
         }
 

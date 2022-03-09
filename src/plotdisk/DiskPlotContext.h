@@ -62,6 +62,9 @@ struct DiskPlotContext
     size_t       cacheSize;         // Size of memory cache to reserve for IO (region in file that never gets written to disk).
     byte*        cache;
 
+    byte*        t1FsBlocks;        // Filesystem block-sized buffer for each bucket in temp1
+                                    // This is to facilitate writing aligned data
+
     // Write intervals are expressed in bytes
     uint32       numBuckets;
     size_t       f1WriteInterval;
@@ -86,7 +89,7 @@ struct DiskPlotContext
     const byte*  plotMemo;
     uint16       plotMemoSize;
 
-    uint32       bucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];
+    uint32       bucketCounts[(uint)TableId::_Count][BB_DP_MAX_BUCKET_COUNT];
     uint64       entryCounts [(uint)TableId::_Count];
 
     // Since back pointer table entries are not sorted along with y,
@@ -95,7 +98,7 @@ struct DiskPlotContext
     // were generated given an L table bucket.
     // This stores how many R entries were generated given an L table bucket,
     // including the cross-bucket entries.
-    uint32       ptrTableBucketCounts[(uint)TableId::_Count][BB_DP_BUCKET_COUNT];;
+    uint32       ptrTableBucketCounts[(uint)TableId::_Count][BB_DP_MAX_BUCKET_COUNT];
 
     // Pointers to tables in the plot file (byte offset to where it starts in the plot file)
     // Where:

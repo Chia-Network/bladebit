@@ -19,7 +19,8 @@ public:
         
         ASSERT( size > 0 );
         ASSERT( _size < _capacity ); 
-        ASSERT( _capacity - paddedSize >= size );
+        // ASSERT( _capacity - paddedSize >= size );
+        FatalIf( !(_capacity - paddedSize >= size), "Allocation buffer overrun." );
 
         void* ptr = reinterpret_cast<void*>( _buffer + paddedSize );
         _size = paddedSize + size;
@@ -44,9 +45,38 @@ public:
         return AllocT<T>( allocSize, alignment );
     }
 
+    //-----------------------------------------------------------
+    inline byte* Buffer() const
+    {
+        return _buffer;
+    }
+
+    //-----------------------------------------------------------
+    inline size_t Capacity() const
+    {
+        return _capacity;
+    }
+
+    //-----------------------------------------------------------
+    inline size_t Size() const
+    {
+        return _size;
+    }
+
+    //-----------------------------------------------------------
+    inline size_t Remainder() const
+    {
+        return _capacity - _size;
+    }
+
+    //-----------------------------------------------------------
+    inline byte* Top() const
+    {
+        return _buffer + _size;
+    }
 
 private:
     byte*  _buffer;
-    size_t _capacity;
-    size_t _size = 0;
+    size_t _capacity;   // Stack capacity
+    size_t _size = 0;   // Current allocated size/stack size
 };

@@ -160,11 +160,53 @@ public:
     {}
 
     //-----------------------------------------------------------
+    inline BitWriter( const BitWriter& src )
+        : _fields  ( src._fields   )
+        , _capacity( src._capacity )
+        , _position( src._position )
+    {}
+
+    //-----------------------------------------------------------
+    inline BitWriter( BitWriter&& src )
+        : _fields  ( src._fields   )
+        , _capacity( src._capacity )
+        , _position( src._position )
+    {
+        src._fields   = nullptr;
+        src._capacity = 0;
+        src._position = 0;
+    }
+
+    //-----------------------------------------------------------
     inline BitWriter()
         : _fields  ( nullptr )
         , _capacity( 0 )
         , _position( 0 )
     {}
+
+     //-----------------------------------------------------------
+    inline BitWriter& operator=( const BitWriter& other ) noexcept
+    {
+        this->_fields   = other._fields  ;
+        this->_capacity = other._capacity;
+        this->_position = other._position;
+        
+        return *this;
+    }
+
+    //-----------------------------------------------------------
+    inline BitWriter& operator=( BitWriter&& other ) noexcept
+    {
+        this->_fields   = other._fields  ;
+        this->_capacity = other._capacity;
+        this->_position = other._position;
+        
+        other._fields   = nullptr;
+        other._capacity = 0;
+        other._position = 0;
+        
+        return *this;
+    }
 
     //-----------------------------------------------------------
     inline void Write( const uint64 value, const uint32 bitCount )
@@ -186,7 +228,7 @@ public:
         const uint32 bitsFree   = 64 - fieldBits;
 
         // Determine how many bits to write to this current field
-        const uint32 bitWrite  = std::min( bitCount, bitsFree );// & 63; // Mod 64
+        const uint32 bitWrite  = bitCount < bitsFree ? bitCount : bitsFree;// std::min( bitCount, bitsFree );// & 63; // Mod 64
         // const uint32 shift     = bitWrite & 63; // Mod 64
 
         // Clear out our new value region
@@ -209,6 +251,16 @@ public:
 
     //-----------------------------------------------------------
     inline uint64  Position() const { return _position; }
+
+    //-----------------------------------------------------------
+    inline uint64  Capacity() const { return _capacity; }
+
+    //-----------------------------------------------------------
+    inline void Bump( uint64 bitCount )
+    {
+        ASSERT( _position + bitCount >= _position );
+        _position += bitCount;
+    }
 
     /*
     Chiapos compatible method. Disabling this here for now since this makes it hard to use in a multi-threaded manner

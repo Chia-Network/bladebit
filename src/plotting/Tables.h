@@ -32,6 +32,7 @@ template<> struct SizeForMeta<NoMeta> { static constexpr size_t Value = 0; };
 template<TableId Table>
 struct TableMetaType;
 
+template<> struct TableMetaType<TableId::Table1> { using MetaIn = NoMeta; using MetaOut = uint32; };
 template<> struct TableMetaType<TableId::Table2> { using MetaIn = uint32; using MetaOut = uint64; };
 template<> struct TableMetaType<TableId::Table3> { using MetaIn = uint64; using MetaOut = Meta4;  };
 template<> struct TableMetaType<TableId::Table4> { using MetaIn = Meta4;  using MetaOut = Meta4;  };

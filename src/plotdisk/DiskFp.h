@@ -6,17 +6,6 @@
 #include "util/BitView.h"
 #include "DiskPlotInfo.h"
 
-template<uint32 _numBuckets>
-class IOBitWriter
-{
-    uint64*          _buffers;
-    size_t           _size;                   // Size per buffer 
-    uint32           _count;                  // How many buffers we have. Must have least 2 buffers
-    uint32           _curBuffer         = 0;
-    uint64           _remainderField    = 0;
-    uint32           _remainderBitCount = 0;
-    DiskBufferQueue* _queue;
-};
 
 template<TableId table, uint32 _numBuckets>
 class DiskFp
