@@ -71,7 +71,7 @@ TEST_CASE( "F1Disk", "[f1]" )
 
     Log::Line( "Loading reference Y table." );
     uint64 refCount = 1ull << _K;
-    uint64* referenceY = LoadReferenceTable<uint64>( "/mnt/p5510a/reference/t1.y.tmp", refCount );
+    const uint64* referenceY = LoadReferenceTable<uint64>( "/mnt/p5510a/reference/t1.y.tmp", refCount );
     ASSERT( refCount == 1ull << _K );
 
     Log::Line( "Loading our Y values" );
@@ -109,19 +109,21 @@ TEST_CASE( "F1Disk", "[f1]" )
             fence.Wait( bucket+1 );
     
             // Unpack values and add bucket part
-            // const uint64 bucketMask = bucket << yBits;
-            const uint64 mask = ( 1ull << ( _K + kExtraBits ) ) - 1;
+            const uint64 bucketMask = bucket << yBits;
             BitReader reader(  yBucket, readBits );
-            // for( uint64 i = 0; i < bucketEntries; i++ )
-            //     yReader[i] = bucketMask | ( reader.ReadBits64( entrySize ) & yMask );
+            
             for( uint64 i = 0; i < bucketEntries; i++ )
-            {
-                yReader[i] = reader.ReadBits64( entrySize ) & mask;
-                ASSERT( yReader[i] != 0 );
-            }
+                yReader[i] = bucketMask | ( reader.ReadBits64( entrySize ) & yMask );
+
+            // const uint64 mask = ( 1ull << ( _K + kExtraBits ) ) - 1;
+            // for( uint64 i = 0; i < bucketEntries; i++ )
+            // {
+            //     yReader[i] = reader.ReadBits64( entrySize ) & mask;
+            //     ASSERT( yReader[i] != 0 );
+            // }
 
             // Sort Y
-            RadixSort256::Sort<BB_DP_MAX_JOBS, uint64>( pool, yReader, yBucket, bucketEntries );
+            RadixSort256::Sort<BB_DP_MAX_JOBS, uint64, 5>( pool, yReader, yBucket, bucketEntries );
 
             yReader += bucketEntries;
         }
@@ -132,7 +134,7 @@ TEST_CASE( "F1Disk", "[f1]" )
     Log::Line( "Validating entries" );
     for( uint64 i = 0; i < refCount; i++ )
     {
-        ASSERT( referenceY[i] == yEntries[i] );
+        ENSURE( referenceY[i] == yEntries[i] );
     }
 
     Log::Line( "Success" );

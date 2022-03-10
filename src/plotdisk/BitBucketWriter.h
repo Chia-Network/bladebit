@@ -12,36 +12,44 @@ class BitBucketWriter
         byte*  buffer;
     };
 
-    DiskBufferQueue& _queue;
-    uint64*          _remainderFields  [_numBuckets];   // Left-over block buffers
+    DiskBufferQueue* _queue                          = nullptr;
+    uint64*          _remainderFields  [_numBuckets] = { nullptr };   // Left-over block buffers
     uint64           _remainderBitCount[_numBuckets] = { 0 };
-    // BitWriter        _writers          [_numBuckets];
     BitBucket        _buckets          [_numBuckets] = { 0 };
-    size_t           _bitCounts        [_numBuckets];
-    FileId           _fileId;
+    size_t           _bitCounts        [_numBuckets] = { 0 };
+    FileId           _fileId                         = FileId::None;
 
 public:
 
+    //-----------------------------------------------------------   
+    inline BitBucketWriter()
+    {}
+
     //-----------------------------------------------------------
     inline BitBucketWriter( DiskBufferQueue& queue, const FileId fileId, byte* blockBuffers )
-        : _queue       ( queue  )
+        : _queue       ( &queue )
         , _fileId      ( fileId )
     {
-        const size_t fsBlockSize = _queue.BlockSize( _fileId );
-        ASSERT( fsBlockSize > 0 );
-
-        for( uint32 i = 0; i < _numBuckets; i++ )
-        {
-            _remainderFields[i]  = (uint64*)blockBuffers;
-            *_remainderFields[i] = 0;
-            blockBuffers += fsBlockSize;
-        }
+        SetBlockBuffers( blockBuffers );
     }
+
+    //-----------------------------------------------------------
+    inline BitBucketWriter( const BitBucketWriter<_numBuckets>& other )
+    {
+        memcpy( this, &other, sizeof( other ) );
+    }
+
+    //-----------------------------------------------------------
+    // inline BitBucketWriter( BitBucketWriter<_numBuckets>&& other )
+    // {
+    //     memcpy( this, &other, sizeof( other ) );
+    //     memset( *other, 0, sizeof( other ));
+    // }
 
     //-----------------------------------------------------------
     inline void BeginWriteBuckets( const uint64 bucketBitSizes[_numBuckets] )
     {
-        const size_t fsBlockSize     = _queue.BlockSize( _fileId );
+        const size_t fsBlockSize     = _queue->BlockSize( _fileId );
         const size_t fsBlockSizeBits = fsBlockSize * 8;
               size_t allocSize       = 0;
 
@@ -50,7 +58,7 @@ public:
         for( uint32 i = 0; i < _numBuckets; i++ )
             allocSize += CDiv( bucketBitSizes[i] + _remainderBitCount[i], fsBlockSizeBits ) * fsBlockSizeBits / 8;
 
-        byte* bucketBuffers = _queue.GetBuffer( allocSize, fsBlockSize, true );
+        byte* bucketBuffers = _queue->GetBuffer( allocSize, fsBlockSize, true );
 
         // Initialize our BitWriters
         byte* fields = bucketBuffers;
@@ -79,7 +87,7 @@ public:
     //-----------------------------------------------------------
     inline void Submit()
     {
-        const size_t fsBlockSize     = _queue.BlockSize( _fileId );
+        const size_t fsBlockSize     = _queue->BlockSize( _fileId );
         const size_t fsBlockSizeBits = fsBlockSize * 8;
 
         // Save any overflow bits
@@ -103,27 +111,27 @@ public:
             }
 
             if( bytesToWrite )
-                _queue.WriteFile( _fileId, i, bucket.buffer, bytesToWrite );
+                _queue->WriteFile( _fileId, i, bucket.buffer, bytesToWrite );
 
             _remainderBitCount[i] = remainderBits;
         }
 
-        _queue.ReleaseBuffer( _buckets[0].buffer );
-        _queue.CommitCommands();
+        _queue->ReleaseBuffer( _buckets[0].buffer );
+        _queue->CommitCommands();
     }
 
     //-----------------------------------------------------------
     inline void SubmitLeftOvers()
     {
-        const size_t fsBlockSize = _queue.BlockSize( _fileId );
+        const size_t fsBlockSize = _queue->BlockSize( _fileId );
         ASSERT( fsBlockSize );
 
         for( uint32 i = 0; i < _numBuckets; i++ )
         {
             if( _remainderBitCount[i] > 0 )
-                _queue.WriteFile( _fileId, i, _remainderFields[i], fsBlockSize );
+                _queue->WriteFile( _fileId, i, _remainderFields[i], fsBlockSize );
         }
-        _queue.CommitCommands();
+        _queue->CommitCommands();
     }
 
     //-----------------------------------------------------------
@@ -135,11 +143,26 @@ public:
         return BitWriter( (uint64*)b.buffer, b.count, _remainderBitCount[bucket] + bitOffset );
     }
 
-
     //-----------------------------------------------------------
     inline size_t RemainderBits( const uint32 bucket )
     {
         ASSERT( bucket < _numBuckets );
         return _remainderBitCount[bucket];
+    }
+
+private:
+
+    //-----------------------------------------------------------
+    inline void SetBlockBuffers( byte* blockBuffers )
+    {
+        const size_t fsBlockSize = _queue->BlockSize( _fileId );
+        ASSERT( fsBlockSize > 0 );
+
+        for( uint32 i = 0; i < _numBuckets; i++ )
+        {
+            _remainderFields[i]  = (uint64*)blockBuffers;
+            *_remainderFields[i] = 0;
+            blockBuffers += fsBlockSize;
+        }
     }
 };

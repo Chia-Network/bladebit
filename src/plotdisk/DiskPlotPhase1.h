@@ -16,156 +16,33 @@ struct GroupInfo
     Pairs   pairs;
 };
 
-// Data covering the last 2 groups of a bucket.
-// This is to match and calculate fx for groups
-// that crossed the boundaries between 2 adjacent buckets.
-struct AdjacentBucketInfo
-{
-    uint32* y    ;
-    uint64* metaA;
-    uint64* metaB;
-    Pairs   pairs;
-    uint32  groupCounts[2];
-    uint32  groupOffset;        // Index in the previous table where the y
-                                // of the groups copied here starts.
-};
-
-
 class DiskPlotPhase1
 {   
-    // Fence Ids used when performing forward propagation
-    struct FPFenceId 
-    {
-        enum 
-        {
-            Start = 0,
-            
-            YLoaded,
-            SortKeyLoaded,
-            MetaALoaded,
-            MetaBLoaded
-        };
-    };
-
-    struct Bucket
-    {
-        uint32* y0     ;
-        uint32* y1     ;
-        uint32* sortKey0;
-        uint32* sortKey1;
-        uint64* map    ;
-        uint64* metaA0 ; 
-        uint64* metaA1 ;
-        uint64* metaB0 ;
-        uint64* metaB1 ;
-        Pairs   pairs  ;
-        uint32* groupBoundaries;
-
-        byte*   bucketId;   // Used during fx gen
-
-        uint32* yTmp;
-        uint64* metaATmp;
-        uint64* metaBTmp;
-
-        FileId  yFileId;
-        FileId  metaAFileId;
-        FileId  metaBFileId;
-
-        uint32  tableEntryCount;    // Running entry count for the table being generated (accross all buckets)
-
-        Fence   fence;              // Used by us, signalled by the IO thread
-        Fence   ioFence;            // Signalled by us, used by the IO thread
-        Fence   mapFence;           // Fence used for writing the lookup map generated from sort keys. With table 2, it is used for writing X back to disk.
-        Fence   backPointersFence;  // Fence used for writing table backpointers
-
-        // Used for overflows
-        // OverflowBuffer yOverflow;
-        // OverflowBuffer metaAOverflow;
-        // OverflowBuffer metaBOverflow;
-
-        AdjacentBucketInfo crossBucketInfo;
-    };
-
 public:
     DiskPlotPhase1( DiskPlotContext& cx );
     void Run();
 
 private:
     void GenF1();
+    
+    template <uint32 _numBuckets>
+    void GenF1Buckets();
 
-    void AllocateFPBuffers( Bucket& bucket );
-
-    void SortAndCompressTable7();
-
-    // Write the sort key as a reverse lookup map (map target (sorted) position to original position)
-    void WriteReverseMap( TableId tableId, const uint32 bucketIdx, const uint32 count, 
-                          const uint32* sortedLookupIndices, uint64* map, Fence* writeFence, bool releaseIndices );
-
+    // Run forward propagations portion
     void ForwardPropagate();
 
     template<TableId tableId>
     void ForwardPropagateTable();
 
-    template<TableId tableId>
-    uint32 ForwardPropagateBucket( uint32 bucketIdx, Bucket& bucket, uint32 entryCount );
+    template<uint32 _numBuckets, TableId tableId>
+    uint64 ForwardPropagateBucket( uint32 bucket );
 
-    uint32 MatchBucket( TableId table, uint32 bucketIdx, Bucket& bucket, uint32 entryCount, GroupInfo groupInfos[BB_MAX_JOBS] );
-
-    void WritePendingBackPointers( const Pairs& pairs, TableId table, uint32 bucketIdx, uint32 entryCount );
-
-    uint32 ScanGroups( uint bucketIdx, const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] );
-
-    uint32 Match( uint bucketIdx, uint maxPairsPerThread, const uint32* yBuffer, GroupInfo groupInfos[BB_MAX_JOBS], Pairs dstPairs );
-
-    // uint32 MatchAdjoiningBucketGroups( uint32* yTmp, uint32* curY, Pairs pairs, const uint32 prevGroupsCounts[2],
-    //                                    uint32 curBucketLength, uint32 maxPairs, uint32 prevBucket, uint32 curBucket );
-
-    template<TableId tableId>
-    uint32 ProcessAdjoiningBuckets( 
-        uint32 bucketIdx, Bucket& bucket, uint32 entryCount,
-        const uint32* curY, const uint64* curMetaA, const uint64* curMetaB
-    );
-
-    template<TableId tableId, typename TMetaA, typename TMetaB>
-    uint32 ProcessCrossBucketGroups(
-        const uint32* prevBucketY,
-        const TMetaA* prevBucketMetaA,
-        const TMetaB* prevBucketMetaB,
-        const uint32* curBucketY,
-        const TMetaA* curBucketMetaA,
-        const TMetaB* curBucketMetaB,
-        uint32*       tmpY,
-        TMetaA*       tmpMetaA,
-        TMetaB*       tmpMetaB,
-        uint32*       outY,
-        uint64*       outMetaA,
-        uint64*       outMetaB,
-        uint32        prevBucketGroupCount,
-        uint32        curBucketEntryCount,
-        uint32        prevBucketIndex,
-        uint32        curBucketIndex,
-        Pairs         pairs,
-        uint32        maxPairs,
-        uint32        sortKeyOffset,
-        uint32&       outCurGroupCount,
-        uint32        pairsOffsetL,
-        uint32        pairsOffsetR
-    );
-
-  
-    void GetWriteFileIdsForBucket( TableId table, FileId& outYId, 
-                                   FileId& outMetaAId, FileId& outMetaBId );
-
-
+    // Write C tables
+    void SortAndCompressTable7();
 
 private:
     DiskPlotContext& _cx;
     DiskBufferQueue* _diskQueue;
-
-//     uint32 _bucketCounts[BB_DP_BUCKET_COUNT];
-    uint32 _maxBucketCount;
-
-    Bucket* _bucket;
 };
 
 

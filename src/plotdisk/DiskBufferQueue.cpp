@@ -417,21 +417,51 @@ byte* DiskBufferQueue::GetBufferForId( const FileId fileId, const uint32 bucket,
 //-----------------------------------------------------------
 void DiskBufferQueue::CommandMain()
 {
+    using namespace std::chrono;
+    
+    const seconds  SPIN_MAX_SECS( 1 );
+    const Duration SPIN_MAX = duration_cast<Duration>( SPIN_MAX_SECS );
+    
     const int CMD_BUF_SIZE = 64;
     Command commands[CMD_BUF_SIZE];
+
+    bool spun = false;
 
     for( ;; )
     {
         _cmdReadySignal.Wait();
 
-        int cmdCount;
-        while( ( ( cmdCount = _commands.Dequeue( commands, CMD_BUF_SIZE ) ) ) )
+        DEQUEUE:
         {
-            _cmdConsumedSignal.Signal();
+            int cmdCount;
+            while( ( ( cmdCount = _commands.Dequeue( commands, CMD_BUF_SIZE ) ) ) )
+            {
+                _cmdConsumedSignal.Signal();
 
-            for( int i = 0; i < cmdCount; i++ )
-                ExecuteCommand( commands[i] );
+                for( int i = 0; i < cmdCount; i++ )
+                    ExecuteCommand( commands[i] );
+
+                spun = false;
+            }
         }
+
+        // Spin for a bit before suspending to allow for more commands to come in
+        if( !spun )
+        {
+            spun = true;
+
+            const auto spinTimer = TimerBegin();
+            for( ;; )
+            {
+                const auto now = TimerBegin();
+                if( ( now - spinTimer ) >= SPIN_MAX )
+                {
+                    goto DEQUEUE;
+                }
+            }
+        }
+
+        spun = false;
     }
 }
 

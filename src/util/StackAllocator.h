@@ -1,7 +1,59 @@
 #pragma once
 
+class IAllocator
+{
+public:
+    virtual ~IAllocator() {}
+
+    virtual void* Alloc( const size_t size, const size_t alignment ) = 0;
+
+    //-----------------------------------------------------------
+    template<typename T>
+    inline T* AllocT( const size_t size, size_t alignment = alignof( T ) )
+    {
+        return reinterpret_cast<T*>( Alloc( size, alignment ) );
+    }
+
+    //-----------------------------------------------------------
+    template<typename T>
+    inline T* CAlloc( const size_t count, size_t alignment = alignof( T ) )
+    {
+        const size_t allocSize = sizeof( T ) * count;
+        ASSERT( allocSize > count );
+        
+        return AllocT<T>( allocSize, alignment );
+    }
+
+    //-----------------------------------------------------------
+    inline void* CAlloc( const size_t count, const size_t size, const size_t alignment )
+    {
+        const size_t paddedSize = RoundUpToNextBoundaryT( size, alignment );
+        
+        return Alloc( paddedSize * count, alignment );
+    }
+};
+
+class DummyAllocator : public IAllocator
+{
+public:
+    //-----------------------------------------------------------
+    void* Alloc( const size_t size, const size_t alignment ) override
+    {
+        const size_t paddedSize = RoundUpToNextBoundaryT( _size, alignment );
+        _size = paddedSize + size;
+        return nullptr;
+    }
+
+    //-----------------------------------------------------------
+    inline size_t Size() const { return _size; }
+
+private:
+    size_t _size = 0;
+};
+
+
 // Fixed-capacity stack allocator
-class StackAllocator
+class StackAllocator : public IAllocator
 {
 public:
 
@@ -12,7 +64,7 @@ public:
     {}
 
     //-----------------------------------------------------------
-    inline void* Alloc( size_t size, size_t alignment )
+    inline void* Alloc( const size_t size, const size_t alignment ) override
     {
         // Start address must be aligned to the specified alignment
         const size_t paddedSize = RoundUpToNextBoundaryT( _size, alignment );
@@ -26,23 +78,6 @@ public:
         _size = paddedSize + size;
 
         return ptr;
-    }
-
-    //-----------------------------------------------------------
-    template<typename T>
-    inline T* AllocT( size_t size, size_t alignment = alignof( T ) )
-    {
-        return reinterpret_cast<T*>( Alloc( size, alignment ) );
-    }
-
-    //-----------------------------------------------------------
-    template<typename T>
-    inline T* CAlloc( size_t count, size_t alignment = alignof( T ) )
-    {
-        const size_t allocSize = sizeof( T ) * count;
-        ASSERT( allocSize > count );
-        
-        return AllocT<T>( allocSize, alignment );
     }
 
     //-----------------------------------------------------------

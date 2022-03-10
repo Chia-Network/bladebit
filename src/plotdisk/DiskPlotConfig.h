@@ -22,7 +22,7 @@
 #define BB_DP_CROSS_BUCKET_MAX_ENTRIES 1024
 
 // #TODO: Increase this, or make the disk queue dynamic. Might need it for buckets = 1024
-#define BB_DISK_QUEUE_MAX_CMDS 4096 //1024
+#define BB_DISK_QUEUE_MAX_CMDS (4096*8) //1024
 
 // Use at 256 buckets for line points so that
 // we can save 1 iteration when sorting it.

@@ -3,9 +3,9 @@
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
 #include "plotdisk/DiskPlotContext.h"
-#include "util/BitView.h"
 #include "DiskPlotInfo.h"
-
+#include "BitBucketWriter.h"
+#include "util/StackAllocator.h"
 
 template<TableId table, uint32 _numBuckets>
 class DiskFp
@@ -25,9 +25,11 @@ public:
     //-----------------------------------------------------------
     inline DiskFp( DiskPlotContext& context )
         : _context( context )
+        , _pool   ( *context.threadPool )
         , _ioQueue( *context.ioQueue )
         , _inFxId ( FileId::FX0 )
         , _outFxId( FileId::FX1 )
+        , _threadCount( context.fpThreadCount )
         // , _bucket ( 0 )
     {
 
@@ -37,6 +39,67 @@ public:
     inline void Run()
     {
 
+    }
+
+    //-----------------------------------------------------------
+    inline void AllocateBuffers( IAllocator& alloc, const size_t fxBlockSize, const size_t pairBlockSize )
+    {
+        using info = DiskPlotInfo<TableId::Table4, _numBuckets>;
+        
+        const uint32 bucketBits    = bblog2( _numBuckets );
+        const size_t maxEntries    = info::MaxBucketEntries;
+        const size_t entrySizeBits = info::EntrySizePackedBits;
+        
+        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize );
+
+        // Working buffers
+        _y[0]    = alloc.CAlloc<uint64>( maxEntries );
+        _y[1]    = alloc.CAlloc<uint64>( maxEntries );
+        
+        _map[0]  = alloc.CAlloc<uint64>( maxEntries );
+
+        _meta[0] = alloc.CAlloc<TMeta>( maxEntries );
+        _meta[1] = alloc.CAlloc<TMeta>( maxEntries );
+        
+        _pair[0] = alloc.CAlloc<Pair> ( maxEntries );
+        
+        // IO buffers
+        const size_t pairBits    = _k + 1 - bucketBits + 9;
+        const size_t mapBits     = _k + 1 - bucketBits + _k + 1;
+
+        const size_t fxWriteSize   = (size_t)_numBuckets * perBucketEntriesSize;
+        const size_t pairWriteSize = CDiv( maxEntries * pairBits, 8 );
+        const size_t mapWriteSize  = CDiv( maxEntries * mapBits, 8 );
+
+        // #TODO: Set actual buffers
+        _fxRead [0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
+        _fxRead [1]   = alloc.Alloc( fxWriteSize, fxBlockSize );
+        _fxWrite[0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
+        _fxWrite[1]   = alloc.Alloc( fxWriteSize, fxBlockSize );
+
+        _pairWrite[0] = alloc.Alloc( pairWriteSize, pairBlockSize );
+        _pairWrite[1] = alloc.Alloc( pairWriteSize, pairBlockSize );
+
+        _mapWrite[0]  = alloc.Alloc( mapWriteSize, pairBlockSize );
+        _mapWrite[1]  = alloc.Alloc( mapWriteSize, pairBlockSize );
+
+        // Block bit buffers
+        alloc.CAlloc( fxBlockSize  , fxBlockSize  , _numBuckets );  // Fx write
+        alloc.CAlloc( pairBlockSize, pairBlockSize, _numBuckets );  // Pair write
+        alloc.CAlloc( pairBlockSize, pairBlockSize, _numBuckets );  // Map write
+    }
+
+    //-----------------------------------------------------------
+    inline static size_t GetRequiredHeapSize( const size_t fxBlockSize, const size_t pairBlockSize )
+    {
+        DiskPlotContext cx = { 0 };
+        DiskFp<TableId::Table4, _numBuckets> fp( cx );
+
+        DummyAllocator alloc;
+        fp.AllocateBuffers( alloc, fxBlockSize, pairBlockSize );
+        
+        return alloc.Size();
     }
 
 private:
@@ -112,7 +175,7 @@ private:
     //-----------------------------------------------------------
     inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, uint64* outY, uint64* outMap, TMeta* outMeta )
     {
-        AnonMTJob::Run( _pool, _fxThreadCount, [=]( AnonMTJob* self ) {
+        AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
 
             constexpr uint32 metaMultipler = InInfo::MetaMultiplier;
 
@@ -151,7 +214,7 @@ private:
     //-----------------------------------------------------------
     inline void SortEntries( Entry* entries, Entry* tmpEntries, const int64 entryCount )
     {
-        AnonPrefixSumJob<uint32>::Run( _pool, _fxThreadCount, [=]( AnonPrefixSumJob<uint32>* self ) {
+        AnonPrefixSumJob<uint32>::Run( _pool, _threadCount, [=]( AnonPrefixSumJob<uint32>* self ) {
             
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
@@ -224,7 +287,7 @@ private:
     //-----------------------------------------------------------
     inline void ExpandEntries( const void* packedEntries, const uint64 inputBitOffset, Entry* expendedEntries, const int64 entryCount )
     {
-        AnonMTJob::Run( _pool, _fxThreadCount, [=]( AnonMTJob* self ) {
+        AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
             
             constexpr uint32 packedEntrySize = InInfo::EntrySizePackedBits;
 
@@ -312,19 +375,27 @@ private:
     FileId           _inFxId     ;
     FileId           _outFxId    ;
     byte**           _readBuffers;
-    Fence            _readFence ;
-    Fence            _writeFence;
+    Fence            _readFence  ;
+    Fence            _writeFence ;
+    Fence            _mapWriteFence;
+    Fence            _lpWriteFence ;
 
     Duration         _readWaitTime = Duration::zero();
 
     // Working buffers, all of them have enough to hold  entries for a single bucket + cross bucket entries
-    Entry*  _entries;   // Unpacked entries
-    uint64* _y   [2];
-    uint64* _map [1];
-    TMeta*  _meta[2];
-    Pair*   _pair[2];
+    Entry*  _entries = nullptr;   // Unpacked entries
+    uint64* _y   [2] = { 0 };
+    uint64* _map [1] = { 0 };
+    TMeta*  _meta[2] = { 0 };
+    Pair*   _pair[1] = { 0 };
 
-    uint32  _fxThreadCount = 1;
+    void*   _fxRead [2] = { 0 };
+    void*   _fxWrite[2] = { 0 };
+
+    void*   _pairWrite[2] = { 0 };
+    void*   _mapWrite [2] = { 0 };
+
+    uint32  _threadCount;
     // For simplicity when doing mult-threaded bucket processing
     // int64            _bucketEntryCount;
     // int64            _lengths[BB_DP_MAX_JOBS];

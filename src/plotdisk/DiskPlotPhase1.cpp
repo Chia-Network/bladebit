@@ -1,82 +1,20 @@
 #include "DiskPlotPhase1.h"
 #include "util/Util.h"
 #include "util/Log.h"
-#include "algorithm/RadixSort.h"
-#include "pos/chacha8.h"
 #include "b3/blake3.h"
+#include "algorithm/RadixSort.h"
 #include "plotting/GenSortKey.h"
-#include "jobs/F1GenBucketized.h"
-#include "jobs/FxGenBucketized.h"
 #include "jobs/LookupMapJob.h"
 #include "plotting/TableWriter.h"
 #include "util/StackAllocator.h"
+#include "DiskF1.h"
 
 // Test
-#include "io/FileStream.h"
-#include "SysHost.h"
 #include "DiskPlotDebug.h"
 
 #if _DEBUG
     #include "../plotmem/DbgHelper.h"
 #endif
-
-// #TODO: Move there outside of here into a header
-//        so that we can perform tests to determine best IO intervals
-
-uint32 MatchEntries( const uint32* yBuffer, const uint32* groupBoundaries, Pairs pairs,
-                     const uint32  groupCount, const uint32 startIndex, const uint32 maxPairs,
-                     const uint64  bucketL, const uint64 bucketR );
-
-FileId GetBackPointersFileIdForTable( TableId table );
-
-//-----------------------------------------------------------
-void DbgValidateFxBucket( const uint64 bucketIdx, uint32* entries, const uint64 entryCount )
-{
-    uint64* refEntries    = nullptr;
-    uint64  refEntryCount = 0;
-
-    {
-        const char* refFilePath = "/mnt/p5510a/reference/t2.y";
-        FileStream file;
-
-        FatalIf( !file.Open( refFilePath, FileMode::Open, FileAccess::Read ), "Failed to open reference table file." );
-
-        file.Read( &refEntryCount, sizeof( refEntryCount ) );
-        file.Seek( (int64)file.BlockSize(), SeekOrigin::Begin );
-        ASSERT( refEntryCount <= 1ull << _K );
-
-        refEntries = bbcvirtalloc<uint64>( refEntryCount );
-
-        size_t sizeToRead = sizeof( uint64 ) * refEntryCount;
-
-        byte* dst = (byte*)refEntries;
-        while( sizeToRead )
-        {
-            ssize_t sizeRead = file.Read( dst, sizeToRead );
-            FatalIf( sizeRead < 1, "Read failed." );
-
-            dst += sizeRead;
-            sizeToRead -= (size_t)sizeRead;
-        }
-    }
-
-    uint64 bucket = bucketIdx << 32;
-
-    const uint64* refReader = refEntries;
-
-    for( uint64 i = 0; i < entryCount; i++ )
-    {
-        const uint64 y    = bucket | entries[i];
-        const uint64 refY = *refReader++;
-
-        if( y != refY )
-            Fatal( "Invalid y value @ %llu", i );
-    }
-
-    Log::Line( "Bucket verified successfully." );
-}
-
-
 
 //-----------------------------------------------------------
 DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
@@ -84,38 +22,6 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     , _diskQueue( cx.ioQueue )
 {
     ASSERT( cx.tmpPath );
-
-    // Use the whole allocation for F1
-    byte*  heap     = cx.heapBuffer;
-    size_t heapSize = cx.heapSize + cx.ioHeapSize;
-
-    _diskQueue->ResetHeap( heapSize, heap );
-
-    _diskQueue->InitFileSet( FileId::FX0, "fx_0", BB_DP_BUCKET_COUNT );
-    _diskQueue->InitFileSet( FileId::FX1, "fx_1", BB_DP_BUCKET_COUNT );
-    
-    // _diskQueue->InitFileSet( FileId::T2              , "table_1"      , 1                  );
-    // _diskQueue->InitFileSet( FileId::T2              , "table_2"      , 1                  );
-    // _diskQueue->InitFileSet( FileId::T3              , "table_3"      , 1                  );
-    // _diskQueue->InitFileSet( FileId::T4              , "table_4"      , 1                  );
-    // _diskQueue->InitFileSet( FileId::T5              , "table_5"      , 1                  );
-    // _diskQueue->InitFileSet( FileId::T6              , "table_6"      , 1                  );
-    // _diskQueue->InitFileSet( FileId::T7              , "table_7"      , 1                  );
-
-    // _diskQueue->InitFileSet( FileId::F7              , "f7"           , BB_DP_BUCKET_COUNT );
-
-    // _diskQueue->InitFileSet( FileId::SORT_KEY2       , "table_2_key"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::SORT_KEY3       , "table_3_key"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::SORT_KEY4       , "table_4_key"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::SORT_KEY5       , "table_5_key"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::SORT_KEY6       , "table_6_key"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::SORT_KEY7       , "table_7_key"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::MAP2            , "table_2_map"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::MAP3            , "table_3_map"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::MAP4            , "table_4_map"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::MAP5            , "table_5_map"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::MAP6            , "table_6_map"  , BB_DP_BUCKET_COUNT );
-    // _diskQueue->InitFileSet( FileId::MAP7            , "table_7_map"  , BB_DP_BUCKET_COUNT );
 }
 
 //-----------------------------------------------------------
@@ -177,6 +83,9 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
+    _diskQueue->InitFileSet( FileId::FX0, "fx_0", _cx.numBuckets );
+    _diskQueue->InitFileSet( FileId::FX1, "fx_1", _cx.numBuckets );
+
 #if !BB_DP_DBG_READ_EXISTING_F1
     GenF1();
 #else
@@ -226,7 +135,7 @@ void DiskPlotPhase1::Run()
 
     // Re-create the disk queue with the io buffer only (remove working heap section)
     exit( 0 );
-    _diskQueue->ResetHeap( cx.ioHeapSize, cx.ioHeap );
+    // _diskQueue->ResetHeap( cx.heapSize, cx.ioHeap );
 
     // ForwardPropagate();
 
@@ -281,7 +190,6 @@ void DiskPlotPhase1::Run()
             TicksToSeconds( _cx.readWaitTime ), TicksToSeconds( _cx.writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
 }
 
-
 ///
 /// F1 Generation
 ///
@@ -294,18 +202,29 @@ void DiskPlotPhase1::GenF1()
     Log::Line( "Generating f1..." );
     auto timer = TimerBegin();
     
-    F1GenBucketized::GenerateF1Disk( 
-        cx.plotId, pool, 
-        cx.f1ThreadCount, 
-        *_diskQueue,
-        cx.bucketCounts[0],
-        cx.numBuckets,
-        FileId::FX1 );
-    
+    switch( cx.numBuckets )
+    {
+        case 128 : GenF1Buckets<128 >(); break;
+        case 256 : GenF1Buckets<256 >(); break;
+        case 512 : GenF1Buckets<512 >(); break;
+        case 1024: GenF1Buckets<1024>(); break;
+    default:
+        ASSERT( 0 );
+        break;
+    }
+
     _cx.entryCounts[0] = 1ull << _K;
     
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
+}
+
+//-----------------------------------------------------------
+template <uint32 _numBuckets>
+void DiskPlotPhase1::GenF1Buckets()
+{
+    DiskF1<_numBuckets> f1( _cx, FileId::FX0 );
+    f1.GenF1();
 }
 
 /*
