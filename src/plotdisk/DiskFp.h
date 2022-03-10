@@ -109,7 +109,7 @@ public:
         return alloc.Size();
     }
 
-private:
+// private:
     //-----------------------------------------------------------
     inline void FpTable()
     {
@@ -239,7 +239,7 @@ private:
         ASSERT( self );
         ASSERT( entries );
         ASSERT( tmpEntries );
-        ASSERT( entryCount > 0);
+        ASSERT( entryCount > 0 );
 
         constexpr uint Radix = 256;
 
@@ -313,7 +313,9 @@ private:
                                       Entry* expendedEntries, const int64 entryCount )
     {
         constexpr uint32 yBits           = InInfo::YBitSize;
+        // const     uint64 yMask           = ( 1ull << yBits ) - 1;
         constexpr uint32 mapBits         = table == TableId::Table2 ? _k : InInfo::MapBitSize;
+        // const     uint64 mapMask         = ( ( 1ull << mapBits) - 1 ) << yBits;
         constexpr uint32 metaMultipler   = InInfo::MetaMultiplier;
         constexpr uint32 packedEntrySize = InInfo::EntrySizePackedBits;
         
@@ -324,25 +326,34 @@ private:
         
         for( ; out < end; out++ )
         {
-            const uint64 y   = reader.ReadBits64( yBits   );
-            const uint64 map = reader.ReadBits64( mapBits );
-
-            out->ykey = y | ( map << yBits );
-
-            if constexpr ( metaMultipler == 2 )
+            if constexpr ( table == TableId::Table2 )
             {
-                out->meta = reader.ReadBits64( 64 );
+                // const uint64 y = reader.ReadBits64( yBits + mapBits );
+                // out->ykey = ( y & yMask ) | ( ( y & mapMask ) << yBits );
+                out->ykey = reader.ReadBits64( packedEntrySize );
             }
-            else if constexpr ( metaMultipler == 3 )
+            else
             {
-                // #TODO: Try aligning entries to 32-bits instead.
-                out->meta.m0 = reader.ReadBits64( 64 );
-                out->meta.m1 = reader.ReadBits64( 32 );
-            }
-            else if constexpr ( metaMultipler == 4 )
-            {
-                out->meta.m0 = reader.ReadBits64( 64 );
-                out->meta.m1 = reader.ReadBits64( 64 );
+                const uint64 y   = reader.ReadBits64( yBits   );
+                const uint64 map = reader.ReadBits64( mapBits );
+
+                out->ykey = y | ( map << yBits );
+
+                if constexpr ( metaMultipler == 2 )
+                {
+                    out->meta = reader.ReadBits64( 64 );
+                }
+                else if constexpr ( metaMultipler == 3 )
+                {
+                    // #TODO: Try aligning entries to 32-bits instead.
+                    out->meta.m0 = reader.ReadBits64( 64 );
+                    out->meta.m1 = reader.ReadBits64( 32 );
+                }
+                else if constexpr ( metaMultipler == 4 )
+                {
+                    out->meta.m0 = reader.ReadBits64( 64 );
+                    out->meta.m1 = reader.ReadBits64( 64 );
+                }
             }
         }
     }

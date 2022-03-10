@@ -17,13 +17,12 @@ struct DiskF1
     using Info = DiskPlotInfo<TableId::Table1, _numBuckets>;
     
     static constexpr uint32 _k = _K;
-    static constexpr int64  _entriesPerBucket = (int64)CDiv( 1ull << _k, _numBuckets );
+    static constexpr int64  _entriesPerBucket = (int64)(( 1ull << _k ) / _numBuckets );
 
     //-----------------------------------------------------------
     inline DiskF1( DiskPlotContext& context, const FileId fileId )
         : _context( context )
-        , _entriesPerThread( CDiv( _entriesPerBucket, (int32)context.f1ThreadCount ) )
-        , _bitWriter()
+        , _entriesPerThread( _entriesPerBucket / (int64)context.f1ThreadCount )
     {
         DiskBufferQueue& ioQueue = *context.ioQueue;
 
@@ -77,11 +76,10 @@ struct DiskF1
             const int32  entriesPerBlock  = kF1BlockSizeBits / (int32)_k;
             const size_t entrySizeBits    = Info::YBitSize + _k;    // y + x
 
-
             uint32* blocks  = _blocks[id];
             uint64* entries = _entries;
 
-            int64 tableEntryCount = 1ll << _k;
+            const int64 trailingEntries = ( 1ll << _k ) - _entriesPerBucket * _numBuckets;
             
             byte key[BB_PLOT_ID_LEN] = { 1 };
             memcpy( key + 1, _context.plotId, BB_PLOT_ID_LEN-1 );
@@ -89,22 +87,27 @@ struct DiskF1
             chacha8_ctx chacha;
             chacha8_keysetup( &chacha, key, 256, NULL );
 
-            uint64 nextX = 0;
-
             auto& bitWriter = _bitWriter;
 
             for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
             {
-                const int64 bucketEntryCount = std::min( _entriesPerBucket, tableEntryCount );
+                int64  entriesPerThread = _entriesPerThread;
+                uint64 x                = (uint64)_entriesPerBucket * bucket + (uint64)entriesPerThread * id;   // Esure this is set before we update entriesPerThread on the last job
 
-                int64  entriesPerThread = bucketEntryCount / (int64)threadCount;
-                uint64 x                = nextX + (uint64)entriesPerThread * id;   // Esure this is set before we update entriesPerThread on the last job
-
+                // Last thread grabs trailing entries
                 if( self->IsLastThread() )
-                    entriesPerThread = bucketEntryCount - entriesPerThread * (int64)( threadCount - 1 );
+                {
+                    entriesPerThread += _entriesPerBucket - entriesPerThread * (int64)threadCount;
+
+                    if( bucket + 1 == _numBuckets )
+                    {
+                        // #TODO: Spread across threads instead
+                        entriesPerThread += trailingEntries;
+                    }
+                }
 
                 const uint64 chachaBlock = x / entriesPerBlock;
-                const uint64 blockCount  = (uint64)CDivT( entriesPerThread, (int64)entriesPerBlock );
+                const uint64 blockCount  = ( x + entriesPerThread ) / entriesPerBlock - chachaBlock + 1;
 
                 // ChaCha gen
                 chacha8_get_keystream( &chacha, chachaBlock, blockCount, (byte*)blocks );
@@ -199,10 +202,6 @@ struct DiskF1
                 }
                 else
                     self->WaitForRelease();
-
-                // Next bucket
-                tableEntryCount -= bucketEntryCount;
-                nextX           += bucketEntryCount;
             }
 
             if( self->IsControlThread() )

@@ -29,7 +29,7 @@ TEST_CASE( "F1Disk", "[f1]" )
     context.heapBuffer    = bbvirtallocbounded<byte>( context.heapSize );
     context.cacheSize     = 64ull GB;
     context.cache         = bbvirtallocbounded<byte>( context.cacheSize );
-    context.f1ThreadCount = 32;
+    context.f1ThreadCount = 24;
 
     ThreadPool pool( SysHost::GetLogicalCPUCount() );
     context.threadPool    = &pool;
@@ -56,7 +56,7 @@ TEST_CASE( "F1Disk", "[f1]" )
     context.plotId = plotId;
 
     const uint32 buckets[] = { 128, 256, 512, 1024 };
-    for( uint32 i = 0; i < sizeof( buckets ) / sizeof( buckets[0] ); i++ )
+    for( uint32 i = 1; i < sizeof( buckets ) / sizeof( buckets[0] ); i++ )
     {
         uint32 b = buckets[i];
         context.numBuckets = b;
@@ -198,7 +198,21 @@ void LoadF1Buckets( DiskPlotContext& context, uint64* yEntries, const uint64* re
             
             BitReader reader( yBucket, readBits, offset * entrySize );
             for( uint64 i = offset; i < end; i++ )
-                yReader[i] = bucketMask | ( reader.ReadBits64( entrySize ) & yMask );
+                yReader[i] = reader.ReadBits64( entrySize );
+                // yReader[i] = bucketMask | ( reader.ReadBits64( entrySize ) & yMask );
+        });
+
+
+        AnonPrefixSumJob<uint32>::Run( pool, [=]( AnonPrefixSumJob<uint32>* self ) {
+            
+            int64 count, offset, end;
+            GetThreadOffsets( self, (int64)bucketEntries, count, offset, end );
+            
+            const uint32 remainderBits = _K - Info::YBitSize;
+            auto* entries = (FpEntry<TableId::Table1>*)yReader;
+            auto* tmp     = (FpEntry<TableId::Table1>*)yBucket;
+            DiskFp<TableId::Table2, numBuckets>::EntrySort( self, count, offset, entries, tmp, remainderBits );
+            
         });
         // BitReader reader(  yBucket, readBits );
         // for( uint64 i = 0; i < bucketEntries; i++ )
@@ -212,12 +226,15 @@ void LoadF1Buckets( DiskPlotContext& context, uint64* yEntries, const uint64* re
         // }
 
         // Sort Y
-        RadixSort256::Sort<BB_DP_MAX_JOBS, uint64, 5>( pool, yReader, yBucket, bucketEntries );
+        // RadixSort256::Sort<BB_DP_MAX_JOBS, uint64, 5>( pool, yReader, yBucket, bucketEntries );
 
     //  Log::Line( " Validating entries" );
         for( uint64 i = 0; i < bucketEntries; i++ )
         {
-            ENSURE( referenceY[i] == yReader[i] );
+            const auto yRef = referenceY[i];
+            const auto y    = bucketMask | ( yReader[i] & yMask );
+            ENSURE( y == yRef );
+            // ENSURE( referenceY[i] == yReader[i] );
         }
 
         yReader += bucketEntries;
