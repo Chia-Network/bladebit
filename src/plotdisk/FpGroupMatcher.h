@@ -7,7 +7,7 @@ struct FpGroupMatcher
 {
     DiskPlotContext& _context;
     uint64           _maxMatches;
-    uint64*          _startPositions[BB_DP_MAX_JOBS] = { 0 };
+    const uint64*    _startPositions[BB_DP_MAX_JOBS] = { 0 };
     uint64           _matchCounts   [BB_DP_MAX_JOBS] = { 0 };
     uint64*          _groupIndices  [BB_DP_MAX_JOBS];
     Pair*            _pairs         [BB_DP_MAX_JOBS];
@@ -39,18 +39,19 @@ struct FpGroupMatcher
             int64 _, offset;
             GetThreadOffsets( self, entryCount, _, offset, _ );
 
-            const uint64* start = yEntries;
-            uint64* entries = entries + offset;
+            const uint64* start   = yEntries;
+            const uint64* entries = start + offset;
 
             // Find base start position
             uint64 curGroup = *entries / kBC;
             while( entries > start )
             {
-                if( *(--entries) / kBC != curGroup )
+                if( entries[-1] / kBC != curGroup )
                     break;
+                --entries;
             }
 
-            const uint64 startIndex = (uint64)((uintptr_t)entries - (uintptr_t)start);
+            const uint64 startIndex = (uint64)(uintptr_t)(entries - start);
 
             _startPositions[id] = entries;
             self->SyncThreads();
@@ -59,15 +60,17 @@ struct FpGroupMatcher
 
             // Now scan for all groups
             uint64* groupIndices = _groupIndices[id];
-            int64   groupCount   = 0;
+            uint64  groupCount   = 0;
             while( ++entries < end )
             {
                 const uint64 g = *entries / kBC;
                 if( g != curGroup )
                 {
                     ASSERT( groupCount < _maxMatches );
+                    groupIndices[groupCount++] = (uint64)(uintptr_t)(entries - start);
+                    
+                    ASSERT( g - curGroup > 1 || groupCount == 1 || groupIndices[groupCount-1] - groupIndices[groupCount-2] <= 350 );
                     curGroup = g;
-                    groupIndices[groupCount++] = (uint64)((uintptr_t)entries - (uintptr_t)start);
                 }
             }
 
@@ -75,18 +78,34 @@ struct FpGroupMatcher
 
             // Add the end location of the last R group
             if( self->IsLastThread() )
-                groupIndices[groupCount] = (uint64)entryCount;
-            else
             {
                 ASSERT( groupCount < _maxMatches );
-                groupIndices[groupCount++] = _groupIndices[id+1][0];
+                groupIndices[groupCount] = (uint64)entryCount;
+            }
+            else
+            {
+                ASSERT( groupCount+1 < _maxMatches );
+                groupIndices[groupCount++] = (uint64)(uintptr_t)(_startPositions[id+1] - start);
+                groupIndices[groupCount  ] = _groupIndices[id+1][0];
             }
 
             // Now perform matches
-            _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches );
+            _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
+
+            // Copy to contiguous pair buffer
+            self->SyncThreads();
+
+            size_t copyOffset = 0;
+
+            uint64* allMatches = _matchCounts;
+            for( uint32 i = 0; i < id; i++ )
+                copyOffset += allMatches[i];
+
+            memcpy( _outPairs + copyOffset, _pairs[id], sizeof( Pair ) * _matchCounts[id] );
+            
         });
 
-        const auto* allMatches = _matchCounts;
+        const uint64* allMatches = _matchCounts;
         uint64 matchCount = 0;
         for( uint32 i = 0; i < threadCount; i++ )
             matchCount += allMatches[i];
@@ -98,7 +117,7 @@ struct FpGroupMatcher
     inline static uint64 MatchGroups( 
         const uint64 startIndex, const int64 groupCount, 
         const uint64* groupBoundaries, const uint64* yBuffer, 
-        Pair* pairs, const uint64 maxPairs )
+        Pair* pairs, const uint64 maxPairs, const uint32 id = 0 )
     {
         uint64 pairCount = 0;
 
@@ -177,6 +196,8 @@ struct FpGroupMatcher
             groupL      = groupR;
             groupLStart = groupRStart;
         }
+
+        return pairCount;
     }
 };
 

@@ -132,6 +132,7 @@ public:
     //-----------------------------------------------------------
     inline void FpBucket( const uint32 bucket )
     {
+        Log::Line( " Bucket %u", bucket );
         const int64 inEntryCount = (int64)_context.bucketCounts[(int)table-1][bucket];
         const bool  isLastBucket = bucket + 1 == _numBuckets;
 
@@ -166,7 +167,7 @@ public:
         }
 
         // Match groups
-        const int64 outEntryCount = MatchEntries( inEntryCount + crossBucketEntryCount );
+        const int64 outEntryCount = MatchEntries( inEntryCount, crossBucketEntryCount );
 
         // Write pairs
         // EncodeAndWritePairs( _pairs[0], outEntryCount );
@@ -182,11 +183,12 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline int64 MatchEntries( const int64 inEntryCount )
+    inline int64 MatchEntries( const int64 inEntryCount, const int64 crossBucketEntryCount )
     {
         FpGroupMatcher matcher( _context, MaxBucketEntries, _y[1], (Pair*)_meta[1], _pair[0] );
-         
-        return 0;
+        const int64 entryCount = (int64)matcher.Match( inEntryCount, _y[0] );
+
+        return entryCount;
     }
 
     //-----------------------------------------------------------
