@@ -8,6 +8,7 @@
 #include "plotting/TableWriter.h"
 #include "util/StackAllocator.h"
 #include "DiskF1.h"
+#include "DiskFp.h"
 
 // Test
 #include "DiskPlotDebug.h"
@@ -83,8 +84,21 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
-    _diskQueue->InitFileSet( FileId::FX0, "fx_0", _cx.numBuckets );
-    _diskQueue->InitFileSet( FileId::FX1, "fx_1", _cx.numBuckets );
+    {
+        const size_t cacheSize = _cx.cacheSize / 2;
+
+        const FileSetOptions opts = FileSetOptions::Cachable | FileSetOptions::DirectIO;
+        
+        FileSetInitData fdata = {
+            .cache     = _cx.cache,
+            .cacheSize = cacheSize
+        };
+
+        _diskQueue->InitFileSet( FileId::FX0, "fx_0", _cx.numBuckets, opts, &fdata );
+        
+        fdata.cache = ((byte*)fdata.cache) + cacheSize;
+        _diskQueue->InitFileSet( FileId::FX1, "fx_1", _cx.numBuckets, opts, &fdata );
+    }
 
 #if !BB_DP_DBG_READ_EXISTING_F1
     GenF1();
@@ -225,6 +239,57 @@ void DiskPlotPhase1::GenF1Buckets()
 {
     DiskF1<_numBuckets> f1( _cx, FileId::FX0 );
     f1.GenF1();
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::ForwardPropagate()
+{
+    for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
+    {
+        switch( table )
+        {
+            case TableId::Table2: ForwardPropagateTable<TableId::Table2>(); break;
+            case TableId::Table3: ForwardPropagateTable<TableId::Table3>(); break;
+            case TableId::Table4: ForwardPropagateTable<TableId::Table4>(); break;
+            case TableId::Table5: ForwardPropagateTable<TableId::Table5>(); break;
+            case TableId::Table6: ForwardPropagateTable<TableId::Table6>(); break;
+            case TableId::Table7: ForwardPropagateTable<TableId::Table7>(); break;
+        
+            default:
+                Fatal( "Invalid table." );
+                break;
+        }
+    }
+}
+
+//-----------------------------------------------------------
+template<TableId table>
+void DiskPlotPhase1::ForwardPropagateTable()
+{
+    const uint32 numBuckets = _cx.numBuckets;
+    
+    for( uint32 bucket = 0; bucket < numBuckets; bucket++ )
+    {
+        switch ( numBuckets )
+        {
+            case 128 : ForwardPropagateBucket<table, 128 >( bucket ); break;
+            case 256 : ForwardPropagateBucket<table, 256 >( bucket ); break;
+            case 512 : ForwardPropagateBucket<table, 512 >( bucket ); break;
+            case 1024: ForwardPropagateBucket<table, 1024>( bucket ); break;
+        
+            default:
+                Fatal( "Invalid bucket count." );
+                break;
+        }
+    }
+}
+
+//-----------------------------------------------------------
+template<TableId table, uint32 _numBuckets>
+uint64 DiskPlotPhase1::ForwardPropagateBucket( const uint32 bucket )
+{
+    DiskFp<table, _numBuckets> fp( _cx );
+    fp.Run();
 }
 
 /*

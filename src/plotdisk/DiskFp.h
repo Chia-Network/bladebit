@@ -32,13 +32,14 @@ public:
         , _threadCount( context.fpThreadCount )
         // , _bucket ( 0 )
     {
-
+        
     }
 
     //-----------------------------------------------------------
     inline void Run()
     {
-
+        StackAllocator alloc( _context.heapBuffer, _context.heapSize );
+        AllocateBuffers( alloc, _context.tmp2BlockSize, _context.tmp1BlockSize );
     }
 
     //-----------------------------------------------------------
@@ -365,7 +366,7 @@ private:
     //-----------------------------------------------------------
     inline byte* GetReadBufferForBucket( const uint32 bucket )
     {
-        return _readBuffers[bucket % 2];
+        return (byte*)_fxRead[bucket % 2];
     }
 
 private:
@@ -374,7 +375,6 @@ private:
     DiskBufferQueue& _ioQueue    ;
     FileId           _inFxId     ;
     FileId           _outFxId    ;
-    byte**           _readBuffers;
     Fence            _readFence  ;
     Fence            _writeFence ;
     Fence            _mapWriteFence;
@@ -389,8 +389,8 @@ private:
     TMeta*  _meta[2] = { 0 };
     Pair*   _pair[1] = { 0 };
 
-    void*   _fxRead [2] = { 0 };
-    void*   _fxWrite[2] = { 0 };
+    void*   _fxRead [2]   = { 0 };
+    void*   _fxWrite[2]   = { 0 };
 
     void*   _pairWrite[2] = { 0 };
     void*   _mapWrite [2] = { 0 };

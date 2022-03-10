@@ -31,11 +31,11 @@ private:
     // Run forward propagations portion
     void ForwardPropagate();
 
-    template<TableId tableId>
+    template<TableId table>
     void ForwardPropagateTable();
 
-    template<uint32 _numBuckets, TableId tableId>
-    uint64 ForwardPropagateBucket( uint32 bucket );
+    template<TableId table, uint32 _numBuckets>
+    uint64 ForwardPropagateBucket( const uint32 bucket );
 
     // Write C tables
     void SortAndCompressTable7();

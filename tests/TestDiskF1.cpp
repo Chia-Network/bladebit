@@ -1,5 +1,7 @@
 #include "TestUtil.h"
+#include "plotdisk/DiskPlotter.h"
 #include "plotdisk/DiskF1.h"
+#include "plotdisk/DiskFp.h"
 #include "util/jobs/MemJobs.h"
 #include "plotdisk/jobs/IOJob.h"
 #include "plotting/PlotTools.h"
@@ -8,20 +10,26 @@
 
 #define WORK_TMP_PATH "/mnt/p5510a/disk_tmp/"
 
+template<uint32 _numBuckets>
+void TestF1Buckets( DiskPlotContext& context );
+
 //-----------------------------------------------------------
 TEST_CASE( "F1Disk", "[f1]" )
 {
     SysHost::InstallCrashHandler();
-    const uint32 numBuckets = 128;
 
+    const uint32 numBuckets = 128;
     DiskPlotContext context = { 0 };
 
+    // Allocate based on 128 buckets, which has the largest allocation size
+    const size_t heapSize = DiskPlotter::GetRequiredSizeForBuckets( 128, WORK_TMP_PATH, WORK_TMP_PATH );
+
     context.numBuckets    = numBuckets;
+    context.heapSize      = heapSize;
+    context.heapBuffer    = bbvirtallocbounded<byte>( context.heapSize );
     context.cacheSize     = 64ull GB;
     context.cache         = bbvirtallocbounded<byte>( context.cacheSize );
     context.f1ThreadCount = 32;
-    context.heapSize      = 8ull GB;
-    context.heapBuffer    = bbvirtallocbounded<byte>( context.heapSize );
 
     ThreadPool pool( SysHost::GetLogicalCPUCount() );
     DiskBufferQueue ioQueue( WORK_TMP_PATH, context.heapBuffer, context.heapSize, 1, false );
@@ -35,16 +43,12 @@ TEST_CASE( "F1Disk", "[f1]" )
                              FileSetOptions::Cachable | FileSetOptions::DirectIO, &fdata );
     }
     
-    const size_t fsBlockSize = ioQueue.BlockSize( FileId::FX0 );
-    context.t1FsBlocks    = bbvirtallocbounded<byte>( fsBlockSize * numBuckets );
-
     context.threadPool = &pool;
     context.ioQueue    = &ioQueue;
 
     Log::Line( "Initializing memory" );
     FaultMemoryPages::RunJob( pool, pool.ThreadCount(), context.cache     , context.cacheSize );
     FaultMemoryPages::RunJob( pool, pool.ThreadCount(), context.heapBuffer, context.heapSize  );
-    FaultMemoryPages::RunJob( pool, pool.ThreadCount(), context.t1FsBlocks, fsBlockSize * numBuckets );
 
     Log::Line( "Testing F1" );
     // const char plotIdHex[] = "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73";
@@ -140,3 +144,9 @@ TEST_CASE( "F1Disk", "[f1]" )
     Log::Line( "Success" );
 }
 
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
+void TestF1Buckets( DiskPlotContext& context )
+{
+
+}
