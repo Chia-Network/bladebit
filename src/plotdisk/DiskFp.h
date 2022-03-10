@@ -16,8 +16,9 @@ public:
 
     static constexpr uint32 _k = Info::_k;
 
-    using Entry    = FpEntry<table>;
-    using TMeta    = typename TableMetaType<table>::MetaOut;
+    using Entry    = FpEntry<table-1>;
+    using TMetaIn  = typename TableMetaType<table>::MetaIn;
+    using TMetaOut = typename TableMetaType<table>::MetaOut;
     using TAddress = uint64;
 
 public:
@@ -40,6 +41,8 @@ public:
     {
         StackAllocator alloc( _context.heapBuffer, _context.heapSize );
         AllocateBuffers( alloc, _context.tmp2BlockSize, _context.tmp1BlockSize );
+
+        FpTable();
     }
 
     //-----------------------------------------------------------
@@ -51,17 +54,20 @@ public:
         const size_t maxEntries    = info::MaxBucketEntries;
         const size_t entrySizeBits = info::EntrySizePackedBits;
         
-        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
         const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize );
 
         // Working buffers
+        _entries[0] = alloc.CAlloc<Entry>( maxEntries );
+        _entries[1] = alloc.CAlloc<Entry>( maxEntries );
+
         _y[0]    = alloc.CAlloc<uint64>( maxEntries );
         _y[1]    = alloc.CAlloc<uint64>( maxEntries );
         
         _map[0]  = alloc.CAlloc<uint64>( maxEntries );
 
-        _meta[0] = alloc.CAlloc<TMeta>( maxEntries );
-        _meta[1] = alloc.CAlloc<TMeta>( maxEntries );
+        _meta[0] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntries );
+        _meta[1] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntries );
         
         _pair[0] = alloc.CAlloc<Pair> ( maxEntries );
         
@@ -70,8 +76,8 @@ public:
         const size_t mapBits     = _k + 1 - bucketBits + _k + 1;
 
         const size_t fxWriteSize   = (size_t)_numBuckets * perBucketEntriesSize;
-        const size_t pairWriteSize = CDiv( maxEntries * pairBits, 8 );
-        const size_t mapWriteSize  = CDiv( maxEntries * mapBits, 8 );
+        const size_t pairWriteSize = CDiv( ( maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES ) * pairBits, 8 );
+        const size_t mapWriteSize  = CDiv( ( maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES ) * mapBits , 8 );
 
         // #TODO: Set actual buffers
         _fxRead [0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
@@ -130,20 +136,20 @@ private:
         const byte* packedEntries = GetReadBufferForBucket( bucket );
 
         // Expand entries to be 64-bit aligned, sort them, then unpack them to individual components
-        ExpandEntries( packedEntries, _entries, inEntryCount );
-        SortEntries( _entries, inEntryCount );
-        UnpackEntries( bucket, _entries, inEntryCount, _y[0], _map[0], _meta[0] );
+        ExpandEntries( packedEntries, 0, _entries[0], inEntryCount );
+        SortEntries( _entries[0], _entries[1], inEntryCount );
+        UnpackEntries( bucket, _entries[0], inEntryCount, _y[0], _map[0], _meta[0] );
         
-        // Expand cross bucket entries
+        // // Expand cross bucket entries
         const int64 crossBucketEntryCount = isLastBucket ? 0 : BB_DP_CROSS_BUCKET_MAX_ENTRIES;
         if( crossBucketEntryCount )
         {
             const size_t packedEntrySize = InInfo::EntrySizePackedBits;
             const size_t bitCapacity     = RoundUpToNextBoundary( crossBucketEntryCount * packedEntrySize, 64 );
 
-            ExpandEntries( packedEntries, 0, bitCapacity, _entries + inEntryCount, crossBucketEntryCount );
-            SortEntries( _entries+inEntryCount, crossBucketEntryCount );
-            UnpackEntries( bucket + 1, _entries + inEntryCount, crossBucketEntryCount, 
+            ExpandEntries( packedEntries, 0, bitCapacity, _entries[0] + inEntryCount, crossBucketEntryCount );
+            SortEntries( _entries[0] + inEntryCount, _entries[1], crossBucketEntryCount );
+            UnpackEntries( bucket + 1, _entries[0] + inEntryCount, crossBucketEntryCount, 
                            _y[0] + inEntryCount, _map[0] + inEntryCount, _meta[0] + inEntryCount );
         }
 
@@ -164,7 +170,7 @@ private:
         // EncodeAndWritePairs( _pairs[0], outEntryCount );
 
         // FxGen
-        TMeta* inMeta = ( table == TableId::Table2 ) ? (TMeta*)_map[0] : _meta[0];
+        // TMeta* inMeta = ( table == TableId::Table2 ) ? (TMeta*)_map[0] : _meta[0];
         // FxGen( outEntryCount, _pairs[0], _y[0], _y[1], _meta[0], _meta[1] );
 
         // Write new entries to disk
@@ -174,7 +180,7 @@ private:
     }
 
     //-----------------------------------------------------------
-    inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, uint64* outY, uint64* outMap, TMeta* outMeta )
+    inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, uint64* outY, uint64* outMap, TMetaIn* outMeta )
     {
         AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
 
@@ -188,9 +194,9 @@ private:
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
 
-            uint64* y    = outY;
-            uint64* map  = outMap;
-            TMeta*  meta = outMeta;
+            uint64*  y    = outY;
+            uint64*  map  = outMap;
+            TMetaIn* meta = outMeta;
             
             const Entry* entries = packedEntries;
 
@@ -206,7 +212,7 @@ private:
                 // which is stored as the map
                 if constexpr ( metaMultipler > 1 )
                 {
-                    outMap[i] = e.meta;
+                    meta[i] = e.meta;
                 }
             }
         });
@@ -298,7 +304,7 @@ private:
             const uint64 inputBitOffset = packedEntrySize * (uint64)offset;
             const size_t bitCapacity    = CDiv( packedEntrySize * (uint64)entryCount, 64 ) * 64;
 
-            ExpandEntries( packedEntries, inputBitOffset, bitCapacity, expendedEntries + offset, count );
+            DiskFp<table,_numBuckets>::ExpandEntries( packedEntries, inputBitOffset, bitCapacity, expendedEntries + offset, count );
         });
     }
 
@@ -307,11 +313,11 @@ private:
                                       Entry* expendedEntries, const int64 entryCount )
     {
         constexpr uint32 yBits           = InInfo::YBitSize;
-        constexpr uint32 mapBits         = InInfo::MapBits;
+        constexpr uint32 mapBits         = table == TableId::Table2 ? _k : InInfo::MapBitSize;
         constexpr uint32 metaMultipler   = InInfo::MetaMultiplier;
         constexpr uint32 packedEntrySize = InInfo::EntrySizePackedBits;
         
-        BitReader reader( (uint64*)packedEntries, CDiv( (uint64)entryCount * packedEntrySize, 64 ) * 64, inputBitOffset );
+        BitReader reader( (uint64*)packedEntries, bitCapacity, inputBitOffset ); //CDiv( (uint64)entryCount * packedEntrySize, 64 ) * 64, inputBitOffset );
 
               Entry* out = expendedEntries;
         const Entry* end = out + entryCount;
@@ -383,11 +389,11 @@ private:
     Duration         _readWaitTime = Duration::zero();
 
     // Working buffers, all of them have enough to hold  entries for a single bucket + cross bucket entries
-    Entry*  _entries = nullptr;   // Unpacked entries
-    uint64* _y   [2] = { 0 };
-    uint64* _map [1] = { 0 };
-    TMeta*  _meta[2] = { 0 };
-    Pair*   _pair[1] = { 0 };
+    Entry*   _entries[2]  = { 0 };   // Unpacked entries   // #TODO: Create read buffers of unpacked size and then just use that as temp entries
+    uint64*  _y   [2]     = { 0 };
+    uint64*  _map [1]     = { 0 };
+    TMetaIn* _meta[2]     = { 0 };
+    Pair*    _pair[1]     = { 0 };
 
     void*   _fxRead [2]   = { 0 };
     void*   _fxWrite[2]   = { 0 };

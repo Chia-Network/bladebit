@@ -24,11 +24,6 @@ struct DiskPlotContext
     size_t       cacheSize;         // Size of memory cache to reserve for IO (region in file that never gets written to disk).
     byte*        cache;
 
-    byte*        fxBlocks;          // Filesystem block-sized buffer for each bucket in temp1
-                                    // This is to facilitate writing aligned data
-    byte*        pairBlocks;
-    byte*        mapBlocks;
-
     uint32       numBuckets;        // Divide entries into this many buckets
 
     // uint32       threadCount;       // How many threads to use for in-memory plot work

@@ -147,11 +147,7 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
-    // Re-create the disk queue with the io buffer only (remove working heap section)
-    exit( 0 );
-    // _diskQueue->ResetHeap( cx.heapSize, cx.ioHeap );
-
-    // ForwardPropagate();
+    ForwardPropagate();
 
     // Check all table counts
     #if _DEBUG
@@ -272,10 +268,10 @@ void DiskPlotPhase1::ForwardPropagateTable()
     {
         switch ( numBuckets )
         {
-            case 128 : ForwardPropagateBucket<table, 128 >( bucket ); break;
-            case 256 : ForwardPropagateBucket<table, 256 >( bucket ); break;
-            case 512 : ForwardPropagateBucket<table, 512 >( bucket ); break;
-            case 1024: ForwardPropagateBucket<table, 1024>( bucket ); break;
+            case 128 : ForwardPropagateBuckets<table, 128 >(); break;
+            case 256 : ForwardPropagateBuckets<table, 256 >(); break;
+            case 512 : ForwardPropagateBuckets<table, 512 >(); break;
+            case 1024: ForwardPropagateBuckets<table, 1024>(); break;
         
             default:
                 Fatal( "Invalid bucket count." );
@@ -286,7 +282,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
 
 //-----------------------------------------------------------
 template<TableId table, uint32 _numBuckets>
-uint64 DiskPlotPhase1::ForwardPropagateBucket( const uint32 bucket )
+void DiskPlotPhase1::ForwardPropagateBuckets()
 {
     DiskFp<table, _numBuckets> fp( _cx );
     fp.Run();

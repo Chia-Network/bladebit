@@ -35,7 +35,7 @@ private:
     void ForwardPropagateTable();
 
     template<TableId table, uint32 _numBuckets>
-    uint64 ForwardPropagateBucket( const uint32 bucket );
+    void ForwardPropagateBuckets();
 
     // Write C tables
     void SortAndCompressTable7();

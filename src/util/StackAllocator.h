@@ -19,7 +19,7 @@ public:
     inline T* CAlloc( const size_t count, size_t alignment = alignof( T ) )
     {
         const size_t allocSize = sizeof( T ) * count;
-        ASSERT( allocSize > count );
+        ASSERT( allocSize >= count );
         
         return AllocT<T>( allocSize, alignment );
     }

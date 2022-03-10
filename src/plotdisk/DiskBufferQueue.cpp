@@ -425,13 +425,13 @@ void DiskBufferQueue::CommandMain()
     const int CMD_BUF_SIZE = 64;
     Command commands[CMD_BUF_SIZE];
 
-    bool spun = false;
+    // bool spun = false;
 
     for( ;; )
     {
         _cmdReadySignal.Wait();
 
-        DEQUEUE:
+        // DEQUEUE:
         {
             int cmdCount;
             while( ( ( cmdCount = _commands.Dequeue( commands, CMD_BUF_SIZE ) ) ) )
@@ -441,27 +441,28 @@ void DiskBufferQueue::CommandMain()
                 for( int i = 0; i < cmdCount; i++ )
                     ExecuteCommand( commands[i] );
 
-                spun = false;
+                // spun = false;
             }
         }
 
         // Spin for a bit before suspending to allow for more commands to come in
-        if( !spun )
-        {
-            spun = true;
+        // if( !spun )
+        // {
+        //     spun = true;
 
-            const auto spinTimer = TimerBegin();
-            for( ;; )
-            {
-                const auto now = TimerBegin();
-                if( ( now - spinTimer ) >= SPIN_MAX )
-                {
-                    goto DEQUEUE;
-                }
-            }
-        }
+        //     const auto spinTimer = TimerBegin();
+        //     for( ;; )
+        //     {
+        //         // #TODO: Need to check here if signalled (without waiting)
+        //         const auto now = TimerBegin();
+        //         if( ( now - spinTimer ) >= SPIN_MAX )
+        //         {
+        //             goto DEQUEUE;
+        //         }
+        //     }
+        // }
 
-        spun = false;
+        // spun = false;
     }
 }
 

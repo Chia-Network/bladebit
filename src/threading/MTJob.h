@@ -408,14 +408,6 @@ struct AnonPrefixSumJob : public PrefixSumJob<AnonPrefixSumJob<TCount>, TCount>
     }
 };
 
-
-//-----------------------------------------------------------
-template<typename TJob, typename T>
-inline void GetThreadOffsets( MTJob<TJob>* job, const T totalCount, T& count, T& offset, T& end )
-{
-    GetThreadOffsets( job->JobId(), job->JobCount(), totalCount, count, offset, end );
-}
-
 //-----------------------------------------------------------
 template<typename T>
 inline void GetThreadOffsets( const uint32 id, const uint32 threadCount, const T totalCount, T& count, T& offset, T& end )
@@ -431,3 +423,11 @@ inline void GetThreadOffsets( const uint32 id, const uint32 threadCount, const T
     
     end = offset + count;
 }
+
+//-----------------------------------------------------------
+template<typename TJob, typename T>
+inline void GetThreadOffsets( MTJob<TJob>* job, const T totalCount, T& count, T& offset, T& end )
+{
+    GetThreadOffsets( job->JobId(), job->JobCount(), totalCount, count, offset, end );
+}
+
