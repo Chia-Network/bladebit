@@ -1,195 +1,182 @@
 #pragma once
+#include "DiskPlotContext.h"
 #include "DiskPlotInfo.h"
+#include "threading/ThreadPool.h"
 
-/*
-template<TableId table>
 struct FpGroupMatcher
 {
-    ThreadPool& _pool;
-    struct Group
-    {
-        int64 index;
-        int64 length;
-    };
-
+    DiskPlotContext& _context;
+    uint64           _maxMatches;
+    uint64*          _startPositions[BB_DP_MAX_JOBS] = { 0 };
+    uint64           _matchCounts   [BB_DP_MAX_JOBS] = { 0 };
+    uint64*          _groupIndices  [BB_DP_MAX_JOBS];
+    Pair*            _pairs         [BB_DP_MAX_JOBS];
+    Pair*            _outPairs;
 
     //-----------------------------------------------------------
-    // int64 ScanGroups(  const uint32* yBuffer, uint32 entryCount, uint32* groups, uint32 maxGroups, GroupInfo groupInfos[BB_MAX_JOBS] )
-    int64 ScanGroups( const int64 entryCount, const int64 maxGroups, const uint64* yEntries )
+    inline FpGroupMatcher( DiskPlotContext& context, const uint64 maxEntries, 
+                           uint64* groupBoundaries, Pair* pairs, Pair* outPairs )
+        : _context( context )
+        , _maxMatches( maxEntries / context.fpThreadCount )
+        , _outPairs( outPairs )
     {
-        AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
-
-            int64 count, offset, end;
-            GetThreadOffsets( self, entryCount, count, offset, end );
-
-            const int64 maxGroupsPerThread = maxGroups / _threadCount;
-
-            // Find the start of the group
-            uint64* y = yEntries + offset;
-            uint64 yGroup = *y / kBC;
-        });
-
-        for( uint i = 1; i < threadCount; i++ )
+        for( uint32 i = 0; i < context.fpThreadCount; i++ )
         {
-          
-            job.yBuffer         = yBuffer;
-            job.groupBoundaries = groups + maxGroupsPerThread * i;
-            job.bucketIdx       = bucketIdx;
-            job.maxGroups       = maxGroupsPerThread;
-            job.groupCount      = 0;
+            _groupIndices[i] = groupBoundaries + _maxMatches * i;
+            _pairs       [i] = pairs           + _maxMatches * i;
+        }
+    }
 
-            const uint32 idx           = entryCount / threadCount * i;
-            const uint64 y             = bucket | yBuffer[idx];
-            const uint64 curGroup      = y / kBC;
-            const uint64 groupLocalIdx = y - curGroup * kBC;
+    //-----------------------------------------------------------
+    inline uint64 Match( const int64 entryCount, const uint64* yEntries )
+    {
+        const uint32 threadCount = _context.fpThreadCount;
 
-            uint64 targetGroup;
+        AnonMTJob::Run( *_context.threadPool, threadCount, [=]( AnonMTJob* self ) {
+            
+            const uint32 id = self->_jobId;
+            
+            int64 _, offset;
+            GetThreadOffsets( self, entryCount, _, offset, _ );
 
-            // If we are already at the start of a group, just use this index
-            if( groupLocalIdx == 0 )
+            const uint64* start = yEntries;
+            uint64* entries = entries + offset;
+
+            // Find base start position
+            uint64 curGroup = *entries / kBC;
+            while( entries > start )
             {
-                job.startIndex = idx;
+                if( *(--entries) / kBC != curGroup )
+                    break;
             }
+
+            const uint64 startIndex = (uint64)((uintptr_t)entries - (uintptr_t)start);
+
+            _startPositions[id] = entries;
+            self->SyncThreads();
+
+            const uint64* end = self->IsLastThread() ? yEntries + entryCount : _startPositions[id+1];
+
+            // Now scan for all groups
+            uint64* groupIndices = _groupIndices[id];
+            int64   groupCount   = 0;
+            while( ++entries < end )
+            {
+                const uint64 g = *entries / kBC;
+                if( g != curGroup )
+                {
+                    ASSERT( groupCount < _maxMatches );
+                    curGroup = g;
+                    groupIndices[groupCount++] = (uint64)((uintptr_t)entries - (uintptr_t)start);
+                }
+            }
+
+            self->SyncThreads();
+
+            // Add the end location of the last R group
+            if( self->IsLastThread() )
+                groupIndices[groupCount] = (uint64)entryCount;
             else
             {
-                // Choose if we should find the upper boundary or the lower boundary
-                const uint64 remainder = kBC - groupLocalIdx;
-                
-                #if _DEBUG
-                    bool foundBoundary = false;
-                #endif
-                if( remainder <= kBC / 2 )
-                {
-                    // Look for the upper boundary
-                    for( uint32 j = idx+1; j < entryCount; j++ )
-                    {
-                        targetGroup = (bucket | yBuffer[j] ) / kBC;
-                        if( targetGroup != curGroup )
-                        {
-                            #if _DEBUG
-                                foundBoundary = true;
-                            #endif
-                            job.startIndex = j; break;
-                        }   
-                    }
-                }
-                else
-                {
-                    // Look for the lower boundary
-                    for( uint32 j = idx-1; j >= 0; j-- )
-                    {
-                        targetGroup = ( bucket | yBuffer[j] ) / kBC;
-                        if( targetGroup != curGroup )
-                        {
-                            #if _DEBUG
-                                foundBoundary = true;
-                            #endif
-                            job.startIndex = j+1; break;
-                        }  
-                    }
-                }
-
-                #if _DEBUG
-                    ASSERT( foundBoundary );
-                #endif
+                ASSERT( groupCount < _maxMatches );
+                groupIndices[groupCount++] = _groupIndices[id+1][0];
             }
 
-            auto& lastJob = jobs[i-1];
-            ASSERT( job.startIndex > lastJob.startIndex );  // #TODO: This should not happen but there should
-                                                            //        be a pre-check in the off chance that the thread count is really high.
-                                                            //        Again, should not happen with the hard-coded thread limit,
-                                                            //        but we can check if entryCount / threadCount <= kBC 
+            // Now perform matches
+            _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches );
+        });
 
+        const auto* allMatches = _matchCounts;
+        uint64 matchCount = 0;
+        for( uint32 i = 0; i < threadCount; i++ )
+            matchCount += allMatches[i];
 
-            // We add +1 so that the next group boundary is added to the list, and we can tell where the R group ends.
-            lastJob.endIndex = job.startIndex + 1;
-
-            ASSERT( ( bucket | yBuffer[job.startIndex-1] ) / kBC != 
-                    ( bucket | yBuffer[job.startIndex] ) / kBC );
-
-            job.groupBoundaries = groups + maxGroupsPerThread * i;
-        }
-
-        // Fill in missing data for the last job
-        jobs[threadCount-1].endIndex = entryCount;
-
-        // Run the scan job
-        const double elapsed = jobs.Run( threadCount );
-        Log::Verbose( "  Finished group scan in %.2lf seconds." );
-
-        // Get the total group count
-        uint groupCount = 0;
-
-        for( uint i = 0; i < threadCount-1; i++ )
-        {
-            auto& job = jobs[i];
-
-            // Add a trailing end index (but don't count it) so that we can test against it
-            job.groupBoundaries[job.groupCount] = jobs[i+1].groupBoundaries[0];
-
-            groupInfos[i].groupBoundaries = job.groupBoundaries;
-            groupInfos[i].groupCount      = job.groupCount;
-            groupInfos[i].startIndex      = job.startIndex;
-
-            groupCount += job.groupCount;
-        }
-        
-        // Let the last job know where its R group is
-        auto& lastJob = jobs[threadCount-1];
-        lastJob.groupBoundaries[lastJob.groupCount] = entryCount;
-
-        groupInfos[threadCount-1].groupBoundaries = lastJob.groupBoundaries;
-        groupInfos[threadCount-1].groupCount      = lastJob.groupCount;
-        groupInfos[threadCount-1].startIndex      = lastJob.startIndex;
-
-        // Log::Line( "  Found %u groups.", groupCount );
-
-        return groupCount;
+        return matchCount;
     }
 
     //-----------------------------------------------------------
-    inline int64 GroupScan( const int64 entryCount, const uint64* yEntries, Group* outGroups, const int64 maxGroups )
+    inline static uint64 MatchGroups( 
+        const uint64 startIndex, const int64 groupCount, 
+        const uint64* groupBoundaries, const uint64* yBuffer, 
+        Pair* pairs, const uint64 maxPairs )
     {
-        
+        uint64 pairCount = 0;
 
-        // const uint32 maxGroups = this->maxGroups;
+        uint8  rMapCounts [kBC];
+        uint16 rMapIndices[kBC];
 
-        // uint32* groupBoundaries = this->groupBoundaries;
-        // uint32  groupCount      = 0;
+        uint64 groupLStart = startIndex;
+        uint64 groupL      = yBuffer[groupLStart] / kBC;
 
-        // const uint32* yBuffer = this->yBuffer;
-        // const uint32  start   = this->startIndex;
-        // const uint32  end     = this->endIndex;
+        for( uint32 i = 0; i < groupCount; i++ )
+        {
+            const uint64 groupRStart = groupBoundaries[i];
+            const uint64 groupR      = yBuffer[groupRStart] / kBC;
 
-        // const uint64  bucket  = ( (uint64)this->bucketIdx ) << 32;
+            if( groupR - groupL == 1 )
+            {
+                // Groups are adjacent, calculate matches
+                const uint16 parity           = groupL & 1;
+                const uint64 groupREnd        = groupBoundaries[i+1];
 
-        // uint64 lastGroup = ( bucket | yBuffer[start] ) / kBC;
+                const uint64 groupLRangeStart = groupL * kBC;
+                const uint64 groupRRangeStart = groupR * kBC;
+                
+                ASSERT( groupREnd - groupRStart <= 350 );
+                ASSERT( groupLRangeStart == groupRRangeStart - kBC );
 
-        // for( uint32 i = start+1; i < end; i++ )
-        // {
-        //     const uint64 group = ( bucket | yBuffer[i] ) / kBC;
+                // Prepare a map of range kBC to store which indices from groupR are used
+                // For now just iterate our bGroup to find the pairs
+            
+                // #NOTE: memset(0) works faster on average than keeping a separate a clearing buffer
+                memset( rMapCounts, 0, sizeof( rMapCounts ) );
 
-        //     if( group != lastGroup )
-        //     {
-        //         ASSERT( group > lastGroup );
+                for( uint64 iR = groupRStart; iR < groupREnd; iR++ )
+                {
+                    uint64 localRY = yBuffer[iR] - groupRRangeStart;
+                    ASSERT( yBuffer[iR] / kBC == groupR );
 
-        //         groupBoundaries[groupCount++] = i;
-        //         lastGroup = group;
+                    if( rMapCounts[localRY] == 0 )
+                        rMapIndices[localRY] = (uint16)( iR - groupRStart );
 
-        //         if( groupCount == maxGroups )
-        //         {
-        //             ASSERT( 0 );    // We ought to always have enough space
-        //                             // So this should be an error
-        //             break;
-        //         }
-        //     }
-        // }
+                    rMapCounts[localRY] ++;
+                }
 
-        // this->groupCount = groupCount;
+                // For each group L entry
+                for( uint64 iL = groupLStart; iL < groupRStart; iL++ )
+                {
+                    const uint64 yL     = yBuffer[iL];
+                    const uint64 localL = yL - groupLRangeStart;
+
+                    // Iterate kExtraBitsPow = 1 << kExtraBits = 1 << 6 == 64
+                    // So iterate 64 times for each L entry.
+                    for( int iK = 0; iK < kExtraBitsPow; iK++ )
+                    {
+                        const uint64 targetR = L_targets[parity][localL][iK];
+
+                        for( uint j = 0; j < rMapCounts[targetR]; j++ )
+                        {
+                            const uint64 iR = groupRStart + rMapIndices[targetR] + j;
+                            ASSERT( iL < iR );
+
+                            // Add a new pair
+                            Pair& pair = pairs[pairCount++];
+                            pair.left  = (uint32)iL;
+                            pair.right = (uint32)iR;
+                            
+                            ASSERT( pairCount <= maxPairs );
+                            if( pairCount == maxPairs )
+                                return pairCount;
+                        }
+                    }
+                }
+            }
+            // Else: Not an adjacent group, skip to next one.
+
+            // Go to next group
+            groupL      = groupR;
+            groupLStart = groupRStart;
+        }
     }
-    // void MatchGroups( const int64 entryCount, )
 };
-*/
-
-
 

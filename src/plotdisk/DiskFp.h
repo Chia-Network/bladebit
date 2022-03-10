@@ -3,6 +3,7 @@
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
 #include "plotdisk/DiskPlotContext.h"
+#include "plotdisk/FpGroupMatcher.h"
 #include "DiskPlotInfo.h"
 #include "BitBucketWriter.h"
 #include "util/StackAllocator.h"
@@ -14,7 +15,8 @@ public:
     using InInfo = DiskPlotInfo<table-1, _numBuckets>;
     using Info   = DiskPlotInfo<table, _numBuckets>;
 
-    static constexpr uint32 _k = Info::_k;
+    static constexpr uint32 _k               = Info::_k;
+    static constexpr uint64 MaxBucketEntries = Info::MaxBucketEntries;
 
     using Entry    = FpEntry<table-1>;
     using TMetaIn  = typename TableMetaType<table>::MetaIn;
@@ -164,7 +166,7 @@ public:
         }
 
         // Match groups
-        // const int64 outEntryCount = MatchEntries( _y[0], _pairs[0], inEntryCount + crossBucketEntryCount );
+        const int64 outEntryCount = MatchEntries( inEntryCount + crossBucketEntryCount );
 
         // Write pairs
         // EncodeAndWritePairs( _pairs[0], outEntryCount );
@@ -177,6 +179,14 @@ public:
         // WriteEntriesToDisk( outEntryCount, _y[1], _meta[1] );
 
         // Save bucket length before y-sort since the pairs remain unsorted
+    }
+
+    //-----------------------------------------------------------
+    inline int64 MatchEntries( const int64 inEntryCount )
+    {
+        FpGroupMatcher matcher( _context, MaxBucketEntries, _y[1], (Pair*)_meta[1], _pair[0] );
+         
+        return 0;
     }
 
     //-----------------------------------------------------------

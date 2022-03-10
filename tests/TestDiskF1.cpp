@@ -29,7 +29,7 @@ TEST_CASE( "F1Disk", "[f1]" )
     context.heapBuffer    = bbvirtallocbounded<byte>( context.heapSize );
     context.cacheSize     = 64ull GB;
     context.cache         = bbvirtallocbounded<byte>( context.cacheSize );
-    context.f1ThreadCount = 24;
+    context.f1ThreadCount = 32;
 
     ThreadPool pool( SysHost::GetLogicalCPUCount() );
     context.threadPool    = &pool;
@@ -41,7 +41,7 @@ TEST_CASE( "F1Disk", "[f1]" )
 
     Log::Line( "Heap  Size: %.2lf GiB", (double)context.heapSize BtoGB );
     Log::Line( "Cache Size: %.2lf GiB", (double)context.cacheSize BtoGB );
-    Log::Line( "Testing f1 with threads", context.f1ThreadCount );
+    Log::Line( "Testing f1 with %u threads", context.f1ThreadCount );
 
     uint64* yEntries = nullptr;
     const uint64* referenceY = nullptr;
@@ -56,7 +56,7 @@ TEST_CASE( "F1Disk", "[f1]" )
     context.plotId = plotId;
 
     const uint32 buckets[] = { 128, 256, 512, 1024 };
-    for( uint32 i = 1; i < sizeof( buckets ) / sizeof( buckets[0] ); i++ )
+    for( uint32 i = 0; i < sizeof( buckets ) / sizeof( buckets[0] ); i++ )
     {
         uint32 b = buckets[i];
         context.numBuckets = b;
