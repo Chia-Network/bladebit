@@ -12,6 +12,8 @@ struct FpGroupMatcher
     uint64*          _groupIndices  [BB_DP_MAX_JOBS];
     Pair*            _pairs         [BB_DP_MAX_JOBS];
     Pair*            _outPairs;
+    uint64           _lastBucketEntries[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    uint64           _lastBucketGroupIndices[2];
 
     //-----------------------------------------------------------
     inline FpGroupMatcher( DiskPlotContext& context, const uint64 maxEntries, 
@@ -28,7 +30,7 @@ struct FpGroupMatcher
     }
 
     //-----------------------------------------------------------
-    inline uint64 Match( const int64 entryCount, const uint64* yEntries )
+    inline uint64 Match( const uint64* yEntries, const int64 entryCount, const int64 nextBucketEntryCount )
     {
         const uint32 threadCount = _context.fpThreadCount;
 
@@ -56,7 +58,8 @@ struct FpGroupMatcher
             _startPositions[id] = entries;
             self->SyncThreads();
 
-            const uint64* end = self->IsLastThread() ? yEntries + entryCount : _startPositions[id+1];
+            const uint64* end = self->IsLastThread() ? yEntries + entryCount + nextBucketEntryCount :
+                                                       _startPositions[id+1];
 
             // Now scan for all groups
             uint64* groupIndices = _groupIndices[id];
@@ -77,10 +80,28 @@ struct FpGroupMatcher
             self->SyncThreads();
 
             // Add the end location of the last R group
+            const uint64 originalGroupCount = groupCount;
+
             if( self->IsLastThread() )
             {
-                ASSERT( groupCount < _maxMatches );
-                groupIndices[groupCount] = (uint64)entryCount;
+                if( nextBucketEntryCount == 0 )
+                {
+                    ASSERT( groupCount < _maxMatches );
+                    groupIndices[groupCount] = (uint64)entryCount;
+                }
+                else
+                {
+                    // Scan until we find the first index belonging to this bucket
+                    for( uint64 i = groupCount-1; i >= 0; i-- )
+                    {
+                        if( groupIndices[i] < (uint64)entryCount )
+                        {
+                            groupCount = i+1;
+                            ASSERT( groupCount < originalGroupCount );
+                            break;
+                        }
+                    }
+                }
             }
             else
             {
@@ -90,7 +111,17 @@ struct FpGroupMatcher
             }
 
             // Now perform matches
-            _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
+            _matchCounts[id] = MatchGroups<false>( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
+
+            if( self->IsLastThread() && nextBucketEntryCount > 0 )
+            {
+                // Perform cross-bucket matches
+                ASSERT( originalGroupCount - groupCount >= 2 );
+
+                _matchCounts[id] += MatchGroups<true>( groupIndices[groupCount-1], 1, groupIndices+groupCount, 
+                                     yEntries, _pairs[id] + _matchCounts[id], _maxMatches - _matchCounts[id], 
+                                     entryCount );
+            }
 
             // Copy to contiguous pair buffer
             self->SyncThreads();
@@ -114,10 +145,11 @@ struct FpGroupMatcher
     }
 
     //-----------------------------------------------------------
+    template<bool HasLGroupEnd = false>
     inline static uint64 MatchGroups( 
         const uint64 startIndex, const int64 groupCount, 
         const uint64* groupBoundaries, const uint64* yBuffer, 
-        Pair* pairs, const uint64 maxPairs, const uint32 id = 0 )
+        Pair* pairs, const uint64 maxPairs, const uint32 idOrGroupLEnd = 0 )
     {
         uint64 pairCount = 0;
 
@@ -131,6 +163,8 @@ struct FpGroupMatcher
         {
             const uint64 groupRStart = groupBoundaries[i];
             const uint64 groupR      = yBuffer[groupRStart] / kBC;
+
+            const uint64 groupLEnd   = HasLGroupEnd ? idOrGroupLEnd : groupRStart;
 
             if( groupR - groupL == 1 )
             {
@@ -162,7 +196,7 @@ struct FpGroupMatcher
                 }
 
                 // For each group L entry
-                for( uint64 iL = groupLStart; iL < groupRStart; iL++ )
+                for( uint64 iL = groupLStart; iL < groupLEnd; iL++ )
                 {
                     const uint64 yL     = yBuffer[iL];
                     const uint64 localL = yL - groupLRangeStart;

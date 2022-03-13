@@ -56,8 +56,9 @@ public:
         const size_t maxEntries    = info::MaxBucketEntries;
         const size_t entrySizeBits = info::EntrySizePackedBits;
         
-        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
-        const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize );
+        const size_t genEntriesPerBucket   = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize ) + 
+                                            RoundUpToNextBoundaryT( CDiv( entrySizeBits * BB_DP_CROSS_BUCKET_MAX_ENTRIES, 8 ), fxBlockSize );
 
         // Working buffers
         _entries[0] = alloc.CAlloc<Entry>( maxEntries );
@@ -150,7 +151,10 @@ public:
             const size_t packedEntrySize = InInfo::EntrySizePackedBits;
             const size_t bitCapacity     = RoundUpToNextBoundary( crossBucketEntryCount * packedEntrySize, 64 );
 
-            ExpandEntries( packedEntries, 0, bitCapacity, _entries[0] + inEntryCount, crossBucketEntryCount );
+            const size_t bucketSizeBytes = CDiv( InInfo::EntrySizePackedBits * (uint64)inEntryCount, 64 ) * 64 / 8;
+
+            ExpandEntries( packedEntries + bucketSizeBytes, 0, bitCapacity - bucketSizeBytes * 8, 
+                          _entries[0] + inEntryCount, crossBucketEntryCount );
             SortEntries( _entries[0] + inEntryCount, _entries[1], crossBucketEntryCount );
             UnpackEntries( bucket + 1, _entries[0] + inEntryCount, crossBucketEntryCount, 
                            _y[0] + inEntryCount, _map[0] + inEntryCount, _meta[0] + inEntryCount );
@@ -186,7 +190,7 @@ public:
     inline int64 MatchEntries( const int64 inEntryCount, const int64 crossBucketEntryCount )
     {
         FpGroupMatcher matcher( _context, MaxBucketEntries, _y[1], (Pair*)_meta[1], _pair[0] );
-        const int64 entryCount = (int64)matcher.Match( inEntryCount, _y[0] );
+        const int64 entryCount = (int64)matcher.Match( _y[0], inEntryCount, crossBucketEntryCount );
 
         return entryCount;
     }
