@@ -144,21 +144,6 @@ public:
         SortEntries( _entries[0], _entries[1], inEntryCount );
         UnpackEntries( bucket, _entries[0], inEntryCount, _y[0], _map[0], _meta[0] );
         
-        // // Expand cross bucket entries
-        const int64 crossBucketEntryCount = isLastBucket ? 0 : BB_DP_CROSS_BUCKET_MAX_ENTRIES;
-        if( crossBucketEntryCount )
-        {
-            const size_t packedEntrySize = InInfo::EntrySizePackedBits;
-            const size_t bitCapacity     = RoundUpToNextBoundary( crossBucketEntryCount * packedEntrySize, 64 );
-
-            const size_t bucketSizeBytes = CDiv( InInfo::EntrySizePackedBits * (uint64)inEntryCount, 64 ) * 64 / 8;
-
-            ExpandEntries( packedEntries + bucketSizeBytes, 0, bitCapacity - bucketSizeBytes * 8, 
-                          _entries[0] + inEntryCount, crossBucketEntryCount );
-            SortEntries( _entries[0] + inEntryCount, _entries[1], crossBucketEntryCount );
-            UnpackEntries( bucket + 1, _entries[0] + inEntryCount, crossBucketEntryCount, 
-                           _y[0] + inEntryCount, _map[0] + inEntryCount, _meta[0] + inEntryCount );
-        }
 
         // Write reverse-map
         if( table == TableId::Table2 )
@@ -172,7 +157,8 @@ public:
 
         // Match groups
         const int64 outEntryCount = MatchEntries( inEntryCount, crossBucketEntryCount );
-
+        SaveCrossBucketEntries( bucket );
+        
         // Write pairs
         // EncodeAndWritePairs( _pairs[0], outEntryCount );
 
@@ -184,6 +170,8 @@ public:
         // WriteEntriesToDisk( outEntryCount, _y[1], _meta[1] );
 
         // Save bucket length before y-sort since the pairs remain unsorted
+
+        
     }
 
     //-----------------------------------------------------------

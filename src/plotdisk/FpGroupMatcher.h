@@ -3,17 +3,28 @@
 #include "DiskPlotInfo.h"
 #include "threading/ThreadPool.h"
 
+struct FpCrossBucketInfo
+{
+    uint32 groupCount[2];
+    uint64 y    [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    Meta4  meta [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    Pair   pairs[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    uint64 matchCount = 0;
+};
+
 struct FpGroupMatcher
 {
     DiskPlotContext& _context;
     uint64           _maxMatches;
-    const uint64*    _startPositions[BB_DP_MAX_JOBS] = { 0 };
-    uint64           _matchCounts   [BB_DP_MAX_JOBS] = { 0 };
+    const uint64*    _startPositions[BB_DP_MAX_JOBS];// = { 0 };
+    uint64           _matchCounts   [BB_DP_MAX_JOBS];// = { 0 };
     uint64*          _groupIndices  [BB_DP_MAX_JOBS];
     Pair*            _pairs         [BB_DP_MAX_JOBS];
     Pair*            _outPairs;
-    uint64           _lastBucketEntries[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
-    uint64           _lastBucketGroupIndices[2];
+
+    // For cross-bucket matching
+    FpCrossBucketInfo _crossBucketInfo;
+    
 
     //-----------------------------------------------------------
     inline FpGroupMatcher( DiskPlotContext& context, const uint64 maxEntries, 
@@ -30,7 +41,9 @@ struct FpGroupMatcher
     }
 
     //-----------------------------------------------------------
-    inline uint64 Match( const uint64* yEntries, const int64 entryCount, const int64 nextBucketEntryCount )
+    template<typename TMeta>
+    inline uint64 Match( const uint64* yEntries, const TMeta* meta, const int64 entryCount, 
+                         FpCrossBucketInfo* crossBucketInfo, bool isFirstBucket )
     {
         const uint32 threadCount = _context.fpThreadCount;
 
@@ -58,8 +71,7 @@ struct FpGroupMatcher
             _startPositions[id] = entries;
             self->SyncThreads();
 
-            const uint64* end = self->IsLastThread() ? yEntries + entryCount + nextBucketEntryCount :
-                                                       _startPositions[id+1];
+            const uint64* end = self->IsLastThread() ? yEntries + entryCount : _startPositions[id+1];
 
             // Now scan for all groups
             uint64* groupIndices = _groupIndices[id];
@@ -80,28 +92,10 @@ struct FpGroupMatcher
             self->SyncThreads();
 
             // Add the end location of the last R group
-            const uint64 originalGroupCount = groupCount;
-
             if( self->IsLastThread() )
             {
-                if( nextBucketEntryCount == 0 )
-                {
-                    ASSERT( groupCount < _maxMatches );
-                    groupIndices[groupCount] = (uint64)entryCount;
-                }
-                else
-                {
-                    // Scan until we find the first index belonging to this bucket
-                    for( uint64 i = groupCount-1; i >= 0; i-- )
-                    {
-                        if( groupIndices[i] < (uint64)entryCount )
-                        {
-                            groupCount = i+1;
-                            ASSERT( groupCount < originalGroupCount );
-                            break;
-                        }
-                    }
-                }
+                ASSERT( groupCount < _maxMatches );
+                groupIndices[groupCount] = (uint64)entryCount;
             }
             else
             {
@@ -111,17 +105,7 @@ struct FpGroupMatcher
             }
 
             // Now perform matches
-            _matchCounts[id] = MatchGroups<false>( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
-
-            if( self->IsLastThread() && nextBucketEntryCount > 0 )
-            {
-                // Perform cross-bucket matches
-                ASSERT( originalGroupCount - groupCount >= 2 );
-
-                _matchCounts[id] += MatchGroups<true>( groupIndices[groupCount-1], 1, groupIndices+groupCount, 
-                                     yEntries, _pairs[id] + _matchCounts[id], _maxMatches - _matchCounts[id], 
-                                     entryCount );
-            }
+            _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
 
             // Copy to contiguous pair buffer
             self->SyncThreads();
@@ -133,7 +117,14 @@ struct FpGroupMatcher
                 copyOffset += allMatches[i];
 
             memcpy( _outPairs + copyOffset, _pairs[id], sizeof( Pair ) * _matchCounts[id] );
-            
+
+             // Perform cross-bucket matches with the previous bucket
+            if( self->IsControlThread() && !isFirstBucket )
+                CrossBucketMatch( yEntries, groupIndices );
+
+            // Save the last 2 groups for cross-bucket matching
+            if( self->IsLastThread() && crossBucketInfo )
+                SaveCrossBucketInfo( *info, groupIndices+groupCount-2, yEntries, meta );
         });
 
         const uint64* allMatches = _matchCounts;
@@ -145,11 +136,16 @@ struct FpGroupMatcher
     }
 
     //-----------------------------------------------------------
-    template<bool HasLGroupEnd = false>
+    inline uint64 CrossBucketMatch( const uint64* yEntries, const uint64 groupIndices[3], FpCrossBucketInfo& info )
+    {
+
+    }
+
+    //-----------------------------------------------------------
     inline static uint64 MatchGroups( 
         const uint64 startIndex, const int64 groupCount, 
         const uint64* groupBoundaries, const uint64* yBuffer, 
-        Pair* pairs, const uint64 maxPairs, const uint32 idOrGroupLEnd = 0 )
+        Pair* pairs, const uint64 maxPairs, const uint32 id = 0 )
     {
         uint64 pairCount = 0;
 
@@ -163,8 +159,6 @@ struct FpGroupMatcher
         {
             const uint64 groupRStart = groupBoundaries[i];
             const uint64 groupR      = yBuffer[groupRStart] / kBC;
-
-            const uint64 groupLEnd   = HasLGroupEnd ? idOrGroupLEnd : groupRStart;
 
             if( groupR - groupL == 1 )
             {
@@ -196,7 +190,7 @@ struct FpGroupMatcher
                 }
 
                 // For each group L entry
-                for( uint64 iL = groupLStart; iL < groupLEnd; iL++ )
+                for( uint64 iL = groupLStart; iL < groupRStart; iL++ )
                 {
                     const uint64 yL     = yBuffer[iL];
                     const uint64 localL = yL - groupLRangeStart;
@@ -232,6 +226,21 @@ struct FpGroupMatcher
         }
 
         return pairCount;
+    }
+
+    //-----------------------------------------------------------
+    template<typename TMeta>
+    inline void SaveCrossBucketInfo( const FpCrossBucketInfo& info, const uint64 groupIndices[3], 
+                                     const uint64* y, const TMeta* meta )
+    {
+        info.groupCount[0] = (uint32)( groupIndices[1] - groupIndices[0] );
+        info.groupCount[1] = (uint32)( groupIndices[2] - groupIndices[1] );
+        
+        const size_t copyCount = info.groupCount[0] + info.groupCount[1];
+        ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+
+        memcpy( info.y   , y    + groupIndices[0], copyCount * sizeof( uint64 ) );
+        memcpy( info.meta, meta + groupIndices[0], copyCount * sizeof( TMeta  ) );
     }
 };
 
