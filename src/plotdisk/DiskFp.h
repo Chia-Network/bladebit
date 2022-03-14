@@ -4,6 +4,7 @@
 #include "plotdisk/DiskBufferQueue.h"
 #include "plotdisk/DiskPlotContext.h"
 #include "plotdisk/FpGroupMatcher.h"
+#include "plotdisk/FpFxGen.h"
 #include "DiskPlotInfo.h"
 #include "BitBucketWriter.h"
 #include "util/StackAllocator.h"
@@ -161,16 +162,14 @@ public:
             // WriteReverseMap( _map[0], inEntryCount );
         }
 
-        // Match groups
-        // const int64 outEntryCount = 
-        MatchEntries( bucket, inEntryCount, y, meta, pairs );
+        const int64 outEntryCount = MatchEntries( bucket, inEntryCount, y, meta, pairs );
         
         // Write pairs
         // EncodeAndWritePairs( _pairs[0], outEntryCount );
 
         // FxGen
-        // TMeta* inMeta = ( table == TableId::Table2 ) ? (TMeta*)_map[0] : _meta[0];
-        // FxGen( outEntryCount, _pairs[0], _y[0], _y[1], _meta[0], _meta[1] );
+        TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)_map[0] : _meta[0];
+        FxGen( bucket, outEntryCount, pairs, y, meta );
 
         // Write new entries to disk
         // WriteEntriesToDisk( outEntryCount, _y[1], _meta[1] );
@@ -186,6 +185,16 @@ public:
         const int64 entryCount = (int64)matcher.Match( inEntryCount, y, meta, &_crossBucketInfo );
 
         return entryCount;
+    }
+
+    //-----------------------------------------------------------
+    void FxGen( const uint32 bucket, const int64 entryCount, const Pair* pairs, conjst uint64* inY, const TMetaIn* inMeta )
+    {
+        using typename TYOut = FpFxGen<table>::TYOut;
+
+        FpFxGen<table> fxGen( _pool, _threadCount );
+        fx.ComputFxMT( entryCount, pairs, inY, inMeta, (TYOut*)_y[1], (TMetaOut*)_meta[1] );
+
     }
 
     //-----------------------------------------------------------
