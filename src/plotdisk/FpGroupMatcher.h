@@ -5,11 +5,18 @@
 
 struct FpCrossBucketInfo
 {
-    uint32 groupCount[2];
-    uint64 y    [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
-    Meta4  meta [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
-    Pair   pairs[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
-    uint64 matchCount = 0;
+    uint32  groupCount[2];
+    uint64* y           = nullptr;
+    Meta4*  meta        = nullptr;
+    Pair*   pair        = nullptr;
+    uint64  matchCount  = 0;
+    uint64  matchOffset = 0;
+    uint32  bucket;
+    uint32  maxBuckets;
+
+    inline bool   IsLastBucket()  const { return bucket == maxBuckets-1; }
+    inline bool   IsFirstBucket() const { return bucket == 0; }
+    inline uint64 EntryCount() const { return (uint64)groupCount[0] + groupCount[1]; }
 };
 
 struct FpGroupMatcher
@@ -42,8 +49,7 @@ struct FpGroupMatcher
 
     //-----------------------------------------------------------
     template<typename TMeta>
-    inline uint64 Match( const uint64* yEntries, const TMeta* meta, const int64 entryCount, 
-                         FpCrossBucketInfo* crossBucketInfo, bool isFirstBucket )
+    inline uint64 Match( const int64 entryCount, const uint64* yEntries, const TMeta* meta, FpCrossBucketInfo* crossBucketInfo )
     {
         const uint32 threadCount = _context.fpThreadCount;
 
@@ -104,6 +110,11 @@ struct FpGroupMatcher
                 groupIndices[groupCount  ] = _groupIndices[id+1][0];
             }
 
+            // Cross-bucket matching
+            // Perform cross-bucket matches with the previous bucket
+            if( self->IsControlThread() && !crossBucketInfo->IsFirstBucket() )
+                this->CrossBucketMatch(*crossBucketInfo, yEntries, groupIndices );
+
             // Now perform matches
             _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
 
@@ -118,13 +129,9 @@ struct FpGroupMatcher
 
             memcpy( _outPairs + copyOffset, _pairs[id], sizeof( Pair ) * _matchCounts[id] );
 
-             // Perform cross-bucket matches with the previous bucket
-            if( self->IsControlThread() && !isFirstBucket )
-                CrossBucketMatch( yEntries, groupIndices );
-
             // Save the last 2 groups for cross-bucket matching
-            if( self->IsLastThread() && crossBucketInfo )
-                SaveCrossBucketInfo( *info, groupIndices+groupCount-2, yEntries, meta );
+            if( self->IsLastThread() && !crossBucketInfo->IsLastBucket() )
+                SaveCrossBucketInfo( *crossBucketInfo, groupIndices + groupCount - 2, yEntries, meta, _outPairs );
         });
 
         const uint64* allMatches = _matchCounts;
@@ -136,12 +143,7 @@ struct FpGroupMatcher
     }
 
     //-----------------------------------------------------------
-    inline uint64 CrossBucketMatch( const uint64* yEntries, const uint64 groupIndices[3], FpCrossBucketInfo& info )
-    {
-
-    }
-
-    //-----------------------------------------------------------
+    template<bool IdIsLGroupEnd = false>
     inline static uint64 MatchGroups( 
         const uint64 startIndex, const int64 groupCount, 
         const uint64* groupBoundaries, const uint64* yBuffer, 
@@ -159,6 +161,8 @@ struct FpGroupMatcher
         {
             const uint64 groupRStart = groupBoundaries[i];
             const uint64 groupR      = yBuffer[groupRStart] / kBC;
+
+            const uint64 groupLEnd   = IdIsLGroupEnd ? id : groupRStart;
 
             if( groupR - groupL == 1 )
             {
@@ -190,7 +194,7 @@ struct FpGroupMatcher
                 }
 
                 // For each group L entry
-                for( uint64 iL = groupLStart; iL < groupRStart; iL++ )
+                for( uint64 iL = groupLStart; iL < groupLEnd; iL++ )
                 {
                     const uint64 yL     = yBuffer[iL];
                     const uint64 localL = yL - groupLRangeStart;
@@ -228,10 +232,40 @@ struct FpGroupMatcher
         return pairCount;
     }
 
+private:
+    //-----------------------------------------------------------
+    inline void CrossBucketMatch( FpCrossBucketInfo& info, const uint64* yEntries, const uint64 curBucketIndices[2] )
+    {
+        const uint64  prevBucketLastGroup  = yEntries[-1] / kBC;
+        const uint64  prevGroupsEntryCount = info.EntryCount();
+        const uint64* yStart               = info.y;
+        ASSERT( info.y + prevGroupsEntryCount == yEntries );
+
+        uint64 groupBoundaries[3] = { 
+            prevGroupsEntryCount,
+            curBucketIndices[0] + prevGroupsEntryCount,
+            curBucketIndices[1] + prevGroupsEntryCount
+        };
+
+        uint64 matches = 0;
+
+        // If the first entry group is the same from the prev's bucket last group,
+        // then we can perform matches with the penultimate bucket
+        if( yEntries[0] / kBC == prevBucketLastGroup )
+        {
+            matches = MatchGroups<true>( 0, 1, groupBoundaries, yStart, info.pair, 
+                                         BB_DP_CROSS_BUCKET_MAX_ENTRIES, (uint32)info.groupCount[0] );
+        }
+
+        matches += MatchGroups<true>( info.groupCount[0], 1, &groupBoundaries[1], yStart, info.pair + matches, 
+                                      BB_DP_CROSS_BUCKET_MAX_ENTRIES-matches, (uint32)prevGroupsEntryCount );
+
+        info.matchCount = matches;
+    }
+
     //-----------------------------------------------------------
     template<typename TMeta>
-    inline void SaveCrossBucketInfo( const FpCrossBucketInfo& info, const uint64 groupIndices[3], 
-                                     const uint64* y, const TMeta* meta )
+    inline void SaveCrossBucketInfo( FpCrossBucketInfo& info, const uint64 groupIndices[3], const uint64* y, const TMeta* meta, const Pair* pairs )
     {
         info.groupCount[0] = (uint32)( groupIndices[1] - groupIndices[0] );
         info.groupCount[1] = (uint32)( groupIndices[2] - groupIndices[1] );
@@ -239,8 +273,16 @@ struct FpGroupMatcher
         const size_t copyCount = info.groupCount[0] + info.groupCount[1];
         ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
 
+        // Copy to the area before our working buffer starts. It is reserved for cross-bucket entries
+        info.y    = (uint64*)( y - copyCount );
+        info.meta = (Meta4*)(meta - copyCount);
+        info.pair = (Pair*)(pairs - copyCount);
+        
         memcpy( info.y   , y    + groupIndices[0], copyCount * sizeof( uint64 ) );
         memcpy( info.meta, meta + groupIndices[0], copyCount * sizeof( TMeta  ) );
+
+        ASSERT( info.y[0] / kBC == info.y[info.groupCount[0]-1] / kBC );
+        ASSERT( info.y[info.groupCount[0]] / kBC == info.y[info.groupCount[0]+info.groupCount[1]-1] / kBC );
     }
 };
 

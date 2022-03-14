@@ -35,7 +35,7 @@ public:
         , _threadCount( context.fpThreadCount )
         // , _bucket ( 0 )
     {
-        
+        _crossBucketInfo.maxBuckets = _numBuckets;
     }
 
     //-----------------------------------------------------------
@@ -54,6 +54,7 @@ public:
         
         const uint32 bucketBits    = bblog2( _numBuckets );
         const size_t maxEntries    = info::MaxBucketEntries;
+        const size_t maxEntriesX   = maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
         const size_t entrySizeBits = info::EntrySizePackedBits;
         
         const size_t genEntriesPerBucket   = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
@@ -64,23 +65,23 @@ public:
         _entries[0] = alloc.CAlloc<Entry>( maxEntries );
         _entries[1] = alloc.CAlloc<Entry>( maxEntries );
 
-        _y[0]    = alloc.CAlloc<uint64>( maxEntries );
-        _y[1]    = alloc.CAlloc<uint64>( maxEntries );
+        _y[0]    = alloc.CAlloc<uint64>( maxEntriesX );
+        _y[1]    = alloc.CAlloc<uint64>( maxEntriesX );
         
-        _map[0]  = alloc.CAlloc<uint64>( maxEntries );
+        _map[0]  = alloc.CAlloc<uint64>( maxEntriesX );
 
-        _meta[0] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntries );
-        _meta[1] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntries );
+        _meta[0] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntriesX );
+        _meta[1] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntriesX );
         
-        _pair[0] = alloc.CAlloc<Pair> ( maxEntries );
+        _pair[0] = alloc.CAlloc<Pair> ( maxEntriesX );
         
         // IO buffers
         const size_t pairBits    = _k + 1 - bucketBits + 9;
         const size_t mapBits     = _k + 1 - bucketBits + _k + 1;
 
         const size_t fxWriteSize   = (size_t)_numBuckets * perBucketEntriesSize;
-        const size_t pairWriteSize = CDiv( ( maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES ) * pairBits, 8 );
-        const size_t mapWriteSize  = CDiv( ( maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES ) * mapBits , 8 );
+        const size_t pairWriteSize = CDiv( ( maxEntriesX ) * pairBits, 8 );
+        const size_t mapWriteSize  = CDiv( ( maxEntriesX ) * mapBits , 8 );
 
         // #TODO: Set actual buffers
         _fxRead [0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
@@ -135,15 +136,20 @@ public:
     {
         Log::Line( " Bucket %u", bucket );
         const int64 inEntryCount = (int64)_context.bucketCounts[(int)table-1][bucket];
-        const bool  isLastBucket = bucket + 1 == _numBuckets;
+        // const bool  isLastBucket = bucket + 1 == _numBuckets;
 
         const byte* packedEntries = GetReadBufferForBucket( bucket );
+
+        // The first part of the buffer is reserved for storing cross bucket entries. 
+        uint64*  y     = _y   [0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
+        TMetaIn* meta  = _meta[0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES; 
+        Pair*    pairs = _pair[0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
+
 
         // Expand entries to be 64-bit aligned, sort them, then unpack them to individual components
         ExpandEntries( packedEntries, 0, _entries[0], inEntryCount );
         SortEntries( _entries[0], _entries[1], inEntryCount );
-        UnpackEntries( bucket, _entries[0], inEntryCount, _y[0], _map[0], _meta[0] );
-        
+        UnpackEntries( bucket, _entries[0], inEntryCount, y, _map[0], meta );
 
         // Write reverse-map
         if( table == TableId::Table2 )
@@ -156,8 +162,8 @@ public:
         }
 
         // Match groups
-        const int64 outEntryCount = MatchEntries( inEntryCount, crossBucketEntryCount );
-        SaveCrossBucketEntries( bucket );
+        // const int64 outEntryCount = 
+        MatchEntries( bucket, inEntryCount, y, meta, pairs );
         
         // Write pairs
         // EncodeAndWritePairs( _pairs[0], outEntryCount );
@@ -170,15 +176,14 @@ public:
         // WriteEntriesToDisk( outEntryCount, _y[1], _meta[1] );
 
         // Save bucket length before y-sort since the pairs remain unsorted
-
-        
     }
 
     //-----------------------------------------------------------
-    inline int64 MatchEntries( const int64 inEntryCount, const int64 crossBucketEntryCount )
+    inline int64 MatchEntries( const uint32 bucket, const int64 inEntryCount, const uint64* y, const TMetaIn* meta, Pair* pairs )
     {
-        FpGroupMatcher matcher( _context, MaxBucketEntries, _y[1], (Pair*)_meta[1], _pair[0] );
-        const int64 entryCount = (int64)matcher.Match( _y[0], inEntryCount, crossBucketEntryCount );
+        _crossBucketInfo.bucket = bucket;
+        FpGroupMatcher matcher( _context, MaxBucketEntries, _y[1], (Pair*)_meta[1], pairs );
+        const int64 entryCount = (int64)matcher.Match( inEntryCount, y, meta, &_crossBucketInfo );
 
         return entryCount;
     }
@@ -417,6 +422,8 @@ private:
     void*   _mapWrite [2] = { 0 };
 
     uint32  _threadCount;
+
+    FpCrossBucketInfo _crossBucketInfo;
     // For simplicity when doing mult-threaded bucket processing
     // int64            _bucketEntryCount;
     // int64            _lengths[BB_DP_MAX_JOBS];
