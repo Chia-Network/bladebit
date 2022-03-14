@@ -167,12 +167,10 @@ public:
         // Write pairs
         // EncodeAndWritePairs( _pairs[0], outEntryCount );
 
-        // FxGen
         TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)_map[0] : _meta[0];
-        FxGen( bucket, outEntryCount, pairs, y, meta );
+        FxGen( bucket, outEntryCount, pairs, y, inMeta );
 
-        // Write new entries to disk
-        // WriteEntriesToDisk( outEntryCount, _y[1], _meta[1] );
+        WriteEntriesToDisk( bucket, outEntryCount, _y[1], (TMetaOut*)_meta[1] );
 
         // Save bucket length before y-sort since the pairs remain unsorted
     }
@@ -188,14 +186,20 @@ public:
     }
 
     //-----------------------------------------------------------
-    void FxGen( const uint32 bucket, const int64 entryCount, const Pair* pairs, conjst uint64* inY, const TMetaIn* inMeta )
+    void FxGen( const uint32 bucket, const int64 entryCount, const Pair* pairs, const uint64* inY, const TMetaIn* inMeta )
     {
-        using typename TYOut = FpFxGen<table>::TYOut;
+        using TYOut = typename FpFxGen<table>::TYOut;
 
-        FpFxGen<table> fxGen( _pool, _threadCount );
-        fx.ComputFxMT( entryCount, pairs, inY, inMeta, (TYOut*)_y[1], (TMetaOut*)_meta[1] );
-
+        FpFxGen<table> fx( _pool, _threadCount );
+        fx.ComputeFxMT( entryCount, pairs, inY, inMeta, (TYOut*)_y[1], (TMetaOut*)_meta[1] );
     }
+
+    //-----------------------------------------------------------
+    inline void WriteEntriesToDisk( const uint32 bucket, const int64 entryCount, const uint64* outY, const TMetaOut* outMeta )
+    {
+        ASSERT( bucket >= 0 );
+    }
+
 
     //-----------------------------------------------------------
     inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, uint64* outY, uint64* outMap, TMetaIn* outMeta )

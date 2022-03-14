@@ -2,6 +2,7 @@
 #include "plotting/Tables.h"
 #include "threading/ThreadPool.h"
 #include "plotdisk/DiskPlotInfo.h"
+#include "b3/blake3.h"
 
 template<TableId table>
 struct FpYType { using Type = uint64; };
@@ -13,8 +14,6 @@ struct FpYType<TableId::Table7> { using Type = uint32; };
 template<TableId table>
 struct FpFxGen
 {
-    using InInfo   = DiskPlotInfo<table-1, _numBuckets>;
-    using OutInfo  = DiskPlotInfo<table, _numBuckets>;
     using TMetaIn  = typename TableMetaType<table>::MetaIn;
     using TMetaOut = typename TableMetaType<table>::MetaOut;
     using TYOut    = typename FpYType<table>::Type;
@@ -22,7 +21,7 @@ struct FpFxGen
     static constexpr size_t MetaInMulti  = TableMetaIn<table>::Multiplier;
     static constexpr size_t MetaOutMulti = TableMetaOut<table>::Multiplier;
 
-    static constexpr uint32 _k = InInfo::_k;
+    static constexpr uint32 _k = _K;
 
     //-----------------------------------------------------------
     inline FpFxGen( ThreadPool& pool, const uint32 threadCount )
@@ -32,20 +31,20 @@ struct FpFxGen
 
     //-----------------------------------------------------------
     inline void ComputeFxMT( const int64 entryCount, const Pair* pairs, const uint64* yIn, const TMetaIn* metaIn,
-                             TYout* yOut, TMetaOut* metaOut )
+                             TYOut* yOut, TMetaOut* metaOut )
     {
         AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
             
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
 
-            ComputeFx( count, pairs+offset, yIn+offset, metaIn+offset, yOut+offset, metaOut+offset, self->_jobId );
+            ComputeFx( count, pairs+offset, yIn, metaIn, yOut+offset, metaOut+offset, self->_jobId );
         });
     }
 
     //-----------------------------------------------------------
     static inline void ComputeFx( const int64 entryCount, const Pair* pairs, const uint64* yIn, const TMetaIn* metaIn,
-                                  TYout* yOut, TMetaOut* metaOut, const uint32 id )
+                                  TYOut* yOut, TMetaOut* metaOut, const uint32 id )
     {
         static_assert( MetaInMulti != 0, "Invalid metaKMultiplier" );
 
@@ -68,14 +67,15 @@ struct FpFxGen
         static_assert( bufferSize <= sizeof( input ), "Invalid fx input buffer size." );
 
         #if _DEBUG
-            uint64 prevY    = yIn[pairs.left[0]];
+            uint64 prevY    = yIn[pairs[0].left];
             uint64 prevLeft = 0;
         #endif
 
         for( int64 i = 0; i < entryCount; i++ )
         {
-            const uint32 left  = pairs.left [i];
-            const uint32 right = pairs.right[i];
+            const auto& pair = pairs[i];
+            const uint32 left  = pair.left;
+            const uint32 right = pair.right;
             ASSERT( left < right );
 
             const uint64 y = yIn[left];
@@ -120,10 +120,10 @@ struct FpFxGen
             }
             else if constexpr( MetaInMulti == 3 )
             {
-                const uint64 l0 = metaIn[left ].m1;
-                const uint64 l1 = metaIn[left ].m2 & 0xFFFFFFFF;
-                const uint64 r0 = metaIn[right].m1;
-                const uint64 r1 = metaIn[right].m2 & 0xFFFFFFFF;
+                const uint64 l0 = metaIn[left ].m0;
+                const uint64 l1 = metaIn[left ].m1 & 0xFFFFFFFF;
+                const uint64 r0 = metaIn[right].m0;
+                const uint64 r1 = metaIn[right].m1 & 0xFFFFFFFF;
             
                 input[0] = Swap64( y  << 26 | l0 >> 38 );
                 input[1] = Swap64( l0 << 26 | l1 >> 6  );
@@ -136,8 +136,8 @@ struct FpFxGen
                 // const uint64 l1 = metaInB[left ];
                 // const uint64 r0 = metaInA[right];
                 // const uint64 r1 = metaInB[right];
-                const TMeta4 l = metaIn[left];
-                const TMeta4 r = metaIn[right];
+                const Meta4 l = metaIn[left];
+                const Meta4 r = metaIn[right];
 
                 input[0] = Swap64( y    << 26 | l.m0 >> 38 );
                 input[1] = Swap64( l.m0 << 26 | l.m1 >> 38 );
@@ -152,7 +152,7 @@ struct FpFxGen
             blake3_hasher_finalize( &hasher, (uint8_t*)output, sizeof( output ) );
 
             const uint64 f = Swap64( *output ) >> yShift;
-            YOut[i] = (TYOut)f;
+            yOut[i] = (TYOut)f;
             
             if constexpr ( MetaOutMulti == 2 && MetaInMulti == 3 )
             {
