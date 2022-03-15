@@ -19,7 +19,7 @@
 // How many extra entries to load from the next bucket to ensure we have enough to hold the 2 groups's
 // worth of entries. This is so that we can besure that we can complete matches from groups from the previous
 // bucket that continue on to the next bucket. There's around 280-320 entries per group on k32. This should be enough
-#define BB_DP_CROSS_BUCKET_MAX_ENTRIES 1024
+#define BB_DP_CROSS_BUCKET_MAX_ENTRIES 768
 
 // #TODO: Increase this, or make the disk queue dynamic. Might need it for buckets = 1024
 #define BB_DISK_QUEUE_MAX_CMDS (4096*8) //1024

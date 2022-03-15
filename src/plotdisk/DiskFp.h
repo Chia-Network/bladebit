@@ -20,6 +20,7 @@ public:
     static constexpr uint64 MaxBucketEntries = Info::MaxBucketEntries;
 
     using Entry    = FpEntry<table-1>;
+    using EntryOut = FpEntry<table>;
     using TMetaIn  = typename TableMetaType<table>::MetaIn;
     using TMetaOut = typename TableMetaType<table>::MetaOut;
     using TAddress = uint64;
@@ -49,7 +50,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline void AllocateBuffers( IAllocator& alloc, const size_t fxBlockSize, const size_t pairBlockSize )
+    inline void AllocateBuffers( IAllocator& alloc, const size_t fxBlockSize, const size_t pairBlockSize, bool dryRun = false )
     {
         using info = DiskPlotInfo<TableId::Table4, _numBuckets>;
         
@@ -58,7 +59,7 @@ public:
         const size_t maxEntriesX   = maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
         const size_t entrySizeBits = info::EntrySizePackedBits;
         
-        const size_t genEntriesPerBucket   = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
         const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize ) + 
                                             RoundUpToNextBoundaryT( CDiv( entrySizeBits * BB_DP_CROSS_BUCKET_MAX_ENTRIES, 8 ), fxBlockSize );
 
@@ -97,9 +98,14 @@ public:
         _mapWrite[1]  = alloc.Alloc( mapWriteSize, pairBlockSize );
 
         // Block bit buffers
-        alloc.CAlloc( fxBlockSize  , fxBlockSize  , _numBuckets );  // Fx write
+        void* fxBlocks = alloc.CAlloc( fxBlockSize  , fxBlockSize  , _numBuckets );  // Fx write
         alloc.CAlloc( pairBlockSize, pairBlockSize, _numBuckets );  // Pair write
         alloc.CAlloc( pairBlockSize, pairBlockSize, _numBuckets );  // Map write
+
+        if( !dryRun )
+        {
+            _fxBitWriter = BitBucketWriter<_numBuckets>( *_context.ioQueue, _outFxId, (byte*)fxBlocks );
+        }
     }
 
     //-----------------------------------------------------------
@@ -109,7 +115,7 @@ public:
         DiskFp<TableId::Table4, _numBuckets> fp( cx );
 
         DummyAllocator alloc;
-        fp.AllocateBuffers( alloc, fxBlockSize, pairBlockSize );
+        fp.AllocateBuffers( alloc, fxBlockSize, pairBlockSize, true );
         
         return alloc.Size();
     }
@@ -146,7 +152,6 @@ public:
         TMetaIn* meta  = _meta[0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES; 
         Pair*    pairs = _pair[0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
 
-
         // Expand entries to be 64-bit aligned, sort them, then unpack them to individual components
         ExpandEntries( packedEntries, 0, _entries[0], inEntryCount );
         SortEntries( _entries[0], _entries[1], inEntryCount );
@@ -170,7 +175,7 @@ public:
         TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)_map[0] : _meta[0];
         FxGen( bucket, outEntryCount, pairs, y, inMeta );
 
-        WriteEntriesToDisk( bucket, outEntryCount, _y[1], (TMetaOut*)_meta[1] );
+        WriteEntriesToDisk( bucket, outEntryCount, _y[1], (TMetaOut*)_meta[1], (EntryOut*)_entries[0] );
 
         // Save bucket length before y-sort since the pairs remain unsorted
     }
@@ -195,11 +200,156 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline void WriteEntriesToDisk( const uint32 bucket, const int64 entryCount, const uint64* outY, const TMetaOut* outMeta )
+    inline void WriteEntriesToDisk( const uint32 bucket, const int64 entryCount, const uint64* outY, const TMetaOut* outMeta, EntryOut* dstEntriesBuckets )
     {
-        ASSERT( bucket >= 0 );
+        using Job = AnonPrefixSumJob<uint32>;
+
+        Job::Run( _pool, _threadCount, [=]( Job* self ) {
+            
+            const uint32 yBits         = Info::YBitSize;
+            const uint32 yShift        = Info::BucketShift;
+            const uint64 yMask         = ( 1ull << yBits ) - 1;
+            const size_t entrySizeBits = Info::EntrySizePackedBits;
+
+            int64 count, offset, end;
+            GetThreadOffsets( self, entryCount, count, offset, end );
+
+            // Count Y buckets
+            uint32 counts        [_numBuckets] = { 0 };
+            uint32 pfxSum        [_numBuckets];
+            uint32 totalCounts   [_numBuckets];
+            uint64 totalBitCounts[_numBuckets];
+
+            const uint64* ySrc    = outY + offset;
+            const uint64* ySrcEnd = outY + end;
+
+            do {
+                counts[(*ySrc) >> yShift]++;
+            } while( ++ySrc < ySrcEnd );
+
+            self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
+
+            // Distribute to the appropriate buckets as an expanded entry
+            const int64     mapIdx     = _tableEntryCount + offset;
+            const TMetaOut* metaSrc    = outMeta + offset;
+                  EntryOut* dstEntries = dstEntriesBuckets;
+
+            ySrc = outY + offset;
+
+            for( int64 i = 0; i < count; i++ )
+            {
+                const uint64 y      = ySrc[i];
+                const uint32 dstIdx = --pfxSum[y >> yShift];
+                ASSERT( (int64)dstIdx < entryCount );
+
+                EntryOut& e = dstEntries[dstIdx];
+                e.ykey =  ( (uint64)(mapIdx+i) << yBits ) | ( y & yMask );  // Write y and key/map as packed already
+
+                if constexpr ( table < TableId::Table7 )
+                    e.meta = metaSrc[i];
+            }
+
+            // Prepare to pack entries
+            auto& bitWriter = _fxBitWriter;
+
+            if( self->IsControlThread() )
+            {
+                self->LockThreads();
+
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                    _context.bucketCounts[(int)table][i] += totalCounts[i];
+
+                // Convert counts to bit sizes
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                    totalBitCounts[i] = totalCounts[i] * entrySizeBits;
+                
+                // #TODO: Wait for the buffer to be available first
+                byte* writeBuffer = GetWriteBuffer( bucket );
+
+                bitWriter.BeginWriteBuckets( totalBitCounts, writeBuffer );
+
+                _sharedTotalBitCounts = totalBitCounts;
+
+                self->ReleaseThreads();
+            }
+            else
+                self->WaitForRelease();
+
+
+            // Bit-compress/pack each bucket entries
+            uint64* totalBucketBitCounts = _sharedTotalBitCounts;
+            uint64  bitsWritten          = 0;
+
+            for( uint32 i = 0; i < _numBuckets; i++ )
+            {
+                const uint64 writeOffset = pfxSum[i];
+                const uint64 bitOffset   = writeOffset * entrySizeBits - bitsWritten;
+                bitsWritten += totalBucketBitCounts[i];
+                
+                ASSERT( bitOffset + counts[i] * entrySizeBits <= totalBucketBitCounts[i] );
+
+                BitWriter writer = bitWriter.GetWriter( i, bitOffset );
+                
+                const EntryOut* entry = dstEntries + writeOffset;
+                ASSERT( counts[i] >= 2 );
+
+                // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
+                PackEntries( entry, 2, writer );
+                self->SyncThreads();
+                PackEntries( entry + 2, (int64)counts[i]-2, writer );
+            }
+
+            // Write buckets to disk
+            if( self->IsControlThread() )
+            {
+                self->LockThreads();
+                bitWriter.Submit();
+                self->ReleaseThreads();
+
+                // #TODO: Signal fence
+            }
+            else
+                self->WaitForRelease();
+            
+        });
     }
 
+    //-----------------------------------------------------------
+    inline static void PackEntries( const EntryOut* entries, const int64 entryCount, BitWriter& writer )
+    {
+        const uint32 yBits         = Info::YBitSize;
+        const uint32 mapBits       = Info::MapBitSize;
+        const uint32 ykeyBits      = yBits + mapBits;
+        const size_t metaOutMulti  = Info::MetaMultiplier;
+        const size_t entrySizeBits = Info::EntrySizePackedBits;
+
+        static_assert( ykeyBits + metaOutMulti * _k == entrySizeBits );
+        static_assert( metaOutMulti != 1 );
+
+        const EntryOut* entry = entries;
+        const EntryOut* end   = entry + entryCount;
+        while( entry < end )
+        {
+            writer.Write( entry->ykey, ykeyBits );
+
+            if constexpr ( metaOutMulti == 2 )
+            {
+                writer.Write( entry->meta, 64 );
+            }
+            else if constexpr ( metaOutMulti == 3 )
+            {
+                writer.Write( entry->meta.m0, 64 );
+                writer.Write( entry->meta.m1, 32 );
+            }
+            else if constexpr ( metaOutMulti == 4 )
+            {
+                writer.Write( entry->meta.m0, 64 );
+                writer.Write( entry->meta.m1, 64 );
+            }
+            
+            entry++;
+        }
+    }
 
     //-----------------------------------------------------------
     inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, uint64* outY, uint64* outMap, TMetaIn* outMeta )
@@ -408,6 +558,12 @@ public:
         return (byte*)_fxRead[bucket % 2];
     }
 
+    //-----------------------------------------------------------
+    inline byte* GetWriteBuffer( const uint32 bucket )
+    {
+        return (byte*)_fxWrite[bucket % 2];
+    }
+
 private:
     DiskPlotContext& _context    ;
     ThreadPool&      _pool       ;
@@ -418,6 +574,8 @@ private:
     Fence            _writeFence ;
     Fence            _mapWriteFence;
     Fence            _lpWriteFence ;
+
+    int64            _tableEntryCount;  // Current table entry count
 
     Duration         _readWaitTime = Duration::zero();
 
@@ -435,6 +593,9 @@ private:
     void*   _mapWrite [2] = { 0 };
 
     uint32  _threadCount;
+    uint64* _sharedTotalBitCounts = nullptr;  // Total bucket bit sizes when writing Fx across all threads
+
+    BitBucketWriter<_numBuckets>  _fxBitWriter;
 
     FpCrossBucketInfo _crossBucketInfo;
     // For simplicity when doing mult-threaded bucket processing

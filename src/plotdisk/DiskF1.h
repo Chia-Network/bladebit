@@ -38,7 +38,7 @@ struct DiskF1
         fxBlocks   = (byte*)stack.Alloc( _numBuckets * context.tmp2BlockSize, context.tmp2BlockSize );
         _blocks[0] = stack.CAlloc<uint32>( entryAllocCount * threadCount );
         _entries   = stack.CAlloc<uint64>( entryAllocCount * threadCount );
-
+    
         for( uint32 i = 1; i < threadCount; i++ )
             _blocks[i] = _blocks[i-1] + entryAllocCount;
 
@@ -197,7 +197,7 @@ struct DiskF1
                 if( self->IsControlThread() )
                 {
                     self->LockThreads();
-                    bitWriter.Submit();
+                    bitWriter.SubmitAndRelease();
                     self->ReleaseThreads();
                 }
                 else

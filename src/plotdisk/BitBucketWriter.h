@@ -51,14 +51,25 @@ public:
     {
         const size_t fsBlockSize     = _queue->BlockSize( _fileId );
         const size_t fsBlockSizeBits = fsBlockSize * 8;
-              size_t allocSize       = 0;
-
         ASSERT( fsBlockSize > 0 );
+
+        size_t allocSize = 0;
 
         for( uint32 i = 0; i < _numBuckets; i++ )
             allocSize += CDiv( bucketBitSizes[i] + _remainderBitCount[i], fsBlockSizeBits ) * fsBlockSizeBits / 8;
 
         byte* bucketBuffers = _queue->GetBuffer( allocSize, fsBlockSize, true );
+
+        BeginWriteBuckets( bucketBitSizes, bucketBuffers );
+    }
+
+    //-----------------------------------------------------------
+    inline void BeginWriteBuckets( const uint64 bucketBitSizes[_numBuckets], byte* bucketBuffers )
+    {
+        ASSERT( bucketBuffers );
+        
+        const size_t fsBlockSizeBits = _queue->BlockSize( _fileId ) * 8;
+        ASSERT( fsBlockSizeBits > 0 );
 
         // Initialize our BitWriters
         byte* fields = bucketBuffers;
@@ -115,7 +126,12 @@ public:
 
             _remainderBitCount[i] = remainderBits;
         }
+    }
 
+    //-----------------------------------------------------------
+    inline void SubmitAndRelease()
+    {
+        this->Submit();
         _queue->ReleaseBuffer( _buckets[0].buffer );
         _queue->CommitCommands();
     }

@@ -242,6 +242,9 @@ void DiskPlotPhase1::ForwardPropagate()
 {
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
     {
+        Log::Line( "Table %u", table+1 );
+        auto timer = TimerBegin();
+
         switch( table )
         {
             case TableId::Table2: ForwardPropagateTable<TableId::Table2>(); break;
@@ -255,6 +258,8 @@ void DiskPlotPhase1::ForwardPropagate()
                 Fatal( "Invalid table." );
                 break;
         }
+
+        Log::Line( "Completed table %u in %.2lf seconds.", table+1, TimerEnd( timer ) );
     }
 }
 
@@ -264,19 +269,16 @@ void DiskPlotPhase1::ForwardPropagateTable()
 {
     const uint32 numBuckets = _cx.numBuckets;
     
-    for( uint32 bucket = 0; bucket < numBuckets; bucket++ )
+    switch ( numBuckets )
     {
-        switch ( numBuckets )
-        {
-            case 128 : ForwardPropagateBuckets<table, 128 >(); break;
-            case 256 : ForwardPropagateBuckets<table, 256 >(); break;
-            case 512 : ForwardPropagateBuckets<table, 512 >(); break;
-            case 1024: ForwardPropagateBuckets<table, 1024>(); break;
-        
-            default:
-                Fatal( "Invalid bucket count." );
-                break;
-        }
+        case 128 : ForwardPropagateBuckets<table, 128 >(); break;
+        case 256 : ForwardPropagateBuckets<table, 256 >(); break;
+        case 512 : ForwardPropagateBuckets<table, 512 >(); break;
+        case 1024: ForwardPropagateBuckets<table, 1024>(); break;
+    
+        default:
+            Fatal( "Invalid bucket count." );
+            break;
     }
 }
 
