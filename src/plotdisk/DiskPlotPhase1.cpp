@@ -106,6 +106,13 @@ void DiskPlotPhase1::Run()
         _diskQueue->InitFileSet( FileId::T5, "t5", 1, FileSetOptions::DirectIO, nullptr );
         _diskQueue->InitFileSet( FileId::T6, "t6", 1, FileSetOptions::DirectIO, nullptr );
         _diskQueue->InitFileSet( FileId::T7, "t7", 1, FileSetOptions::DirectIO, nullptr );
+
+        _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
     }
 
 #if !BB_DP_DBG_READ_EXISTING_F1
@@ -268,7 +275,7 @@ void DiskPlotPhase1::ForwardPropagate()
         Log::Line( "Table IO wait time: Read: %.2lf s | Write: %.2lf.", 
                     TicksToSeconds( _tableReadWaitTime ), TicksToSeconds( _tableWriteWaitTime ) );
 
-        std::swap( _fxIds[0], _fxIds[1] );
+        std::swap( _fxIn, _fxOut );
     }
 }
 
@@ -298,7 +305,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
 template<TableId table, uint32 _numBuckets>
 void DiskPlotPhase1::ForwardPropagateBuckets()
 {
-    DiskFp<table, _numBuckets> fp( _cx );
+    DiskFp<table, _numBuckets> fp( _cx, _fxIn, _fxOut );
     fp.Run();
 
     _tableReadWaitTime  = fp.ReadWaitTime();

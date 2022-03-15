@@ -34,5 +34,6 @@ private:
     Duration         _tableReadWaitTime;
     Duration         _tableWriteWaitTime;
 
-    FileId           _fxIds[2] = { FileId::FX0, FileId::FX1 };
+    FileId           _fxIn  = FileId::FX0;
+    FileId           _fxOut = FileId::FX1;
 };

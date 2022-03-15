@@ -20,14 +20,6 @@ enum class FileId
     T6,
     T7,
 
-    // Sort key used to convert to map (during Phase 1)
-    SORT_KEY2,
-    SORT_KEY3,
-    SORT_KEY4,
-    SORT_KEY5,
-    SORT_KEY6,
-    SORT_KEY7,
-
     // Maps from match order to y-sorted order
     MAP2,
     MAP3,
@@ -79,19 +71,19 @@ enum class FileId
 //-----------------------------------------------------------
 inline FileId TableIdToSortKeyId( const TableId table )
 {
-    switch( table )
-    {
-        case TableId::Table2: return FileId::SORT_KEY2;
-        case TableId::Table3: return FileId::SORT_KEY3;
-        case TableId::Table4: return FileId::SORT_KEY4;
-        case TableId::Table5: return FileId::SORT_KEY5;
-        case TableId::Table6: return FileId::SORT_KEY6;
-        case TableId::Table7: return FileId::SORT_KEY7;
+    // switch( table )
+    // {
+    //     case TableId::Table2: return FileId::SORT_KEY2;
+    //     case TableId::Table3: return FileId::SORT_KEY3;
+    //     case TableId::Table4: return FileId::SORT_KEY4;
+    //     case TableId::Table5: return FileId::SORT_KEY5;
+    //     case TableId::Table6: return FileId::SORT_KEY6;
+    //     case TableId::Table7: return FileId::SORT_KEY7;
     
-        default:
-            ASSERT( 0 );
-            break;
-    }
+    //     default:
+    //         ASSERT( 0 );
+    //         break;
+    // }
     
     ASSERT( 0 );
     return FileId::None;

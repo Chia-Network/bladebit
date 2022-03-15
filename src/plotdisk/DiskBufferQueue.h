@@ -29,9 +29,9 @@ struct FileSet
 {
     const char*    name             = nullptr;
     Span<IStream*> files;
-    void*          blockBuffers     = nullptr;
-    size_t*        blockOffsets     = nullptr;
-    IIOTransform*  transform        = nullptr;
+    void*          blockBuffer     = nullptr;   // For aligned reads
+    // size_t*        blockOffsets    = nullptr;
+    // IIOTransform*  transform        = nullptr;
     FileSetOptions options          = FileSetOptions::None;
 };
 
@@ -173,7 +173,7 @@ public:
         return _workHeap.Alloc( size, alignment, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
     }
 
-    byte* GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer = true );
+    // byte* GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer = true );
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
     // These returns the buffer back to the queue so that it is in use.
@@ -228,7 +228,7 @@ private:
     void CmdSeekBucket( const Command& cmd );
 
     void WriteToFile( IStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
-    void ReadFromFile( IStream& file, size_t size, byte* buffer, byte* blockBuffer, const char* fileName, uint bucket );
+    void ReadFromFile( IStream& file, size_t size, byte* buffer, byte* blockBuffer, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket );
 
     void CmdDeleteFile( const Command& cmd );
     void CmdDeleteBucket( const Command& cmd );

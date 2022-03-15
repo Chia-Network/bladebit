@@ -9,6 +9,12 @@
 #include "BitBucketWriter.h"
 #include "util/StackAllocator.h"
 
+template<TableId table>
+struct FpMapType { using Type = uint64; };
+
+template<>
+struct FpMapType<TableId::Table2> { using Type = uint32; };
+
 template<TableId table, uint32 _numBuckets>
 class DiskFp
 {
@@ -42,7 +48,8 @@ public:
     //-----------------------------------------------------------
     inline void Run()
     {
-        _ioQueue.SeekBucket( _inFxId, 0, SeekOrigin::Begin );
+        _ioQueue.SeekBucket( _inFxId , 0, SeekOrigin::Begin );
+        _ioQueue.SeekBucket( _outFxId, 0, SeekOrigin::Begin );
         _ioQueue.CommitCommands();
 
         StackAllocator alloc( _context.heapBuffer, _context.heapSize );
@@ -100,20 +107,19 @@ public:
         _mapWrite[1]  = alloc.Alloc( mapWriteSize, pairBlockSize );
 
         // Block bit buffers
-        byte* fxBlocks   = (byte*)alloc.CAlloc( fxBlockSize  , fxBlockSize  , _numBuckets );  // Fx write
-        byte* pairBlocks = (byte*)alloc.CAlloc( pairBlockSize, pairBlockSize, 1 );            // Pair write
-        byte* keyBlocks  = (byte*)alloc.CAlloc( pairBlockSize, pairBlockSize, _numBuckets );  // Key write
-        byte* mapBlocks  = (byte*)alloc.CAlloc( pairBlockSize, pairBlockSize, 1 );            // Map write
+        byte* fxBlocks   = (byte*)alloc.CAlloc( _numBuckets, fxBlockSize  , fxBlockSize   );  // Fx write
+        byte* pairBlocks = (byte*)alloc.CAlloc( 1          , pairBlockSize, pairBlockSize );  // Pair write
+        byte* xBlocks    = (byte*)alloc.CAlloc( 1          , pairBlockSize, pairBlockSize );  // x write
+        byte* mapBlocks  = (byte*)alloc.CAlloc( _numBuckets, pairBlockSize, pairBlockSize );  // Map write
 
         if( !dryRun )
         {
-            const FileId keyWriterId = FileId::MAP2 + (FileId)table-1;
-            const FileId mapWriterId = table == TableId::Table2 ? FileId::T1 : FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
+            const FileId mapWriterId = FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
 
             _fxBitWriter   = BitBucketWriter<_numBuckets>( _ioQueue, _outFxId, (byte*)fxBlocks );
             _pairBitWriter = BitBucketWriter<1>          ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
-            // _keyBitWriter  = BitBucketWriter<_numBuckets>( _ioQueue, keyWriterId, (byte*)keyBlocks );
-            // _mapBitWriter  = BitBucketWriter<1>          ( _ioQueue, mapWriterId, (byte*)mapBlocks );
+            _xBitWriter    = BitBucketWriter<1>          ( _ioQueue, FileId::T1,  (byte*)xBlocks );
+            _mapBitWriter  = BitBucketWriter<_numBuckets>( _ioQueue, mapWriterId, (byte*)mapBlocks );
         }
     }
 
@@ -121,7 +127,7 @@ public:
     inline static size_t GetRequiredHeapSize( const size_t fxBlockSize, const size_t pairBlockSize )
     {
         DiskPlotContext cx = { 0 };
-        DiskFp<TableId::Table4, _numBuckets> fp( cx );
+        DiskFp<TableId::Table4, _numBuckets> fp( cx, FileId::None, FileId::None );
 
         DummyAllocator alloc;
         fp.AllocateBuffers( alloc, fxBlockSize, pairBlockSize, true );
@@ -159,7 +165,7 @@ public:
     //-----------------------------------------------------------
     inline void FpBucket( const uint32 bucket )
     {
-        Log::Line( " Bucket %u", bucket );
+        // Log::Verbose( " Bucket %u", bucket );
         const int64 inEntryCount = (int64)_context.bucketCounts[(int)table-1][bucket];
         // const bool  isLastBucket = bucket + 1 == _numBuckets;
 
@@ -175,15 +181,7 @@ public:
         SortEntries( _entries[0], _entries[1], inEntryCount );
         UnpackEntries( bucket, _entries[0], inEntryCount, y, _map[0], meta );
 
-        // Write reverse-map
-        if( table == TableId::Table2 )
-        {
-            // Write sorted x back to disk
-        }
-        else
-        {
-            // WriteReverseMap( _map[0], inEntryCount );
-        }
+        WriteMap( bucket, inEntryCount, _map[0], _map[1] ); // #TOOD: Can use meta1 here for map1...
 
         const int64 outEntryCount = MatchEntries( bucket, inEntryCount, y, meta, pairs );
 
@@ -200,6 +198,154 @@ public:
 
         _crossBucketInfo.matchOffset += (uint64)outEntryCount;
         // Save bucket length before y-sort since the pairs remain unsorted
+    }
+
+    //-----------------------------------------------------------
+    void WriteMap( const uint32 bucket, const int64 entryCount, const uint64* map, uint64* outMap )
+    {
+        using TMap = typename FpMapType<table>::Type;
+
+        const FileId mapFile = table == TableId::Table2 ? FileId::T1 : FileId::MAP2 + (FileId)table-2;
+        
+        if constexpr ( table == TableId::Table2 )
+        {
+            byte* writeBuffer = GetMapWriteBuffer( bucket );
+            
+            if( bucket > 1 )
+                _mapWriteFence.Wait( bucket - 2, _writeWaitTime );
+
+             AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
+
+                int64 count, offset, end;
+                GetThreadOffsets( self, entryCount, count, offset, end );
+
+                const TMap* inMap  = ((TMap*)map) + offset;
+                      TMap* outMap = ((TMap*)writeBuffer) + offset;
+                
+                // Just copy to the write buffer
+                memcpy( outMap, inMap, sizeof( TMap ) * count );
+
+                // Write sorted x back to disk
+                self->SyncThreads();
+                if( self->IsControlThread() )
+                {
+                    const uint64 totalBits = entryCount * sizeof( TMap ) * 8;
+
+                    _xBitWriter.BeginWriteBuckets( &totalBits, writeBuffer );
+                    _xBitWriter.Submit();
+                    _ioQueue.SignalFence( _mapWriteFence, bucket );
+                    _ioQueue.CommitCommands();
+                }
+            });
+
+            return;
+        }
+
+        // Write the key as a map to the final entry location.
+        // We do this by writing into buckets to final sorted (current) location
+        // into its original bucket, with the offset in that bucket.
+        using Job = AnonPrefixSumJob<uint32>;
+
+        uint32 totalCounts   [_numBuckets];
+        uint64 totalBitCounts[_numBuckets];
+        
+        Job::Run( _pool, _threadCount, [&]( Job* self ) {
+
+            const uint32 shift       = Info::MapBitSize - Info::BucketBits;
+            const uint32 bitSize     = Info::MapBitSize + Info::MapBitSize - Info::BucketBits;
+            const uint32 encodeShift = Info::MapBitSize;
+
+            int64 count, offset, end;
+            GetThreadOffsets( self, entryCount, count, offset, end );
+
+            uint32 counts        [_numBuckets] = { 0 };
+            uint32 pfxSum        [_numBuckets];
+            // uint64 totalBitCounts[_numBuckets];
+            
+            const uint64* inIdx    = map + offset;
+            const uint64* inIdxEnd = map + end;
+
+            // Count buckets
+            do {
+                const uint64 b = *inIdx >> shift;
+                ASSERT( b < _numBuckets );
+                counts[b]++;
+            } while( ++inIdx < inIdxEnd );
+
+            self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
+
+            // Convert map entries from source inded to reverse map
+            const uint64 tableOffset = (uint64)( _tableEntryCount + offset );
+            
+            const uint64* reverseMap    = map + offset;
+                  uint64* outMapBuckets = outMap; 
+
+            for( int64 i = 0; i < count; i++ )
+            {
+                const uint64 m = reverseMap[i];
+                const uint64 b = m >> shift;
+
+                const uint32 dstIdx = --pfxSum[b];
+
+                const uint64 finalIdx = (uint64)(tableOffset + i);
+                outMapBuckets[dstIdx] = (m << encodeShift) | finalIdx;
+            }
+
+            auto& bitWriter = _mapBitWriter;
+            uint64* bitCounts = totalBitCounts;
+
+            if( self->IsControlThread() )
+            {
+                self->LockThreads();
+
+                // Convert counts to bit sizes
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                    bitCounts[i] = (uint64)totalCounts[i] * bitSize;
+                
+                byte* writeBuffer = GetMapWriteBuffer( bucket );
+                
+                // Wait for the buffer to be available first
+                if( bucket > 1 )
+                    _mapWriteFence.Wait( bucket - 2, _writeWaitTime );
+
+                bitWriter.BeginWriteBuckets( bitCounts, writeBuffer );
+
+                self->ReleaseThreads();
+            }
+            else
+                self->WaitForRelease();
+
+            // Bit-compress/pack each bucket entries
+            uint64 bitsWritten = 0;
+
+            for( uint32 i = 0; i < _numBuckets; i++ )
+            {
+                const uint64 writeOffset = pfxSum[i];
+                const uint64 bitOffset   = writeOffset * bitSize - bitsWritten;
+                bitsWritten += bitCounts[i];
+                
+                ASSERT( bitOffset + counts[i] * bitSize <= bitCounts[i] );
+
+                BitWriter writer = bitWriter.GetWriter( i, bitOffset );
+                
+                const uint64* mapToWrite    = outMapBuckets + writeOffset; 
+                const uint64* mapToWriteEnd = mapToWrite + counts[i]; 
+                ASSERT( counts[i] >= 2 );
+
+                // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
+                writer.Write( mapToWrite[0], bitSize );
+                writer.Write( mapToWrite[1], bitSize );
+                
+                self->SyncThreads();
+
+                mapToWrite+=2;
+                while( mapToWrite < mapToWriteEnd )
+                {
+                    writer.Write( *mapToWrite, bitSize );
+                    mapToWrite++;
+                }
+            }
+        });
     }
 
     //-----------------------------------------------------------
@@ -231,6 +377,53 @@ public:
 
         FpFxGen<table> fx( _pool, _threadCount );
         fx.ComputeFxMT( entryCount, pairs, inY, inMeta, (TYOut*)_y[1], (TMetaOut*)_meta[1] );
+    }
+
+    //-----------------------------------------------------------
+    inline void WritePairsToDisk( const uint32 bucket, const int64 entryCount, const Pair* pairs )
+    {
+        uint64 bitBucketSizes = (uint64)entryCount * Info::PairBitSize;
+        byte*  writeBuffer    = GetPairWriteBuffer( bucket );
+
+        _pairWriteFence.Wait( bucket, _writeWaitTime );
+        _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, writeBuffer );
+
+        AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
+
+            int64 count, offset, end;
+            GetThreadOffsets( self, entryCount, count, offset, end );
+
+            const Pair* pair = pairs + offset;
+
+            BitWriter writer = _pairBitWriter.GetWriter( 0, (uint64)offset * Info::PairBitSize );
+
+            ASSERT( count >= 2 );
+            PackPairs( 2, pair, writer );
+            self->SyncThreads();
+            PackPairs( count-2, pair+2, writer );
+        });
+
+        _pairBitWriter.Submit();
+        _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );   // #TODO: Don't signal here, signal on cross-bucket?
+        _ioQueue.CommitCommands();
+    }
+
+    //-----------------------------------------------------------
+    inline static void PackPairs( const int64 entryCount, const Pair* pair, BitWriter& writer )
+    {
+        const uint32 entrySizeBits = Info::PairBitSize;
+        const uint32 shift         = Info::PairBitSizeL;
+        const uint64 mask          = ( 1ull << shift ) - 1;
+
+        const Pair* end = pair + entryCount;
+
+        while( pair < end )
+        {
+            ASSERT( pair->right - pair->left < 512 );
+
+            writer.Write( ( (uint64)(pair->right - pair->left) << shift ) | ( pair->left & mask ), entrySizeBits );
+            pair++;
+        }
     }
 
     //-----------------------------------------------------------
@@ -352,53 +545,6 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline void WritePairsToDisk( const uint32 bucket, const int64 entryCount, const Pair* pairs )
-    {
-        uint64 bitBucketSizes = (uint64)entryCount * Info::PairBitSize;
-        byte*  writeBuffer    = GetPairWriteBuffer( bucket );
-
-        _pairWriteFence.Wait( bucket, _writeWaitTime );
-        _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, writeBuffer );
-
-        AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
-
-            int64 count, offset, end;
-            GetThreadOffsets( self, entryCount, count, offset, end );
-
-            const Pair* pair = pairs + offset;
-
-            BitWriter writer = _pairBitWriter.GetWriter( 0, (uint64)offset * Info::PairBitSize );
-
-            ASSERT( count >= 2 );
-            PackPairs( 2, pair, writer );
-            self->SyncThreads();
-            PackPairs( count-2, pair+2, writer );
-        });
-
-        _pairBitWriter.Submit();
-        _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );   // #TODO: Don't signal here, signal on cross-bucket?
-        _ioQueue.CommitCommands();
-    }
-
-    //-----------------------------------------------------------
-    inline static void PackPairs( const int64 entryCount, const Pair* pair, BitWriter& writer )
-    {
-        const uint32 entrySizeBits = Info::PairBitSize;
-        const uint32 shift         = Info::PairBitSizeL;
-        const uint64 mask          = ( 1ull << shift ) - 1;
-
-        const Pair* end = pair + entryCount;
-
-        while( pair < end )
-        {
-            ASSERT( pair->right - pair->left < 512 );
-
-            writer.Write( ( (uint64)(pair->right - pair->left) << shift ) | ( pair->left & mask ), entrySizeBits );
-            pair++;
-        }
-    }
-
-    //-----------------------------------------------------------
     inline static void PackEntries( const EntryOut* entries, const int64 entryCount, BitWriter& writer )
     {
         const uint32 yBits         = Info::YBitSize;
@@ -438,6 +584,8 @@ public:
     //-----------------------------------------------------------
     inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, uint64* outY, uint64* outMap, TMetaIn* outMeta )
     {
+        using TMap = typename FpMapType<table>::Type;
+
         AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
 
             constexpr uint32 metaMultipler = InInfo::MetaMultiplier;
@@ -451,7 +599,7 @@ public:
             GetThreadOffsets( self, entryCount, count, offset, end );
 
             uint64*  y    = outY;
-            uint64*  map  = outMap;
+            TMap*    map  = (TMap*)outMap;
             TMetaIn* meta = outMeta;
             
             const Entry* entries = packedEntries;
@@ -462,7 +610,7 @@ public:
 
                 const uint64 ykey = e.ykey;
                 y  [i] = bucketBits | ( ykey & yMask );
-                map[i] = ykey >> yBits;
+                map[i] = (TMap)( ykey >> yBits );
 
                 // Can't be 1 (table 1 only), because in that case the metadata is x, 
                 // which is stored as the map
@@ -654,6 +802,12 @@ public:
         return (byte*)_pairWrite[bucket % 2];
     }
 
+    //-----------------------------------------------------------
+    inline byte* GetMapWriteBuffer( const uint32 bucket )
+    {
+        return (byte*)_mapWrite[bucket % 2];
+    }
+
 private:
     DiskPlotContext& _context    ;
     ThreadPool&      _pool       ;
@@ -687,10 +841,10 @@ private:
     uint32  _threadCount;
     uint64* _sharedTotalBitCounts = nullptr;  // Total bucket bit sizes when writing Fx across all threads
 
-    BitBucketWriter<_numBuckets>  _fxBitWriter;
-    BitBucketWriter<1>            _pairBitWriter;
-    BitBucketWriter<_numBuckets>  _keyBitWriter;
-    BitBucketWriter<1>            _mapBitWriter;
+    BitBucketWriter<_numBuckets> _fxBitWriter;
+    BitBucketWriter<1>           _pairBitWriter;
+    BitBucketWriter<_numBuckets> _mapBitWriter;
+    BitBucketWriter<1>           _xBitWriter;
 
     FpCrossBucketInfo _crossBucketInfo;
 };
