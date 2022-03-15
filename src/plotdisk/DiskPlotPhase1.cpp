@@ -98,6 +98,14 @@ void DiskPlotPhase1::Run()
         
         fdata.cache = ((byte*)fdata.cache) + cacheSize;
         _diskQueue->InitFileSet( FileId::FX1, "fx_1", _cx.numBuckets, opts, &fdata );
+
+        _diskQueue->InitFileSet( FileId::T1, "t1", 1, FileSetOptions::DirectIO, nullptr );  // X (sorted on Y)
+        _diskQueue->InitFileSet( FileId::T2, "t2", 1, FileSetOptions::DirectIO, nullptr );  // Back pointers
+        _diskQueue->InitFileSet( FileId::T3, "t3", 1, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::T4, "t4", 1, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::T5, "t5", 1, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::T6, "t6", 1, FileSetOptions::DirectIO, nullptr );
+        _diskQueue->InitFileSet( FileId::T7, "t7", 1, FileSetOptions::DirectIO, nullptr );
     }
 
 #if !BB_DP_DBG_READ_EXISTING_F1
@@ -206,13 +214,10 @@ void DiskPlotPhase1::Run()
 //-----------------------------------------------------------
 void DiskPlotPhase1::GenF1()
 {
-    DiskPlotContext& cx   = _cx;
-    ThreadPool&      pool = *cx.threadPool;
-
     Log::Line( "Generating f1..." );
     auto timer = TimerBegin();
     
-    switch( cx.numBuckets )
+    switch( _cx.numBuckets )
     {
         case 128 : GenF1Buckets<128 >(); break;
         case 256 : GenF1Buckets<256 >(); break;
@@ -260,6 +265,10 @@ void DiskPlotPhase1::ForwardPropagate()
         }
 
         Log::Line( "Completed table %u in %.2lf seconds.", table+1, TimerEnd( timer ) );
+        Log::Line( "Table IO wait time: Read: %.2lf s | Write: %.2lf.", 
+                    TicksToSeconds( _tableReadWaitTime ), TicksToSeconds( _tableWriteWaitTime ) );
+
+        std::swap( _fxIds[0], _fxIds[1] );
     }
 }
 
@@ -267,6 +276,9 @@ void DiskPlotPhase1::ForwardPropagate()
 template<TableId table>
 void DiskPlotPhase1::ForwardPropagateTable()
 {
+    _tableReadWaitTime  = Duration::zero();
+    _tableWriteWaitTime = Duration::zero();
+
     const uint32 numBuckets = _cx.numBuckets;
     
     switch ( numBuckets )
@@ -288,6 +300,9 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
 {
     DiskFp<table, _numBuckets> fp( _cx );
     fp.Run();
+
+    _tableReadWaitTime  = fp.ReadWaitTime();
+    _tableWriteWaitTime = fp.WriteWaitTime();
 }
 
 /*

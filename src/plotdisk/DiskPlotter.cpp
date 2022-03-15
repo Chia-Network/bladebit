@@ -56,8 +56,8 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
 
     Log::Line( "[Bladebit Disk PLotter]" );
-    Log::Line( " Heap size      : %.2lf MiB", (double)_cx.heapSize BtoMB );
-    Log::Line( " Cache size     : %.2lf MiB", (double)_cx.cacheSize BtoMB );
+    Log::Line( " Heap size      : %.2lf GiB ( %.2lf MiB )", (double)_cx.heapSize BtoGB, (double)_cx.heapSize BtoMB );
+    Log::Line( " Cache size     : %.2lf GiB ( %.2lf MiB )", (double)_cx.cacheSize BtoGB, (double)_cx.cacheSize BtoMB );
     Log::Line( " Bucket count   : %u"       , _cx.numBuckets    );
     Log::Line( " F1 threads     : %u"       , _cx.f1ThreadCount );
     Log::Line( " FP threads     : %u"       , _cx.fpThreadCount );

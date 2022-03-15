@@ -52,6 +52,10 @@ struct DiskPlotInfo
     static constexpr uint32 YBitSize               = _k - bblog2( _numBuckets ) + kExtraBits;
     static constexpr uint32 MapBitSize             = table == TableId::Table1 ? 0 : _k + 1;
 
+    static constexpr uint32 PairBitSizeL           = _k + 1 - BucketBits;
+    static constexpr uint32 PairBitSizeR           = 9;
+    static constexpr uint32 PairBitSize            = PairBitSizeL + PairBitSizeR;
+
     static constexpr uint32 EntrySizePackedBits    = YBitSize + MapBitSize + ( MetaMultiplier * _k );
     static constexpr uint32 EntrySizeExpandedBits  = CDiv( EntrySizePackedBits, 64 ) * 64;
 

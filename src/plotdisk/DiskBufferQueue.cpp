@@ -598,19 +598,12 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     {
         const size_t bufferSize = sizes[i];
         
-        // Only write up-to the block-aligned boundary.
-        // The caller is in charge of writing any remainders manually
-        // #TODO: Remove the direct IO size adjust
-        const size_t writeSize = _useDirectIO == false ? bufferSize :
-                                 bufferSize / blockSize * blockSize;
+        // Only write up-to the block-aligned boundary. The caller is in charge of handling unlaigned data.
+        ASSERT( bufferSize == bufferSize / blockSize * blockSize );
+        WriteToFile( *fileSet.files[i], bufferSize, buffer, (byte*)fileSet.blockBuffers, fileSet.name, i );
 
-        WriteToFile( *fileSet.files[i], writeSize, buffer, (byte*)fileSet.blockBuffers, fileSet.name, i );
         // ASSERT( IsFlagSet( fileBuckets.files[i].GetFileAccess(), FileAccess::ReadWrite ) );
-        // Each bucket buffer must start at the next block-aligned boundary
-        const size_t bufferOffset = _useDirectIO == false ? bufferSize :
-                                    RoundUpToNextBoundaryT( bufferSize, blockSize );
-
-        buffer += bufferOffset;
+        buffer += bufferSize;
     }
 }
 
@@ -650,8 +643,8 @@ void DiskBufferQueue::CmdSeekBucket( const Command& cmd )
 //-----------------------------------------------------------
 inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket )
 {
-    if( !_useDirectIO )
-    {
+    // if( !_useDirectIO )
+    // {
         while( size )
         {
             ssize_t sizeWritten = file.Write( buffer, size );
@@ -665,45 +658,46 @@ inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte
             size -= (size_t)sizeWritten;
             buffer += sizeWritten;
         }
-    }
-    else
-    {
-        const size_t blockSize   = _blockSize;
-        size_t       sizeToWrite = size / blockSize * blockSize;
-        const size_t remainder   = size - sizeToWrite;
+    // }
+    // else
+    // {
+    //     ASSERT()
+    //     const size_t blockSize   = _blockSize;
+    //     size_t       sizeToWrite = size / blockSize * blockSize;
+    //     const size_t remainder   = size - sizeToWrite;
 
-        while( sizeToWrite )
-        {
-            ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
-            if( sizeWritten < 1 )
-            {
-                const int err = file.GetError();
-                Fatal( "Failed to write to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
-            }
+    //     while( sizeToWrite )
+    //     {
+    //         ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
+    //         if( sizeWritten < 1 )
+    //         {
+    //             const int err = file.GetError();
+    //             Fatal( "Failed to write to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+    //         }
 
-            ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
+    //         ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
 
-            sizeToWrite -= (size_t)sizeWritten;
-            buffer      += sizeWritten;
-        }
+    //         sizeToWrite -= (size_t)sizeWritten;
+    //         buffer      += sizeWritten;
+    //     }
         
-        if( remainder )
-        {
-            ASSERT( blockBuffer );
+    //     if( remainder )
+    //     {
+    //         ASSERT( blockBuffer );
             
-            // Unnecessary zeroing of memory, but might be useful for debugging
-            memset( blockBuffer, 0, blockSize );
-            memcpy( blockBuffer, buffer, remainder );
+    //         // Unnecessary zeroing of memory, but might be useful for debugging
+    //         memset( blockBuffer, 0, blockSize );
+    //         memcpy( blockBuffer, buffer, remainder );
 
-            ssize_t sizeWritten = file.Write( blockBuffer, blockSize );
+    //         ssize_t sizeWritten = file.Write( blockBuffer, blockSize );
 
-            if( sizeWritten < remainder )
-            {
-                const int err = file.GetError();
-                Fatal( "Failed to write block to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
-            }
-        }
-    }
+    //         if( sizeWritten < remainder )
+    //         {
+    //             const int err = file.GetError();
+    //             Fatal( "Failed to write block to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+    //         }
+    //     }
+    // }
 }
 
 //-----------------------------------------------------------
