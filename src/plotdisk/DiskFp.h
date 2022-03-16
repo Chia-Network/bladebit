@@ -30,6 +30,7 @@ public:
     using TMetaIn  = typename TableMetaType<table>::MetaIn;
     using TMetaOut = typename TableMetaType<table>::MetaOut;
     using TAddress = uint64;
+    using TYOut    = typename FpFxGen<table>::TYOut;
 
 public:
 
@@ -56,6 +57,8 @@ public:
         AllocateBuffers( alloc, _context.tmp2BlockSize, _context.tmp1BlockSize );
 
         FpTable();
+
+        _context.entryCounts[(int)table] = (uint64)_tableEntryCount;
     }
 
     //-----------------------------------------------------------
@@ -183,29 +186,39 @@ public:
 
         WriteMap( bucket, inEntryCount, _map[0], _map[1] ); // #TOOD: Can use meta1 here for map1...
 
-        const int64 outEntryCount = MatchEntries( bucket, inEntryCount, y, meta, pairs );
+        const TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)_map[0] : _meta[0];
 
-        // Write cross-bucket entries (this will perform fx on cross-bucket entries and write them to disk)
+        TYOut*    outY    = (TYOut*)_y[1];
+        TMetaOut* outMeta = (TMetaOut*)_meta[1];
+
+        // Match
+        const int64 outEntryCount = MatchEntries( bucket, inEntryCount, y, inMeta, pairs );
+
+        const int64 crossMatchCount  = _crossBucketInfo.matchCount;
+        const int64 writeEntrtyCount = outEntryCount + crossMatchCount;
+
         if( bucket > 0 )
-            ProcessCrossBucketEntries();
+            ProcessCrossBucketEntries( bucket - 1, pairs - crossMatchCount, outY, outMeta );
+        
+        WritePairsToDisk( bucket, writeEntrtyCount, pairs - crossMatchCount );
 
-        WritePairsToDisk( bucket, outEntryCount, pairs );
+        FxGen( bucket, outEntryCount, pairs, y, inMeta, outY + crossMatchCount, outMeta + crossMatchCount );
 
-        TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)_map[0] : _meta[0];
-        FxGen( bucket, outEntryCount, pairs, y, inMeta );
+        WriteEntriesToDisk( bucket, writeEntrtyCount, outY, outMeta, (EntryOut*)_entries[0] );
 
-        WriteEntriesToDisk( bucket, outEntryCount, _y[1], (TMetaOut*)_meta[1], (EntryOut*)_entries[0] );
-
-        _crossBucketInfo.matchOffset += (uint64)outEntryCount;
         // Save bucket length before y-sort since the pairs remain unsorted
+        _context.ptrTableBucketCounts[(int)table][bucket] += (uint64)writeEntrtyCount;
+
+        _tableEntryCount += writeEntrtyCount;
+        _crossBucketInfo.matchOffset = (uint64)outEntryCount;   // Set the offset for the next cross-bucket entries
+        _crossBucketInfo.matchCount  = 0;
     }
 
     //-----------------------------------------------------------
     void WriteMap( const uint32 bucket, const int64 entryCount, const uint64* map, uint64* outMap )
     {
         using TMap = typename FpMapType<table>::Type;
-
-        const FileId mapFile = table == TableId::Table2 ? FileId::T1 : FileId::MAP2 + (FileId)table-2;
+        ASSERT( entryCount < (1ll << _k) );
         
         if constexpr ( table == TableId::Table2 )
         {
@@ -286,6 +299,7 @@ public:
                 const uint64 b = m >> shift;
 
                 const uint32 dstIdx = --pfxSum[b];
+                ASSERT( (int64)dstIdx < entryCount );
 
                 const uint64 finalIdx = (uint64)(tableOffset + i);
                 outMapBuckets[dstIdx] = (m << encodeShift) | finalIdx;
@@ -320,6 +334,9 @@ public:
 
             for( uint32 i = 0; i < _numBuckets; i++ )
             {
+                if( counts[i] < 1 )
+                    continue;
+
                 const uint64 writeOffset = pfxSum[i];
                 const uint64 bitOffset   = writeOffset * bitSize - bitsWritten;
                 bitsWritten += bitCounts[i];
@@ -330,21 +347,34 @@ public:
                 
                 const uint64* mapToWrite    = outMapBuckets + writeOffset; 
                 const uint64* mapToWriteEnd = mapToWrite + counts[i]; 
-                ASSERT( counts[i] >= 2 );
-
-                // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
-                writer.Write( mapToWrite[0], bitSize );
-                writer.Write( mapToWrite[1], bitSize );
                 
+                // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
+                const uint64* mapToWriteEndPass1 = mapToWrite + std::min( counts[i], 2u ); 
+
+                while( mapToWrite < mapToWriteEndPass1 )
+                {
+                    writer.Write( *mapToWrite, bitSize );
+                    mapToWrite++;
+                }
+
                 self->SyncThreads();
 
-                mapToWrite+=2;
                 while( mapToWrite < mapToWriteEnd )
                 {
                     writer.Write( *mapToWrite, bitSize );
                     mapToWrite++;
                 }
             }
+
+            // Write to disk
+            self->SyncThreads();
+            if( self->IsControlThread() )
+            {
+                bitWriter.Submit();
+                _ioQueue.SignalFence( _mapWriteFence, bucket );
+                _ioQueue.CommitCommands();
+            }
+
         });
     }
 
@@ -359,7 +389,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    void ProcessCrossBucketEntries()
+    void ProcessCrossBucketEntries( const uint32 bucket, Pair* dstPairs, TYOut* outY, TMetaOut* outMeta )
     {
         FpCrossBucketInfo& info = _crossBucketInfo;
         // ASSERT( info.matchCount );
@@ -367,16 +397,27 @@ public:
         if( !info.matchCount )
             return;
 
+        FxGen( bucket, info.matchCount, info.pair, info.y, (TMetaIn*)info.meta, outY, outMeta );
         
+        const uint32 matchOffset = (uint32)info.matchOffset;
+        const Pair * srcPairs    = info.pair;
+
+        for( uint64 i = 0; i < info.matchCount; i++ )
+        {
+            auto& src = srcPairs[i];
+            auto& dst = dstPairs[i];
+            dst.left  = src.left  + matchOffset;
+            dst.right = src.right + matchOffset;
+        }
     }
 
     //-----------------------------------------------------------
-    void FxGen( const uint32 bucket, const int64 entryCount, const Pair* pairs, const uint64* inY, const TMetaIn* inMeta )
+    void FxGen( const uint32 bucket, const int64 entryCount, 
+                const Pair* pairs, const uint64* inY, const TMetaIn* inMeta, 
+                TYOut* outY, TMetaOut* outMeta )
     {
-        using TYOut = typename FpFxGen<table>::TYOut;
-
         FpFxGen<table> fx( _pool, _threadCount );
-        fx.ComputeFxMT( entryCount, pairs, inY, inMeta, (TYOut*)_y[1], (TMetaOut*)_meta[1] );
+        fx.ComputeFxMT( entryCount, pairs, inY, inMeta, outY, outMeta );
     }
 
     //-----------------------------------------------------------
@@ -427,7 +468,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline void WriteEntriesToDisk( const uint32 bucket, const int64 entryCount, const uint64* outY, const TMetaOut* outMeta, EntryOut* dstEntriesBuckets )
+    inline void WriteEntriesToDisk( const uint32 bucket, const int64 entryCount, const TYOut* outY, const TMetaOut* outMeta, EntryOut* dstEntriesBuckets )
     {
         using Job = AnonPrefixSumJob<uint32>;
 
@@ -447,8 +488,8 @@ public:
             uint32 totalCounts   [_numBuckets];
             uint64 totalBitCounts[_numBuckets];
 
-            const uint64* ySrc    = outY + offset;
-            const uint64* ySrcEnd = outY + end;
+            const TYOut* ySrc    = outY + offset;
+            const TYOut* ySrcEnd = outY + end;
 
             do {
                 counts[(*ySrc) >> yShift]++;
@@ -540,7 +581,6 @@ public:
             }
             else
                 self->WaitForRelease();
-            
         });
     }
 
@@ -611,6 +651,7 @@ public:
                 const uint64 ykey = e.ykey;
                 y  [i] = bucketBits | ( ykey & yMask );
                 map[i] = (TMap)( ykey >> yBits );
+                ASSERT( map[i] <= ( 1ull << Info::MapBitSize ) - 1 );
 
                 // Can't be 1 (table 1 only), because in that case the metadata is x, 
                 // which is stored as the map
@@ -820,7 +861,7 @@ private:
     Fence            _pairWriteFence;
     Fence            _crossBucketFence;
 
-    int64            _tableEntryCount;  // Current table entry count
+    int64            _tableEntryCount = 0;  // Current table entry count
 
     Duration         _readWaitTime  = Duration::zero();
     Duration         _writeWaitTime = Duration::zero();

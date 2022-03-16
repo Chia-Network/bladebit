@@ -47,9 +47,9 @@ struct DiskPlotInfo
     static constexpr uint32 MetaMultiplier         = static_cast<uint32>( TableMetaOut<table>::Multiplier );
 
     static constexpr uint32 BucketBits             = bblog2( _numBuckets );
-    static constexpr uint32 BucketShift            = ( _k + kExtraBits) - BucketBits;
+    static constexpr uint32 BucketShift            = table < TableId::Table7 ? ( _k + kExtraBits) - BucketBits : _k - BucketBits;
 
-    static constexpr uint32 YBitSize               = _k - bblog2( _numBuckets ) + kExtraBits;
+    static constexpr uint32 YBitSize               = table < TableId::Table7 ? _k - bblog2( _numBuckets ) + kExtraBits : _k - bblog2( _numBuckets );
     static constexpr uint32 MapBitSize             = table == TableId::Table1 ? 0 : _k + 1; // This should be key bit size
 
     static constexpr uint32 PairBitSizeL           = _k + 1 - BucketBits;

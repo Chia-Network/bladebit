@@ -170,10 +170,9 @@ void DiskPlotPhase1::Run()
     {
         uint64 entryCount = 0;
 
-        for( int bucket = 0; bucket < (int)BB_DP_BUCKET_COUNT; bucket++ )
+        for( int bucket = 0; bucket < (int)_cx.bucketCounts; bucket++ )
             entryCount += cx.bucketCounts[table][bucket];
 
-        // cx.entryCounts[table] = entryCount;
         ASSERT( entryCount == cx.entryCounts[table] );
     }
     #endif

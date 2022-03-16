@@ -126,6 +126,7 @@ public:
 
             _remainderBitCount[i] = remainderBits;
         }
+        _queue->CommitCommands();
     }
 
     //-----------------------------------------------------------

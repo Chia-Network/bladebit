@@ -63,7 +63,7 @@
                 "-p", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8",
                 // "-c", "xch1uf48n3f50xrs7zds0uek9wp9wmyza6crnex6rw8kwm3jnm39y82q5mvps6",
                 // "-t", "24",
-                // "-w",
+                "-w",
                 // "-v",
                 "-i", "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835",
                 "--memo", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef01b7bf8a22a9ac82a003e07b551c851ea683839f3e1beb8ac9ede57d2c020669",
@@ -74,9 +74,9 @@
                 "diskplot",
                 "-t", "/mnt/p5510a/disk_tmp",
                 "--f1-threads", "24",
-                "--fp-threads", "32",
+                "--fp-threads", "48",
 
-                "--cache", "96G",
+                "--cache", "256G",
                 // "-s",
 
                 // "--c-threads" , "18",

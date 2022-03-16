@@ -6,9 +6,13 @@
 struct FpCrossBucketInfo
 {
     uint32  groupCount[2];
+
+    uint64  savedY   [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    Meta4   savedMeta[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    Pair    pair     [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+
     uint64* y           = nullptr;
     Meta4*  meta        = nullptr;
-    Pair*   pair        = nullptr;
     uint64  matchCount  = 0;
     uint64  matchOffset = 0;
     uint32  bucket;
@@ -28,10 +32,6 @@ struct FpGroupMatcher
     uint64*          _groupIndices  [BB_DP_MAX_JOBS];
     Pair*            _pairs         [BB_DP_MAX_JOBS];
     Pair*            _outPairs;
-
-    // For cross-bucket matching
-    FpCrossBucketInfo _crossBucketInfo;
-    
 
     //-----------------------------------------------------------
     inline FpGroupMatcher( DiskPlotContext& context, const uint64 maxEntries, 
@@ -113,7 +113,7 @@ struct FpGroupMatcher
             // Cross-bucket matching
             // Perform cross-bucket matches with the previous bucket
             if( self->IsControlThread() && !crossBucketInfo->IsFirstBucket() )
-                this->CrossBucketMatch(*crossBucketInfo, yEntries, groupIndices );
+                this->CrossBucketMatch<TMeta>( *crossBucketInfo, yEntries, groupIndices );
 
             // Now perform matches
             _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
@@ -131,7 +131,7 @@ struct FpGroupMatcher
 
             // Save the last 2 groups for cross-bucket matching
             if( self->IsLastThread() && !crossBucketInfo->IsLastBucket() )
-                SaveCrossBucketInfo( *crossBucketInfo, groupIndices + groupCount - 2, yEntries, meta, _outPairs );
+                SaveCrossBucketInfo( *crossBucketInfo, groupIndices + groupCount - 2, yEntries, meta );
         });
 
         const uint64* allMatches = _matchCounts;
@@ -234,18 +234,22 @@ struct FpGroupMatcher
 
 private:
     //-----------------------------------------------------------
+    template<typename TMeta>
     inline void CrossBucketMatch( FpCrossBucketInfo& info, const uint64* yEntries, const uint64 curBucketIndices[2] )
     {
         const uint64  prevBucketLastGroup  = yEntries[-1] / kBC;
         const uint64  prevGroupsEntryCount = info.EntryCount();
         const uint64* yStart               = info.y;
-        ASSERT( info.y + prevGroupsEntryCount == yEntries );
 
         uint64 groupBoundaries[3] = { 
             prevGroupsEntryCount,
             curBucketIndices[0] + prevGroupsEntryCount,
             curBucketIndices[1] + prevGroupsEntryCount
         };
+
+        memcpy( info.y   , info.savedY   , sizeof( uint64 ) * prevGroupsEntryCount );
+        memcpy( info.meta, info.savedMeta, sizeof( TMeta  ) * prevGroupsEntryCount );
+        ASSERT( info.y + prevGroupsEntryCount == yEntries );
 
         uint64 matches = 0;
 
@@ -257,7 +261,7 @@ private:
                                          BB_DP_CROSS_BUCKET_MAX_ENTRIES, (uint32)info.groupCount[0] );
         }
 
-        matches += MatchGroups<true>( info.groupCount[0], 1, &groupBoundaries[1], yStart, info.pair + matches, 
+        matches += MatchGroups<true>( info.groupCount[0], 1, &groupBoundaries[1], yStart, &info.pair[matches], 
                                       BB_DP_CROSS_BUCKET_MAX_ENTRIES-matches, (uint32)prevGroupsEntryCount );
 
         info.matchCount = matches;
@@ -265,7 +269,7 @@ private:
 
     //-----------------------------------------------------------
     template<typename TMeta>
-    inline void SaveCrossBucketInfo( FpCrossBucketInfo& info, const uint64 groupIndices[3], const uint64* y, const TMeta* meta, const Pair* pairs )
+    inline void SaveCrossBucketInfo( FpCrossBucketInfo& info, const uint64 groupIndices[3], const uint64* y, const TMeta* meta )
     {
         info.groupCount[0] = (uint32)( groupIndices[1] - groupIndices[0] );
         info.groupCount[1] = (uint32)( groupIndices[2] - groupIndices[1] );
@@ -275,14 +279,13 @@ private:
 
         // Copy to the area before our working buffer starts. It is reserved for cross-bucket entries
         info.y    = (uint64*)( y - copyCount );
-        info.meta = (Meta4*)(meta - copyCount);
-        info.pair = (Pair*)(pairs - copyCount);
+        info.meta = (Meta4*)( meta - copyCount );
         
-        memcpy( info.y   , y    + groupIndices[0], copyCount * sizeof( uint64 ) );
-        memcpy( info.meta, meta + groupIndices[0], copyCount * sizeof( TMeta  ) );
+        memcpy( info.savedY   , y    + groupIndices[0], copyCount * sizeof( uint64 ) );
+        memcpy( info.savedMeta, meta + groupIndices[0], copyCount * sizeof( TMeta  ) );
 
-        ASSERT( info.y[0] / kBC == info.y[info.groupCount[0]-1] / kBC );
-        ASSERT( info.y[info.groupCount[0]] / kBC == info.y[info.groupCount[0]+info.groupCount[1]-1] / kBC );
+        ASSERT( info.savedY[0] / kBC == info.savedY[info.groupCount[0]-1] / kBC );
+        ASSERT( info.savedY[info.groupCount[0]] / kBC == info.savedY[info.groupCount[0]+info.groupCount[1]-1] / kBC );
     }
 };
 
