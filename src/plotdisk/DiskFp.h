@@ -9,6 +9,7 @@
 #include "BitBucketWriter.h"
 #include "util/StackAllocator.h"
 
+
 template<TableId table>
 struct FpMapType { using Type = uint64; };
 
@@ -184,9 +185,9 @@ public:
         SortEntries( _entries[0], _entries[1], inEntryCount );
         UnpackEntries( bucket, _entries[0], inEntryCount, y, _map[0], meta );
 
-        WriteMap( bucket, inEntryCount, _map[0], _map[1] ); // #TOOD: Can use meta1 here for map1...
+        WriteMap( bucket, inEntryCount, _map[0], (uint64*)_meta[1] );
 
-        const TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)_map[0] : _meta[0];
+        const TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)_map[0] : meta;
 
         TYOut*    outY    = (TYOut*)_y[1];
         TMetaOut* outMeta = (TMetaOut*)_meta[1];
@@ -397,7 +398,8 @@ public:
         if( !info.matchCount )
             return;
 
-        FxGen( bucket, info.matchCount, info.pair, info.y, (TMetaIn*)info.meta, outY, outMeta );
+        // FxGen( bucket, info.matchCount, info.pair, info.y, (TMetaIn*)info.meta, outY, outMeta );
+        FpFxGen<table>::ComputeFx( (int64)info.matchCount, info.pair, info.y, (TMetaIn*)info.meta, outY, outMeta, 0 );
         
         const uint32 matchOffset = (uint32)info.matchOffset;
         const Pair * srcPairs    = info.pair;
@@ -556,11 +558,11 @@ public:
                 const uint64 writeOffset = pfxSum[i];
                 const uint64 bitOffset   = writeOffset * entrySizeBits - bitsWritten;
                 bitsWritten += totalBucketBitCounts[i];
-                
+
                 ASSERT( bitOffset + counts[i] * entrySizeBits <= totalBucketBitCounts[i] );
 
                 BitWriter writer = bitWriter.GetWriter( i, bitOffset );
-                
+
                 const EntryOut* entry = dstEntries + writeOffset;
                 ASSERT( counts[i] >= 2 );
 
@@ -656,9 +658,7 @@ public:
                 // Can't be 1 (table 1 only), because in that case the metadata is x, 
                 // which is stored as the map
                 if constexpr ( metaMultipler > 1 )
-                {
                     meta[i] = e.meta;
-                }
             }
         });
     }

@@ -54,9 +54,9 @@ struct FpGroupMatcher
         const uint32 threadCount = _context.fpThreadCount;
 
         AnonMTJob::Run( *_context.threadPool, threadCount, [=]( AnonMTJob* self ) {
-            
+
             const uint32 id = self->_jobId;
-            
+
             int64 _, offset;
             GetThreadOffsets( self, entryCount, _, offset, _ );
 
@@ -113,7 +113,7 @@ struct FpGroupMatcher
             // Cross-bucket matching
             // Perform cross-bucket matches with the previous bucket
             if( self->IsControlThread() && !crossBucketInfo->IsFirstBucket() )
-                this->CrossBucketMatch<TMeta>( *crossBucketInfo, yEntries, groupIndices );
+                this->CrossBucketMatch<TMeta>( *crossBucketInfo, yEntries, meta, groupIndices );
 
             // Now perform matches
             _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
@@ -235,11 +235,9 @@ struct FpGroupMatcher
 private:
     //-----------------------------------------------------------
     template<typename TMeta>
-    inline void CrossBucketMatch( FpCrossBucketInfo& info, const uint64* yEntries, const uint64 curBucketIndices[2] )
+    inline void CrossBucketMatch( FpCrossBucketInfo& info, const uint64* yEntries, const TMeta* meta, const uint64 curBucketIndices[2] )
     {
-        const uint64  prevBucketLastGroup  = yEntries[-1] / kBC;
-        const uint64  prevGroupsEntryCount = info.EntryCount();
-        const uint64* yStart               = info.y;
+        const uint64 prevGroupsEntryCount = info.EntryCount();
 
         uint64 groupBoundaries[3] = { 
             prevGroupsEntryCount,
@@ -247,21 +245,32 @@ private:
             curBucketIndices[1] + prevGroupsEntryCount
         };
 
+        // Copy to the area before our working buffer starts. It is reserved for cross-bucket entries
+        info.y    = (uint64*)( yEntries - prevGroupsEntryCount );
+        info.meta = (Meta4*)( meta - prevGroupsEntryCount );
+
         memcpy( info.y   , info.savedY   , sizeof( uint64 ) * prevGroupsEntryCount );
         memcpy( info.meta, info.savedMeta, sizeof( TMeta  ) * prevGroupsEntryCount );
-        ASSERT( info.y + prevGroupsEntryCount == yEntries );
 
+        const uint64* yStart = info.y;
         uint64 matches = 0;
+
+        uint32 lastGrpMatchIndx = 1;
 
         // If the first entry group is the same from the prev's bucket last group,
         // then we can perform matches with the penultimate bucket
-        if( yEntries[0] / kBC == prevBucketLastGroup )
+        if( yEntries[0] / kBC == yEntries[-1] / kBC )
         {
             matches = MatchGroups<true>( 0, 1, groupBoundaries, yStart, info.pair, 
                                          BB_DP_CROSS_BUCKET_MAX_ENTRIES, (uint32)info.groupCount[0] );
         }
+        else
+        {
+            // We have different groups at the bucket boundary, so update the boundaries for the next match accordingly
+            lastGrpMatchIndx = 0;
+        }
 
-        matches += MatchGroups<true>( info.groupCount[0], 1, &groupBoundaries[1], yStart, &info.pair[matches], 
+        matches += MatchGroups<true>( info.groupCount[0], 1, &groupBoundaries[lastGrpMatchIndx], yStart, &info.pair[matches], 
                                       BB_DP_CROSS_BUCKET_MAX_ENTRIES-matches, (uint32)prevGroupsEntryCount );
 
         info.matchCount = matches;
@@ -273,14 +282,10 @@ private:
     {
         info.groupCount[0] = (uint32)( groupIndices[1] - groupIndices[0] );
         info.groupCount[1] = (uint32)( groupIndices[2] - groupIndices[1] );
-        
+
         const size_t copyCount = info.groupCount[0] + info.groupCount[1];
         ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
 
-        // Copy to the area before our working buffer starts. It is reserved for cross-bucket entries
-        info.y    = (uint64*)( y - copyCount );
-        info.meta = (Meta4*)( meta - copyCount );
-        
         memcpy( info.savedY   , y    + groupIndices[0], copyCount * sizeof( uint64 ) );
         memcpy( info.savedMeta, meta + groupIndices[0], copyCount * sizeof( TMeta  ) );
 

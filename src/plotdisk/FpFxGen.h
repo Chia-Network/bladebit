@@ -79,7 +79,7 @@ struct FpFxGen
             ASSERT( left < right );
 
             const uint64 y = yIn[left];
-            
+
             #if _DEBUG
                 ASSERT( y >= prevY );
                 ASSERT( left >= prevLeft );
@@ -153,7 +153,7 @@ struct FpFxGen
 
             const uint64 f = Swap64( *output ) >> yShift;
             yOut[i] = (TYOut)f;
-            
+
             if constexpr ( MetaOutMulti == 2 && MetaInMulti == 3 )
             {
                 const uint64 h0 = Swap64( output[0] );
