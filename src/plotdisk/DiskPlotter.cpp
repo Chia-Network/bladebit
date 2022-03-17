@@ -68,8 +68,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     Log::Line( " Unbuffered IO  : %s"       , _cx.useDirectIO ? "true" : "false" );
 
     Log::Line( " Allocating memory" );
-    _cx.heapBuffer = (byte*)SysHost::VirtualAlloc( _cx.heapSize );
-    FatalIf( !_cx.heapBuffer, "Failed to allocated heap buffer. Make sure you have enough free memory." );
+    _cx.heapBuffer = bbvirtallocnuma<byte>( _cx.heapSize );
 
     if( _cx.cacheSize )
     {
@@ -85,7 +84,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
             _cx.cacheSize = alignedCacheSize;
         }
 
-        _cx.cache = bbvirtalloc<byte>( _cx.cacheSize );
+        _cx.cache = bbvirtallocnuma<byte>( _cx.cacheSize );
     }
   
     // Initialize our Thread Pool and IO Queue

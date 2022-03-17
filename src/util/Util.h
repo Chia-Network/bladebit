@@ -190,6 +190,21 @@ inline T* bbvirtalloc( size_t size )
 }
 
 //-----------------------------------------------------------
+template<typename T = void>
+inline T* bbvirtallocnuma( size_t size )
+{
+    T* ptr = bbvirtalloc<T>( size );
+
+    if( SysHost::GetNUMAInfo() )
+    {
+        if( !SysHost::NumaSetMemoryInterleavedMode( ptr, size ) )
+            Log::Error( "Warning: Failed to bind NUMA memory." );
+    }
+
+    return ptr;
+}
+
+//-----------------------------------------------------------
 template<typename T>
 inline T* bbcvirtalloc( size_t count )
 {
