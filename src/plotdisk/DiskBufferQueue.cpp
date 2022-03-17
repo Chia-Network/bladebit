@@ -418,52 +418,21 @@ void DiskBufferQueue::CommandThreadMain( DiskBufferQueue* self )
 //-----------------------------------------------------------
 void DiskBufferQueue::CommandMain()
 {
-    using namespace std::chrono;
-    
-    const seconds  SPIN_MAX_SECS( 1 );
-    const Duration SPIN_MAX = duration_cast<Duration>( SPIN_MAX_SECS );
-    
     const int CMD_BUF_SIZE = 64;
     Command commands[CMD_BUF_SIZE];
-
-    // bool spun = false;
 
     for( ;; )
     {
         _cmdReadySignal.Wait();
 
-        // DEQUEUE:
+        int cmdCount;
+        while( ( ( cmdCount = _commands.Dequeue( commands, CMD_BUF_SIZE ) ) ) )
         {
-            int cmdCount;
-            while( ( ( cmdCount = _commands.Dequeue( commands, CMD_BUF_SIZE ) ) ) )
-            {
-                _cmdConsumedSignal.Signal();
+            _cmdConsumedSignal.Signal();
 
-                for( int i = 0; i < cmdCount; i++ )
-                    ExecuteCommand( commands[i] );
-
-                // spun = false;
-            }
+            for( int i = 0; i < cmdCount; i++ )
+                ExecuteCommand( commands[i] );
         }
-
-        // Spin for a bit before suspending to allow for more commands to come in
-        // if( !spun )
-        // {
-        //     spun = true;
-
-        //     const auto spinTimer = TimerBegin();
-        //     for( ;; )
-        //     {
-        //         // #TODO: Need to check here if signalled (without waiting)
-        //         const auto now = TimerBegin();
-        //         if( ( now - spinTimer ) >= SPIN_MAX )
-        //         {
-        //             goto DEQUEUE;
-        //         }
-        //     }
-        // }
-
-        // spun = false;
     }
 }
 

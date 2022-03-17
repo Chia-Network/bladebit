@@ -73,11 +73,13 @@
                 "--show-memo",
                 "diskplot",
                 "-t", "/mnt/p5510a/disk_tmp",
-                "--f1-threads", "32",
-                "--fp-threads", "62",
+                "--f1-threads", "24",
+                "--fp-threads", "48",
 
                 "--cache", "256G",
+                "--cache", "64G",
                 // "-s",
+                "-b", "512",
 
                 // "--c-threads" , "18",
                 // "--p2-threads", "8",
