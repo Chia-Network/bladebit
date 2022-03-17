@@ -103,6 +103,7 @@ struct ConvertToLPJob : public PrefixSumJob<ConvertToLPJob>
     void DistributeToBuckets( const int64 enytryCount, const uint64* linePoints, const uint32* map );
 };
 
+/*
 //-----------------------------------------------------------
 DiskPlotPhase3::DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phase3Data )
     : _context   ( context    )
@@ -1429,6 +1430,6 @@ void DiskPlotPhase3::DeleteBucket( FileId fileId )
 
     _context.ioQueue->DeleteBucket( fileId );
 }
-
+*/
 
 

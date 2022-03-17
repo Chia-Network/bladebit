@@ -1,6 +1,7 @@
 #include "DiskPlotPhase2.h"
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
+#include "transforms/FxTransform.h"
 // #include "jobs/UnpackMapJob.h"
 
 // Fence ids used when loading buckets

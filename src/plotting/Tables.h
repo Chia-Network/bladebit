@@ -16,9 +16,9 @@ enum class TableId
 ///
 /// Helpers for working with metadata
 ///
-struct Meta3 { uint64 m0, m1; };  // Used for when the metadata multiplier == 3
-struct Meta4 : Meta3 {};          // Used for when the metadata multiplier == 4
-struct NoMeta {};                 // Used for when the metadata multiplier == 0
+struct  NoMeta {};                // Used for when the metadata multiplier == 0
+struct  Meta4 { uint64 m0, m1; }; // Used for when the metadata multiplier == 4
+struct  Meta3 : Meta4{};          // Used for when the metadata multiplier == 3
 
 template<typename TMeta>
 struct SizeForMeta;
@@ -32,6 +32,7 @@ template<> struct SizeForMeta<NoMeta> { static constexpr size_t Value = 0; };
 template<TableId Table>
 struct TableMetaType;
 
+template<> struct TableMetaType<TableId::Table1> { using MetaIn = NoMeta; using MetaOut = uint32; };
 template<> struct TableMetaType<TableId::Table2> { using MetaIn = uint32; using MetaOut = uint64; };
 template<> struct TableMetaType<TableId::Table3> { using MetaIn = uint64; using MetaOut = Meta4;  };
 template<> struct TableMetaType<TableId::Table4> { using MetaIn = Meta4;  using MetaOut = Meta4;  };

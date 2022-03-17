@@ -9,6 +9,7 @@
 #include <cstdarg>
 #include <chrono>
 #include <atomic>
+#include <cmath>
 #include "Platform.h"
 
 // Defined in Util.cpp

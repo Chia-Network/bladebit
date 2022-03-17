@@ -3,6 +3,12 @@
 
 typedef void (*ThreadRunner)( void* data );
 
+enum class ThreadPriority
+{
+    Normal = 0,
+    High
+};
+
 class Thread
 {
 public:
@@ -25,6 +31,8 @@ public:
 
     bool HasExited() const;
 
+    bool SetPriority( const ThreadPriority priority );
+    
 private:
     
     #if PLATFORM_IS_UNIX

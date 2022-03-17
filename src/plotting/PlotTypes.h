@@ -7,25 +7,9 @@ struct Pairs
     uint16* right;
 };
 
-
-// Represents a double-buffered blob of data of the size of
-// the block size of the device we're writing to * 2 (one for y one for x)
-struct DoubleBuffer
+struct Pair
 {
-    byte* front;
-    byte* back;
-    Fence fence;
-
-    inline DoubleBuffer()
-    {
-        // Has to be initially signaled, since the first swap doesn't need to wait.
-        fence.Signal();
-    }
-    inline ~DoubleBuffer() {}
-
-    inline void Flip()
-    {
-        fence.Wait();
-        std::swap( front, back );
-    }
+    uint32 left;
+    uint32 right;
 };
+static_assert( sizeof( Pair ) == 8, "Invalid Pair struct." );

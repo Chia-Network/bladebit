@@ -11,12 +11,15 @@ public:
     {
         GlobalPlotConfig* globalCfg                = nullptr;
         const char*       tmpPath                  = nullptr;
+        const char*       tmpPath2                 = nullptr;
         size_t            workHeapSize             = 0;
         size_t            expectedTmpDirBlockSize  = 0;
+        uint32            numBuckets               = 256;
         uint32            ioThreadCount            = 0;
         size_t            ioBufferSize             = 0;
         uint32            ioBufferCount            = 0;
-        DiskWriteInterval writeIntervals[(uint)TableId::_Count] = { 0 };
+        size_t            cacheSize                = 0;
+
         bool              enableDirectIO           = false;
 
         uint32            f1ThreadCount            = 0;
@@ -40,13 +43,16 @@ public:
 
     void Plot( const PlotRequest& req );
 
-    static void GetHeapRequiredSize( DiskFPBufferSizes& sizes, const size_t fileBlockSize, const uint threadCount );
+    static bool   GetTmpPathsBlockSizes(  const char* tmpPath1, const char* tmpPath2, size_t& tmpPath1Size, size_t& tmpPath2Size );
+    static size_t GetRequiredSizeForBuckets( const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2 );
+    static size_t GetRequiredSizeForBuckets( const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize );
     
     static void ParseCommandLine( CliParser& cli, Config& cfg );
 
     static void PrintUsage();
+
+
 private:
     DiskPlotContext   _cx;
-    DiskFPBufferSizes _fpBufferSizes;
 };
 

@@ -235,3 +235,26 @@ void* Thread::ThreadStarterUnix( Thread* t )
     return nullptr;
 }
 
+//-----------------------------------------------------------
+bool Thread::SetPriority( const ThreadPriority priority )
+{
+    // #TODO: Implement
+    // struct sched_param sched;
+
+    switch( priority )
+    {
+        // case ThreadPriority::Normal:
+        
+        //     break;
+
+        // case ThreadPriority::High:
+        
+        //     break;
+            
+        
+        default:
+            ASSERT( 0 );
+            return false;
+    }
+}
+

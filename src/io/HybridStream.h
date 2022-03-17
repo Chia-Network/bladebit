@@ -10,7 +10,7 @@ public:
 
     bool Open( void* memory, ssize_t memorySize, const char* path, FileMode mode, FileAccess access, FileFlags flags = FileFlags::None );
     // bool Open( ssize_t memorySize, const char* path, FileMode mode, FileAccess access, FileFlags flags = FileFlags::None );
-    // void Close();
+    void Close();
 
     ssize_t Read( void* buffer, size_t size ) override;
 
@@ -27,6 +27,8 @@ public:
     int GetError() override;
 
     inline bool IsOpen() const { return _file.IsOpen(); }
+
+    FileStream& File() { return _file; }
 
 private:
     FileStream _file;                       // Backing file

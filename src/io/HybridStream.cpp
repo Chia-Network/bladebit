@@ -22,6 +22,18 @@ bool HybridStream::Open( void* memory, ssize_t memorySize, const char* path, Fil
     return true;
 }
 
+//-----------------------------------------------------------
+void HybridStream::Close()
+{
+    if( !IsOpen() )
+        return;
+
+    _memory    = nullptr;
+    _memSize   = 0;
+    _position  = 0;
+    _error     = 0;
+    _file.Close();
+}
 // //-----------------------------------------------------------
 // bool HybridStream::Open( ssize_t memorySize, const char* path, FileMode mode, FileAccess access, FileFlags flags )
 // {

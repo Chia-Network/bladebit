@@ -13,6 +13,9 @@ struct SortKeyGen
     template<uint MAX_JOBS, typename T>
     static void Sort( ThreadPool& pool, int64 length, const uint32* keys, const T* src, T* dst );
 
+    template<uint MAX_JOBS, typename T>
+    static void Sort( ThreadPool& pool, const uint32 desiredThreadCount, int64 length, const uint32* keys, const T* src, T* dst );
+
 private:
     struct GenJob
     {
@@ -68,9 +71,16 @@ inline void SortKeyGen::Generate( ThreadPool& pool, uint64 length, uint32* keyBu
 template<uint MAX_JOBS, typename T>
 inline void SortKeyGen::Sort( ThreadPool& pool, int64 length, const uint32* keys, const T* src, T* dst )
 {
+    Sort( pool, pool.ThreadCount(), length, keys, src, dst );
+}
+
+//-----------------------------------------------------------
+template<uint MAX_JOBS, typename T>
+inline void SortKeyGen::Sort( ThreadPool& pool, const uint32 desiredThreadCount, int64 length, const uint32* keys, const T* src, T* dst )
+{
     ASSERT( pool.ThreadCount() <= MAX_JOBS );
 
-    int64 threadCount = (int64)pool.ThreadCount();
+    const int64 threadCount = desiredThreadCount == 0 ? (int64)pool.ThreadCount() : (int64)std::min( desiredThreadCount, pool.ThreadCount() );
 
     const int64 entriesPerThread = length / threadCount;
     const int64 tailingEntries   = length - ( entriesPerThread * threadCount );

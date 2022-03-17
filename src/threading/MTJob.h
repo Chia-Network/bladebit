@@ -7,6 +7,8 @@
     #include "util/Log.h"
 #endif
 
+#include <functional>
+
 template<typename TJob, uint MaxJobs>
 struct MTJobRunner;
 
@@ -71,11 +73,16 @@ struct MTJobSyncT
     #endif
 };
 
+template<typename F, typename... Args>
+static void RunAnonymous( F&& f, Args&&... args );
+
 struct MTJobSync : public MTJobSyncT<MTJobSync> {};
 
 template<typename TJob>
 struct MTJob : public MTJobSyncT<TJob>
 {
+    inline virtual ~MTJob() {}
+
     template<typename,uint>
     friend struct MTJobRunner;
 
@@ -93,6 +100,7 @@ struct MTJobRunner
     double Run( uint32 threadCount );
 
     inline TJob& operator[]( uint64 index ) { return this->_jobs[index]; }
+    inline TJob& operator[]( int64  index ) { return this->_jobs[index]; }
     inline TJob& operator[]( uint index   ) { return this->_jobs[index]; }
     inline TJob& operator[]( int index    ) { return this->_jobs[index]; }
 
@@ -104,6 +112,38 @@ private:
 private:
     TJob        _jobs[MaxJobs];
     ThreadPool& _pool;
+};
+
+
+struct AnonMTJob : public MTJob<AnonMTJob>
+{
+    std::function<void(AnonMTJob*)>* func;
+
+    inline void Run() override { (*func)( this ); }
+
+    // Run anononymous job, from a lambda, for example
+    template<typename F,
+        std::enable_if_t<
+        std::is_invocable_r_v<void, F, AnonMTJob*>>* = nullptr>
+    inline static void Run( ThreadPool& pool, const uint32 threadCount, F&& func )
+    {
+        std::function<void(AnonMTJob*)> f = func;
+        
+        MTJobRunner<AnonMTJob> jobs( pool );
+        for( uint32 i = 0; i< threadCount; i++ )
+        {
+            auto& job = jobs[i];
+            job.func = &f;
+        }
+
+        jobs.Run( threadCount );
+    }
+
+    template<typename F>
+    inline static void Run( ThreadPool& pool, F&& func )
+    {
+        Run( pool, pool.ThreadCount(), func );
+    }
 };
 
 
@@ -232,7 +272,7 @@ template<typename TJob>
 inline bool MTJobSyncT<TJob>::ReduceThreadCount( uint newThreadCount )
 {
     ASSERT( newThreadCount < _jobCount );
-    ASSERT( newThreadCount > 0 );
+    ASSERT( newThreadCount >= 0 );
 
     // Does this thread need to synchronize?
     // If not, don't participate
@@ -274,25 +314,27 @@ inline void MTJobSyncT<TJob>::Trace( const char* msg, ... )
 #endif
 
 /// Helper Job that calculates a prefix sum
-template<typename TJob>
+template<typename TJob, typename TCount = uint32>
 struct PrefixSumJob : public MTJob<TJob>
 {
-    uint32* counts;
+    inline virtual ~PrefixSumJob() {}
 
-    void CalculatePrefixSum(
+    TCount* counts;
+
+    inline void CalculatePrefixSum(
         uint32  bucketSize,
-        uint32* counts,
-        uint32* pfxSum,
-        uint32* bucketCounts );
+        TCount* counts,
+        TCount* pfxSum,
+        TCount* bucketCounts );
 };
 
 //-----------------------------------------------------------
-template<typename TJob>
-inline void PrefixSumJob<TJob>::CalculatePrefixSum(
+template<typename TJob, typename TCount>
+inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
         uint32  bucketSize,
-        uint32* counts,
-        uint32* pfxSum,
-        uint32* bucketCounts )
+        TCount* counts,
+        TCount* pfxSum,
+        TCount* bucketCounts )
 {
     const uint32 jobId    = this->JobId();
     const uint32 jobCount = this->JobCount();
@@ -301,34 +343,91 @@ inline void PrefixSumJob<TJob>::CalculatePrefixSum(
     this->SyncThreads();
 
     // Add up all of the jobs counts
-    memset( pfxSum, 0, sizeof( uint32 ) * bucketSize );
+    memset( pfxSum, 0, sizeof( TCount ) * bucketSize );
 
-    for( uint i = 0; i < jobCount; i++ )
+    for( uint32 i = 0; i < jobCount; i++ )
     {
-        const uint* tCounts = this->GetJob( i ).counts;
+        const TCount* tCounts = this->GetJob( i ).counts;
 
-        for( uint j = 0; j < bucketSize; j++ )
+        for( uint32 j = 0; j < bucketSize; j++ )
             pfxSum[j] += tCounts[j];
     }
 
     // If we're the control thread, retain the total bucket count
     if( this->IsControlThread() )
     {
-        memcpy( bucketCounts, pfxSum, sizeof( uint32 ) * bucketSize );
+        memcpy( bucketCounts, pfxSum, sizeof( TCount ) * bucketSize );
     }
 
     // Calculate the prefix sum
-    for( uint i = 1; i < bucketSize; i++ )
+    for( uint32 i = 1; i < bucketSize; i++ )
         pfxSum[i] += pfxSum[i-1];
 
     // Subtract the count from all threads after ours 
     // to get the correct prefix sum for this thread
-    for( uint t = jobId+1; t < jobCount; t++ )
+    for( uint32 t = jobId+1; t < jobCount; t++ )
     {
-        const uint* tCounts = this->GetJob( t ).counts;
+        const TCount* tCounts = this->GetJob( t ).counts;
 
-        for( uint i = 0; i < bucketSize; i++ )
+        for( uint32 i = 0; i < bucketSize; i++ )
             pfxSum[i] -= tCounts[i];
     }
+}
+
+
+//-----------------------------------------------------------
+template<typename TCount = uint32>
+struct AnonPrefixSumJob : public PrefixSumJob<AnonPrefixSumJob<TCount>, TCount>
+{
+    std::function<void(AnonPrefixSumJob*)>* func;
+
+    inline void Run() override { (*func)( this ); }
+
+    // Run anononymous job, from a lambda, for example
+    template<typename F,
+        std::enable_if_t<
+        std::is_invocable_r_v<void, F, AnonPrefixSumJob<TCount>*>>* = nullptr>
+    inline static void Run( ThreadPool& pool, const uint32 threadCount, F&& func )
+    {
+        std::function<void(AnonPrefixSumJob<TCount>*)> f = func;
+        
+        MTJobRunner<AnonPrefixSumJob<TCount>> jobs( pool );
+        for( uint32 i = 0; i< threadCount; i++ )
+        {
+            auto& job = jobs[i];
+            job.func = &f;
+        }
+
+        jobs.Run( threadCount );
+    }
+
+    template<typename F>
+    inline static void Run( ThreadPool& pool, F&& func )
+    {
+        Run( pool, pool.ThreadCount(), func );
+    }
+};
+
+//-----------------------------------------------------------
+template<typename T>
+inline void GetThreadOffsets( const uint32 id, const uint32 threadCount, const T totalCount, T& count, T& offset, T& end )
+{
+    const T countPerThread = totalCount / (T)threadCount;
+    const T remainder      = totalCount - countPerThread * (T)threadCount;
+
+    count  = countPerThread;
+    offset = (T)id * countPerThread;
+
+    if( id == threadCount-1 )
+        count += remainder;
+    
+    end = offset + count;
+}
+
+//-----------------------------------------------------------
+template<typename TJob, typename T>
+inline void GetThreadOffsets( MTJob<TJob>* job, const T totalCount, T& count, T& offset, T& end )
+{
+    GetThreadOffsets( job->JobId(), job->JobCount(), totalCount, count, offset, end );
 }
 

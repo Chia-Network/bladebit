@@ -1,9 +1,10 @@
 #include "DiskBufferQueue.h"
-#include "util/Util.h"
+#include "io/FileStream.h"
+#include "io/HybridStream.h"
 #include "plotdisk/DiskPlotConfig.h"
-#include "SysHost.h"
-
+#include "plotdisk/IOTransforms.h"
 #include "jobs/IOJob.h"
+#include "util/Util.h"
 #include "util/Log.h"
 
 
@@ -48,7 +49,6 @@ DiskBufferQueue::DiskBufferQueue(
 
     // Initialize I/O thread
     _dispatchThread.Run( CommandThreadMain, this );
-
 }
 
 //-----------------------------------------------------------
@@ -65,6 +65,13 @@ DiskBufferQueue::~DiskBufferQueue()
 }
 
 //-----------------------------------------------------------
+size_t DiskBufferQueue::BlockSize( FileId fileId ) const
+{
+    ASSERT( _files[(int)fileId].files[0] );
+    return _files[(int)fileId].files[0]->BlockSize();
+}
+
+//-----------------------------------------------------------
 void DiskBufferQueue::ResetHeap( const size_t heapSize, void* heapBuffer )
 {
     _workHeap.ResetHeap( heapSize, heapBuffer );
@@ -73,24 +80,47 @@ void DiskBufferQueue::ResetHeap( const size_t heapSize, void* heapBuffer )
 //-----------------------------------------------------------
 bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketCount )
 {
+    return InitFileSet( fileId, name, bucketCount, FileSetOptions::None, nullptr );
+}
+
+//-----------------------------------------------------------
+bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketCount, const FileSetOptions options, const FileSetInitData* optsData )
+{
     char*        pathBuffer    = _filePathBuffer;
     const size_t workDirLength = _workDir.length();
 
     char* baseName = pathBuffer + workDirLength;
 
     FileFlags flags = FileFlags::LargeFile;
-    if( _useDirectIO )
+    if( IsFlagSet( options, FileSetOptions::DirectIO ) )
         flags |= FileFlags::NoBuffering;
 
     FileSet& fileSet = _files[(uint)fileId];
-    
-    fileSet.name         = name;
-    fileSet.files.values = new FileStream[bucketCount];
-    fileSet.files.length = bucketCount;
+    ASSERT( !fileSet.files.values );
 
+    fileSet.name         = name;
+    fileSet.files.values = new IStream*[bucketCount];
+    fileSet.files.length = bucketCount;
+    fileSet.blockBuffer  = nullptr;
+    fileSet.options      = options;
+
+    const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable );
+    ASSERT( !isCachable || optsData );
+
+    const size_t cacheSize = isCachable ? optsData->cacheSize / bucketCount : 0;
+    byte* cache = isCachable ? (byte*)optsData->cache : nullptr;
+
+    // #TODO: Try using a single file and opening multiple handles to that file as buckets...
     for( uint i = 0; i < bucketCount; i++ )
     {
-        FileStream& file = fileSet.files[i];
+        IStream* file = nullptr;
+        
+        if( isCachable )
+            file = new HybridStream();
+        else 
+            file = new FileStream();
+
+        fileSet.files[i] = file;
 
         const FileMode fileMode =
         #if _DEBUG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 )
@@ -103,36 +133,45 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
             sprintf( baseName, "%s_%u.tmp", name, i );
         else
             sprintf( baseName, "%s", name );
-        
-        if( !file.Open( pathBuffer, fileMode, FileAccess::ReadWrite, flags ) )
+
+        bool opened;
+
+        if( isCachable )
+        {
+            opened = static_cast<HybridStream*>( file )->Open( cache, cacheSize, pathBuffer, fileMode, FileAccess::ReadWrite, flags );
+            cache += cacheSize;
+
+            ASSERT( cacheSize / file->BlockSize() * file->BlockSize() == cacheSize );
+        }
+        else
+            opened = static_cast<FileStream*>( file )->Open( pathBuffer, fileMode, FileAccess::ReadWrite, flags );
+
+        if( !opened )
         {
             // Allow plot file to fail opening
             if( fileId == FileId::PLOT )
             {
-                Log::Line( "Failed to open plot file %s with error: %d.", pathBuffer, file.GetError() );
+                Log::Line( "Failed to open plot file %s with error: %d.", pathBuffer, file->GetError() );
                 return false;
             }
             
-            Fatal( "Failed to open temp work file @ %s with error: %d.", pathBuffer, file.GetError() );
+            Fatal( "Failed to open temp work file @ %s with error: %d.", pathBuffer, file->GetError() );
         }
 
-        // #TODO: Remove this, we will keep a block size per-file set and do alignment ourselves.
-        if( !_blockBuffer )
+        if( i == 0 && IsFlagSet( options, FileSetOptions::DirectIO ) )
         {
-            _blockSize = file.BlockSize();
-            FatalIf( _blockSize < 2, "Invalid temporary file block size." );
-            
-            _blockBuffer = (byte*)SysHost::VirtualAlloc( _blockSize, false );
-            FatalIf( !_blockBuffer, "Out of memory." );
-        }
-        else if( fileId != FileId::PLOT )
-        {
-            if( file.BlockSize() != _blockSize )
-                Fatal( "Temporary work files have differing block sizes." );
+            // const size_t totalBlockSize = file->BlockSize() * bucketCount;
+            fileSet.blockBuffer = bbvirtalloc<void>( file->BlockSize() );
         }
     }
 
     return true;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::SetTransform( FileId fileId, IIOTransform& transform )
+{
+    // _files[(int)fileId].transform = &transform;
 }
 
 //-----------------------------------------------------------
@@ -347,8 +386,29 @@ void DiskBufferQueue::CommitCommands()
 //-----------------------------------------------------------
 void DiskBufferQueue::CommandThreadMain( DiskBufferQueue* self )
 {
+    // #TODO: Remove this, testing
+    SysHost::SetCurrentThreadAffinityCpuId( SysHost::GetLogicalCPUCount() - 1 );
     self->CommandMain();
 }
+
+//-----------------------------------------------------------
+// byte* DiskBufferQueue::GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer )
+// {
+//     if( !IsFlagSet( _files[(int)fileId].options, FileSetOptions::DirectIO ) )
+//         return GetBuffer( size, blockUntilFreeBuffer );
+
+//     const size_t blockOffset = _files[(int)fileId].blockOffsets[bucket];
+//     const size_t blockSize   = _files[(int)fileId].files[bucket]->BlockSize();
+
+//     size_t allocSize = RoundUpToNextBoundaryT( size, blockOffset );
+//     if( blockOffset > 0 )
+//         allocSize += blockSize;
+    
+//     byte* buffer = _workHeap.Alloc( allocSize, blockSize, blockUntilFreeBuffer, &_ioBufferWaitTime );
+//     buffer += blockOffset;
+    
+//     return buffer;
+// }
 
 
 ///
@@ -410,9 +470,9 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd SeekFile: (%u) bucket:%u offset:%lld origin:%ld", cmd.seek.fileId, cmd.seek.bucket, cmd.seek.offset, (int)cmd.seek.origin );
             #endif
-                if( !_files[(uint)cmd.seek.fileId].files[cmd.seek.bucket].Seek( cmd.seek.offset, cmd.seek.origin ) )
+                if( !_files[(uint)cmd.seek.fileId].files[cmd.seek.bucket]->Seek( cmd.seek.offset, cmd.seek.origin ) )
                 {
-                    int err = _files[(uint)cmd.seek.fileId].files[cmd.seek.bucket].GetError();
+                    int err = _files[(uint)cmd.seek.fileId].files[cmd.seek.bucket]->GetError();
                     Fatal( "[DiskBufferQueue] Failed to seek file %s.%u with error %d (0x%x)", 
                            _files[(uint)cmd.seek.fileId].name, cmd.seek.bucket, err, err );
                 }
@@ -480,33 +540,40 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     const uint*  sizes       = cmd.buckets.sizes;
     const byte*  buffers     = cmd.buckets.buffers;
 
-    FileSet&     fileBuckets = _files[(int)fileId];
-    ASSERT( IsFlagSet( fileBuckets.files[0].GetFileAccess(), FileAccess::ReadWrite ) );
+    FileSet&     fileSet     = _files[(int)fileId];
+    // ASSERT( IsFlagSet( fileBuckets.files[0]->GetFileAccess(), FileAccess::ReadWrite ) );
 
-    const uint   bucketCount = (uint)fileBuckets.files.length;
+    const uint32 bucketCount = (uint32)fileSet.files.length;
 
     Log::Debug( "  >>> Write 0x%p", buffers );
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
     const size_t blockSize = _blockSize;
     const byte*  buffer    = buffers;
+
+    // if( fileSet.transform )
+    // {
+    //     IIOTransform::TransformData data = {
+    //         .buffer      = (void*)buffers,
+    //         .numBuckets  = bucketCount,
+    //         .bucketSizes = (uint32*)sizes
+    //     };
+
+    //     // #TODO: Profile time elapsed here
+    //     fileSet.transform->Write( data );
+    // }
+
     
     for( uint i = 0; i < bucketCount; i++ )
     {
         const size_t bufferSize = sizes[i];
         
-        // Only write up-to the block-aligned boundary.
-        // The caller is in charge of writing any remainders manually
-        const size_t writeSize = _useDirectIO == false ? bufferSize :
-                                 bufferSize / blockSize * blockSize;
+        // Only write up-to the block-aligned boundary. The caller is in charge of handling unlaigned data.
+        ASSERT( bufferSize == bufferSize / blockSize * blockSize );
+        WriteToFile( *fileSet.files[i], bufferSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, i );
 
-        WriteToFile( fileBuckets.files[i], writeSize, buffer, _blockBuffer, fileBuckets.name, i );
-        ASSERT( IsFlagSet( fileBuckets.files[i].GetFileAccess(), FileAccess::ReadWrite ) );
-        // Each bucket buffer must start at the next block-aligned boundary
-        const size_t bufferOffset = _useDirectIO == false ? bufferSize :
-                                    RoundUpToNextBoundaryT( bufferSize, blockSize );
-
-        buffer += bufferOffset;
+        // ASSERT( IsFlagSet( fileBuckets.files[i].GetFileAccess(), FileAccess::ReadWrite ) );
+        buffer += bufferSize;
     }
 }
 
@@ -514,14 +581,17 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
 void DiskBufferQueue::CndWriteFile( const Command& cmd )
 {
     FileSet& fileBuckets = _files[(int)cmd.file.fileId];
-    WriteToFile( fileBuckets.files[cmd.file.bucket], cmd.file.size, cmd.file.buffer, _blockBuffer, fileBuckets.name, cmd.file.bucket );
+    WriteToFile( *fileBuckets.files[cmd.file.bucket], cmd.file.size, cmd.file.buffer, (byte*)fileBuckets.blockBuffer, fileBuckets.name, cmd.file.bucket );
 }
 
 //-----------------------------------------------------------
 void DiskBufferQueue::CmdReadFile( const Command& cmd )
 {
-    FileSet& fileBuckets = _files[(int)cmd.file.fileId];
-    ReadFromFile( fileBuckets.files[cmd.file.bucket], cmd.file.size, cmd.file.buffer, _blockBuffer, fileBuckets.name, cmd.file.bucket );
+    FileSet& fileSet = _files[(int)cmd.file.fileId];
+    const bool   directIO  = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
+    const size_t blockSize = fileSet.files[0]->BlockSize();
+
+    ReadFromFile( *fileSet.files[cmd.file.bucket], cmd.file.size, cmd.file.buffer, (byte*)fileSet.blockBuffer, blockSize, directIO, fileSet.name, cmd.file.bucket );
 }
 
 //-----------------------------------------------------------
@@ -535,19 +605,19 @@ void DiskBufferQueue::CmdSeekBucket( const Command& cmd )
 
     for( uint i = 0; i < bucketCount; i++ )
     {
-        if( !fileBuckets.files[i].Seek( seekOffset, seekOrigin ) )
+        if( !fileBuckets.files[i]->Seek( seekOffset, seekOrigin ) )
         {
-            int err = fileBuckets.files[i].GetError();
+            int err = fileBuckets.files[i]->GetError();
             Fatal( "[DiskBufferQueue] Failed to seek file %s.%u with error %d (0x%x)", fileBuckets.name, i, err, err );
         }
     }
 }
 
 //-----------------------------------------------------------
-inline void DiskBufferQueue::WriteToFile( FileStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket )
+inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte* buffer, byte* blockBuffer, const char* fileName, uint bucket )
 {
-    if( !_useDirectIO )
-    {
+    // if( !_useDirectIO )
+    // {
         while( size )
         {
             ssize_t sizeWritten = file.Write( buffer, size );
@@ -561,51 +631,52 @@ inline void DiskBufferQueue::WriteToFile( FileStream& file, size_t size, const b
             size -= (size_t)sizeWritten;
             buffer += sizeWritten;
         }
-    }
-    else
-    {
-        const size_t blockSize   = _blockSize;
-        size_t       sizeToWrite = size / blockSize * blockSize;
-        const size_t remainder   = size - sizeToWrite;
+    // }
+    // else
+    // {
+    //     ASSERT()
+    //     const size_t blockSize   = _blockSize;
+    //     size_t       sizeToWrite = size / blockSize * blockSize;
+    //     const size_t remainder   = size - sizeToWrite;
 
-        while( sizeToWrite )
-        {
-            ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
-            if( sizeWritten < 1 )
-            {
-                const int err = file.GetError();
-                Fatal( "Failed to write to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
-            }
+    //     while( sizeToWrite )
+    //     {
+    //         ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
+    //         if( sizeWritten < 1 )
+    //         {
+    //             const int err = file.GetError();
+    //             Fatal( "Failed to write to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+    //         }
 
-            ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
+    //         ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
 
-            sizeToWrite -= (size_t)sizeWritten;
-            buffer      += sizeWritten;
-        }
+    //         sizeToWrite -= (size_t)sizeWritten;
+    //         buffer      += sizeWritten;
+    //     }
         
-        if( remainder )
-        {
-            ASSERT( blockBuffer );
+    //     if( remainder )
+    //     {
+    //         ASSERT( blockBuffer );
             
-            // Unnecessary zeroing of memory, but might be useful for debugging
-            memset( blockBuffer, 0, blockSize );
-            memcpy( blockBuffer, buffer, remainder );
+    //         // Unnecessary zeroing of memory, but might be useful for debugging
+    //         memset( blockBuffer, 0, blockSize );
+    //         memcpy( blockBuffer, buffer, remainder );
 
-            ssize_t sizeWritten = file.Write( blockBuffer, blockSize );
+    //         ssize_t sizeWritten = file.Write( blockBuffer, blockSize );
 
-            if( sizeWritten < remainder )
-            {
-                const int err = file.GetError();
-                Fatal( "Failed to write block to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
-            }
-        }
-    }
+    //         if( sizeWritten < remainder )
+    //         {
+    //             const int err = file.GetError();
+    //             Fatal( "Failed to write block to '%s.%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+    //         }
+    //     }
+    // }
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::ReadFromFile( FileStream& file, size_t size, byte* buffer, byte* blockBuffer, const char* fileName, uint bucket )
+inline void DiskBufferQueue::ReadFromFile( IStream& file, size_t size, byte* buffer, byte* blockBuffer, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket )
 {
-    if( !_useDirectIO )
+    if( !directIO )
     {
         while( size )
         {
@@ -622,29 +693,34 @@ void DiskBufferQueue::ReadFromFile( FileStream& file, size_t size, byte* buffer,
     }
     else
     {
-        const size_t blockSize  = _blockSize;
+        int err;
+        FatalIf( !IOJob::ReadFromFile( file, buffer, size, blockBuffer, blockSize, err ),
+            "Failed to read from '%s_%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+
+
+    //     const size_t blockSize  = _blockSize;
         
-        /// #NOTE: All our buffers should be block aligned so we should be able to freely read all blocks to them...
-        ///       Only implement remainder block reading if we really need to.
-    //     size_t       sizeToRead = size / blockSize * blockSize;
-    //     const size_t remainder  = size - sizeToRead;
+    //     /// #NOTE: All our buffers should be block aligned so we should be able to freely read all blocks to them...
+    //     ///       Only implement remainder block reading if we really need to.
+    // //     size_t       sizeToRead = size / blockSize * blockSize;
+    // //     const size_t remainder  = size - sizeToRead;
 
-        size_t sizeToRead = CDivT( size, blockSize ) * blockSize;
+    //     size_t sizeToRead = CDivT( size, blockSize ) * blockSize;
 
-        while( sizeToRead )
-        {
-            ssize_t sizeRead = file.Read( buffer, sizeToRead );
-            if( sizeRead < 1 )
-            {
-                const int err = file.GetError();
-                Fatal( "Failed to read from '%s_%u' work file with error %d (0x%x).", fileName, bucket, err, err );
-            }
+    //     while( sizeToRead )
+    //     {
+    //         ssize_t sizeRead = file.Read( buffer, sizeToRead );
+    //         if( sizeRead < 1 )
+    //         {
+    //             const int err = file.GetError();
+    //             Fatal( "Failed to read from '%s_%u' work file with error %d (0x%x).", fileName, bucket, err, err );
+    //         }
 
-            ASSERT( sizeRead <= (ssize_t)sizeToRead );
+    //         ASSERT( sizeRead <= (ssize_t)sizeToRead );
             
-            sizeToRead -= (size_t)sizeRead;
-            buffer     += sizeRead;
-        }
+    //         sizeToRead -= (size_t)sizeRead;
+    //         buffer     += sizeRead;
+    //     }
     }
 
 //     if( remainder )
@@ -767,12 +843,22 @@ void DiskBufferQueue::DeleterMain()
 //-----------------------------------------------------------
 void DiskBufferQueue::DeleteFileNow( const FileId fileId, uint32 bucket )
 {
-    FileSet&    fileBuckets = _files[(int)fileId];
-    FileStream& file        = fileBuckets.files[bucket];
-    file.Close();
+    FileSet&    fileSet = _files[(int)fileId];
+
+    const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
+    if( isHybridFile )
+    {
+        auto* file = static_cast<HybridStream*>( fileSet.files[0] );
+        file->Close();
+    }
+    else
+    {
+        auto* file = static_cast<FileStream*>( fileSet.files[0] );
+        file->Close();
+    }
 
     char* basePath = _filePathBuffer + _workDir.length();
-    sprintf( basePath, "%s_%u.tmp", fileBuckets.name, bucket );
+    sprintf( basePath, "%s_%u.tmp", fileSet.name, bucket );
     
     const int r = remove( _filePathBuffer );
 
@@ -783,16 +869,26 @@ void DiskBufferQueue::DeleteFileNow( const FileId fileId, uint32 bucket )
 //-----------------------------------------------------------
 void DiskBufferQueue::DeleteBucketNow( const FileId fileId )
 {
-    FileSet& fileBuckets = _files[(int)fileId];
+    FileSet& fileSet = _files[(int)fileId];
 
     char* basePath = _filePathBuffer + _workDir.length();
 
-    for( size_t i = 0; i < fileBuckets.files.length; i++ )
-    {
-        FileStream& file = fileBuckets.files[i];
-        file.Close();
+    const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
 
-        sprintf( basePath, "%s_%u.tmp", fileBuckets.name, (uint)i );
+    for( size_t i = 0; i < fileSet.files.length; i++ )
+    {
+        if( isHybridFile )
+        {
+            auto* file = static_cast<HybridStream*>( fileSet.files[i] );
+            file->Close();
+        }
+        else
+        {
+            auto* file = static_cast<FileStream*>( fileSet.files[i] );
+            file->Close();
+        }
+
+        sprintf( basePath, "%s_%u.tmp", fileSet.name, (uint)i );
     
         const int r = remove( _filePathBuffer );
 

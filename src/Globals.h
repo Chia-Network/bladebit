@@ -95,13 +95,13 @@ inline FlagType operator ~ ( FlagType lhs )                                     
 
 #define ImplementArithmeticOps( EnumType ) \
 /* Prefix ++*/                                                      \
-inline EnumType& operator++( EnumType& self )                       \
+constexpr inline EnumType& operator++( EnumType& self )             \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     (*reinterpret_cast<BaseT*>( &self ))++; return self;            \
 }                                                                   \
 /* Postfix ++*/                                                     \
-inline EnumType operator++( EnumType& self, int )                   \
+constexpr inline EnumType operator++( EnumType& self, int )         \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     EnumType tmp = self;                                            \
@@ -109,13 +109,13 @@ inline EnumType operator++( EnumType& self, int )                   \
     return tmp;                                                     \
 }                                                                   \
 /* Prefix --*/                                                      \
-inline EnumType& operator--( EnumType& self )                       \
+constexpr inline EnumType& operator--( EnumType& self )             \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     (*reinterpret_cast<BaseT*>( &self ))--; return self;            \
 }                                                                   \
 /* Postfix --*/                                                     \
-inline EnumType operator--( EnumType& self, int )                   \
+constexpr inline EnumType operator--( EnumType& self, int )         \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     EnumType tmp = self;                                            \
@@ -123,25 +123,25 @@ inline EnumType operator--( EnumType& self, int )                   \
     return tmp;                                                     \
 }                                                                   \
                                                                     \
-inline EnumType operator+( EnumType lhs, EnumType rhs )             \
+constexpr inline EnumType operator+( EnumType lhs, EnumType rhs )   \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     return static_cast<EnumType>( static_cast<BaseT>( lhs ) +       \
                                   static_cast<BaseT>( rhs ) );      \
 }                                                                   \
-inline EnumType operator+( EnumType lhs, int rhs )                  \
+constexpr inline EnumType operator+( EnumType lhs, int rhs )        \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     return static_cast<EnumType>( static_cast<BaseT>( lhs ) + rhs); \
 }                                                                   \
                                                                     \
-inline EnumType operator-( EnumType lhs, EnumType rhs )             \
+constexpr inline EnumType operator-( EnumType lhs, EnumType rhs )   \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     return static_cast<EnumType>( static_cast<BaseT>( lhs ) -       \
                                   static_cast<BaseT>( rhs ) );      \
 }                                                                   \
-inline EnumType operator-( EnumType lhs, int rhs )                  \
+constexpr inline EnumType operator-( EnumType lhs, int rhs )        \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     return static_cast<EnumType>( static_cast<BaseT>( lhs ) - rhs );\

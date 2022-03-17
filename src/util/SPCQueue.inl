@@ -92,7 +92,7 @@ int SPCQueue<T, Capacity>::Dequeue( T* values, int capacity )
     _readPosition = ( readPos + count ) % Capacity;
 
     const int copyCount = std::min( count, Capacity - readPos );
-    bbmemcpy_t( values, _buffer + readPos, (size_t)count );
+    bbmemcpy_t( values, _buffer + readPos, (size_t)copyCount );
 
     // We might have to do 2 copies if we're wrapping around the end of the buffer
     const int remainder = count - copyCount;

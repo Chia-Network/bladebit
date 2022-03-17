@@ -1,159 +1,44 @@
 #include "F1GenBucketized.h"
+#include "threading/MTJob.h"
 #include "plotdisk/DiskBufferQueue.h"
 #include "plotting/PlotTypes.h"
+#include "plotting/PackEntries.h"
 #include "threading/ThreadPool.h"
 #include "pos/chacha8.h"
 #include "util/Util.h"
 
-template<typename TJob>
-struct F1BucketJob : public MTJob<TJob>
-{
-    const byte* key;                // Chacha key
-    uint32      x;                  // Starting x value for this thread
-    uint32      blockCount;         // Total number of blocks for each thread. Or blocks per thread per chunk in the disk version.
-    uint32*     counts;             // Each thread's entry count per bucket. Shared with other threads to calculate prefix sum.
-    uint32*     totalBucketCounts;  // Total counts per for all buckets. Used by the control thread
-
-    byte*   blocks;                 // chacha blocks buffer
-    uint32* yBuckets;               // Bucket buffer for y (on the disk version, these are set by the control thread)
-    uint32* xBuckets;               // Bucket buffer for x
-
-    void CalculateMultiThreadedPrefixSum( 
-        uint32 counts[BB_DP_BUCKET_COUNT],
-        uint32 pfxSum[BB_DP_BUCKET_COUNT],
-        uint32 bucketCounts[BB_DP_BUCKET_COUNT],
-        const size_t fileBlockSize
-    );
-};
-
-// Job to perform bucketized f1 generation completely in memory
-struct F1MemBucketJob : public F1BucketJob<F1MemBucketJob>
-{
-    void Run() override;
-};
-
-// Job to perform bucketized f1 generation and writing it
-// to disk in intervals known as "chunks".
-struct F1DiskBucketJob : public F1BucketJob<F1DiskBucketJob>
+struct F1DiskBucketJob : PrefixSumJob<F1DiskBucketJob>
 {
     DiskBufferQueue* diskQueue;
+    const byte* key;                        // Chacha key
+    uint32      x;                          // Starting x value for this thread
+    uint32      numBuckets;                 // How many buckets are we processing?
+    uint64      blocksPerBucketPerThread;   // How many blocks to write per bucket per thread
+    uint64      blockCount;                 // Total number of blocks for each thread.
+    uint32*     totalBucketCounts;          // Total counts per for all buckets. Used by the control thread
+    
+    byte*       blocks;                     // chacha blocks buffer
+    uint64*     entries;                    // Entries in y + x format
+    uint64*     writeBuffer;                // Entries encoded in disk format. Set by the control thread
+    size_t      writebufferSize;            // Size to allocate for the serialization buffer
 
-    uint32  chunkCount;
-    uint32  chunkBufferSize;    // Allocation size for the chunk buffer.
-                                // It should be guaranteed to hold enough values
-                                // needed for all buckets, including file block size 
-                                // alignment space.
-
-    uint32  trailingBlocks;     // Total amount of trailing blocks (not per-thread),
-                                // These fit inside a chunk, but may be less than
-                                // can be handled per-thread so we may need to run
-                                // less threads for them.
-
-    byte* remaindersBuffer;     // Buffer used to hold the remainder entries that 
-                                // don't align to file block size.
-                                // Thse are submitted in their own commands when
-                                // we have enough entries to align to file block size.
+    FileId      fileId;
 
     void Run() override;
+    inline void  GetWriteBuffer( uint32*& sizes, const uint64 blockCount, const size_t entrySizeBits );
+    inline void  EncodeEntries( const uint64* input, uint64* output, const uint32* pfxSum );
+    inline void  WriteBuckets( uint64* entries, const uint32* bucketCounts, uint32* sizes );
 
-    void SaveBlockRemainders( uint32* yBuckets, uint32* xBuckets, const uint32* bucketCounts, 
-                              DoubleBuffer* remainderBuffers, uint32* remainderSizes );
-
-    void WriteFinalBlockRemainders( DoubleBuffer* remainderBuffers, uint32* remainderSizes );
 };
 
-template<bool WriteToDisk, bool SingleThreaded, typename TJob>
-void GenerateF1( 
-    chacha8_ctx&      chacha, 
-    uint32            x,
-    byte*             blocks,
-    uint32            blockCount,
-    uint64            entryCount,
-    uint32*           yBuckets,
-    uint32*           xBuckets,
-    uint32            bucketCounts[BB_DP_BUCKET_COUNT],
-    MTJobSyncT<TJob>* job,
-    size_t            fileBlockSize
-);
-
-///
-/// RAM F1
-///
 //-----------------------------------------------------------
-void F1GenBucketized::GenerateF1Mem( 
-    const byte* plotId,
-    ThreadPool& pool, 
-    uint        threadCount,
-    byte*       blocks,
-    uint32*     yBuckets,
-    uint32*     xBuckets,
-    uint32      bucketCounts[BB_DP_BUCKET_COUNT]
-)
+size_t F1GenBucketized::GetEntrySizeBits( const uint32 numBuckets, const uint32 k )
 {
-    ASSERT( threadCount <= pool.ThreadCount() );
-    
-    const uint64 entryCount      = 1ull << _K;
-    const uint32 entriesPerBlock = (uint32)( kF1BlockSize / sizeof( uint32 ) );
-    const uint32 blockCount      = (uint32)( entryCount / entriesPerBlock );
-    
-    const uint32 blocksPerThread = blockCount / threadCount;
-
-    uint32 trailingBlocks = blockCount - blocksPerThread * threadCount;
-    
-    // Prepare ChaCha key
-    byte key[32] = { 1 };
-    memcpy( key + 1, plotId, 31 );
-
-    memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-
-    uint32 x = 0;
-    MTJobRunner<F1MemBucketJob> f1Job( pool );
-
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        F1MemBucketJob& job = f1Job[i];
-        job.key               = key;
-        job.blockCount        = blocksPerThread;
-        job.x                 = x;
-        
-        job.blocks            = blocks;
-        job.yBuckets          = yBuckets;
-        job.xBuckets          = xBuckets;
-        job.totalBucketCounts = nullptr;
-        job.counts            = nullptr;
-
-        if( trailingBlocks )
-        {
-            job.blockCount ++;
-            trailingBlocks --; 
-        }
-
-        x       += job.blockCount * entriesPerBlock;
-        blocks  += job.blockCount * kF1BlockSize;
-    }
-
-    f1Job[0].totalBucketCounts = bucketCounts;
-
-    f1Job.Run( threadCount );
+    ASSERT( numBuckets >= 64 );
+    const uint32 bitsSaved    = (uint32)log2( numBuckets ) - kExtraBits;
+    const size_t bitsPerEntry = k * 2 - bitsSaved;
+    return bitsPerEntry; 
 }
-
-//-----------------------------------------------------------
-void F1MemBucketJob::Run()
-{
-    chacha8_ctx chacha;
-    chacha8_keysetup( &chacha, key, 256, NULL );
-
-    const uint32 entriesPerBlock = kF1BlockSize / sizeof( uint32 );
-    const uint32 entryCount      = blockCount * entriesPerBlock;
-
-    // if( this->JobCount() > 1 )
-    // MTJobSyncT<F1MemBucketJob>* job = static_cast<MTJobSyncT<F1MemBucketJob>*>( this );
-    GenerateF1<false, false>( chacha, x, blocks, blockCount,
-                              entryCount, yBuckets, xBuckets,
-                              totalBucketCounts, this, 0 );
-}
-
-
 
 ///
 /// Disk F1
@@ -162,105 +47,94 @@ void F1MemBucketJob::Run()
 void F1GenBucketized::GenerateF1Disk(
     const byte*      plotId,
     ThreadPool&      pool, 
-    uint             threadCount,
+    uint32           threadCount,
     DiskBufferQueue& diskQueue,
-    const size_t     chunkSize,
-    uint32           bucketCounts[BB_DP_BUCKET_COUNT]
+    uint32*          bucketCounts,
+    const uint32     numBuckets,
+    const FileId     fileId
 )
 {
+    constexpr uint32 k = _K;
+    static_assert( k == 32, "K32-only versioin." );
+
     ASSERT( threadCount <= pool.ThreadCount() );
+    ASSERT( numBuckets >= BB_DP_MIN_BUCKET_COUNT );
+    ASSERT( numBuckets <= BB_DP_MAX_BUCKET_COUNT );
     
-    const uint64 entryCount            = 1ull << _K;
-    const uint32 entriesPerBlock       = (uint32)( kF1BlockSize / sizeof( uint32 ) );
-    const uint32 blockCount            = (uint32)( entryCount / entriesPerBlock );
-
-    // We need to adjust the chunk buffer size to leave some space for us to be
-    // able to align each bucket start pointer to the block size of the output device
-    const size_t fileBlockSize         = diskQueue.UseDirectIO() ? diskQueue.BlockSize() : 0;
-    const size_t bucketBlockAlignSize  = fileBlockSize * BB_DP_BUCKET_COUNT;
-
-    const size_t bucketBufferAllocSize = chunkSize / 2;                 // Allocation size for each single bucket buffer (for x and y)
-    const size_t usableChunkSize       = ( bucketBufferAllocSize * 2 ) - bucketBlockAlignSize * 2;
-
-    const uint32 blocksPerChunk = (uint32)( usableChunkSize / ( kF1BlockSize * 2 ) ); // * 2 because we also have space for the x values
-    ASSERT( blocksPerChunk * kF1BlockSize <= bucketBufferAllocSize );
-
-    uint32 chunkCount     = blockCount / blocksPerChunk;                // How many chunks we need to process 
-                                                                        // (needs ot be floored to ensure we fit in the chunk buffer)
-    uint32 trailingBlocks = blockCount - blocksPerChunk * chunkCount;
-
-    // Threads operate on a chunk at a time.
-    const uint32 blocksPerThread = blocksPerChunk / threadCount;
-
-    // #TODO: Ensure each thread has at least one block.
-    ASSERT( blocksPerThread > 0 );
+    const uint64 kEntryCount              = 1ull << k;
+    const uint64 entriesPerBucket         = kEntryCount / numBuckets;
+    const uint32 entriesPerBlock          = (uint32)( kF1BlockSize / (k / 8ull) );
     
-    // Add the blocks that don't into a per-thread boundary as trailing blocks
-    trailingBlocks += ( blocksPerChunk * chunkCount ) - ( blocksPerThread * threadCount * chunkCount );
+    const uint64 blockCount               = kEntryCount / entriesPerBlock;
+    const uint64 blocksPerThread          = blockCount / threadCount;
+    const uint64 blocksPerBucket          = entriesPerBucket / entriesPerBlock;
+    const uint64 blocksPerBucketPerThread = blocksPerBucket / threadCount;
+    
+    const uint32 bitsSaved        = (uint32)log2( numBuckets ) - kExtraBits;
+    // const size_t bitsPerEntry     = k * 2 - bitsSaved;                         // Bits per entry when the entry is serialized
+    
+    uint64 trailingBlocks = blockCount - blocksPerThread * threadCount;
 
-    // If the trailing blocks add up to a new chunk, then add that chunk
-    // the rest of the traiiling entries will be run as a special case,
-    // potentially with less threads than specified.
-    if( trailingBlocks > blocksPerChunk )
-    {
-        chunkCount ++;
-        trailingBlocks -= blocksPerChunk;
-    }
-
+    // Working buffer allocation size
+    const size_t blockBufferSize = RoundUpToNextBoundary( blocksPerBucketPerThread * kF1BlockSize, sizeof( uint64 ) );
+    const size_t writeBufferSize = blocksPerBucketPerThread * entriesPerBlock * threadCount * sizeof( uint64 );  // y - extraBits + x
 
     // Allocate our buffers
-    byte* blocksRoot = diskQueue.GetBuffer( blocksPerThread * kF1BlockSize * threadCount );
-    byte* blocks     = blocksRoot;
-
-    // Remainders buffers are: 2 file block-sized buffers per bucket per x/y
-    byte* remainders = fileBlockSize ? diskQueue.GetBuffer( diskQueue.BlockSize() * BB_DP_BUCKET_COUNT * 4 ) : nullptr;
+    uint64* entries    = (uint64*)diskQueue.GetBuffer( writeBufferSize );
+    byte*   blocksRoot = diskQueue.GetBuffer( blockBufferSize * threadCount );
+    byte*   blocks     = blocksRoot;
 
      // Prepare Jobs
     byte key[32] = { 1 };
     memcpy( key + 1, plotId, 31 );
 
-    memset( bucketCounts, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
+    memset( bucketCounts, 0, sizeof( uint32 ) * numBuckets );
 
-    MTJobRunner<F1DiskBucketJob> f1Job( pool );
-
+    MTJobRunner<F1DiskBucketJob> jobs( pool );
     uint32 x = 0;
 
     for( uint i = 0; i < threadCount; i++ )
     {
-        F1DiskBucketJob& job = f1Job[i];
+        F1DiskBucketJob& job = jobs[i];
 
-        job.key               = key;
-        job.blockCount        = blocksPerThread;
-        job.x                 = x;
+        job.key                      = key;
+        job.x                        = x;
+        job.numBuckets               = numBuckets;
+        job.blockCount               = blocksPerThread;
+        job.blocksPerBucketPerThread = blocksPerBucketPerThread;
+        job.blocks                   = blocks;
+        job.entries                  = entries;
+        job.writeBuffer              = nullptr;
+        job.totalBucketCounts        = nullptr;
+        job.counts                   = nullptr;
 
-        job.blocks            = blocks;
-        job.yBuckets          = nullptr;
-        job.xBuckets          = nullptr;
-        job.totalBucketCounts = nullptr;
-        job.counts            = nullptr;
-        
-        job.diskQueue         = &diskQueue;
-        job.chunkCount        = chunkCount;
-        job.chunkBufferSize   = bucketBufferAllocSize;
-        job.trailingBlocks    = trailingBlocks;
-        job.remaindersBuffer  = remainders;
+        job.diskQueue                = &diskQueue;
+        job.writebufferSize          = writeBufferSize;
+        job.fileId                   = fileId;
+
+        if( trailingBlocks )
+        {
+            job.blockCount += trailingBlocks;
+            trailingBlocks--;
+        }
 
         x      += job.blockCount * entriesPerBlock;
-        blocks += job.blockCount * kF1BlockSize;
+        blocks += blockBufferSize;
     }
-    f1Job[0].totalBucketCounts = bucketCounts;
+
+    ASSERT( trailingBlocks == 0 );
+
+    jobs[0].totalBucketCounts = bucketCounts;
 
     // Run jobs
-    f1Job.Run( threadCount );
+    jobs.Run( threadCount );
 
     // Release our buffers
     {
         Fence fence;
 
+        diskQueue.ReleaseBuffer( entries    );
         diskQueue.ReleaseBuffer( blocksRoot );
-        
-        if( remainders )
-            diskQueue.ReleaseBuffer( remainders );
         
         diskQueue.SignalFence( fence );
         diskQueue.CommitCommands();
@@ -272,349 +146,218 @@ void F1GenBucketized::GenerateF1Disk(
 //-----------------------------------------------------------
 void F1DiskBucketJob::Run()
 {
-    DiskBufferQueue& diskQueue = *this->diskQueue;
+    const uint32 k = _K;
+    static_assert( k == 32, "Only k32 supported for now." );
 
-    const uint32 entriesPerBlock = kF1BlockSize / sizeof( uint32 );
-    const size_t fileBlockSize   = diskQueue.UseDirectIO() ? diskQueue.BlockSize() : 0;
-    const size_t chunkBufferSize = this->chunkBufferSize;
-    
-    uint32* sizes           = nullptr;      
-    uint32* yBuckets        = nullptr;
-    uint32* xBuckets        = nullptr;
+    const uint32 kMinusKExtraBits  = k - kExtraBits;
+    const uint32 entriesPerBlock   = (uint32)( kF1BlockSize / (k / 8ull) );
+    const uint32 numBuckets        = this->numBuckets;
+    const uint32 bitsSaved         = (uint32)log2( numBuckets ) - kExtraBits;
+    const uint32 bucketBitShift    = k - ( kExtraBits + bitsSaved );
+    const size_t bitsPerEntry      = k * 2 - bitsSaved;
+    const uint64 blocksPerBucket   = this->blocksPerBucketPerThread;
 
-    uint32 chunkCount       = this->chunkCount;
-    uint32 blockCount       = this->blockCount;
-    uint32 entriesPerThread = blockCount * entriesPerBlock;
+    byte*   blocks      = this->blocks;
+    uint64* entries     = this->entries;
 
-    const uint32 entriesPerChunk = entriesPerThread * _jobCount;
+    uint32* sizes       = nullptr;          // Only used by the control thread   
+    uint64  blockCount  = this->blockCount;
+
+    // For distribution into buckets
+    uint32 counts        [BB_DP_MAX_BUCKET_COUNT];
+    uint32 pfxSum        [BB_DP_MAX_BUCKET_COUNT];
+    uint32 totalCounts   [BB_DP_MAX_BUCKET_COUNT];
+
+    uint32* outTotalCounts = this->totalBucketCounts;
+    this->totalBucketCounts = totalCounts;
+   
+    // Start processing blocks
+    uint64 x = this->x;
 
     chacha8_ctx chacha;
     chacha8_keysetup( &chacha, key, 256, NULL );
 
-    // These are used only by the control thread
-    DoubleBuffer* remainders         = nullptr;
-    uint*         remainderSizes     = nullptr;
-    uint*         bucketCounts       = nullptr;
-
-    if( this->IsControlThread() )
+    for( ;; )
     {
-        bucketCounts = bbmalloc<uint32>( sizeof( uint ) * BB_DP_BUCKET_COUNT );
-
-        if( fileBlockSize )
-        {
-            remainders     = bbmalloc<DoubleBuffer>( sizeof( DoubleBuffer ) * BB_DP_BUCKET_COUNT );
-            remainderSizes = bbmalloc<uint32>      ( sizeof( uint )         * BB_DP_BUCKET_COUNT );
-
-            memset( remainderSizes, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-
-            // Layout for the buffers is:
-            //
-            // front: [y0][x0][y1][x1]...[y63][x63]
-            // back:  [y0][x0][y1][x1]...[y63][x63]
-            // 
-            // So all 'front' buffers are contiguous for all buckets,
-            // then follow all the 'back' buffers for all buckets.
-            byte* front = this->remaindersBuffer;
-            byte* back  = this->remaindersBuffer + fileBlockSize * BB_DP_BUCKET_COUNT * 2;
-
-            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            {
-                DoubleBuffer* dbuf = new ( (void*)&remainders[i] ) DoubleBuffer();
-
-                dbuf->front = front;
-                dbuf->back  = back;
-
-                front += fileBlockSize * 2;
-                back  += fileBlockSize * 2;
-            }
-        }
-    }
-
-    // Add a special-case last chunk if we have trailing blocks 
-    // (blocks that don't add-up to completely fill a chunk)
-    uint trailingChunk = 0xFFFFFFFF;
-
-    if( this->trailingBlocks )
-    {
-        trailingChunk = chunkCount;
-        chunkCount ++;
-    }
-
-    // Start processing chunks
-    uint32 x = this->x;
-
-    for( uint chunk = 0; chunk < chunkCount; chunk++ )
-    {
-        if( chunk == trailingChunk )
-        {
-            // If this is the trailing chunk, this means it is a special-case
-            // chunk which has less blocks than a full chunk. We might need
-            // to use less threads, therefore drop the threads that won't participate
-            // in the trailing chunk.
-            uint32 trailingBlocks = this->trailingBlocks;
-            uint32 threadCount    = this->JobCount();
-
-            // See how many threads we need for the trailing blocks
-            uint32 blocksPerThread = trailingBlocks / threadCount;
+        const uint64 blocksToWrite = std::min( blockCount, blocksPerBucket );
         
-            while( !blocksPerThread )
+        // Drop any threads that are not participating
+        if( blocksToWrite < blocksPerBucket )
+        {
+            uint32 threadCount = this->JobCount();
+            for( uint32 i = 0; i < this->JobCount(); i++ )
             {
-                blocksPerThread = trailingBlocks / --threadCount;
+                if( this->GetJob( i ).blockCount < 1 )
+                {
+                    if( !this->ReduceThreadCount( i ) )
+                        return;
+
+                    break;
+                }
             }
-
-            // Change our participating thread counts, and if this thread
-            // is no longer participating, exit early
-            if( this->JobCount() != threadCount )
-            {
-                if( !this->ReduceThreadCount( threadCount ) )
-                    return;
-            }
-
-            // Distribute any left over blocks amongs threads
-            trailingBlocks -=  threadCount * blocksPerThread;
-
-            ASSERT( trailingBlocks < threadCount );
-            if( _jobId < trailingBlocks )
-                blocksPerThread++;
-
-            // Update the block count
-            blockCount       = blocksPerThread;
-            entriesPerThread = blocksPerThread * entriesPerBlock;
-
-            // Update the x value to the correct starting position
-            x = entriesPerChunk * chunk;
-
-            // Since threads before ours might have trailing blocks, ensure
-            // we account for that when offsetting our x
-            if( _jobId < trailingBlocks )
-                x += _jobId * entriesPerThread;
-            else
-            {
-                x += ( trailingBlocks * ( entriesPerThread + entriesPerBlock ) );
-                x += ( _jobId - trailingBlocks ) * entriesPerThread;
-            }
-
-            // Continue processing trailing blocks
         }
 
-        // Grab an IO buffer
+        ASSERT( blocksToWrite );
+
+        // Generate chacha blocks
+        const uint64 chachaBlock = x * _K / kF1BlockSizeBits;
+        chacha8_get_keystream( &chacha, chachaBlock, blocksToWrite, blocks );
+
+        // Count how many entries we have per bucket
+        memset( counts, 0, sizeof( uint32 ) * numBuckets );
+        
+        const int64   entryCount = (int64)( blocksToWrite * entriesPerBlock );
+        const uint32* u32Blocks  = (uint32*)blocks;
+
+        for( int64 i = 0; i < entryCount; i++ )
+            counts[Swap32( u32Blocks[i] ) >> bucketBitShift] ++;
+
+        memset( totalCounts, 0, numBuckets * sizeof( uint32 ) );
+        CalculatePrefixSum( numBuckets, counts, pfxSum, totalCounts );
+
         if( this->IsControlThread() )
         {
-            this->LockThreads();
-
-            sizes    = (uint32*)diskQueue.GetBuffer( sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-            yBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
-            xBuckets = (uint32*)diskQueue.GetBuffer( chunkBufferSize );
-
-            // const size_t pageSize     = SysHost::GetPageSize();
-            // const size_t sizesSize    = RoundUpToNextBoundaryT( sizeof( uint32 ) * BB_DP_BUCKET_COUNT, pageSize ) + pageSize * 2;
-            // const size_t bucketsSizes = RoundUpToNextBoundaryT( chunkBufferSize, pageSize ) + pageSize * 2;
-
-            // byte* sizesBuffer = bbvirtalloc<byte>( sizesSize );
-            // byte* ysBuffer    = bbvirtalloc<byte>( bucketsSizes );
-            // byte* xsBuffer    = bbvirtalloc<byte>( bucketsSizes );
-
-            // SysHost::VirtualProtect( sizesBuffer, pageSize );
-            // SysHost::VirtualProtect( sizesBuffer + sizesSize-pageSize, pageSize );
-
-            // SysHost::VirtualProtect( ysBuffer, pageSize );
-            // SysHost::VirtualProtect( ysBuffer + bucketsSizes-pageSize, pageSize );
-
-            // SysHost::VirtualProtect( xsBuffer, pageSize );
-            // SysHost::VirtualProtect( xsBuffer + bucketsSizes-pageSize, pageSize );
-
-            // sizes    = (uint32*)( sizesBuffer + pageSize );
-            // yBuckets = (uint32*)( ysBuffer + pageSize );
-            // xBuckets = (uint32*)( xsBuffer + pageSize );
-            
-            this->yBuckets = yBuckets;
-            this->xBuckets = xBuckets;
-            this->ReleaseThreads();
+            for( uint32 i = 0; i < numBuckets; i++ )
+                outTotalCounts[i] += totalCounts[i];
         }
-        else
+
+        // Distribute into buckets
+        for( int64 i = 0; i < entryCount; i++ )
         {
-            this->WaitForRelease();
-
-            // #TODO: Need to wait for buffer lock here, so the we can suspend in case there's no buffer available.
-
-            yBuckets = GetJob( 0 ).yBuckets;
-            xBuckets = GetJob( 0 ).xBuckets;
-
-            ASSERT( yBuckets );
-            ASSERT( xBuckets );
+            const uint64 y   = Swap32( u32Blocks[i] );
+            const uint32 dst = --pfxSum[y >> bucketBitShift];
+            entries[dst] = ( y << kExtraBits ) | ( ( x + (uint64)i ) >> kMinusKExtraBits );
         }
 
-        // Calculate blocks for this chunk
-        GenerateF1<true, false>( chacha, x, blocks, blockCount, entriesPerThread, yBuckets, xBuckets, bucketCounts, this, fileBlockSize );
+        // Grab a buffer to write to
+        GetWriteBuffer( sizes, blocksToWrite, bitsPerEntry );
+        ASSERT( this->writeBuffer );
 
-        x += entriesPerChunk;
+        // Convert entries to bits
+        // #TODO: We need to save the last offset of the bit we wrote here.
+        //        Otherwise we will have incorrect entries when loading the bucket.
+        EncodeEntries( entries, (uint64*)this->writeBuffer, pfxSum );
 
-        // Submit the buckets for this chunk to disk
-        // Now this chunk can be submitted to the write queue, and we can continue to the next one.
-        // After all the chunks have been written, we can read back from disk to sort each bucket
-        // #TODO: Move this to its own func?
-        if( this->LockThreads() )
-        {
-            // Add to total bucket counts
-            uint32* totalBucketCounts = this->totalBucketCounts;
+        // Write to disk
+        WriteBuckets( (uint64*)this->writeBuffer, totalCounts, sizes );
 
-            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                totalBucketCounts[i] += bucketCounts[i];
+        x += entriesPerBlock * blocksToWrite;
+        blockCount -= blocksToWrite;
+        this->blockCount -= blocksToWrite;
 
-            // #TODO: Don't do this if not using direct IO?
-            // #NOTE: We give it the non-block aligned size, but the Queue will 
-            //        only write up to the block aligned size. The rest
-            //        we write with the remainder buffers.
-            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                sizes[i] = (uint32)( bucketCounts[i] * sizeof( uint32 ) );
-
-            diskQueue.WriteBuckets( FileId::Y0, yBuckets, sizes );
-            diskQueue.WriteBuckets( FileId::X , xBuckets, sizes );
-            diskQueue.CommitCommands();
-
-            // If we're not at our last chunk, we need to shave-off
-            // any entries that will not align to the file block size and
-            // leave them in our buckets for the next run.
-            if( fileBlockSize )
-                this->SaveBlockRemainders( yBuckets, xBuckets, bucketCounts, remainders, remainderSizes );
-
-            diskQueue.ReleaseBuffer( sizes    );
-            diskQueue.ReleaseBuffer( yBuckets );
-            diskQueue.ReleaseBuffer( xBuckets );
-            diskQueue.CommitCommands();
-
-            this->ReleaseThreads();
-        }
-        else
-            this->WaitForRelease();
-    }
-    
-    // Write final block remainders & Clean-up
-    if( this->IsControlThread() )
-    {
-        if( fileBlockSize )
-            this->WriteFinalBlockRemainders( remainders, remainderSizes );
-
-        // Wait for our commands to finish
-        Fence fence;
-        diskQueue.SignalFence( fence );
-        diskQueue.CommitCommands();
-        fence.Wait();
-
-        free( bucketCounts );
-
-        // Destruct & free our remainders
-        if( fileBlockSize )
-        {
-            for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-                remainders[i].~DoubleBuffer();
-
-            free( remainders        );
-            free( remainderSizes    );
-        }
+        this->writeBuffer = nullptr;
     }
 }
 
-
 //-----------------------------------------------------------
-inline void F1DiskBucketJob::SaveBlockRemainders( uint32* yBuckets, uint32* xBuckets, const uint32* bucketCounts, 
-                                                  DoubleBuffer* remainderBuffers, uint32* remainderSizes )
+inline void F1DiskBucketJob::EncodeEntries( const uint64* input, uint64* output, const uint32* pfxSum )
 {
-    DiskBufferQueue& queue               = *this->diskQueue;
-    const size_t     fileBlockSize       = queue.BlockSize();
-    const size_t     remainderBufferSize = fileBlockSize * BB_DP_BUCKET_COUNT;
+    const uint32* myCounts    = this->counts;                           // This job's entry counts
+    const uint32* totalCounts = this->GetJob( 0 ).totalBucketCounts;    // Total counts for this iteration
 
-    byte* yPtr = (byte*)yBuckets;
-    byte* xPtr = (byte*)xBuckets;
+    const uint32 numBuckets   = this->numBuckets;
+    const size_t bitsPerEntry = F1GenBucketized::GetEntrySizeBits( numBuckets, _K );
 
-    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+    // All buckets must have a minimum set of entries, otherwise do it single-threaded
+    const uint32 threadCount = this->JobCount();
+    const uint32 threshold   = threadCount * 2;
+
+    for( uint32 bucket = 0; bucket < numBuckets; bucket++ )
     {
-        const size_t bucketSize       = bucketCounts[i] * sizeof( uint32 );
-        const size_t blockAlignedSize = bucketSize / fileBlockSize * fileBlockSize;
-                    
-        size_t remainderSize = bucketSize - blockAlignedSize;
-        ASSERT( remainderSize / 4 * 4 == remainderSize );
-
-        if( remainderSize )
+        if( totalCounts[bucket] <= threshold )
         {
-            size_t curRemainderSize = remainderSizes[i];
-                        
-            const size_t copySize = std::min( remainderSize, fileBlockSize - curRemainderSize );
+            if( this->JobId() > 0 )
+                return;
 
-            DoubleBuffer& buf = remainderBuffers[i];
-
-            byte* yRemainder = buf.front;
-            byte* xRemainder = yRemainder + fileBlockSize;
-
-            memcpy( yRemainder + curRemainderSize, yPtr + blockAlignedSize, copySize );
-            memcpy( xRemainder + curRemainderSize, xPtr + blockAlignedSize, copySize );
-
-            curRemainderSize += remainderSize;
-
-            if( curRemainderSize >= fileBlockSize )
+            // Encode all buckets single-threaded
+            uint64 entryOffset = 0;
+            for( uint32 bucket = 0; bucket < numBuckets; bucket++ )
             {
-                // This may block if the last buffer has not yet finished writing to disk
-                buf.Flip();
+                const uint64 entryCount = totalCounts[bucket];
 
-                // Overflow buffer is full, submit it for writing
-                queue.WriteFile( FileId::Y0, i, yRemainder, fileBlockSize );
-                queue.WriteFile( FileId::X , i, xRemainder, fileBlockSize );
-                queue.SignalFence( buf.fence );
-                queue.CommitCommands();
+                EntryPacker::SerializeEntries( input, output, (int64)entryCount, entryOffset, bitsPerEntry );
+                
+                const uint64 fieldAlignedCount = CDiv( entryCount * bitsPerEntry, 64 );
 
-                // Update new remainder size, if we overflowed our buffer
-                // and copy any overflow, if we have some.
-                remainderSize = curRemainderSize - fileBlockSize;
-
-                if( remainderSize )
-                {
-                    yRemainder = buf.front;
-                    xRemainder = yRemainder + fileBlockSize;
-
-                    memcpy( yRemainder, yPtr + blockAlignedSize + copySize, remainderSize );
-                    memcpy( xRemainder, xPtr + blockAlignedSize + copySize, remainderSize );
-                }
-
-                remainderSizes[i] = 0;
-                remainderSize     = remainderSize;
+                entryOffset += entryCount;
+                input       += entryCount;
+                output      += fieldAlignedCount;
             }
 
-            // Update size
-            remainderSizes[i] += (uint)remainderSize;
+            return;
         }
+    }
 
-        // The next bucket buffer starts at the next file block size boundary
-        const size_t bucketOffset = RoundUpToNextBoundaryT( bucketSize, fileBlockSize );
-        yPtr += bucketOffset;
-        xPtr += bucketOffset;
+    for( uint32 bucket = 0; bucket < numBuckets; bucket++ )
+    {
+        const uint64 entryCount  = myCounts[bucket];
+        const uint64 entryOffset = pfxSum  [bucket];
+
+        ASSERT( entryCount > 2 );
+
+        EntryPacker::SerializeEntries( input, output, (int64)entryCount - 2, entryOffset, bitsPerEntry );
+        this->SyncThreads();
+        EntryPacker::SerializeEntries( input, output, 2, entryOffset + entryCount - 2, bitsPerEntry );
+        
+        const uint64 fieldAlignedCount = CDiv( totalCounts[bucket] * bitsPerEntry, 64 );
+        input  += totalCounts[bucket];
+        output += fieldAlignedCount;
     }
 }
 
 //-----------------------------------------------------------
-void F1DiskBucketJob::WriteFinalBlockRemainders( DoubleBuffer* remainderBuffers, uint32* remainderSizes )
+inline void F1DiskBucketJob::GetWriteBuffer( uint32*& sizes, const uint64 blockCount, const size_t entrySizeBits )
 {
-    DiskBufferQueue& queue         = *this->diskQueue;
-    const size_t     fileBlockSize = queue.BlockSize();
-
-    for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+    if( this->IsControlThread() )
     {
-        const size_t size = remainderSizes[i];
-        ASSERT( size / 4 * 4 == size );
-        
-        if( size == 0 )
-            continue;
+        this->LockThreads();
 
-        const DoubleBuffer& buf = remainderBuffers[i];
+        auto* bits = (uint64*)this->diskQueue->GetBuffer( this->writebufferSize );
         
-        byte* yBuffer = buf.front;
-        byte* xBuffer = yBuffer + fileBlockSize;
+        sizes  = (uint32*)this->diskQueue->GetBuffer( this->numBuckets * sizeof( uint32 ) );
 
-        queue.WriteFile( FileId::Y0, i, yBuffer, size );
-        queue.WriteFile( FileId::X , i, xBuffer, size );
+        for( uint32 i = 0; i < this->JobCount(); i++ )
+        {
+            auto& job       = _jobs[i];
+            job.writeBuffer = bits;
+        }
+
+        this->ReleaseThreads();
+    }
+    else
+    {
+        this->WaitForRelease();
     }
 }
 
+//-----------------------------------------------------------
+inline void F1DiskBucketJob::WriteBuckets( uint64* entries, const uint32* bucketCounts, uint32* sizes )
+{
+    if( this->IsControlThread() )
+    {
+        const size_t bitsPerEntry = F1GenBucketized::GetEntrySizeBits( numBuckets, _K );
 
+        this->LockThreads();
+
+        for( uint32 i = 0; i < numBuckets; i++ )
+            totalBucketCounts[i] += bucketCounts[i];
+
+        for( uint32 i = 0; i < numBuckets; i++ )
+            sizes[i] = CDiv( bucketCounts[i] * bitsPerEntry, 64 );
+
+        diskQueue->WriteBuckets( fileId, entries, sizes );
+        diskQueue->ReleaseBuffer( entries );
+        diskQueue->ReleaseBuffer( sizes );
+        diskQueue->CommitCommands();
+
+        this->ReleaseThreads();
+    }
+    else
+        this->WaitForRelease();
+}
+
+
+/*
 ///
 /// F1 Generation
 ///
@@ -812,41 +555,6 @@ void GenerateF1(
         xBuckets[idx14] = x + 14;
         xBuckets[idx15] = x + 15;
 
-        // const uint32 refY = 3022;
-        // if( yBuckets[idx0 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx1 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx2 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx3 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx4 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx5 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx6 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx7 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx8 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx9 ] == refY ) BBDebugBreak();
-        // if( yBuckets[idx10] == refY ) BBDebugBreak();
-        // if( yBuckets[idx11] == refY ) BBDebugBreak();
-        // if( yBuckets[idx12] == refY ) BBDebugBreak();
-        // if( yBuckets[idx13] == refY ) BBDebugBreak();
-        // if( yBuckets[idx14] == refY ) BBDebugBreak();
-        // if( yBuckets[idx15] == refY ) BBDebugBreak();
-
-        // if( x + 0  == 41867 ) BBDebugBreak();
-        // if( x + 1  == 41867 ) BBDebugBreak();
-        // if( x + 2  == 41867 ) BBDebugBreak();
-        // if( x + 3  == 41867 ) BBDebugBreak();
-        // if( x + 4  == 41867 ) BBDebugBreak();
-        // if( x + 5  == 41867 ) BBDebugBreak();
-        // if( x + 6  == 41867 ) BBDebugBreak();
-        // if( x + 7  == 41867 ) BBDebugBreak();
-        // if( x + 8  == 41867 ) BBDebugBreak();
-        // if( x + 9  == 41867 ) BBDebugBreak();
-        // if( x + 10 == 41867 ) BBDebugBreak();
-        // if( x + 11 == 41867 ) BBDebugBreak();
-        // if( x + 12 == 41867 ) BBDebugBreak();
-        // if( x + 13 == 41867 ) BBDebugBreak();
-        // if( x + 14 == 41867 ) BBDebugBreak();
-        // if( x + 15 == 41867 ) BBDebugBreak();
-
         block += entriesPerBlock;
         x     += entriesPerBlock;
     }
@@ -861,108 +569,4 @@ void GenerateF1(
         xBuckets[idx] = x + i;
     }
 }
-
-//-----------------------------------------------------------
-template<typename TJob>
-inline void F1BucketJob<TJob>::CalculateMultiThreadedPrefixSum( 
-    uint32 counts[BB_DP_BUCKET_COUNT],
-    uint32 pfxSum[BB_DP_BUCKET_COUNT],
-    uint32 bucketCounts[BB_DP_BUCKET_COUNT],
-    const size_t fileBlockSize
-)
-{
-    const uint32 jobId    = this->JobId();
-    const uint32 jobCount = this->JobCount();
-
-    // This holds the count of extra entries added per-bucket
-    // to align each bucket starting address to disk block size.
-    // Only used when fileBlockSize > 0
-    uint32 entryPadding[BB_DP_BUCKET_COUNT];
-
-    this->counts = counts;
-    this->SyncThreads();
-
-    // Add up all of the jobs counts
-    memset( pfxSum, 0, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-
-    for( uint i = 0; i < jobCount; i++ )
-    {
-        const uint* tCounts = this->GetJob( i ).counts;
-
-        for( uint j = 0; j < BB_DP_BUCKET_COUNT; j++ )
-            pfxSum[j] += tCounts[j];
-    }
-
-    // #TODO: Only do this for the control thread?
-    // uint32 totalCount = 0;
-    // for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-    //     totalCount += pfxSum[i];
-
-    // If we're the control thread, retain the total bucket count
-    if( this->IsControlThread() )
-    {
-        memcpy( bucketCounts, pfxSum, sizeof( uint32 ) * BB_DP_BUCKET_COUNT );
-    }
-
-    // #TODO: Only do this if using Direct IO
-    // We need to align our bucket totals to the  file block size boundary
-    // so that each block buffer is properly aligned for direct io.
-    if( fileBlockSize )
-    {
-        #if _DEBUG
-            size_t bucketAddress = 0;
-        #endif
-
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT-1; i++ )
-        {
-            const uint32 count = pfxSum[i];
-
-            pfxSum[i]       = RoundUpToNextBoundary( count * sizeof( uint32 ), (int)fileBlockSize ) / sizeof( uint32 );
-            entryPadding[i] = pfxSum[i] - count;
-
-            #if _DEBUG
-                bucketAddress += pfxSum[i] * sizeof( uint32 );
-                ASSERT( bucketAddress / fileBlockSize * fileBlockSize == bucketAddress );
-            #endif
-        }
-
-        #if _DEBUG
-        // if( this->IsControlThread() )
-        // {
-        //     size_t totalSize = 0;
-        //     for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-        //         totalSize += pfxSum[i];
-
-        //     totalSize *= sizeof( uint32 );
-        //     Log::Line( "Total Size: %llu", totalSize );
-        // }   
-        #endif
-    }
-
-    // Calculate the prefix sum
-    for( uint i = 1; i < BB_DP_BUCKET_COUNT; i++ )
-        pfxSum[i] += pfxSum[i-1];
-
-    // Subtract the count from all threads after ours 
-    // to get the correct prefix sum for this thread
-    for( uint t = jobId+1; t < jobCount; t++ )
-    {
-        const uint* tCounts = this->GetJob( t ).counts;
-
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            pfxSum[i] -= tCounts[i];
-    }
-
-    if( fileBlockSize )
-    {
-        // Now that we have the starting addresses of the buckets
-        // at a block-aligned position, we need to substract
-        // the padding that we added to align them, so that
-        // the entries actually get writting to the starting
-        // point of the address
-
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT-1; i++ )
-            pfxSum[i] -= entryPadding[i];
-    }
-}
-
+*/

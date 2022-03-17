@@ -5,6 +5,7 @@
 #include <vector>
 #include "Platform.h"
 #include "SysHost.h"
+#include "Log.h"
 
 #ifdef _MSC_VER
     #define Swap16( x ) _byteswap_ushort( x )
@@ -46,6 +47,60 @@ void _Fatal( const char* message, ... );
 
 #define FatalIf( cond, message, ... ) if( (cond) ) { Fatal( message, ## __VA_ARGS__ ); }
 
+
+//-----------------------------------------------------------
+template <typename T>
+constexpr inline T bblog2( T x )
+{
+    T r = 0;
+    while( x >>= 1 )
+        r++;
+    return r;
+}
+
+
+// Divide a by b and apply ceiling if needed.
+//-----------------------------------------------------------
+template <typename T>
+constexpr inline T CDiv( T a, int b )
+{
+    return ( a + (T)b - 1 ) / (T)b;
+}
+
+//-----------------------------------------------------------
+template <typename T>
+constexpr inline T CDivT( T a, T b )
+{
+    return ( a + b - (T)1 ) / b;
+}
+
+// Round up a number to the next upper boundary.
+// For example, if we want to round up some bytes to the next 8-byte boundary.
+//-----------------------------------------------------------
+template<typename T>
+constexpr inline T RoundUpToNextBoundary( T value, int boundary )
+{
+    return value + ( boundary - ( value % boundary ) ) % boundary;
+}
+
+template<typename T>
+constexpr inline T RoundUpToNextBoundaryT( T value, T boundary )
+{
+    return value + ( boundary - ( value % boundary ) ) % boundary;
+}
+
+//-----------------------------------------------------------
+inline bool MemCmp( const void* a, const void* b, size_t size )
+{
+    return memcmp( a, b, size ) == 0;
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T bbclamp( const T value, const T min, const T max )
+{
+    return value < min ? min : value > max ? max : value;
+}
 
 //-----------------------------------------------------------
 template<typename T>
@@ -119,12 +174,34 @@ inline void* bballoca( size_t size )
 }
 
 //-----------------------------------------------------------
-template<typename T>
+inline void bbvirtfree( void* ptr )
+{
+    ASSERT( ptr );
+    SysHost::VirtualFree( ptr );
+}
+
+//-----------------------------------------------------------
+template<typename T = void>
 inline T* bbvirtalloc( size_t size )
 {
     void* ptr = SysHost::VirtualAlloc( size, false );
     FatalIf( !ptr, "VirtualAlloc failed." );
     return reinterpret_cast<T*>( ptr );
+}
+
+//-----------------------------------------------------------
+template<typename T = void>
+inline T* bbvirtallocnuma( size_t size )
+{
+    T* ptr = bbvirtalloc<T>( size );
+
+    if( SysHost::GetNUMAInfo() )
+    {
+        if( !SysHost::NumaSetMemoryInterleavedMode( ptr, size ) )
+            Log::Error( "Warning: Failed to bind NUMA memory." );
+    }
+
+    return ptr;
 }
 
 //-----------------------------------------------------------
@@ -134,42 +211,67 @@ inline T* bbcvirtalloc( size_t count )
     return bbvirtalloc<T>( sizeof( T ) * count );
 }
 
-
-// Divide a by b and apply ceiling if needed.
+// Allocate virtual memory with protected boundary pages
+// #NOTE: Only free with bbvirtfreebounded
 //-----------------------------------------------------------
-template <typename T>
-constexpr inline T CDiv( T a, int b )
+template<typename T = void>
+inline T* bbvirtallocbounded( size_t size )
 {
-    return ( a + (T)b - 1 ) / (T)b;
+    const size_t pageSize = SysHost::GetPageSize();
+    size = RoundUpToNextBoundaryT<size_t>( size, pageSize ) + pageSize * 2;
+
+    auto* ptr = (byte*)SysHost::VirtualAlloc( size, false );
+    FatalIf( !ptr, "VirtualAlloc failed." );
+
+    SysHost::VirtualProtect( ptr, pageSize, VProtect::NoAccess );
+    SysHost::VirtualProtect( ptr + size - pageSize, pageSize, VProtect::NoAccess );
+
+    return reinterpret_cast<T*>( ptr + pageSize );
 }
 
 //-----------------------------------------------------------
-template <typename T>
-constexpr inline T CDivT( T a, T b )
+template<typename T = void>
+inline T* bbvirtallocboundednuma( size_t size )
 {
-    return ( a + b - (T)1 ) / b;
+    T* ptr = bbvirtallocbounded<T>( size );
+    if( SysHost::GetNUMAInfo() )
+    {
+        if( !SysHost::NumaSetMemoryInterleavedMode( ptr, size ) )
+            Log::Error( "Warning: Failed to bind NUMA memory." );
+    }
+   
+   return ptr;
 }
 
-// Round up a number to the next upper boundary.
-// For example, if we want to round up some bytes to the next 8-byte boundary.
 //-----------------------------------------------------------
 template<typename T>
-constexpr inline T RoundUpToNextBoundary( T value, int boundary )
+inline T* bbcvirtallocbounded( size_t count )
 {
-    return value + ( boundary - ( value % boundary ) ) % boundary;
-}
-
-template<typename T>
-constexpr inline T RoundUpToNextBoundaryT( T value, T boundary )
-{
-    return value + ( boundary - ( value % boundary ) ) % boundary;
+    return bbvirtallocbounded<T>( sizeof( T ) * count );
 }
 
 //-----------------------------------------------------------
-inline bool MemCmp( const void* a, const void* b, size_t size )
+template<typename T = void>
+inline T* bbcvirtallocboundednuma( size_t count )
 {
-    return memcmp( a, b, size ) == 0;
+    T* ptr = bbcvirtallocbounded<T>( count );
+    if( SysHost::GetNUMAInfo() )
+    {
+        if( !SysHost::NumaSetMemoryInterleavedMode( ptr, count * sizeof( T ) ) )
+            Log::Error( "Warning: Failed to bind NUMA memory." );
+    }
+   
+   return ptr;
 }
+
+//-----------------------------------------------------------
+inline void bbvirtfreebounded( void* ptr )
+{
+    ASSERT( ptr );
+    SysHost::VirtualFree( ((byte*)ptr) - SysHost::GetPageSize() );
+}
+
+
 
 const char HEX_TO_BIN[256] = {
     0,   // 0	00	NUL
