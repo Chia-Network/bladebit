@@ -91,7 +91,9 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.threadPool = new ThreadPool( sysLogicalCoreCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
     _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, _cx.heapSize, _cx.ioThreadCount, _cx.useDirectIO );
 
-    if( cfg.globalCfg->warmStart )
+    // if( cfg.globalCfg->warmStart )
+    // #TODO: IMPORTANT: Remove this after testing
+    Log::Line( "WARNING: Forcing warm start for testing." );
     {
         Log::Line( "Warm start: Pre-faulting memory pages..." );
 
