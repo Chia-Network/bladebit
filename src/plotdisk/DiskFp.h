@@ -813,17 +813,10 @@ public:
         const size_t bucketSizeBytes = CDiv( InInfo::EntrySizePackedBits * (uint64)inBucketLength, 64 ) * 64 / 8;
 
         byte* readBuffer = GetReadBufferForBucket( bucket );
+        ASSERT( (size_t)readBuffer / _ioQueue.BlockSize( _inFxId ) * _ioQueue.BlockSize( _inFxId ) == (size_t)readBuffer );
+        
         _ioQueue.SeekFile( _inFxId, bucket, 0, SeekOrigin::Begin );
         _ioQueue.ReadFile( _inFxId, bucket, readBuffer, bucketSizeBytes );
-        
-        // We need to read a little bit from the next bucket as well, so we can do proper group matching across buckets
-        if( bucket+1 < _numBuckets )
-        {
-            const size_t nextBucketLoadSize = CDiv( InInfo::EntrySizePackedBits * (uint64)BB_DP_CROSS_BUCKET_MAX_ENTRIES, 64 ) * 64 / 8;
-            
-            _ioQueue.SeekFile( _inFxId, bucket+1, 0, SeekOrigin::Begin );
-            _ioQueue.ReadFile( _inFxId, bucket+1, readBuffer + bucketSizeBytes, nextBucketLoadSize );
-        }
         _ioQueue.SignalFence( _readFence, bucket+1 );
         _ioQueue.CommitCommands();
     }

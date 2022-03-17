@@ -87,7 +87,10 @@ void DiskPlotPhase1::Run()
     {
         const size_t cacheSize = _cx.cacheSize / 2;
 
-        const FileSetOptions opts = FileSetOptions::Cachable | FileSetOptions::DirectIO;
+        FileSetOptions opts = FileSetOptions::DirectIO;
+
+        if( _cx.cache )
+            opts |= FileSetOptions::Cachable;
         
         FileSetInitData fdata = {
             .cache     = _cx.cache,

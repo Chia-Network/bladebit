@@ -100,7 +100,10 @@ DiskPlotter::DiskPlotter( const Config cfg )
                                     std::min( cfg.globalCfg->threadCount, sysLogicalCoreCount );
 
         FaultMemoryPages::RunJob( *_cx.threadPool, threadCount, _cx.heapBuffer, _cx.heapSize );
-        FaultMemoryPages::RunJob( *_cx.threadPool, threadCount, _cx.cache, _cx.cacheSize );
+
+        if( _cx.cacheSize )
+            FaultMemoryPages::RunJob( *_cx.threadPool, threadCount, _cx.cache, _cx.cacheSize );
+
         Log::Line( "Memory initialized." );
     }
 }
@@ -512,10 +515,10 @@ you would typically lower the thread count for this threads if you are
 incurring I/O waits.
 
 [EXAMPLES]
-bladebit -t 24 -f ... -c ... diskplot --f1 256MB --fx 256MB -t /my/temporary/plot/dir
- --f1-threads 3 --c-threads 8 --p2-threads 12 --p3-threads 8 /my/output/dir
+bladebit -t 24 -f ... -c ... diskplot --b 128 --cache 32G -t /my/temporary/plot/dir
+ --f1-threads 3 --fp-threads 16 --c-threads 8 --p2-threads 12 --p3-threads 8 /my/output/dir
 
-bladebit -t 8 -f ... -c ... diskplot --f1 64MB --fx 128MB -t /my/temporary/plot/dir /my/output/dir
+bladebit -t 8 -f ... -c ... diskplot -t /my/temporary/plot/dir -t2 /my/other/tmp/dir /my/output/dir
 )";
 
 //-----------------------------------------------------------
