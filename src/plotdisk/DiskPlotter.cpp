@@ -72,7 +72,21 @@ DiskPlotter::DiskPlotter( const Config cfg )
     FatalIf( !_cx.heapBuffer, "Failed to allocated heap buffer. Make sure you have enough free memory." );
 
     if( _cx.cacheSize )
+    {
+        // We need to align the cache size to the block size of the temp2 dir
+        const size_t cachePerBucket        = _cx.cacheSize / _cx.numBuckets;
+        const size_t cachePerBucketAligned = CDivT( cachePerBucket, _cx.tmp2BlockSize ) * _cx.tmp2BlockSize;
+        const size_t alignedCacheSize      = cachePerBucketAligned * _cx.numBuckets;
+
+        if( alignedCacheSize != _cx.cacheSize )
+        {
+            Log::Line( "Warning: Cache size has been adjusted from %.2lf to %.2lf MiB to make it block-aligned.",
+                (double)_cx.cacheSize BtoMB, (double)alignedCacheSize BtoMB );
+            _cx.cacheSize = alignedCacheSize;
+        }
+
         _cx.cache = bbvirtalloc<byte>( _cx.cacheSize );
+    }
   
     // Initialize our Thread Pool and IO Queue
     _cx.threadPool = new ThreadPool( sysLogicalCoreCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );

@@ -138,10 +138,10 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 
         if( isCachable )
         {
-            const size_t lastCache = i == bucketCount - 1 ? optsData->cacheSize - cacheSize * bucketCount : 0;
-
-            opened = static_cast<HybridStream*>( file )->Open( cache, cacheSize + lastCache, pathBuffer, fileMode, FileAccess::ReadWrite, flags );
+            opened = static_cast<HybridStream*>( file )->Open( cache, cacheSize, pathBuffer, fileMode, FileAccess::ReadWrite, flags );
             cache += cacheSize;
+
+            ASSERT( cacheSize / file->BlockSize() * file->BlockSize() == cacheSize );
         }
         else
             opened = static_cast<FileStream*>( file )->Open( pathBuffer, fileMode, FileAccess::ReadWrite, flags );

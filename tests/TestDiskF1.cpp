@@ -243,5 +243,4 @@ void LoadF1Buckets( DiskPlotContext& context, uint64* yEntries, const uint64* re
 
     bbvirtfreebounded( yBuckets[0] );
     bbvirtfreebounded( yBuckets[1] );
-    
 }
