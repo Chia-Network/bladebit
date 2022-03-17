@@ -43,9 +43,9 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.numBuckets  = cfg.numBuckets;
     _cx.heapSize    = heapSize;
     _cx.cacheSize   = cfg.cacheSize;
-    _cx.useDirectIO = cfg.enableDirectIO;
 
-    const uint sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
+    const uint  sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
+    const auto* numa                = SysHost::GetNUMAInfo();
 
     // _cx.threadCount   = gCfg.threadCount;
     _cx.ioThreadCount = cfg.ioThreadCount;
@@ -65,10 +65,14 @@ DiskPlotter::DiskPlotter( const Config cfg )
     Log::Line( " P2 threads     : %u"       , _cx.p2ThreadCount );
     Log::Line( " P3 threads     : %u"       , _cx.p3ThreadCount );
     Log::Line( " IO threads     : %u"       , _cx.ioThreadCount );
-    Log::Line( " Unbuffered IO  : %s"       , _cx.useDirectIO ? "true" : "false" );
 
     Log::Line( " Allocating memory" );
-    _cx.heapBuffer = bbvirtallocnuma<byte>( _cx.heapSize );
+    _cx.heapBuffer = bbvirtalloc<byte>( _cx.heapSize );
+    if( numa && !gCfg.disableNuma )
+    {
+        if( !SysHost::NumaSetMemoryInterleavedMode( _cx.heapBuffer, _cx.heapSize  ) )
+            Log::Error( "WARNING: Failed to bind NUMA memory on the heap." );
+    }
 
     if( _cx.cacheSize )
     {
@@ -79,17 +83,23 @@ DiskPlotter::DiskPlotter( const Config cfg )
 
         if( alignedCacheSize != _cx.cacheSize )
         {
-            Log::Line( "Warning: Cache size has been adjusted from %.2lf to %.2lf MiB to make it block-aligned.",
+            Log::Line( "WARNING: Cache size has been adjusted from %.2lf to %.2lf MiB to make it block-aligned.",
                 (double)_cx.cacheSize BtoMB, (double)alignedCacheSize BtoMB );
             _cx.cacheSize = alignedCacheSize;
         }
 
         _cx.cache = bbvirtallocnuma<byte>( _cx.cacheSize );
+        if( numa && !gCfg.disableNuma )
+        {
+            if( !SysHost::NumaSetMemoryInterleavedMode( _cx.cache, _cx.cacheSize  ) )
+                Log::Error( "WARNING: Failed to bind NUMA memory on the cache." );
+        }
     }
   
     // Initialize our Thread Pool and IO Queue
+    const int32 ioThreadId = -1;    // Force unbounded IO thread for now. We should bind it to the last used thread, of the max threads used...
     _cx.threadPool = new ThreadPool( sysLogicalCoreCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
-    _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, _cx.heapSize, _cx.ioThreadCount, _cx.useDirectIO );
+    _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, _cx.heapSize, _cx.ioThreadCount, ioThreadId );
 
     // if( cfg.globalCfg->warmStart )
     // #TODO: IMPORTANT: Remove this after testing

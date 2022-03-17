@@ -33,7 +33,6 @@ struct DiskPlotContext
     uint32       cThreadCount;      // How many threads to use for C3 park writing and compression
     uint32       p2ThreadCount;     // How many threads to use for Phase 2
     uint32       p3ThreadCount;     // How many threads to use for Phase 3
-    bool         useDirectIO;       // Use unbuffered (direct-IO) when performing temp read/writes?
 
     const byte*  plotId;
     const byte*  plotMemo;

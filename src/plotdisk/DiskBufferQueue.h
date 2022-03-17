@@ -130,7 +130,7 @@ class DiskBufferQueue
 public:
     DiskBufferQueue( const char* workDir, byte* workBuffer, 
                      size_t workBufferSize, uint ioThreadCount,
-                     bool useDirectIO );
+                     int32 threadBindId = -1 );
 
     ~DiskBufferQueue();
 
@@ -198,8 +198,6 @@ public:
     inline size_t BlockSize() const { return _blockSize; }
     size_t BlockSize( FileId fileId ) const;
     
-    inline bool   UseDirectIO()   const { return _useDirectIO; }
-
     inline const WorkHeap& Heap() const { return _workHeap; }
 
     inline size_t PlotHeaderSize() const { return _plotHeaderSize; }
@@ -260,7 +258,6 @@ private:
     
     SPCQueue<Command, BB_DISK_QUEUE_MAX_CMDS> _commands;
 
-    bool              _useDirectIO;
     // ThreadPool        _threadPool;
 
     AutoResetSignal   _cmdReadySignal;
@@ -271,6 +268,6 @@ private:
     AutoResetSignal   _deleteSignal;                    // We do this in a separate thread as to not
     GrowableSPCQueue<FileDeleteCommand> _deleteQueue;   // block other commands when the kernel is clearing cached IO buffers for the files.
     bool              _deleterExit = false;
-
+    int32             _threadBindId;
     
 };

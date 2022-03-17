@@ -15,16 +15,16 @@
 DiskBufferQueue::DiskBufferQueue( 
     const char* workDir, byte* workBuffer, 
     size_t workBufferSize, uint ioThreadCount,
-    bool useDirectIO
+    int32 threadBindId
 )
     : _workDir       ( workDir     )
     , _workHeap      ( workBufferSize, workBuffer )
-    , _useDirectIO   ( useDirectIO )
     // , _threadPool    ( ioThreadCount, ThreadPool::Mode::Fixed, true )
     , _dispatchThread()
     , _deleterThread ()
     , _deleteSignal  ()
     , _deleteQueue   ( 128 )
+    , _threadBindId  ( threadBindId )
 {
     ASSERT( workDir );
 
@@ -386,8 +386,12 @@ void DiskBufferQueue::CommitCommands()
 //-----------------------------------------------------------
 void DiskBufferQueue::CommandThreadMain( DiskBufferQueue* self )
 {
-    // #TODO: Remove this, testing
-    SysHost::SetCurrentThreadAffinityCpuId( SysHost::GetLogicalCPUCount() - 1 );
+    if( self->_threadBindId > -1 )
+    {
+        const uint32 threadBindId = (uint32)self->_threadBindId;
+        ASSERT( threadBindId < SysHost::GetLogicalCPUCount() );
+        SysHost::SetCurrentThreadAffinityCpuId( threadBindId );
+    }
     self->CommandMain();
 }
 
