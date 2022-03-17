@@ -238,6 +238,7 @@ void DiskPlotPhase1::GenF1()
     
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
+    Log::Line( "Table 1 IO wait time: Write: %.2lf.", _cx.ioQueue->IOBufferWaitTime() );
 }
 
 //-----------------------------------------------------------
@@ -309,6 +310,8 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
 
     _tableReadWaitTime  = fp.ReadWaitTime();
     _tableWriteWaitTime = fp.WriteWaitTime();
+    _cx.readWaitTime  += _tableReadWaitTime;
+    _cx.writeWaitTime += _tableWriteWaitTime;
 
     #if BB_DP_DBG_VALIDATE_FX
         #if !_DEBUG

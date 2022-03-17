@@ -336,7 +336,10 @@ public:
             for( uint32 i = 0; i < _numBuckets; i++ )
             {
                 if( counts[i] < 1 )
+                {
+                    self->SyncThreads();
                     continue;
+                }
 
                 const uint64 writeOffset = pfxSum[i];
                 const uint64 bitOffset   = writeOffset * bitSize - bitsWritten;
