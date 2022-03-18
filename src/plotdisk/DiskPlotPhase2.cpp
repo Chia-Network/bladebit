@@ -81,26 +81,24 @@ void DiskPlotPhase2::Run()
     DiskPlotContext& context = _context;
     DiskBufferQueue& queue   = *context.ioQueue;
 
-    uint64 largestTableLength = 1;
+    uint64 maxEntries = 0;
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
-        largestTableLength = std::max( largestTableLength, context.entryCounts[(int)table] );
+        maxEntries = std::max( maxEntries, context.entryCounts[(int)table] );
 
     // Determine what size we can use to load
-    // #TODO: Support overflow entries.
-    const uint64 maxEntries          = 1ull << _K;
     const size_t bitFieldSize        = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
     const size_t bitFieldBuffersSize = bitFieldSize * 2;
     
     const uint32 mapBucketEvenSize   = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
-    const uint32 mapBucketMaxSize    = std::max( mapBucketEvenSize, (uint32)( largestTableLength - mapBucketEvenSize * (BB_DP_BUCKET_COUNT-1) ) );
+    const uint32 mapBucketMaxSize    = std::max( mapBucketEvenSize, (uint32)( maxEntries - mapBucketEvenSize * (BB_DP_BUCKET_COUNT-1) ) );
     const size_t tmpMapBufferSize    = mapBucketMaxSize * sizeof( uint32 );
 
-    const size_t fullHeapSize        = context.heapSize + context.ioHeapSize;
+    const size_t fullHeapSize        = context.heapSize + context.heapSize;
     const size_t heapRemainder       = fullHeapSize - bitFieldBuffersSize - tmpMapBufferSize;
 
 
     _phase3Data.bitFieldSize   = bitFieldSize;
-    _phase3Data.maxTableLength = largestTableLength;
+    _phase3Data.maxTableLength = maxEntries;
 
     #if _DEBUG && BB_DP_DBG_SKIP_PHASE_2
         return;
@@ -583,7 +581,7 @@ void DiskPlotPhase2::UnpackTableMap( TableId table )
 
     // Take some heap space for the tmp stripping buffer
     // const size_t tmpBucketSize = std::max( bucketEntryCount, lastBucketCount ) * sizeof( uint32);
-    const size_t totalHeapSize = context.heapSize + context.ioHeapSize;
+    const size_t totalHeapSize = context.heapSize + context.heapSize;
     
     byte*   heap      = context.heapBuffer;
     // uint32* tmpBucket = (uint32*)heap;  
