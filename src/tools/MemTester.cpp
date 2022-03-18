@@ -67,8 +67,9 @@ void MemTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
         MemCpyMT::Copy( dst, src, memSize, pool, threadCount );
         auto elapsed = TimerEnd( timer );
 
-        Log::Line( "Copied %.2lf MiB in %.2lf seconds @ %.2lf MiB/s (%.2lf GiB/s).", 
-                    sizeMB, elapsed, memSize / elapsed BtoMB, memSize / elapsed BtoGB  );
+        Log::Line( "Copied %.2lf MiB in %.2lf seconds @ %.2lf MiB/s (%.2lf GiB/s) or %2.lf MB/s (%.2lf GB/s).", 
+                    sizeMB, elapsed, memSize / elapsed BtoMB, memSize / elapsed BtoGB,
+                    memSize / elapsed / 1000000.0, memSize / elapsed / 1000000000.0 );
         Log::Line( "" );
     }
 
