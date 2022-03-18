@@ -190,8 +190,9 @@ void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
             "Failed to write with error %d (0x%x).", err, err );
         auto elapsed = TimerEnd( timer );
 
-        Log::Line( "Wrote %.2lf MiB in %.2lf seconds @ %.2lf MiB/s (%.2lf GiB/s).", 
-                    sizeMB, elapsed, totalWriteSize / elapsed BtoMB, totalWriteSize / elapsed BtoGB  );
+        Log::Line( "Wrote %.2lf MiB in %.2lf seconds @ %.2lf MiB/s (%.2lf GiB/s) or %2.lf MB/s (%.2lf GB/s).", 
+                    sizeMB, elapsed, totalWriteSize / elapsed BtoMB, totalWriteSize / elapsed BtoGB,
+                    totalWriteSize / elapsed / 1000000.0, totalWriteSize / elapsed / 1000000000.0 );
 
         // Read
         Log::Line( "" );
@@ -213,8 +214,9 @@ void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
             "Failed to read with error %d (0x%x)", err, err );
         elapsed = TimerEnd( timer );
 
-        Log::Line( "Read %.2lf MiB in %.2lf seconds @ %.2lf MiB/s (%.2lf GiB/s).", 
-                    sizeMB, elapsed, totalWriteSize / elapsed BtoMB, totalWriteSize / elapsed BtoGB );
+        Log::Line( "Read %.2lf MiB in %.2lf seconds @ %.2lf MiB/s (%.2lf GiB/s) or %2.lf MB/s (%.2lf GB/s).", 
+                    sizeMB, elapsed, totalWriteSize / elapsed BtoMB, totalWriteSize / elapsed BtoGB,
+                    totalWriteSize / elapsed / 1000000.0, totalWriteSize / elapsed / 1000000000.0 );
 
         if( pass+1 < passCount )
         {

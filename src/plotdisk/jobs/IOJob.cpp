@@ -23,7 +23,7 @@ bool IOJob::MTRead( ThreadPool& pool, uint32 threadCount,
     int&      error )
 {
     
-    return RunIOJob( files, pool, threadCount, files, (byte*)dstBuffer, sizeToRead, 
+    return RunIOJob( false, pool, threadCount, files, (byte*)dstBuffer, sizeToRead, 
                      (byte**)blockBuffers, blockSize, error );
 }
 
