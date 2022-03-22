@@ -2,7 +2,8 @@
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
 #include "transforms/FxTransform.h"
-// #include "jobs/UnpackMapJob.h"
+#include "plotdisk/DiskPlotInfo.h"
+
 
 // Fence ids used when loading buckets
 struct FenceId
@@ -71,9 +72,7 @@ DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
 }
 
 //-----------------------------------------------------------
-DiskPlotPhase2::~DiskPlotPhase2()
-{
-}
+DiskPlotPhase2::~DiskPlotPhase2() {}
 
 //-----------------------------------------------------------
 void DiskPlotPhase2::Run()
@@ -93,7 +92,7 @@ void DiskPlotPhase2::Run()
     const uint32 mapBucketMaxSize    = std::max( mapBucketEvenSize, (uint32)( maxEntries - mapBucketEvenSize * (BB_DP_BUCKET_COUNT-1) ) );
     const size_t tmpMapBufferSize    = mapBucketMaxSize * sizeof( uint32 );
 
-    const size_t fullHeapSize        = context.heapSize + context.heapSize;
+    const size_t fullHeapSize        = context.heapSize;
     const size_t heapRemainder       = fullHeapSize - bitFieldBuffersSize - tmpMapBufferSize;
 
 

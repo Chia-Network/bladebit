@@ -139,7 +139,8 @@
                 // "F1GenBucketized"
                 // "FxSort"
                 // "FxDisk"
-                "F1Disk"
+                // "F1Disk"
+                "PairsAndMap"
             ]
         }
 

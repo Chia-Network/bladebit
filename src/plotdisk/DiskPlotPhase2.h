@@ -22,6 +22,9 @@ public:
     
     void    UnpackTableMap( TableId table );
 
+    // void    
+
+
     inline const Phase3Data& GetPhase3Data() const { return _phase3Data; }
 
 private:
