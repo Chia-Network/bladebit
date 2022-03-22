@@ -23,6 +23,21 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     , _diskQueue( cx.ioQueue )
 {
     ASSERT( cx.tmpPath );
+
+    _diskQueue->InitFileSet( FileId::T1, "t1", 1, FileSetOptions::DirectIO, nullptr );  // X (sorted on Y)
+    _diskQueue->InitFileSet( FileId::T2, "t2", 1, FileSetOptions::DirectIO, nullptr );  // Back pointers
+    _diskQueue->InitFileSet( FileId::T3, "t3", 1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::T4, "t4", 1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::T5, "t5", 1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::T6, "t6", 1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::T7, "t7", 1, FileSetOptions::DirectIO, nullptr );
+
+    _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
 }
 
 //-----------------------------------------------------------
@@ -91,7 +106,7 @@ void DiskPlotPhase1::Run()
 
         if( _cx.cache )
             opts |= FileSetOptions::Cachable;
-        
+
         FileSetInitData fdata = {
             .cache     = _cx.cache,
             .cacheSize = cacheSize
@@ -101,21 +116,6 @@ void DiskPlotPhase1::Run()
         
         fdata.cache = ((byte*)fdata.cache) + cacheSize;
         _diskQueue->InitFileSet( FileId::FX1, "fx_1", _cx.numBuckets, opts, &fdata );
-
-        _diskQueue->InitFileSet( FileId::T1, "t1", 1, FileSetOptions::DirectIO, nullptr );  // X (sorted on Y)
-        _diskQueue->InitFileSet( FileId::T2, "t2", 1, FileSetOptions::DirectIO, nullptr );  // Back pointers
-        _diskQueue->InitFileSet( FileId::T3, "t3", 1, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::T4, "t4", 1, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::T5, "t5", 1, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::T6, "t6", 1, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::T7, "t7", 1, FileSetOptions::DirectIO, nullptr );
-
-        _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-        _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
     }
 
 #if !BB_DP_DBG_READ_EXISTING_F1
