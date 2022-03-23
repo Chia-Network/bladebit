@@ -199,7 +199,10 @@ public:
         const int64 writeEntrtyCount = outEntryCount + crossMatchCount;
 
         if( bucket > 0 )
+        {
             ProcessCrossBucketEntries( bucket - 1, pairs - crossMatchCount, outY, outMeta );
+            _context.ptrTableBucketCounts[(int)table][bucket-1] += crossMatchCount;
+        }
         
         WritePairsToDisk( bucket, writeEntrtyCount, pairs - crossMatchCount );
 
@@ -208,7 +211,7 @@ public:
         WriteEntriesToDisk( bucket, writeEntrtyCount, outY, outMeta, (EntryOut*)_entries[0] );
 
         // Save bucket length before y-sort since the pairs remain unsorted
-        _context.ptrTableBucketCounts[(int)table][bucket] += (uint64)writeEntrtyCount;
+        _context.ptrTableBucketCounts[(int)table][bucket] += (uint64)outEntryCount;
 
         _tableEntryCount += writeEntrtyCount;
         _crossBucketInfo.matchOffset = (uint64)outEntryCount;   // Set the offset for the next cross-bucket entries
@@ -272,9 +275,8 @@ public:
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
 
-            uint32 counts        [_numBuckets] = { 0 };
-            uint32 pfxSum        [_numBuckets];
-            // uint64 totalBitCounts[_numBuckets];
+            uint32 counts[_numBuckets] = { 0 };
+            uint32 pfxSum[_numBuckets];
             
             const uint64* inIdx    = map + offset;
             const uint64* inIdxEnd = map + end;

@@ -36,6 +36,8 @@ DiskPlotter::DiskPlotter( const Config cfg )
     FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
         "Failed to obtain temp paths block size." );
 
+    FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
+
     const size_t heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
 
     _cx.tmpPath     = cfg.tmpPath;
