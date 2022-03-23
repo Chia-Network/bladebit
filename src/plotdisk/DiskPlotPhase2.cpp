@@ -12,7 +12,6 @@ struct DiskMapReader
 {
     static constexpr uint32 _k         = _K;
     static constexpr uint32 _savedBits = bblog2( _numBuckets );
-    static constexpr uint32 _pairBits  = _k + 1 - _savedBits + 9;
     static constexpr uint32 _mapBits   = _k + 1 + _k - _savedBits;
 
     //-----------------------------------------------------------
@@ -28,6 +27,9 @@ struct DiskMapReader
         _loadBuffers[1] = allocator.Alloc( bufferSize, blockSize );
         _loadBuffers[2] = allocator.Alloc( bufferSize, blockSize );
         _loadBuffers[3] = allocator.Alloc( bufferSize, blockSize );
+
+        _unpackdMaps[0]  = allocator.CAlloc<uint64>( maxBucketEntries );
+        _unpackdMaps[1]  = allocator.CAlloc<uint64>( maxBucketEntries );
 
         for( uint32 i = 0; i < _numBuckets; i++ )
             _buffers[i] = _loadBuffers[i & 3]; // i & 3 == i % 4
@@ -74,15 +76,73 @@ struct DiskMapReader
     }
 
     //-----------------------------------------------------------
-    void ReadEntries( const int64 entryCount, uint64* outMap )
+    void ReadEntries( const uint64 entryCount, uint64* outMap )
     {
+        ASSERT( _bucketsRead < _numBuckets );
+
         AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
+            
+            uint64  entriesToRead = entryCount;
+            uint64* outWriter     = outMap;
+            
+            while( entriesToRead )
+            {
+                // Do we need to unpack the buffer first?
+                if( _bucketsUnpacked <= _bucketsRead )
+                {
+                    const uint64 bucketLength = _context.bucketCounts[(int)_table][_bucketsUnpacked];
+                    
+                    int64 count, offset, end;
+                    GetThreadOffsets( self, (int64)bucketLength, count, offset, end );
+                    ASSERT( count > 0 );
 
-            int64 count, offset, end;
-            GetThreadOffsets( self, entryCount, count, offset, end );
+                    uint64* unpackedMap = _unpackdMaps[_bucketsUnpacked & 1];
+                    BitReader reader( (uint64*)_buffers[_bucketsUnpacked], _mapBits * bucketLength, offset * 8 );
 
-            const uint64* buffer = _buffers[_bucketsRead];
-            // const BitReader reader( );
+                    const uint32 idxShift     = _k+1;
+                    const uint64 finalIdxMask = ( 1ull << idxShift ) - 1;
+                    for( int64 i = 0; i < count; i++ )
+                    {
+                        const uint64 packedMap = reader.ReadBits64( (uint32)_mapBits );
+                        const uint64 map       = packedMap & finalIdxMask;
+                        const uint32 dstIdx    = (uint32)( packedMap >> idxShift );
+
+                        ASSERT( dstIdx < bucketLength );
+                        unpackedMap[dstIdx] = map;
+                    }
+
+                    if( self->IsControlThread() )
+                    {
+                        self->LockThreads();
+                        _bucketsUnpacked++;
+                        self->ReleaseThreads();
+                    }
+                    else
+                        self->WaitForRelease();
+                }
+
+                const uint64  bucketLength = _context.bucketCounts[(int)_table][_bucketsRead];
+                const uint64  readCount    = std::min( bucketLength - _bucketReadOffset, entriesToRead );
+
+                const uint64* readMap = _unpackdMaps[_bucketsRead & 1];
+
+                // Simply copy the unpacked map to the destination buffer
+                uint64 count, offset, end;
+                GetThreadOffsets( self, readCount, count, offset, end );
+
+                memcpy( outWriter + offset, readMap + offset, count * sizeof( uint64 ) );
+
+                // Update read entries
+                entriesToRead -= readCount;
+                outWriter     += readCount;
+
+                _bucketReadOffset += readCount;
+                if( _bucketReadOffset == bucketLength )
+                {
+                    _bucketReadOffset = 0;
+                    _bucketsRead++;
+                }
+            }
         });
     }
 
@@ -91,12 +151,14 @@ private:
     TableId          _table;
     uint32           _bucketsLoaded     = 0;
     uint32           _bucketsRead       = 0;
-    uint64           _entriesRead       = 0;    // Entries that have actually bean read/unpacked
+    uint32           _bucketsUnpacked   = 0;
     uint64           _bucketEntryOffset = 0;
+    uint64           _bucketReadOffset  = 0;    // Entries that have actually bean read/unpacked in a bucket
 
-    void*            _loadBuffers[4];       // We only actually use 4 buffers for loading. We do double-buffering,
-                                            // but since a single load may go across bucket boundaries, we need 4.
-    void*            _buffers[_numBuckets]; // Keeps track of the buffers used when a particular bucket was loaded
+    uint64*          _unpackdMaps[2];
+    void*            _loadBuffers[4];           // We only actually use 4 buffers for loading. We do double-buffering,
+                                                // but since a single load may go across bucket boundaries, we need 4.
+    void*            _buffers[_numBuckets];     // Keeps track of the buffers used when a particular bucket was loaded
 };
 
 
@@ -110,7 +172,6 @@ struct DiskPairAndMapReader
     static constexpr uint32 _k         = _K;
     static constexpr uint32 _savedBits = bblog2( _numBuckets );
     static constexpr uint32 _pairBits  = _k + 1 - _savedBits + 9;
-    static constexpr uint32 _mapBits   = _k + 1 + _k - _savedBits;
 
     //-----------------------------------------------------------
     DiskPairAndMapReader( DiskPlotContext& context, Fence& fence, const TableId table, IAllocator& allocator )
@@ -195,30 +256,37 @@ struct DiskPairAndMapReader
 
             memcpy( _pairBuffers[nextLoadIdx], pairBuffer + bucketByteSize, blockSize );
         }
+        const uint32 startBit = bucket == 0 ? (uint32)blockBitSize : (uint32)(blockBitSize - _pairOverflowBits[bucket-1] );
+        ASSERT( startBit <= blockSize*8 );
 
-        const uint32 bitOffset = bucket == 0 ? (uint32)blockBitSize : (uint32)(blockBitSize - _pairOverflowBits[bucket-1] );
-        ASSERT( bitOffset <= blockSize*8 );
+        const size_t fullBitSize = _pairBucketLoadSize[bucket] * 8 + blockBitSize - startBit;
+        
+        const int64 bucketLength = (int64)_context.ptrTableBucketCounts[(int)_table][bucket];
 
-        const size_t fullBitSize = _pairBucketLoadSize[bucket] * 8 + blockBitSize - bitOffset;
+        AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
+            
 
-        // #TODO: Set offset, and do it multi-threaded
-        BitReader reader( (uint64*)pairBuffer, fullBitSize, bitOffset );
+            int64 count, offset, end;
+            GetThreadOffsets( self, bucketLength, count, offset, end );
 
-        const int64  pairBucketLength = (int64)_context.ptrTableBucketCounts[(int)_table][bucket];
-        const uint64 offset = _entriesLoaded;
-        const uint32 lBits  = _k - _savedBits + 1;
-        const uint32 rBits  = 9;
+            const size_t bitOffset = startBit + (size_t)offset * _pairBits;
+            BitReader reader( (uint64*)pairBuffer, fullBitSize, bitOffset );
 
-        for( int64 i = 0; i < pairBucketLength; i++ )
-        {
-            const uint64 left  = offset + reader.ReadBits64( lBits );
-            uint64 right = reader.ReadBits64( rBits );
+            // const uint64 pairOffset = _entriesLoaded;
+            const uint32 lBits  = _k - _savedBits + 1;
+            const uint32 rBits  = 9;
 
-            right += left;
+            for( int64 i = offset; i < end; i++ )
+            {
+                const uint32 left  = /*pairOffset+*/ (uint32)reader.ReadBits64( lBits );
+                const uint32 right = left +  (uint32)reader.ReadBits64( rBits );;
 
-            ASSERT( right - left < 512 );
-            // Pair p = { .left = left, .rigt = right; }
-        }
+                outPairs[i] = { .left = left, .right = right };
+            }
+        });
+
+        // #TODO: Try not to start another threaded job, and instead do it in the same MT job?
+        _mapReader.ReadEntries( (uint64)bucketLength, outMap );
     }
 
 private:
@@ -333,10 +401,16 @@ void DiskPlotPhase2::Run()
     Fence fence;
     DiskPairAndMapReader<256> reader( context, fence, TableId::Table2, allocator );
 
+    const uint64 maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, 256>::MaxBucketEntries;
+    Pair*   pairs = allocator.CAlloc<Pair>  ( maxBucketEntries );
+    uint64* map   = allocator.CAlloc<uint64>( maxBucketEntries );
+
+    Log::Line( "Used %.2lf GiB of %.2lf GiB.", (double)allocator.Size() BtoGB, (double)context.heapSize BtoGB );
+
     reader.LoadNextBucket();
     reader.LoadNextBucket();
-    reader.UnpackBucket( 0, nullptr, nullptr );
-    reader.UnpackBucket( 1, nullptr, nullptr );
+    reader.UnpackBucket( 0, pairs, map );
+    reader.UnpackBucket( 1, pairs, map );
     ////
 
     // uint64 maxEntries = 0;
