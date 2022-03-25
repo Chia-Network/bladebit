@@ -8,7 +8,7 @@
 #include "DiskPlotInfo.h"
 #include "BitBucketWriter.h"
 #include "util/StackAllocator.h"
-
+#include "plotting/TableWriter.h"
 
 template<TableId table>
 struct FpMapType { using Type = uint64; };
@@ -65,8 +65,13 @@ public:
         {
             // Process and write C tables to disk
             std::swap( _inFxId, _outFxId );
-            void WriteCTables();
+
+            _writeFence.Wait( _numBuckets - 1 );
+            WriteCTables();
         }
+
+        // #TODO: Pass in the fences and then wait before we start the next table...
+        _writeFence.Wait( _numBuckets - 1 );
     }
 
     //-----------------------------------------------------------
@@ -609,6 +614,9 @@ public:
         _ioQueue.SeekBucket( _inFxId , 0, SeekOrigin::Begin );
         _ioQueue.CommitCommands();
 
+        _readFence .Reset( 0 );
+        _writeFence.Reset( 0 );
+
         uint32 c1NextCheckpoint = 0;  // How many C1 entries to skip until the next checkpoint. If there's any entries here, it means the last bucket wrote a
         uint32 c2NextCheckpoint = 0;  // checkpoint entry and still had entries which did not reach the next checkpoint.
                                       // Ex. Last bucket had 10005 entries, so it wrote a checkpoint at 0 and 10000, then it counted 5 more entries, so
@@ -627,8 +635,10 @@ public:
         const size_t c1TableSizeBytes = c1TotalEntries * sizeof( uint32 );
         const size_t c2TableSizeBytes = c2TotalEntries * sizeof( uint32 );
 
-        uint32* c1Buffer = nullptr;//(uint32*)ioQueue.GetBuffer( c1TableSizeBytes );
-        uint32* c2Buffer = nullptr;//(uint32*)ioQueue.GetBuffer( c2TableSizeBytes );
+        // Use meta1 for here, it's big enough to hold both at any bucket size
+        // meta1 is 64MiB on  which is enough to c1 and c2
+        uint32* c1Buffer = (uint32*)_meta[1];
+        uint32* c2Buffer = c1Buffer + c1TotalEntries;
 
         // See Note in LoadNextbucket() regarding the 'prefix region' for c3 overflow that we allocate
         const size_t c3ParkOverflowSize = sizeof( uint32 ) * kCheckpoint1Interval;
@@ -645,6 +655,9 @@ public:
         // Load initial bucket
         LoadBucket( 0 );
 
+        uint32* c1Writer = c1Buffer;
+        uint32* c2Writer = c2Buffer;
+
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
             // Load next bucket in the background
@@ -656,18 +669,16 @@ public:
             const uint32 bucketLength  = (int64)_context.bucketCounts[(int)TableId::Table7][bucket];
             const byte*  packedEntries = GetReadBufferForBucket( bucket );
             
-            // Expand entries to be 64-bit aligned, sort them, then unpack them to individual components
+            
+            uint32* f7 = ((uint32*)_y[0]) + kCheckpoint1Interval;
+
             ExpandEntries( packedEntries, 0, _entries[0], (int64)bucketLength );
             SortEntries( _entries[0], _entries[1], (int64)bucketLength );
-
-            // #TODO: Need to unpack to uint32 on k == 32
-            UnpackEntries( bucket, _entries[0], (int64)bucketLength, y[0], _map[0], nullptr );
-
-            WriteMap( bucket, (int64)bucketLength, _map[0], (uint64*)_meta[1] );
+            UnpackEntries<uint32, true>( bucket, _entries[0], (int64)bucketLength, f7, _map[0], nullptr );
+            WriteMap( bucket, (int64)bucketLength, _map[0], (uint64*)_meta[0] );
 
             // Now handle f7 and write them into C tables
             // We will set the addersses to these tables accordingly.
-            const uint32 threadCount = context.cThreadCount;
 
             // Write C1
             {
@@ -675,7 +686,7 @@ public:
 
                 // #TODO: Do C1 multi-threaded. For now jsut single-thread it...
                 for( uint32 i = c1NextCheckpoint; i < bucketLength; i += c1Interval )
-                    *c1Writer++ = Swap32( buffer.f7[i] );
+                    *c1Writer++ = Swap32( f7[i] );
                 
                 // Track how many entries we covered in the last checkpoint region
                 const uint32 c1Length          = bucketLength - c1NextCheckpoint;
@@ -694,7 +705,7 @@ public:
                 else
                 {
                     for( uint32 i = c2NextCheckpoint; i < bucketLength; i += c2Interval )
-                        *c2Writer++ = Swap32( buffer.f7[i] );
+                        *c2Writer++ = Swap32( f7[i] );
                 
                     // Track how many entries we covered in the last checkpoint region
                     const uint32 c2Length          = bucketLength - c2NextCheckpoint;
@@ -706,9 +717,9 @@ public:
 
             // Write C3
             {
-                const bool isLastBucket = nextBucket == BucketCount;
+                const bool isLastBucket = bucket == _numBuckets-1;
 
-                uint32* c3F7           = buffer.f7;
+                uint32* c3F7           = f7;
                 uint32  c3BucketLength = bucketLength;
 
                 if( c3ParkOverflowCount )
@@ -725,8 +736,8 @@ public:
                 
                 // #TODO: Remove this
                 // Dump f7's that have the value of 0xFFFFFFFF for now,
-                // this is just for compatibility with RAM bladebit for testing
-                // plots against it.
+                // this is just for compatibility with RAM bladebit
+                // for testing plots against it.
                 if( isLastBucket )
                 {
                     while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
@@ -752,14 +763,16 @@ public:
                     c3BucketLength -= overflowEntries;
                 }
 
-
                 const size_t c3BufferSize = CalculateC3Size() * parkCount;
-                byte* c3Buffer = ioQueue.GetBuffer( c3BufferSize );
+                      byte*  c3Buffer     = GetWriteBuffer( bucket );
+
+                if( bucket > 1 )
+                    _writeFence.Wait( bucket - 2, _writeWaitTime );
 
                 // #NOTE: This function uses re-writes our f7 buffer, so ensure it is done after
                 //        that buffer is no longer needed.
-                const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_MAX_JOBS>( *context.threadPool, 
-                                                threadCount, c3BucketLength, c3F7, c3Buffer );
+                const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_MAX_JOBS>( *_context.threadPool, 
+                                                _context.cThreadCount, c3BucketLength, c3F7, c3Buffer );
                 ASSERT( sizeWritten == c3BufferSize );
 
                 c3TableSizeBytes += sizeWritten;
@@ -767,7 +780,7 @@ public:
 
                 // Write the C3 table to the plot file directly
                 _ioQueue.WriteFile( FileId::PLOT, 0, c3Buffer, c3BufferSize );
-                _ioQueue.ReleaseBuffer( c3Buffer );
+                _ioQueue.SignalFence( _writeFence, bucket );
                 _ioQueue.CommitCommands();
             }
         }
@@ -811,15 +824,16 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, uint64* outY, uint64* outMap, TMetaIn* outMeta )
+    template<typename TY, bool IsF7 = false>
+    inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, TY* outY, uint64* outMap, TMetaIn* outMeta )
     {
-        using TMap = typename FpMapType<table>::Type;
+        using TMap  = typename FpMapType<table>::Type;
 
         AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
 
             constexpr uint32 metaMultipler = InInfo::MetaMultiplier;
 
-            const uint32 yBits = InInfo::YBitSize;
+            const uint32 yBits = IsF7 ? _k : InInfo::YBitSize;
             const uint64 yMask = 0xFFFFFFFFFFFFFFFFull >> (64-yBits);
 
             const uint64 bucketBits = ((uint64)bucket) << yBits;
@@ -827,7 +841,7 @@ public:
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
 
-            uint64*  y    = outY;
+            TY*      y    = (TY*)outY;
             TMap*    map  = (TMap*)outMap;
             TMetaIn* meta = outMeta;
             
@@ -838,13 +852,13 @@ public:
                 auto& e = entries[i];
 
                 const uint64 ykey = e.ykey;
-                y  [i] = bucketBits | ( ykey & yMask );
+                y  [i] = (TY)( bucketBits | ( ykey & yMask ) );
                 map[i] = (TMap)( ykey >> yBits );
                 ASSERT( map[i] <= ( 1ull << Info::MapBitSize ) - 1 );
 
                 // Can't be 1 (table 1 only), because in that case the metadata is x, 
                 // which is stored as the map
-                if constexpr ( metaMultipler > 1 )
+                if constexpr ( metaMultipler > 1 && !IsF7 )
                     meta[i] = e.meta;
             }
         });
@@ -1030,21 +1044,21 @@ public:
     }
 
 private:
-    DiskPlotContext& _context    ;
-    ThreadPool&      _pool       ;
-    DiskBufferQueue& _ioQueue    ;
-    FileId           _inFxId     ;
-    FileId           _outFxId    ;
-    Fence            _readFence  ;      // #TODO: Pass these in, have them pre-created so that we don't re-create them per-table
-    Fence            _writeFence ;
+    DiskPlotContext& _context;
+    ThreadPool&      _pool;
+    DiskBufferQueue& _ioQueue;
+    FileId           _inFxId;
+    FileId           _outFxId;
+    Fence            _readFence;            // #TODO: Pass these in, have them pre-created so that we don't re-create them per-table?
+    Fence            _writeFence;
     Fence            _mapWriteFence;
     Fence            _pairWriteFence;
     Fence            _crossBucketFence;
 
     int64            _tableEntryCount = 0;  // Current table entry count
 
-    Duration         _readWaitTime  = Duration::zero();
-    Duration         _writeWaitTime = Duration::zero();
+    Duration         _readWaitTime    = Duration::zero();
+    Duration         _writeWaitTime   = Duration::zero();
 
     // Working buffers, all of them have enough to hold  entries for a single bucket + cross bucket entries
     Entry*   _entries[2]  = { 0 };   // Unpacked entries   // #TODO: Create read buffers of unpacked size and then just use that as temp entries
