@@ -11,7 +11,7 @@ template<uint32 _numBuckets>
 struct DiskMapReader
 {
     static constexpr uint32 _k         = _K;
-    static constexpr uint32 _savedBits = bblog2( _numBuckets );
+    static constexpr uint32 _savedBits = bblog2( _numBuckets - 1 );
     static constexpr uint32 _mapBits   = _k + 1 + _k - _savedBits;
 
     //-----------------------------------------------------------
@@ -28,11 +28,19 @@ struct DiskMapReader
         _loadBuffers[2] = allocator.Alloc( bufferSize, blockSize );
         _loadBuffers[3] = allocator.Alloc( bufferSize, blockSize );
 
-        _unpackdMaps[0]  = allocator.CAlloc<uint64>( maxBucketEntries );
-        _unpackdMaps[1]  = allocator.CAlloc<uint64>( maxBucketEntries );
+        _unpackdMaps[0] = allocator.CAlloc<uint64>( maxBucketEntries );
+        _unpackdMaps[1] = allocator.CAlloc<uint64>( maxBucketEntries );
 
+        ASSERT( _numBuckets == context.numBuckets + 1 );
         for( uint32 i = 0; i < _numBuckets; i++ )
             _buffers[i] = _loadBuffers[i & 3]; // i & 3 == i % 4
+
+        memcpy( _bucketCounts, context.bucketCounts[(int)table], sizeof( uint32 ) * ( _numBuckets - 1 ) );
+
+        const uint32 overflowEntries = (uint32)( _context.entryCounts[(int)_table] - (1ull << _k ) );
+        _bucketCounts[_numBuckets-1] =  overflowEntries;
+        _bucketCounts[_numBuckets-2] -= overflowEntries;
+
     }
 
     //-----------------------------------------------------------
@@ -43,12 +51,13 @@ struct DiskMapReader
 
         DiskBufferQueue& ioQueue = *_context.ioQueue;
 
-        const FileId mapId         = FileId::MAP2 + (FileId)_table - 1;
+        const FileId mapId           = FileId::MAP2 + (FileId)_table - 1;
 
-        const size_t blockSize     = ioQueue.BlockSize( FileId::T1 );
-        const size_t blockSizeBits = blockSize * 8;
+        const size_t blockSize       = ioQueue.BlockSize( FileId::T1 );
+        const size_t blockSizeBits   = blockSize * 8;
 
-        uint64 bucketLength = _context.bucketCounts[(int)_table][_bucketsLoaded];
+        uint64 bucketLength = _bucketCounts[_bucketsLoaded];
+        ASSERT( bucketLength );
 
         // Need to load current bucket?
         if( _bucketEntryOffset == 0 )
@@ -68,8 +77,9 @@ struct DiskMapReader
             ASSERT( _bucketsLoaded < _numBuckets );
 
             // Upade bucket length and load the new bucket
-            bucketLength = _context.bucketCounts[(int)_table][_bucketsLoaded];
-            
+            bucketLength = _bucketCounts[_bucketsLoaded];
+            ASSERT( bucketLength );
+
             const size_t loadSize = CDivT( (size_t)bucketLength * _mapBits, blockSizeBits ) * blockSize;
             ioQueue.ReadFile( mapId, _bucketsLoaded, _buffers[_bucketsLoaded], loadSize );
         }
@@ -81,16 +91,18 @@ struct DiskMapReader
         ASSERT( _bucketsRead < _numBuckets );
 
         AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
-            
-            uint64  entriesToRead = entryCount;
-            uint64* outWriter     = outMap;
-            
+
+            uint64  entriesToRead    = entryCount;
+            uint64* outWriter        = outMap;
+            uint64  readBucketOffset = _bucketReadOffset;
+            uint32  bucketsRead      = _bucketsRead;
+
             while( entriesToRead )
             {
                 // Do we need to unpack the buffer first?
-                if( _bucketsUnpacked <= _bucketsRead )
+                if( _bucketsUnpacked <= bucketsRead )
                 {
-                    const uint64 bucketLength = _context.bucketCounts[(int)_table][_bucketsUnpacked];
+                    const uint64 bucketLength = _bucketCounts[_bucketsUnpacked];
                     
                     int64 count, offset, end;
                     GetThreadOffsets( self, (int64)bucketLength, count, offset, end );
@@ -101,13 +113,13 @@ struct DiskMapReader
 
                     const uint32 idxShift     = _k+1;
                     const uint64 finalIdxMask = ( 1ull << idxShift ) - 1;
-                    for( int64 i = 0; i < count; i++ )
+                    for( int64 i = offset; i < end; i++ )
                     {
                         const uint64 packedMap = reader.ReadBits64( (uint32)_mapBits );
                         const uint64 map       = packedMap & finalIdxMask;
                         const uint32 dstIdx    = (uint32)( packedMap >> idxShift );
 
-                        ASSERT( dstIdx < bucketLength );
+                        ASSERT( dstIdx < ( 1ull << _k ) / ( _numBuckets - 1 ) );
                         unpackedMap[dstIdx] = map;
                     }
 
@@ -121,10 +133,10 @@ struct DiskMapReader
                         self->WaitForRelease();
                 }
 
-                const uint64  bucketLength = _context.bucketCounts[(int)_table][_bucketsRead];
-                const uint64  readCount    = std::min( bucketLength - _bucketReadOffset, entriesToRead );
+                const uint64  bucketLength = _bucketCounts[bucketsRead];
+                const uint64  readCount    = std::min( bucketLength - readBucketOffset, entriesToRead );
 
-                const uint64* readMap = _unpackdMaps[_bucketsRead & 1];
+                const uint64* readMap = _unpackdMaps[bucketsRead & 1];
 
                 // Simply copy the unpacked map to the destination buffer
                 uint64 count, offset, end;
@@ -136,12 +148,18 @@ struct DiskMapReader
                 entriesToRead -= readCount;
                 outWriter     += readCount;
 
-                _bucketReadOffset += readCount;
-                if( _bucketReadOffset == bucketLength )
+                readBucketOffset += readCount;
+                if( readBucketOffset == bucketLength )
                 {
-                    _bucketReadOffset = 0;
-                    _bucketsRead++;
+                    readBucketOffset = 0;
+                    bucketsRead++;
                 }
+            }
+
+            if( self->IsControlThread() )
+            {
+                _bucketReadOffset = readBucketOffset;
+                _bucketsRead      = bucketsRead;
             }
         });
     }
@@ -153,12 +171,15 @@ private:
     uint32           _bucketsRead       = 0;
     uint32           _bucketsUnpacked   = 0;
     uint64           _bucketEntryOffset = 0;
-    uint64           _bucketReadOffset  = 0;    // Entries that have actually bean read/unpacked in a bucket
+    uint64           _bucketReadOffset  = 0;     // Entries that have actually bean read/unpacked in a bucket
 
     uint64*          _unpackdMaps[2];
-    void*            _loadBuffers[4];           // We only actually use 4 buffers for loading. We do double-buffering,
-                                                // but since a single load may go across bucket boundaries, we need 4.
-    void*            _buffers[_numBuckets];     // Keeps track of the buffers used when a particular bucket was loaded
+    void*            _loadBuffers[4];            // We only actually use 4 buffers for loading. We do double-buffering,
+                                                 // but since a single load may go across bucket boundaries, we need 4.
+    void*            _buffers[_numBuckets];      // Keeps track of the buffers used when a particular bucket was loaded
+
+    uint32           _bucketCounts[_numBuckets]; // We copy the bucket counts because maps have 1 more bucket for
+                                                 // overflow entries.
 };
 
 
@@ -279,7 +300,7 @@ struct DiskPairAndMapReader
             for( int64 i = offset; i < end; i++ )
             {
                 const uint32 left  = /*pairOffset+*/ (uint32)reader.ReadBits64( lBits );
-                const uint32 right = left +  (uint32)reader.ReadBits64( rBits );;
+                const uint32 right = left +  (uint32)reader.ReadBits64( rBits );
 
                 outPairs[i] = { .left = left, .right = right };
             }
@@ -293,7 +314,7 @@ private:
     DiskPlotContext& _context;
     Fence&           _fence;
 
-    DiskMapReader<_numBuckets> _mapReader;
+    DiskMapReader<_numBuckets+1> _mapReader;
 
     void*            _pairBuffers       [2];
     uint32           _pairOverflowBits  [_numBuckets];

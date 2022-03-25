@@ -16,7 +16,6 @@ class BitBucketWriter
     uint64*          _remainderFields  [_numBuckets] = { nullptr };   // Left-over block buffers
     uint64           _remainderBitCount[_numBuckets] = { 0 };
     BitBucket        _buckets          [_numBuckets] = { 0 };
-    size_t           _bitCounts        [_numBuckets] = { 0 };
     FileId           _fileId                         = FileId::None;
 
 public:

@@ -111,19 +111,19 @@ public:
         _mapWrite[1]  = alloc.Alloc( mapWriteSize, pairBlockSize );
 
         // Block bit buffers
-        byte* fxBlocks   = (byte*)alloc.CAlloc( _numBuckets, fxBlockSize  , fxBlockSize   );  // Fx write
-        byte* pairBlocks = (byte*)alloc.CAlloc( 1          , pairBlockSize, pairBlockSize );  // Pair write
-        byte* xBlocks    = (byte*)alloc.CAlloc( 1          , pairBlockSize, pairBlockSize );  // x write
-        byte* mapBlocks  = (byte*)alloc.CAlloc( _numBuckets, pairBlockSize, pairBlockSize );  // Map write
+        byte* fxBlocks   = (byte*)alloc.CAlloc( _numBuckets  , fxBlockSize  , fxBlockSize   );  // Fx write
+        byte* pairBlocks = (byte*)alloc.CAlloc( 1            , pairBlockSize, pairBlockSize );  // Pair write
+        byte* xBlocks    = (byte*)alloc.CAlloc( 1            , pairBlockSize, pairBlockSize );  // x write
+        byte* mapBlocks  = (byte*)alloc.CAlloc( _numBuckets+1, pairBlockSize, pairBlockSize );  // Map write
 
         if( !dryRun )
         {
             const FileId mapWriterId = FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
 
-            _fxBitWriter   = BitBucketWriter<_numBuckets>( _ioQueue, _outFxId, (byte*)fxBlocks );
-            _pairBitWriter = BitBucketWriter<1>          ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
-            _xBitWriter    = BitBucketWriter<1>          ( _ioQueue, FileId::T1,  (byte*)xBlocks );
-            _mapBitWriter  = BitBucketWriter<_numBuckets>( _ioQueue, mapWriterId, (byte*)mapBlocks );
+            _fxBitWriter   = BitBucketWriter<_numBuckets>  ( _ioQueue, _outFxId, (byte*)fxBlocks );
+            _pairBitWriter = BitBucketWriter<1>            ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
+            _xBitWriter    = BitBucketWriter<1>            ( _ioQueue, FileId::T1,  (byte*)xBlocks );
+            _mapBitWriter  = BitBucketWriter<_numBuckets+1>( _ioQueue, mapWriterId, (byte*)mapBlocks );
         }
     }
 
@@ -263,52 +263,58 @@ public:
         // into its original bucket, with the offset in that bucket.
         using Job = AnonPrefixSumJob<uint32>;
 
-        uint32 totalCounts   [_numBuckets];
-        uint64 totalBitCounts[_numBuckets];
-        
-        Job::Run( _pool, _threadCount, [&]( Job* self ) {
+        uint32 totalCounts   [_numBuckets+1];
+        uint64 totalBitCounts[_numBuckets+1];
 
-            const uint32 shift       = Info::MapBitSize - Info::BucketBits;
-            const uint32 bitSize     = Info::MapBitSize + Info::MapBitSize - Info::BucketBits;
-            const uint32 encodeShift = Info::MapBitSize;
+        Job::Run( _pool, _threadCount, [&]( Job* self ) {
+            
+            const uint32 bucketBits   = Info::BucketBits;
+            const uint32 bucketShift  = _k - bucketBits;
+            const uint32 bitSize      = Info::MapBitSize + Info::MapBitSize - bucketBits;
+            const uint32 encodeShift  = Info::MapBitSize;
+
+            const uint32 numBuckets   = _numBuckets + 1;
 
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
 
-            uint32 counts[_numBuckets] = { 0 };
-            uint32 pfxSum[_numBuckets];
-            
+            uint32 counts[numBuckets] = { 0 };
+            uint32 pfxSum[numBuckets];
+
             const uint64* inIdx    = map + offset;
             const uint64* inIdxEnd = map + end;
 
             // Count buckets
             do {
-                const uint64 b = *inIdx >> shift;
-                ASSERT( b < _numBuckets );
+                const uint64 b = *inIdx >> bucketShift;
+                ASSERT( b < numBuckets );
                 counts[b]++;
             } while( ++inIdx < inIdxEnd );
 
-            self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
+            self->CalculatePrefixSum( numBuckets, counts, pfxSum, totalCounts );
 
             // Convert map entries from source inded to reverse map
             const uint64 tableOffset = (uint64)( _tableEntryCount + offset );
-            
+
             const uint64* reverseMap    = map + offset;
                   uint64* outMapBuckets = outMap; 
 
             for( int64 i = 0; i < count; i++ )
             {
-                const uint64 m = reverseMap[i];
-                const uint64 b = m >> shift;
+                const uint64 origin = reverseMap[i];
+                const uint64 b      = origin >> bucketShift;
 
                 const uint32 dstIdx = --pfxSum[b];
                 ASSERT( (int64)dstIdx < entryCount );
 
                 const uint64 finalIdx = (uint64)(tableOffset + i);
-                outMapBuckets[dstIdx] = (m << encodeShift) | finalIdx;
+
+                ASSERT( finalIdx < ( 1ull << encodeShift ) );
+
+                outMapBuckets[dstIdx] = (origin << encodeShift) | finalIdx;
             }
 
-            auto& bitWriter = _mapBitWriter;
+            auto&   bitWriter = _mapBitWriter;
             uint64* bitCounts = totalBitCounts;
 
             if( self->IsControlThread() )
@@ -316,11 +322,11 @@ public:
                 self->LockThreads();
 
                 // Convert counts to bit sizes
-                for( uint32 i = 0; i < _numBuckets; i++ )
+                for( uint32 i = 0; i < numBuckets; i++ )
                     bitCounts[i] = (uint64)totalCounts[i] * bitSize;
-                
+
                 byte* writeBuffer = GetMapWriteBuffer( bucket );
-                
+
                 // Wait for the buffer to be available first
                 if( bucket > 1 )
                     _mapWriteFence.Wait( bucket - 2, _writeWaitTime );
@@ -335,7 +341,7 @@ public:
             // Bit-compress/pack each bucket entries
             uint64 bitsWritten = 0;
 
-            for( uint32 i = 0; i < _numBuckets; i++ )
+            for( uint32 i = 0; i < numBuckets; i++ )
             {
                 if( counts[i] < 1 )
                 {
@@ -346,14 +352,14 @@ public:
                 const uint64 writeOffset = pfxSum[i];
                 const uint64 bitOffset   = writeOffset * bitSize - bitsWritten;
                 bitsWritten += bitCounts[i];
-                
+
                 ASSERT( bitOffset + counts[i] * bitSize <= bitCounts[i] );
 
                 BitWriter writer = bitWriter.GetWriter( i, bitOffset );
-                
+
                 const uint64* mapToWrite    = outMapBuckets + writeOffset; 
                 const uint64* mapToWriteEnd = mapToWrite + counts[i]; 
-                
+
                 // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
                 const uint64* mapToWriteEndPass1 = mapToWrite + std::min( counts[i], 2u ); 
 
@@ -380,7 +386,6 @@ public:
                 _ioQueue.SignalFence( _mapWriteFence, bucket );
                 _ioQueue.CommitCommands();
             }
-
         });
     }
 
@@ -880,10 +885,10 @@ private:
     uint32  _threadCount;
     uint64* _sharedTotalBitCounts = nullptr;  // Total bucket bit sizes when writing Fx across all threads
 
-    BitBucketWriter<_numBuckets> _fxBitWriter;
-    BitBucketWriter<1>           _pairBitWriter;
-    BitBucketWriter<_numBuckets> _mapBitWriter;
-    BitBucketWriter<1>           _xBitWriter;
+    BitBucketWriter<_numBuckets>   _fxBitWriter;
+    BitBucketWriter<1>             _pairBitWriter;
+    BitBucketWriter<_numBuckets+1> _mapBitWriter;
+    BitBucketWriter<1>             _xBitWriter;
 
     FpCrossBucketInfo _crossBucketInfo;
 };

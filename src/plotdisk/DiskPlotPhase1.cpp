@@ -32,12 +32,12 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     _diskQueue->InitFileSet( FileId::T6, "t6", 1, FileSetOptions::DirectIO, nullptr );
     _diskQueue->InitFileSet( FileId::T7, "t7", 1, FileSetOptions::DirectIO, nullptr );
 
-    _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
 }
 
 //-----------------------------------------------------------
