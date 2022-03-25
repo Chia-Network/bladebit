@@ -1,6 +1,9 @@
 #pragma once
 
-#include "DiskPlotContext.h"
+#include "plotdisk/DiskPlotContext.h"
+
+template<uint32 _numBuckets>
+struct DiskPairAndMapReader;
 
 class DiskPlotPhase2
 {
@@ -16,13 +19,19 @@ public:
 
     void Run();
 
-    void    MarkTable( TableId table, uint64* lTableMarks, uint64* rTableMarks );
+private:
+
+    template<uint32 _numBuckets>
+    void RunWithBuckets();
+
+    template<uint32 _numBuckets>
+    void    MarkTable( TableId table, DiskPairAndMapReader<_numBuckets> reader, uint64* lTableMarks, uint64* rTableMarks );
+
+    // void    MarkTable( TableId table, uint64* lTableMarks, uint64* rTableMarks );
     void    LoadNextBuckets( TableId table, uint32 bucket, uint64*& mapBuffer, Pairs& pairsBuffer, uint32& outBucketEntryCount );
     uint32* UnpackMap( uint64* map, uint32 entryCount, const uint32 bucket );
     
     void    UnpackTableMap( TableId table );
-
-    // void    
 
 
     inline const Phase3Data& GetPhase3Data() const { return _phase3Data; }

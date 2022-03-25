@@ -110,6 +110,20 @@ public:
         return _buffer + _size;
     }
 
+    //-----------------------------------------------------------
+    inline void Pop( const size_t size )
+    {
+        ASSERT( size >= _size );
+        _size -= size;
+    }
+
+    //-----------------------------------------------------------
+    inline void PopToMarker( const size_t sizeMarker )
+    {
+        ASSERT( sizeMarker <= _size );
+        _size = sizeMarker;
+    }
+
 private:
     byte*  _buffer;
     size_t _capacity;   // Stack capacity
