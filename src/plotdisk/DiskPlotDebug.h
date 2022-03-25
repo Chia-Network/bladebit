@@ -92,7 +92,7 @@ inline void Debug::ValidateYForTable( const FileId fileId, DiskBufferQueue& queu
         void* buffer = bucketBuffers[bucket % 2];
 
         ASSERT( bucketCounts[bucket] <= maxBucketEntries );
-        const size_t size = entrySize * bucketCounts[bucket];
+        const size_t size = CDivT( entrySizeBits * bucketCounts[bucket], blockSize * 8 ) * blockSize;
 
         queue.ReadFile( fileId, bucket, buffer, size );
         queue.SignalFence( fence, bucket + 1 );

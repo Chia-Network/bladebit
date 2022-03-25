@@ -25,7 +25,10 @@ private:
     void ForwardPropagateBuckets();
 
     // Write C tables
-    void SortAndCompressTable7();
+    void WriteCTables();
+
+    template<uint32 _numBuckets>
+    void WriteCTablesBuckets();
 
 private:
     DiskPlotContext& _cx;

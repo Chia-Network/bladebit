@@ -61,17 +61,20 @@ public:
 
         _context.entryCounts[(int)table] = (uint64)_tableEntryCount;
 
-        if constexpr ( table == TableId::Table7 )
-        {
-            // Process and write C tables to disk
-            std::swap( _inFxId, _outFxId );
-
-            _writeFence.Wait( _numBuckets - 1 );
-            WriteCTables();
-        }
-
         // #TODO: Pass in the fences and then wait before we start the next table...
         _writeFence.Wait( _numBuckets - 1 );
+    }
+
+    //-----------------------------------------------------------
+    inline void RunF7()
+    {
+        _ioQueue.SeekBucket( _inFxId, 0, SeekOrigin::Begin );
+        _ioQueue.CommitCommands();
+
+        StackAllocator alloc( _context.heapBuffer, _context.heapSize );
+        AllocateBuffers( alloc, _context.tmp2BlockSize, _context.tmp1BlockSize );
+
+        WriteCTables();
     }
 
     //-----------------------------------------------------------
@@ -194,7 +197,7 @@ public:
 
         // Expand entries to be 64-bit aligned, sort them, then unpack them to individual components
         ExpandEntries( packedEntries, 0, _entries[0], inEntryCount );
-        SortEntries( _entries[0], _entries[1], inEntryCount );
+        SortEntries<Entry, InInfo::YBitSize>( _entries[0], _entries[1], inEntryCount );
         UnpackEntries( bucket, _entries[0], inEntryCount, y, _map[0], meta );
 
         WriteMap( bucket, inEntryCount, _map[0], (uint64*)_meta[1] );
@@ -640,7 +643,7 @@ public:
         uint32* c1Buffer = (uint32*)_meta[1];
         uint32* c2Buffer = c1Buffer + c1TotalEntries;
 
-        // See Note in LoadNextbucket() regarding the 'prefix region' for c3 overflow that we allocate
+        // A prefix region to keep overflowed c3 park entries for the next park
         const size_t c3ParkOverflowSize = sizeof( uint32 ) * kCheckpoint1Interval;
 
         uint32 c3ParkOverflowCount = 0; // Overflow entries from a bucket that did not make it into a C3 park this bucket. Saved for the next bucket.
@@ -672,19 +675,26 @@ public:
             
             uint32* f7 = ((uint32*)_y[0]) + kCheckpoint1Interval;
 
-            ExpandEntries( packedEntries, 0, _entries[0], (int64)bucketLength );
-            SortEntries( _entries[0], _entries[1], (int64)bucketLength );
-            UnpackEntries<uint32, true>( bucket, _entries[0], (int64)bucketLength, f7, _map[0], nullptr );
+            using T7Entry = FpEntry<TableId::Table7>;
+
+            ExpandEntries<T7Entry, true>( packedEntries, 0, (T7Entry*)_entries[0], (int64)bucketLength );
+            SortEntries<T7Entry, Info::YBitSize>( (T7Entry*)_entries[0], (T7Entry*)_entries[1], (int64)bucketLength );
+
+            // Any bucket count above 128 will only require 3 iterations w/ k=32, so 
+            // the sorted entries will be at the _entries[1] buffer in that case
+            auto* sortedEntries = (T7Entry*)( _numBuckets > 128 ? _entries[1] : _entries[0] );
+
+            UnpackEntries<T7Entry, uint32, true>( bucket, sortedEntries, (int64)bucketLength, f7, _map[0], nullptr );
             WriteMap( bucket, (int64)bucketLength, _map[0], (uint64*)_meta[0] );
 
-            // Now handle f7 and write them into C tables
-            // We will set the addersses to these tables accordingly.
+            /// Now handle f7 and write them into C tables
+            /// We will set the addersses to these tables accordingly.
 
             // Write C1
             {
                 ASSERT( bucketLength > c1NextCheckpoint );
 
-                // #TODO: Do C1 multi-threaded. For now jsut single-thread it...
+                // #TODO: Do C1 multi-threaded? For now jsut single-thread it...
                 for( uint32 i = c1NextCheckpoint; i < bucketLength; i += c1Interval )
                     *c1Writer++ = Swap32( f7[i] );
                 
@@ -824,16 +834,16 @@ public:
     }
 
     //-----------------------------------------------------------
-    template<typename TY, bool IsF7 = false>
-    inline void UnpackEntries( const uint32 bucket, const Entry* packedEntries, const int64 entryCount, TY* outY, uint64* outMap, TMetaIn* outMeta )
+    template<typename TEntry, typename TY, bool IsT7Out = false>
+    inline void UnpackEntries( const uint32 bucket, const TEntry* packedEntries, const int64 entryCount, TY* outY, uint64* outMap, TMetaIn* outMeta )
     {
-        using TMap  = typename FpMapType<table>::Type;
+        using TMap = typename FpMapType<table>::Type;
 
         AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
 
-            constexpr uint32 metaMultipler = InInfo::MetaMultiplier;
+            constexpr uint32 metaMultipler = IsT7Out ? 0 : InInfo::MetaMultiplier;
 
-            const uint32 yBits = IsF7 ? _k : InInfo::YBitSize;
+            const uint32 yBits = IsT7Out ? Info::YBitSize : InInfo::YBitSize;
             const uint64 yMask = 0xFFFFFFFFFFFFFFFFull >> (64-yBits);
 
             const uint64 bucketBits = ((uint64)bucket) << yBits;
@@ -845,7 +855,7 @@ public:
             TMap*    map  = (TMap*)outMap;
             TMetaIn* meta = outMeta;
             
-            const Entry* entries = packedEntries;
+            const TEntry* entries = packedEntries;
 
             for( int64 i = offset; i < end; i++ )
             {
@@ -858,29 +868,30 @@ public:
 
                 // Can't be 1 (table 1 only), because in that case the metadata is x, 
                 // which is stored as the map
-                if constexpr ( metaMultipler > 1 && !IsF7 )
+                if constexpr ( metaMultipler > 1 )
                     meta[i] = e.meta;
             }
         });
     }
 
     //-----------------------------------------------------------
-    inline void SortEntries( Entry* entries, Entry* tmpEntries, const int64 entryCount )
+    template<typename TEntry, uint32 yBitSize>
+    inline void SortEntries( TEntry* entries, TEntry* tmpEntries, const int64 entryCount )
     {
         AnonPrefixSumJob<uint32>::Run( _pool, _threadCount, [=]( AnonPrefixSumJob<uint32>* self ) {
             
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
 
-            const uint32 remainderBits = _k - InInfo::YBitSize;
-            EntrySort( self, count, offset, entries, tmpEntries, remainderBits );
+            const uint32 remainderBits = _k - yBitSize;
+            EntrySort<remainderBits>( self, count, offset, entries, tmpEntries );
         });
     }
 
     //-----------------------------------------------------------
-    template<typename T, typename TJob, typename BucketT>
+    template<uint32 remainderBits, typename T, typename TJob, typename BucketT>
     inline static void EntrySort( PrefixSumJob<TJob, BucketT>* self, const int64 entryCount, const int64 offset, 
-                                  T* entries, T* tmpEntries, const uint32 remainderBits )
+                                  T* entries, T* tmpEntries )
     {
         ASSERT( self );
         ASSERT( entries );
@@ -889,7 +900,8 @@ public:
 
         constexpr uint Radix = 256;
 
-        constexpr int32  iterations = 4;
+        constexpr uint32 MaxIter    = 4;
+        constexpr int32  iterations = MaxIter - remainderBits / 8;
         constexpr uint32 shiftBase  = 8;
 
         BucketT counts     [Radix];
@@ -900,8 +912,8 @@ public:
         T* input  = entries;
         T* output = tmpEntries;
 
-        const uint32 lastByteMask = 0xFF >> remainderBits;
-        uint32 masks[iterations]  = { 0xFF, 0xFF, 0xFF, lastByteMask };
+        const uint32 lastByteMask   = 0xFF >> remainderBits;
+              uint32 masks[MaxIter] = { 0xFF, 0xFF, 0xFF, lastByteMask };
 
         for( int32 iter = 0; iter < iterations ; iter++, shift += shiftBase )
         {
@@ -938,11 +950,12 @@ public:
     //-----------------------------------------------------------
     // Convert entries from packed bits into 64-bit aligned entries
     //-----------------------------------------------------------
-    inline void ExpandEntries( const void* packedEntries, const uint64 inputBitOffset, Entry* expendedEntries, const int64 entryCount )
+    template<typename TEntry, bool Table7Out = false>
+    inline void ExpandEntries( const void* packedEntries, const uint64 inputBitOffset, TEntry* expendedEntries, const int64 entryCount )
     {
         AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
             
-            constexpr uint32 packedEntrySize = InInfo::EntrySizePackedBits;
+            constexpr uint32 packedEntrySize = Table7Out ? Info::YBitSize + Info::MapBitSize : InInfo::EntrySizePackedBits;
 
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
@@ -950,36 +963,34 @@ public:
             const uint64 inputBitOffset = packedEntrySize * (uint64)offset;
             const size_t bitCapacity    = CDiv( packedEntrySize * (uint64)entryCount, 64 ) * 64;
 
-            DiskFp<table,_numBuckets>::ExpandEntries( packedEntries, inputBitOffset, bitCapacity, expendedEntries + offset, count );
+            DiskFp<table,_numBuckets>::ExpandEntries<TEntry, Table7Out>( packedEntries, inputBitOffset, bitCapacity, expendedEntries + offset, count );
         });
     }
 
     //-----------------------------------------------------------
+    template<typename TEntry, bool Table7Out = false>
     inline static void ExpandEntries( const void* packedEntries, const uint64 inputBitOffset, const size_t bitCapacity,
-                                      Entry* expendedEntries, const int64 entryCount )
+                                      TEntry* expendedEntries, const int64 entryCount )
     {
-        constexpr uint32 yBits           = InInfo::YBitSize;
-        // const     uint64 yMask           = ( 1ull << yBits ) - 1;
+        constexpr uint32 yBits           = Table7Out ? Info::YBitSize : InInfo::YBitSize;
         constexpr uint32 mapBits         = table == TableId::Table2 ? _k : InInfo::MapBitSize;
-        // const     uint64 mapMask         = ( ( 1ull << mapBits) - 1 ) << yBits;
-        constexpr uint32 metaMultipler   = InInfo::MetaMultiplier;
-        constexpr uint32 packedEntrySize = InInfo::EntrySizePackedBits;
+        constexpr uint32 metaMultipler   = Table7Out ? 0 : InInfo::MetaMultiplier;
+        constexpr uint32 packedEntrySize = Table7Out ? yBits + mapBits : InInfo::EntrySizePackedBits;
         
-        BitReader reader( (uint64*)packedEntries, bitCapacity, inputBitOffset ); //CDiv( (uint64)entryCount * packedEntrySize, 64 ) * 64, inputBitOffset );
+        BitReader reader( (uint64*)packedEntries, bitCapacity, inputBitOffset );
 
-              Entry* out = expendedEntries;
-        const Entry* end = out + entryCount;
+              TEntry* out = expendedEntries;
+        const TEntry* end = out + entryCount;
         
         for( ; out < end; out++ )
         {
-            if constexpr ( table == TableId::Table2 )
+            if constexpr ( table == TableId::Table2 || Table7Out )
             {
-                // const uint64 y = reader.ReadBits64( yBits + mapBits );
-                // out->ykey = ( y & yMask ) | ( ( y & mapMask ) << yBits );
                 out->ykey = reader.ReadBits64( packedEntrySize );
             }
             else
             {
+                // #TODO: Can still get ykey in a single step like above
                 const uint64 y   = reader.ReadBits64( yBits   );
                 const uint64 map = reader.ReadBits64( mapBits );
 

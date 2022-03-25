@@ -38,6 +38,25 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
     _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
     _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
+
+    {
+        const size_t cacheSize = _cx.cacheSize / 2;
+
+        FileSetOptions opts = FileSetOptions::DirectIO;
+
+        if( _cx.cache )
+            opts |= FileSetOptions::Cachable;
+
+        FileSetInitData fdata = {
+            .cache     = _cx.cache,
+            .cacheSize = cacheSize
+        };
+
+        _diskQueue->InitFileSet( FileId::FX0, "fx_0", _cx.numBuckets, opts, &fdata );
+        
+        fdata.cache = ((byte*)fdata.cache) + cacheSize;
+        _diskQueue->InitFileSet( FileId::FX1, "fx_1", _cx.numBuckets, opts, &fdata );
+    }
 }
 
 //-----------------------------------------------------------
@@ -90,7 +109,7 @@ void DiskPlotPhase1::Run()
         }
 
         #if BB_DP_DBG_SKIP_TO_C_TABLES
-            SortAndCompressTable7();
+            WriteCTables();
         #endif
 
         return;
@@ -99,24 +118,7 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
-    {
-        const size_t cacheSize = _cx.cacheSize / 2;
-
-        FileSetOptions opts = FileSetOptions::DirectIO;
-
-        if( _cx.cache )
-            opts |= FileSetOptions::Cachable;
-
-        FileSetInitData fdata = {
-            .cache     = _cx.cache,
-            .cacheSize = cacheSize
-        };
-
-        _diskQueue->InitFileSet( FileId::FX0, "fx_0", _cx.numBuckets, opts, &fdata );
-        
-        fdata.cache = ((byte*)fdata.cache) + cacheSize;
-        _diskQueue->InitFileSet( FileId::FX1, "fx_1", _cx.numBuckets, opts, &fdata );
-    }
+    
 
 #if !BB_DP_DBG_READ_EXISTING_F1
     GenF1();
@@ -211,10 +213,10 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
-    // SortAndCompressTable7();
-
     Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
             TicksToSeconds( _cx.readWaitTime ), TicksToSeconds( _cx.writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
+
+    WriteCTables();
 }
 
 ///
@@ -289,9 +291,7 @@ void DiskPlotPhase1::ForwardPropagateTable()
     _tableReadWaitTime  = Duration::zero();
     _tableWriteWaitTime = Duration::zero();
 
-    const uint32 numBuckets = _cx.numBuckets;
-    
-    switch ( numBuckets )
+    switch( _cx.numBuckets )
     {
         case 128 : ForwardPropagateBuckets<table, 128 >(); break;
         case 256 : ForwardPropagateBuckets<table, 256 >(); break;
@@ -313,8 +313,8 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
 
     _tableReadWaitTime  = fp.ReadWaitTime();
     _tableWriteWaitTime = fp.WriteWaitTime();
-    _cx.readWaitTime  += _tableReadWaitTime;
-    _cx.writeWaitTime += _tableWriteWaitTime;
+    _cx.readWaitTime   += _tableReadWaitTime;
+    _cx.writeWaitTime  += _tableWriteWaitTime;
 
     #if BB_DP_DBG_VALIDATE_FX
         #if !_DEBUG
@@ -324,5 +324,50 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
         using TYOut = typename DiskFp<table, _numBuckets>::TYOut;
         Debug::ValidateYForTable<table, _numBuckets, TYOut>( _fxOut, *_cx.ioQueue, *_cx.threadPool, _cx.bucketCounts[(int)table] );
     #endif
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase1::WriteCTables()
+{
+    switch( _cx.numBuckets )
+    {
+        case 128 : WriteCTablesBuckets<128 >(); break;
+        case 256 : WriteCTablesBuckets<256 >(); break;
+        case 512 : WriteCTablesBuckets<512 >(); break;
+        case 1024: WriteCTablesBuckets<1024>(); break;
+    
+        default:
+            Fatal( "Invalid bucket count." );
+            break;
+    }
+}
+
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
+void DiskPlotPhase1::WriteCTablesBuckets()
+{
+    #if BB_DP_DBG_SKIP_TO_C_TABLES
+        _fxIn  = FileId::FX0;
+        _fxOut = FileId::FX1;
+
+        #if BB_DP_DBG_VALIDATE_FX 
+            #if !_DEBUG
+                Log::Line( "Warning: Table validation enabled in release mode." );
+            #endif
+            
+            using TYOut = typename DiskFp<TableId::Table7, _numBuckets>::TYOut;
+            Debug::ValidateYForTable<TableId::Table7, _numBuckets, TYOut>( _fxIn, *_cx.ioQueue, *_cx.threadPool, _cx.bucketCounts[(int)TableId::Table7] );
+        #endif
+    #endif
+
+    Log::Line( "Processing f7s and writing C tables to plot file." );
+
+    const auto timer = TimerBegin();
+
+    DiskFp<TableId::Table7, _numBuckets> fp( _cx, _fxIn, _fxOut );
+    fp.RunF7();
+
+    const double elapsed = TimerEnd( timer );
+    Log::Line( "Completed C processing tables in %.2lf seconds.", elapsed );
 }
 
