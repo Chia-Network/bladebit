@@ -174,6 +174,7 @@ public:
                 LoadBucket( bucket + 1 );
 
             _readFence.Wait( bucket + 1, _readWaitTime );
+            if( table == TableId::Table5 && bucket >= _numBuckets - 2 )  BBDebugBreak();
             FpBucket( bucket );
         }
 

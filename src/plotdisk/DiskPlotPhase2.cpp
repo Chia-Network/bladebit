@@ -7,6 +7,10 @@
 #include "DiskPlotInfo.h"
 #include "plotdisk/DiskPairReader.h"
 
+// #DEBUG
+#include "jobs/IOJob.h"
+#include "io/FileStream.h"
+#include "DiskPlotDebug.h"
 
 //-----------------------------------------------------------
 template<TableId table>
@@ -162,16 +166,16 @@ void DiskPlotPhase2::RunWithBuckets()
     // _mapWriteFence->Signal();
 
     // Mark all tables
-    FileId lTableFileId = FileId::MARKED_ENTRIES_6;
+    FileId  lTableFileId  = FileId::MARKED_ENTRIES_6;
+
+    uint64* lMarkingTable = bitFields[0];
+    uint64* rMarkingTable = bitFields[1];
 
     for( TableId table = TableId::Table7; table > TableId::Table2; table = table-1 )
     {
         readFence.Reset( 0 );
 
         const auto timer = TimerBegin();
-
-        uint64* lMarkingTable = bitFields[0];
-        uint64* rMarkingTable = bitFields[1];
         
         const size_t stackMarker = allocator.Size();
         DiskPairAndMapReader<_numBuckets> reader( context, context.p2ThreadCount, readFence, table, allocator );
@@ -181,19 +185,25 @@ void DiskPlotPhase2::RunWithBuckets()
         // Log::Line( "Allocated work heap of %.2lf GiB out of %.2lf GiB.", 
         //     (double)(allocator.Size() + markfieldSize*2 ) BtoGB, (double)context.heapSize BtoGB );
 
-        MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
+        // MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
 
         //
         // #TEST
         //
-        #if 0
-        if( 0 )
+        // #if 0
+        // if( 0 )
         {
-            uint32* lPtrBuf = bbcvirtalloc<uint32>( 1ull << _K );
-            uint16* rPtrBuf = bbcvirtalloc<uint16>( 1ull << _K );
+            Debug::ValidatePairs<_numBuckets>( _context, TableId::Table7 );
 
-            byte* rMarkedBuffer = bbcvirtalloc<byte>( 1ull << _K );
-            byte* lMarkedBuffer = bbcvirtalloc<byte>( 1ull << _K );
+            Pair*   pairBuf       = bbcvirtalloc<Pair>( maxEntries );
+            uint64* pairReadBuf   = bbcvirtalloc<uint64>( maxEntries );
+            byte*   rMarkedBuffer = bbcvirtalloc<byte>( maxEntries );
+            byte*   lMarkedBuffer = bbcvirtalloc<byte>( maxEntries );
+
+            Pair* pairRef    = bbcvirtalloc<Pair>( 1ull << _K );
+            Pair* pairRefTmp = bbcvirtalloc<Pair>( 1ull << _K );
+
+            
             
             for( TableId rTable = TableId::Table7; rTable > TableId::Table1; rTable = rTable-1 )
             {
@@ -207,26 +217,52 @@ void DiskPlotPhase2::RunWithBuckets()
 
                 Log::Line( "Reading R table %u...", rTable+1 );
                 {
-                    const FileId rTableIdL = TableIdToBackPointerFileId( rTable );
-                    const FileId rTableIdR = (FileId)((int)rTableIdL + 1 );
+                    const uint32 savedBits    = bblog2( _numBuckets );
+                    const uint32 pairBits     = _K + 1 - savedBits + 9;
+                    const size_t blockSize    = queue.BlockSize( FileId::T1 );
+                    const size_t pairReadSize = (size_t)CDiv( rEntryCount * pairBits, (int)blockSize*8 ) * blockSize;
+                    const FileId rTableId     = FileId::T1 + (FileId)rTable;
 
                     Fence fence;
-                    queue.ReadFile( rTableIdL, 0, lPtrBuf, sizeof( uint32 ) * rEntryCount );
-                    queue.ReadFile( rTableIdR, 0, rPtrBuf, sizeof( uint16 ) * rEntryCount );
+                    queue.ReadFile( rTableId, 0, pairReadBuf, pairReadSize );
                     queue.SignalFence( fence );
                     queue.CommitCommands();
                     fence.Wait();
+
+                    AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
+
+                        uint64 count, offset, end;
+                        GetThreadOffsets( self, rEntryCount, count, offset, end );
+
+                        BitReader reader( pairReadBuf, rEntryCount * pairBits, offset * pairBits );
+                        const uint32 lBits  = _K - savedBits + 1;
+                        const uint32 rBits  = 9;
+                        for( uint64 i = offset; i < end; i++ )
+                        {
+                            const uint32 left  = (uint32)reader.ReadBits64( lBits );
+                            const uint32 right = left +  (uint32)reader.ReadBits64( rBits );
+                            pairBuf[i] = { .left = left, .right = right };
+                        }
+                    });
                 }
 
+                uint64 refEntryCount = 0;
+                {
+                    Log::Line( "Loading reference pairs." );
+                    FatalIf( !Debug::LoadRefTable( "/mnt/p5510a/reference/p1.t7.tmp", pairRef, refEntryCount ),
+                        "Failed to load reference table." );
 
-                uint32* lPtr = lPtrBuf;
-                uint16* rPtr = rPtrBuf;
+                    ASSERT( refEntryCount == rEntryCount );
+                    RadixSort256::Sort<BB_DP_MAX_JOBS,uint64,4>( *_context.threadPool, (uint64*)pairRef, (uint64*)pairRefTmp, refEntryCount );
+                }
+
+                const Pair* pairPtr = pairBuf;
                 
                 uint64 lEntryOffset = 0;
                 uint64 rTableOffset = 0;
 
                 Log::Line( "Marking entries..." );
-                for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+                for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
                 {
                     const uint32 rBucketCount = context.ptrTableBucketCounts[(int)rTable][bucket];
                     const uint32 lBucketCount = context.bucketCounts[(int)lTable][bucket];
@@ -246,11 +282,11 @@ void DiskPlotPhase2::RunWithBuckets()
                                 continue;
                         }
 
-                        uint64 l = (uint64)lPtr[e] + lEntryOffset;
-                        uint64 r = (uint64)rPtr[e] + l;
+                        uint64 l = (uint64)pairPtr[e].left  + lEntryOffset;
+                        uint64 r = (uint64)pairPtr[e].right + lEntryOffset;
 
-                        ASSERT( l < ( 1ull << _K ) );
-                        ASSERT( r < ( 1ull << _K ) );
+                        ASSERT( l < lEntryCount );
+                        ASSERT( r < lEntryCount );
 
                         lMarkedBuffer[l] = 1;
                         lMarkedBuffer[r] = 1;
@@ -258,8 +294,7 @@ void DiskPlotPhase2::RunWithBuckets()
                         // lMarkedEntries.Set( r );
                     }
 
-                    lPtr += rBucketCount;
-                    rPtr += rBucketCount;
+                    pairPtr += rBucketCount;
 
                     lEntryOffset += lBucketCount;
                     rTableOffset += context.bucketCounts[(int)rTable][bucket];
@@ -283,7 +318,7 @@ void DiskPlotPhase2::RunWithBuckets()
                 memset( lMarkedBuffer, 0, 1ull << _K );
             }
         }
-        #endif
+        // #endif
 
         // Ensure the last table finished writing to the bitfield
         Duration writeWaitTime = Duration::zero();
@@ -297,7 +332,7 @@ void DiskPlotPhase2::RunWithBuckets()
         queue.CommitCommands();
 
         // Swap marking tables
-        std::swap( bitFields[0], bitFields[1] );
+        std::swap( lMarkingTable, rMarkingTable );
         lTableFileId = (FileId)( (int)lTableFileId - 1 );
 
         const double elapsed = TimerEnd( timer );
@@ -311,32 +346,31 @@ void DiskPlotPhase2::RunWithBuckets()
         // Log::Line( " Table %u IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", table,
         //     TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 
-    //     // #TEST:
-    //     // if( table < TableId::Table7 )
-    //     // if( 0 )
-    //     // {
-    //     //     BitField markedEntries( bitFields[1] );
-    //     //     uint64 lTableEntries = context.entryCounts[(int)table-1];
+        // #TEST:
+        // if( table < TableId::Table7 )
+        // if( 0 )
+        {
+            BitField markedEntries( rMarkingTable );
+            uint64 lTableEntries = context.entryCounts[(int)table-1];
 
-    //     //     uint64 bucketsTotalCount = 0;
-    //     //     for( uint64 e = 0; e < BB_DP_BUCKET_COUNT; ++e )
-    //     //         bucketsTotalCount += context.ptrTableBucketCounts[(int)table-1][e];
+            uint64 bucketsTotalCount = 0;
+            for( uint64 e = 0; e < _numBuckets; ++e )
+                bucketsTotalCount += context.ptrTableBucketCounts[(int)table-1][e];
 
-    //     //     ASSERT( bucketsTotalCount == lTableEntries );
+            ASSERT( bucketsTotalCount == lTableEntries );
 
-    //     //     uint64 lTablePrunedEntries = 0;
+            uint64 lTablePrunedEntries = 0;
 
-    //     //     for( uint64 e = 0; e < lTableEntries; ++e )
-    //     //     {
-    //     //         if( markedEntries.Get( e ) )
-    //     //             lTablePrunedEntries++;
-    //     //     }
+            for( uint64 e = 0; e < lTableEntries; ++e )
+            {
+                if( markedEntries.Get( e ) )
+                    lTablePrunedEntries++;
+            }
 
-    //     //     Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", table,
-    //     //                lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
-    //     //     Log::Line( "" );
-
-    //     // }
+            Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", table,
+                       lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
+            Log::Line( "" );
+        }
     }
 
     // bitFieldFence.Wait( _context.writeWaitTime );

@@ -6,6 +6,7 @@
 #include "threading/ThreadPool.h"
 #include "threading/MTJob.h"
 #include "plotdisk/DiskPlotInfo.h"
+#include "plotdisk/DiskPlotContext.h"
 #include "plotdisk/jobs/IOJob.h"
 #include "io/FileStream.h"
 #include "util/BitView.h"
@@ -30,6 +31,12 @@ namespace Debug
 
     template<TableId table, uint32 numBuckets, typename TYOut>
     void ValidateYForTable( const FileId fileId, DiskBufferQueue& queue, ThreadPool& pool, uint32 bucketCounts[numBuckets] );
+
+    template<typename T>
+    bool LoadRefTable( const char* path, T*& buffer, uint64& outEntryCount );
+
+    template<uint32 _numBuckets>
+    void ValidatePairs(  DiskPlotContext& context, const TableId table );
 }
 
 template<TableId table, uint32 numBuckets, typename TYOut>
@@ -203,4 +210,168 @@ inline void Debug::ValidateYForTable( const FileId fileId, DiskBufferQueue& queu
     bbvirtfree( bucketBuffers[1] );
     bbvirtfree( entries );
     bbvirtfree( tmp     );
+}
+
+
+//-----------------------------------------------------------
+template<typename T>
+inline bool Debug::LoadRefTable( const char* path, T*& buffer, uint64& outEntryCount )
+{
+    FileStream file;
+
+    if( !file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::NoBuffering | FileFlags::LargeFile ) )
+        return false;
+
+    const size_t blockSize = file.BlockSize();
+    
+    uint64* block = (uint64*)bbvirtalloc( blockSize );
+    ASSERT( block );
+
+    bool success = false;
+    if( file.Read( block, blockSize ) )
+    {
+        outEntryCount = *block;
+
+        if( buffer == nullptr )
+            buffer = bbvirtalloc<T>( RoundUpToNextBoundary( outEntryCount * sizeof( T ), blockSize ) );
+
+        int err = 0;
+        success = IOJob::ReadFromFile( file, buffer, sizeof( T ) * outEntryCount, block, blockSize, err );
+    }
+
+    bbvirtfree( block );
+    return success;
+}
+
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
+inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table )
+{
+    uint64 refCount = 0;
+    Pair*  refPairs = nullptr;
+
+
+    {
+        char path[1024];
+        sprintf( path, "%sp1.t%d.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
+        Log::Line( " Loading reference table '%s'.", path );
+
+        FatalIf( !Debug::LoadRefTable( path, refPairs, refCount ), "Failed to load table." );
+    }
+
+    ThreadPool& pool = *context.threadPool;
+
+    const uint64 pairCount = context.entryCounts[(int)table];
+    uint64* tmpPairs = bbcvirtalloc<uint64>( std::max( refCount, pairCount ) );
+    
+    // We need to unpack the entries in such a way that we can sort the pairs in increasing order again.
+    auto SwapPairs = [&]( Pair* pairs, const uint64 pairCount ) {
+
+        AnonMTJob::Run( pool, [=]( AnonMTJob* self ) {
+
+            uint64 count, offset, endIdx;
+            GetThreadOffsets( self, pairCount, count, offset, endIdx );
+
+                  Pair* src = pairs + offset;
+            const Pair* end = pairs + endIdx;
+
+            do {
+                std::swap( src->left, src->right );
+            } while( ++src < end );
+        });
+    };
+
+    Log::Line( "Sorting reference pairs.");
+    SwapPairs( refPairs, refCount );
+    RadixSort256::Sort<BB_MAX_JOBS>( pool, (uint64*)refPairs, tmpPairs, refCount );
+    SwapPairs( refPairs, refCount );
+
+    Log::Line( "Loading our pairs." );
+
+    
+    Pair* pairs = bbcvirtalloc<Pair>( pairCount );
+
+    const uint32 savedBits = bblog2( _numBuckets );
+    const uint32 pairBits  = _K + 1 - savedBits + 9;
+
+    {
+        const size_t blockSize    = context.ioQueue->BlockSize( FileId::T1 );
+        const size_t pairReadSize = (size_t)CDiv( pairCount * pairBits, (int)blockSize*8 ) * blockSize;
+        const FileId rTableId     = FileId::T1 + (FileId)table;
+        
+        Fence fence;
+
+        uint64* pairBitBuffer = bbcvirtalloc<uint64>( pairReadSize );
+        context.ioQueue->SeekBucket( rTableId, 0, SeekOrigin::Begin );
+        context.ioQueue->ReadFile( rTableId, 0, pairBitBuffer, pairReadSize );
+        context.ioQueue->SignalFence( fence );
+        context.ioQueue->SeekBucket( rTableId, 0, SeekOrigin::Begin );
+        context.ioQueue->CommitCommands();
+
+        fence.Wait();
+
+         AnonMTJob::Run( pool, [=]( AnonMTJob* self ) {
+
+            uint64 count, offset, end;
+            GetThreadOffsets( self, pairCount, count, offset, end );
+
+            BitReader reader( pairBitBuffer, pairCount * pairBits, offset * pairBits );
+            const uint32 lBits = _K - savedBits + 1;
+            const uint32 rBits = 9;
+            
+            for( uint64 i = offset; i < end; i++ )
+            {
+                const uint32 left  = (uint32)reader.ReadBits64( lBits );
+                const uint32 right = left +  (uint32)reader.ReadBits64( rBits );
+                pairs[i] = { .left = left, .right = right };
+            }
+
+            // Now set them to global coords
+            // #TODO: This won't work for overflow entries, for now test like this
+            uint32 entryOffset = 0;
+            Pair*  pairReader = pairs;
+
+            for( uint32 b = 0; b < _numBuckets; b++ )
+            {
+                self->SyncThreads();
+
+                const uint32 bucketCount = context.ptrTableBucketCounts[(int)table][b];
+
+                GetThreadOffsets( self, (uint64)bucketCount, count, offset, end );
+                for( uint64 i = offset; i < end; i++ )
+                {
+                    pairReader[i].left  += entryOffset;
+                    pairReader[i].right += entryOffset;
+                }
+
+                entryOffset += context.bucketCounts[(int)table-1][b];
+                pairReader  += bucketCount;
+            }
+        });
+
+        bbvirtfree( pairBitBuffer );
+    }
+
+    Log::Line( "Sorting our pairs.");
+    SwapPairs( pairs, pairCount );
+    RadixSort256::Sort<BB_MAX_JOBS>( pool, (uint64*)pairs, tmpPairs, pairCount );
+    SwapPairs( pairs, pairCount );
+
+    Log::Line( "Comparing pairs." );
+
+    const uint64 count = std::min( refCount, pairCount );
+    for( uint64 i = 0; i < count; i++ )
+    {
+        const Pair p = pairs[i];
+        const Pair r = refPairs[i];
+
+        if( *(uint64*)&p != *(uint64*)&r )
+        {
+            ASSERT( 0 );
+        }
+    }
+    
+    Log::Line( "OK" );
+    bbvirtfree( refPairs );
+    bbvirtfree( pairs );
 }
