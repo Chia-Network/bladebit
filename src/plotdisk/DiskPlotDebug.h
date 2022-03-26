@@ -276,6 +276,7 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
             const Pair* end = pairs + endIdx;
 
             do {
+                if( src->left == 16778218 && src->right == 16778555 ) BBDebugBreak();
                 std::swap( src->left, src->right );
             } while( ++src < end );
         });
@@ -287,8 +288,6 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
     SwapPairs( refPairs, refCount );
 
     Log::Line( "Loading our pairs." );
-
-    
     Pair* pairs = bbcvirtalloc<Pair>( pairCount );
 
     const uint32 savedBits = bblog2( _numBuckets );
@@ -329,7 +328,7 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
             // Now set them to global coords
             // #TODO: This won't work for overflow entries, for now test like this
             uint32 entryOffset = 0;
-            Pair*  pairReader = pairs;
+            Pair*  pairReader  = pairs;
 
             for( uint32 b = 0; b < _numBuckets; b++ )
             {
@@ -352,22 +351,32 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
         bbvirtfree( pairBitBuffer );
     }
 
-    Log::Line( "Sorting our pairs.");
+    // Log::Line( "Sorting our pairs.");
     SwapPairs( pairs, pairCount );
     RadixSort256::Sort<BB_MAX_JOBS>( pool, (uint64*)pairs, tmpPairs, pairCount );
     SwapPairs( pairs, pairCount );
 
     Log::Line( "Comparing pairs." );
 
+    uint32 b           = 0;
+    uint64 bucketStart = 0;
+    uint32 bucketEnd   = context.ptrTableBucketCounts[(int)table][b];
+    uint64 lOffset     = 0;
+
     const uint64 count = std::min( refCount, pairCount );
     for( uint64 i = 0; i < count; i++ )
     {
-        const Pair p = pairs[i];
+        const Pair p = pairs   [i];
         const Pair r = refPairs[i];
 
         if( *(uint64*)&p != *(uint64*)&r )
-        {
             ASSERT( 0 );
+
+        if( i == bucketEnd )
+        {
+            lOffset     += context.bucketCounts[(int)table][b];
+            bucketStart = bucketEnd;
+            bucketEnd   += context.ptrTableBucketCounts[(int)table][++b];
         }
     }
     
@@ -375,3 +384,4 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
     bbvirtfree( refPairs );
     bbvirtfree( pairs );
 }
+

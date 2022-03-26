@@ -31,8 +31,8 @@ public:
     using EntryOut = FpEntry<table>;
     using TMetaIn  = typename TableMetaType<table>::MetaIn;
     using TMetaOut = typename TableMetaType<table>::MetaOut;
-    using TAddress = uint64;
     using TYOut    = typename FpFxGen<table>::TYOut;
+    using TAddress = uint64;
 
 public:
 
@@ -174,7 +174,7 @@ public:
                 LoadBucket( bucket + 1 );
 
             _readFence.Wait( bucket + 1, _readWaitTime );
-            if( table == TableId::Table5 && bucket >= _numBuckets - 2 )  BBDebugBreak();
+
             FpBucket( bucket );
         }
 
@@ -231,7 +231,6 @@ public:
         _context.ptrTableBucketCounts[(int)table][bucket] += (uint64)outEntryCount;
 
         _tableEntryCount += writeEntrtyCount;
-        _crossBucketInfo.matchOffset = (uint64)outEntryCount;   // Set the offset for the next cross-bucket entries
         _crossBucketInfo.matchCount  = 0;
     }
 
@@ -425,10 +424,9 @@ public:
         if( !info.matchCount )
             return;
 
-        // FxGen( bucket, info.matchCount, info.pair, info.y, (TMetaIn*)info.meta, outY, outMeta );
         FpFxGen<table>::ComputeFx( (int64)info.matchCount, info.pair, info.y, (TMetaIn*)info.meta, outY, outMeta, 0 );
         
-        const uint32 matchOffset = (uint32)info.matchOffset;
+        const uint32 matchOffset = (uint32)info.matchOffset[0]; // Grab the previous bucket's offset and apply it
         const Pair * srcPairs    = info.pair;
 
         for( uint64 i = 0; i < info.matchCount; i++ )

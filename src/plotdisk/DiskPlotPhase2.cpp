@@ -193,15 +193,15 @@ void DiskPlotPhase2::RunWithBuckets()
         // #if 0
         // if( 0 )
         {
-            Debug::ValidatePairs<_numBuckets>( _context, TableId::Table7 );
+            // Debug::ValidatePairs<_numBuckets>( _context, TableId::Table7 );
 
             Pair*   pairBuf       = bbcvirtalloc<Pair>( maxEntries );
             uint64* pairReadBuf   = bbcvirtalloc<uint64>( maxEntries );
             byte*   rMarkedBuffer = bbcvirtalloc<byte>( maxEntries );
             byte*   lMarkedBuffer = bbcvirtalloc<byte>( maxEntries );
 
-            Pair* pairRef    = bbcvirtalloc<Pair>( 1ull << _K );
-            Pair* pairRefTmp = bbcvirtalloc<Pair>( 1ull << _K );
+            Pair*   pairRef       = bbcvirtalloc<Pair>( 1ull << _K );
+            Pair*   pairRefTmp    = bbcvirtalloc<Pair>( 1ull << _K );
 
             
             
@@ -248,9 +248,11 @@ void DiskPlotPhase2::RunWithBuckets()
 
                 uint64 refEntryCount = 0;
                 {
-                    Log::Line( "Loading reference pairs." );
-                    FatalIf( !Debug::LoadRefTable( "/mnt/p5510a/reference/p1.t7.tmp", pairRef, refEntryCount ),
-                        "Failed to load reference table." );
+                    char path[1024];
+                    sprintf( path, "%sp1.t%d.tmp", BB_DP_DBG_REF_DIR, (int)rTable+1 );
+                    Log::Line( " Loading reference table '%s'.", path );
+
+                    FatalIf( !Debug::LoadRefTable( path, pairRef, refEntryCount ), "Failed to load reference table." );
 
                     ASSERT( refEntryCount == rEntryCount );
                     RadixSort256::Sort<BB_DP_MAX_JOBS,uint64,4>( *_context.threadPool, (uint64*)pairRef, (uint64*)pairRefTmp, refEntryCount );

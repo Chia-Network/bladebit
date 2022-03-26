@@ -64,7 +64,7 @@ void DiskPlotPhase1::Run()
 {
     DiskPlotContext& cx = _cx;
 
-    #if _DEBUG && BB_DP_DBG_SKIP_PHASE_1
+    #if _DEBUG && ( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE )
     {
         FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 
@@ -107,6 +107,10 @@ void DiskPlotPhase1::Run()
         {
             Fatal( "Failed to open pointer bucket counts file." );
         }
+
+        #if BB_DP_P1_SKIP_TO_TABLE
+            goto FP;
+        #endif
 
         #if BB_DP_DBG_SKIP_TO_C_TABLES
             WriteCTables();
@@ -167,6 +171,7 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
+FP:
     ForwardPropagate();
 
     // Check all table counts
@@ -257,7 +262,15 @@ void DiskPlotPhase1::GenF1Buckets()
 //-----------------------------------------------------------
 void DiskPlotPhase1::ForwardPropagate()
 {
-    for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
+    TableId startTable = TableId::Table2;
+
+    #if BB_DP_P1_SKIP_TO_TABLE
+        startTable = BB_DP_P1_START_TABLE;
+        if( (int)startTable ^ 1 )
+            std::swap( _fxIn, _fxOut );
+    #endif
+
+    for( TableId table = startTable; table <= TableId::Table7; table++ )
     {
         Log::Line( "Table %u", table+1 );
         auto timer = TimerBegin();
@@ -275,7 +288,6 @@ void DiskPlotPhase1::ForwardPropagate()
                 Fatal( "Invalid table." );
                 break;
         }
-
         Log::Line( "Completed table %u in %.2lf seconds.", table+1, TimerEnd( timer ) );
         Log::Line( "Table IO wait time: Read: %.2lf s | Write: %.2lf.", 
                     TicksToSeconds( _tableReadWaitTime ), TicksToSeconds( _tableWriteWaitTime ) );
@@ -315,6 +327,8 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
     _tableWriteWaitTime = fp.WriteWaitTime();
     _cx.readWaitTime   += _tableReadWaitTime;
     _cx.writeWaitTime  += _tableWriteWaitTime;
+
+    Debug::ValidatePairs<256>( _cx, table );
 
     #if BB_DP_DBG_VALIDATE_FX
         #if !_DEBUG
