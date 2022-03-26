@@ -25,6 +25,7 @@ public:
 
     static constexpr uint32 _k               = Info::_k;
     static constexpr uint64 MaxBucketEntries = Info::MaxBucketEntries;
+    static constexpr uint32 MapBucketCount   = table == TableId::Table2 ? 1 : _numBuckets + 1;
 
     using Entry    = FpEntry<table-1>;
     using EntryOut = FpEntry<table>;
@@ -127,19 +128,17 @@ public:
         _mapWrite[1]  = alloc.Alloc( mapWriteSize, pairBlockSize );
 
         // Block bit buffers
-        byte* fxBlocks   = (byte*)alloc.CAlloc( _numBuckets  , fxBlockSize  , fxBlockSize   );  // Fx write
-        byte* pairBlocks = (byte*)alloc.CAlloc( 1            , pairBlockSize, pairBlockSize );  // Pair write
-        byte* xBlocks    = (byte*)alloc.CAlloc( 1            , pairBlockSize, pairBlockSize );  // x write
-        byte* mapBlocks  = (byte*)alloc.CAlloc( _numBuckets+1, pairBlockSize, pairBlockSize );  // Map write
+        byte* fxBlocks   = (byte*)alloc.CAlloc( _numBuckets   , fxBlockSize  , fxBlockSize   );  // Fx write
+        byte* pairBlocks = (byte*)alloc.CAlloc( 1             , pairBlockSize, pairBlockSize );  // Pair write
+        byte* mapBlocks  = (byte*)alloc.CAlloc( MapBucketCount, pairBlockSize, pairBlockSize );  // Map write
 
         if( !dryRun )
         {
-            const FileId mapWriterId = FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
+            const FileId mapWriterId = table == TableId::Table2 ? FileId::T1 : FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
 
-            _fxBitWriter   = BitBucketWriter<_numBuckets>  ( _ioQueue, _outFxId, (byte*)fxBlocks );
-            _pairBitWriter = BitBucketWriter<1>            ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
-            _xBitWriter    = BitBucketWriter<1>            ( _ioQueue, FileId::T1,  (byte*)xBlocks );
-            _mapBitWriter  = BitBucketWriter<_numBuckets+1>( _ioQueue, mapWriterId, (byte*)mapBlocks );
+            _fxBitWriter   = BitBucketWriter<_numBuckets>   ( _ioQueue, _outFxId, (byte*)fxBlocks );
+            _pairBitWriter = BitBucketWriter<1>             ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
+            _mapBitWriter  = BitBucketWriter<MapBucketCount>( _ioQueue, mapWriterId, (byte*)mapBlocks );
         }
     }
 
@@ -180,6 +179,7 @@ public:
 
         _fxBitWriter  .SubmitLeftOvers();
         _pairBitWriter.SubmitLeftOvers();
+        _mapBitWriter .SubmitLeftOvers();
     }
 
     //-----------------------------------------------------------
@@ -264,8 +264,8 @@ public:
                 {
                     const uint64 totalBits = entryCount * sizeof( TMap ) * 8;
 
-                    _xBitWriter.BeginWriteBuckets( &totalBits, writeBuffer );
-                    _xBitWriter.Submit();
+                    _mapBitWriter.BeginWriteBuckets( &totalBits, writeBuffer );
+                    _mapBitWriter.Submit();
                     _ioQueue.SignalFence( _mapWriteFence, bucket );
                     _ioQueue.CommitCommands();
                 }
@@ -286,7 +286,7 @@ public:
             
             const uint32 bucketBits   = Info::BucketBits;
             const uint32 bucketShift  = _k - bucketBits;
-            const uint32 bitSize      = Info::MapBitSize + Info::MapBitSize - bucketBits;
+            const uint32 bitSize      = Info::MapBitSize + _k - bucketBits;
             const uint32 encodeShift  = Info::MapBitSize;
 
             const uint32 numBuckets   = _numBuckets + 1;
@@ -791,6 +791,8 @@ public:
             }
         }
 
+        // Submit any left-over map bits
+        _mapBitWriter.SubmitLeftOvers();
 
         // Seek back to the begining of the C1 table and
         // write C1 and C2 buffers to file, then seek back to the end of the C3 table
@@ -1119,10 +1121,9 @@ private:
     uint32  _threadCount;
     uint64* _sharedTotalBitCounts = nullptr;  // Total bucket bit sizes when writing Fx across all threads
 
-    BitBucketWriter<_numBuckets>   _fxBitWriter;
-    BitBucketWriter<1>             _pairBitWriter;
-    BitBucketWriter<_numBuckets+1> _mapBitWriter;
-    BitBucketWriter<1>             _xBitWriter;
+    BitBucketWriter<_numBuckets>    _fxBitWriter;
+    BitBucketWriter<1>              _pairBitWriter;
+    BitBucketWriter<MapBucketCount> _mapBitWriter;
 
     FpCrossBucketInfo _crossBucketInfo;
 };

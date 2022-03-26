@@ -8,6 +8,11 @@
 #include "plotdisk/DiskPairReader.h"
 
 
+//-----------------------------------------------------------
+template<TableId table>
+inline void MarkTableEntries( int64 i, const int64 entryCount, BitField lTable, const BitField rTable,
+                              uint64 lTableOffset, const Pair* pairs, const uint64* map );
+
 // Fence ids used when loading buckets
 struct FenceId
 {
@@ -47,16 +52,6 @@ public:
     template<TableId table>
     inline int32 MarkStep( int32 i, const int32 entryCount, BitField lTable, const BitField rTable,
                            uint64 lTableOffset, const Pairs& pairs, const uint32* map );
-};
-
-struct StripMapJob : MTJob<StripMapJob>
-{
-    uint32        entryCount;
-    const uint64* inMap;
-    uint32*       outKey;
-    uint32*       outMap;
-
-    void Run() override;
 };
 
 //-----------------------------------------------------------
@@ -121,8 +116,9 @@ void DiskPlotPhase2::RunWithBuckets()
     DiskBufferQueue& queue   = *context.ioQueue;
 
     StackAllocator allocator( context.heapBuffer, context.heapSize );
-    ////
-    Fence fence;
+    
+    Fence readFence;
+    Fence bitFieldFence;
     
 
     const uint64 maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
@@ -166,145 +162,152 @@ void DiskPlotPhase2::RunWithBuckets()
     // _mapWriteFence->Signal();
 
     // Mark all tables
-    // FileId lTableFileId = FileId::MARKED_ENTRIES_6;
+    FileId lTableFileId = FileId::MARKED_ENTRIES_6;
 
     for( TableId table = TableId::Table7; table > TableId::Table2; table = table-1 )
     {
+        readFence.Reset( 0 );
+
         const auto timer = TimerBegin();
 
         uint64* lMarkingTable = bitFields[0];
         uint64* rMarkingTable = bitFields[1];
         
         const size_t stackMarker = allocator.Size();
-        DiskPairAndMapReader<_numBuckets> reader( context, fence, table, allocator );
+        DiskPairAndMapReader<_numBuckets> reader( context, context.p2ThreadCount, readFence, table, allocator );
 
         ASSERT( allocator.Size() < context.heapSize );
 
         // Log::Line( "Allocated work heap of %.2lf GiB out of %.2lf GiB.", 
         //     (double)(allocator.Size() + markfieldSize*2 ) BtoGB, (double)context.heapSize BtoGB );
 
-        MarkTable<_numBuckets>( table, reader, lMarkingTable, rMarkingTable );
+        MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
 
-    //     //
-    //     // #TEST
-    //     //
-    //     #if 0
-    //     if( 0 )
-    //     {
-    //         uint32* lPtrBuf = bbcvirtalloc<uint32>( 1ull << _K );
-    //         uint16* rPtrBuf = bbcvirtalloc<uint16>( 1ull << _K );
+        //
+        // #TEST
+        //
+        #if 0
+        if( 0 )
+        {
+            uint32* lPtrBuf = bbcvirtalloc<uint32>( 1ull << _K );
+            uint16* rPtrBuf = bbcvirtalloc<uint16>( 1ull << _K );
 
-    //         byte* rMarkedBuffer = bbcvirtalloc<byte>( 1ull << _K );
-    //         byte* lMarkedBuffer = bbcvirtalloc<byte>( 1ull << _K );
+            byte* rMarkedBuffer = bbcvirtalloc<byte>( 1ull << _K );
+            byte* lMarkedBuffer = bbcvirtalloc<byte>( 1ull << _K );
             
-    //         for( TableId rTable = TableId::Table7; rTable > TableId::Table1; rTable = rTable-1 )
-    //         {
-    //             const TableId lTable = rTable-1;
+            for( TableId rTable = TableId::Table7; rTable > TableId::Table1; rTable = rTable-1 )
+            {
+                const TableId lTable = rTable-1;
 
-    //             const uint64 rEntryCount = context.entryCounts[(int)rTable];
-    //             const uint64 lEntryCount = context.entryCounts[(int)lTable];
+                const uint64 rEntryCount = context.entryCounts[(int)rTable];
+                const uint64 lEntryCount = context.entryCounts[(int)lTable];
 
-    //             // BitField rMarkedEntries( (uint64*)rMarkedBuffer );
-    //             // BitField lMarkedEntries( (uint64*)lMarkedBuffer );
+                // BitField rMarkedEntries( (uint64*)rMarkedBuffer );
+                // BitField lMarkedEntries( (uint64*)lMarkedBuffer );
 
-    //             Log::Line( "Reading R table %u...", rTable+1 );
-    //             {
-    //                 const FileId rTableIdL = TableIdToBackPointerFileId( rTable );
-    //                 const FileId rTableIdR = (FileId)((int)rTableIdL + 1 );
+                Log::Line( "Reading R table %u...", rTable+1 );
+                {
+                    const FileId rTableIdL = TableIdToBackPointerFileId( rTable );
+                    const FileId rTableIdR = (FileId)((int)rTableIdL + 1 );
 
-    //                 Fence fence;
-    //                 queue.ReadFile( rTableIdL, 0, lPtrBuf, sizeof( uint32 ) * rEntryCount );
-    //                 queue.ReadFile( rTableIdR, 0, rPtrBuf, sizeof( uint16 ) * rEntryCount );
-    //                 queue.SignalFence( fence );
-    //                 queue.CommitCommands();
-    //                 fence.Wait();
-    //             }
+                    Fence fence;
+                    queue.ReadFile( rTableIdL, 0, lPtrBuf, sizeof( uint32 ) * rEntryCount );
+                    queue.ReadFile( rTableIdR, 0, rPtrBuf, sizeof( uint16 ) * rEntryCount );
+                    queue.SignalFence( fence );
+                    queue.CommitCommands();
+                    fence.Wait();
+                }
 
 
-    //             uint32* lPtr = lPtrBuf;
-    //             uint16* rPtr = rPtrBuf;
+                uint32* lPtr = lPtrBuf;
+                uint16* rPtr = rPtrBuf;
                 
-    //             uint64 lEntryOffset = 0;
-    //             uint64 rTableOffset = 0;
+                uint64 lEntryOffset = 0;
+                uint64 rTableOffset = 0;
 
-    //             Log::Line( "Marking entries..." );
-    //             for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
-    //             {
-    //                 const uint32 rBucketCount = context.ptrTableBucketCounts[(int)rTable][bucket];
-    //                 const uint32 lBucketCount = context.bucketCounts[(int)lTable][bucket];
+                Log::Line( "Marking entries..." );
+                for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
+                {
+                    const uint32 rBucketCount = context.ptrTableBucketCounts[(int)rTable][bucket];
+                    const uint32 lBucketCount = context.bucketCounts[(int)lTable][bucket];
 
-    //                 for( uint e = 0; e < rBucketCount; e++ )
-    //                 {
-    //                     // #NOTE: The bug is related to this.
-    //                     //        Somehow the entries we get from the R table
-    //                     //        are not filtering properly...
-    //                     //        We tested without this and got the exact same
-    //                     //        results from the reference implementation
-    //                     if( rTable < TableId::Table7 )
-    //                     {
-    //                         const uint64 rIdx = rTableOffset + e;
-    //                         // if( !rMarkedEntries.Get( rIdx ) )
-    //                         if( !rMarkedBuffer[rIdx] )
-    //                             continue;
-    //                     }
+                    for( uint e = 0; e < rBucketCount; e++ )
+                    {
+                        // #NOTE: The bug is related to this.
+                        //        Somehow the entries we get from the R table
+                        //        are not filtering properly...
+                        //        We tested without this and got the exact same
+                        //        results from the reference implementation
+                        if( rTable < TableId::Table7 )
+                        {
+                            const uint64 rIdx = rTableOffset + e;
+                            // if( !rMarkedEntries.Get( rIdx ) )
+                            if( !rMarkedBuffer[rIdx] )
+                                continue;
+                        }
 
-    //                     uint64 l = (uint64)lPtr[e] + lEntryOffset;
-    //                     uint64 r = (uint64)rPtr[e] + l;
+                        uint64 l = (uint64)lPtr[e] + lEntryOffset;
+                        uint64 r = (uint64)rPtr[e] + l;
 
-    //                     ASSERT( l < ( 1ull << _K ) );
-    //                     ASSERT( r < ( 1ull << _K ) );
+                        ASSERT( l < ( 1ull << _K ) );
+                        ASSERT( r < ( 1ull << _K ) );
 
-    //                     lMarkedBuffer[l] = 1;
-    //                     lMarkedBuffer[r] = 1;
-    //                     // lMarkedEntries.Set( l );
-    //                     // lMarkedEntries.Set( r );
-    //                 }
+                        lMarkedBuffer[l] = 1;
+                        lMarkedBuffer[r] = 1;
+                        // lMarkedEntries.Set( l );
+                        // lMarkedEntries.Set( r );
+                    }
 
-    //                 lPtr += rBucketCount;
-    //                 rPtr += rBucketCount;
+                    lPtr += rBucketCount;
+                    rPtr += rBucketCount;
 
-    //                 lEntryOffset += lBucketCount;
-    //                 rTableOffset += context.bucketCounts[(int)rTable][bucket];
-    //             }
+                    lEntryOffset += lBucketCount;
+                    rTableOffset += context.bucketCounts[(int)rTable][bucket];
+                }
 
-    //             uint64 prunedEntryCount = 0;
-    //             Log::Line( "Counting entries." );
-    //             for( uint64 e = 0; e < lEntryCount; e++ )
-    //             {
-    //                 if( lMarkedBuffer[e] )
-    //                     prunedEntryCount++;
-    //                 // if( lMarkedEntries.Get( e ) )
-    //             }
+                uint64 prunedEntryCount = 0;
+                Log::Line( "Counting entries." );
+                for( uint64 e = 0; e < lEntryCount; e++ )
+                {
+                    if( lMarkedBuffer[e] )
+                        prunedEntryCount++;
+                    // if( lMarkedEntries.Get( e ) )
+                }
 
-    //             Log::Line( " %llu/%llu (%.2lf%%)", prunedEntryCount, lEntryCount,
-    //                 ((double)prunedEntryCount / lEntryCount) * 100.0 );
-    //             Log::Line("");
+                Log::Line( " %llu/%llu (%.2lf%%)", prunedEntryCount, lEntryCount,
+                    ((double)prunedEntryCount / lEntryCount) * 100.0 );
+                Log::Line("");
 
-    //             // Swap marking tables and zero-out the left one.
-    //             std::swap( lMarkedBuffer, rMarkedBuffer );
-    //             memset( lMarkedBuffer, 0, 1ull << _K );
-    //         }
-    //     }
-    //     #endif
+                // Swap marking tables and zero-out the left one.
+                std::swap( lMarkedBuffer, rMarkedBuffer );
+                memset( lMarkedBuffer, 0, 1ull << _K );
+            }
+        }
+        #endif
 
-        // // Ensure the last table finished writing to the bitfield
-        // if( table < TableId::Table7 )
-        //     bitFieldFence.Wait( _context.writeWaitTime );
+        // Ensure the last table finished writing to the bitfield
+        Duration writeWaitTime = Duration::zero();
 
-    //     // Submit l marking table for writing
-    //     queue.WriteFile( lTableFileId, 0, lMarkingTable, bitFieldSize );
-    //     queue.SignalFence( bitFieldFence );
-    //     queue.CommitCommands();
+        if( table < TableId::Table7 )
+            bitFieldFence.Wait( writeWaitTime );
 
-    //     // Swap marking tables
-    //     std::swap( bitFields[0], bitFields[1] );
-    //     lTableFileId = (FileId)( (int)lTableFileId - 1 );
+        // Submit l marking table for writing
+        queue.WriteFile( lTableFileId, 0, lMarkingTable, markfieldSize );
+        queue.SignalFence( bitFieldFence );
+        queue.CommitCommands();
+
+        // Swap marking tables
+        std::swap( bitFields[0], bitFields[1] );
+        lTableFileId = (FileId)( (int)lTableFileId - 1 );
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
+        Log::Line( " IO write wait time: %.2lf seconds.", TicksToSeconds( writeWaitTime ) );
+        _context.writeWaitTime += writeWaitTime;
 
         allocator.PopToMarker( stackMarker );
         ASSERT( allocator.Size() == stackMarker );
+
         // Log::Line( " Table %u IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", table,
         //     TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 
@@ -343,425 +346,109 @@ void DiskPlotPhase2::RunWithBuckets()
     // UnpackTableMap( TableId::Table7 );
     // UnpackTableMap( TableId::Table2 );
 
+    
+
     // Log::Line( " Phase 2 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
     //         TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 }
 
 //-----------------------------------------------------------
 template<uint32 _numBuckets>
-void DiskPlotPhase2::MarkTable( TableId table, DiskPairAndMapReader<_numBuckets> reader, uint64* lTableMarks, uint64* rTableMarks )
+void DiskPlotPhase2::MarkTable( const TableId rTable, DiskPairAndMapReader<_numBuckets> reader,
+                                Pair* pairs, uint64* map, uint64* lTableMarks, uint64* rTableMarks )
+{
+    switch( rTable )
+    {
+        case TableId::Table7: MarkTableBuckets<TableId::Table7, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table6: MarkTableBuckets<TableId::Table6, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table5: MarkTableBuckets<TableId::Table5, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table4: MarkTableBuckets<TableId::Table4, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table3: MarkTableBuckets<TableId::Table3, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+    
+        default:
+            ASSERT( 0 );
+            break;
+    }
+}
+//-----------------------------------------------------------
+template<TableId table, uint32 _numBuckets>
+void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader, 
+                                       Pair* pairs, uint64* map, uint64* lTableMarks, uint64* rTableMarks )
 {
     // Load initial bucket
     reader.LoadNextBucket();
 
+    uint64 lTableOffset = 0;
+
     for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
     {
         reader.LoadNextBucket();
+        reader.UnpackBucket( bucket, pairs, map );
 
-        // reader.UnpackBucket()
-        
-    }
-}
-
-//-----------------------------------------------------------
-// void DiskPlotPhase2::MarkTable( TableId table, uint64* lTableMarks, uint64* rTableMarks )
-// {
-//     DiskPlotContext& context = _context;
-//     DiskBufferQueue& queue   = *context.ioQueue;
-
-//     const FileId rMapId       = table < TableId::Table7 ? TableIdToMapFileId( table ) : FileId::None;
-//     const FileId rTableLPtrId = TableIdToBackPointerFileId( table );
-//     const FileId rTableRPtrId = (FileId)((int)rTableLPtrId + 1 );
-
-//     // Seek the table files back to the beginning
-//     queue.SeekFile( rTableLPtrId, 0, 0, SeekOrigin::Begin );
-//     queue.SeekFile( rTableRPtrId, 0, 0, SeekOrigin::Begin );
-//     queue.CommitCommands();
-
-//     if( rMapId != FileId::None )
-//     {
-//         queue.SeekBucket( rMapId, 0, SeekOrigin::Begin );
-//         queue.CommitCommands();
-//     }
-
-//     const uint64 maxEntries          = 1ull << _K;
-//     const uint32 maxEntriesPerBucket = (uint32)( maxEntries / (uint64)BB_DP_BUCKET_COUNT );
-//     const uint64 tableEntryCount     = context.entryCounts[(int)table];
-    
-//     _bucketsLoaded = 0;
-//     _bucketReadFence->Reset( 0 );
-
-//     const uint32 threadCount = context.p2ThreadCount;
-
-//     uint64 lTableEntryOffset     = 0;
-//     uint32 pairBucket            = 0;   // Pair bucket we are processing (may be different than 'bucket' which refers to the map bucket)
-//     uint32 pairBucketEntryOffset = 0;   // Offset in the current pair bucket 
-
-//     for( uint32 bucket = 0; bucket - BB_DP_BUCKET_COUNT; bucket++ )
-//     {
-//         uint32  bucketEntryCount;
-//         uint64* unsortedMapBuffer;
-//         Pairs   pairs;
-
-//         // Load as many buckets as we can in the background
-//         LoadNextBuckets( table, bucket, unsortedMapBuffer, pairs, bucketEntryCount );
-
-//         uint32* map = nullptr;
-//         const uint32 waitFenceId = bucket * FenceId::FenceCount;
-        
-//         if( rMapId != FileId::None )
-//         {
-//             // Wait for the map to finish loading
-//             _bucketReadFence->Wait( FenceId::MapLoaded + waitFenceId, _context.readWaitTime );
-
-//             // Ensure the map buffer isn't being used anymore (we use the tmp map buffer for this)
-//             _mapWriteFence->Wait( _context.writeWaitTime );
-
-//             // Sort the lookup map and strip out the origin index
-//             // const auto stripTimer = TimerBegin();
-//             map = UnpackMap( unsortedMapBuffer, bucketEntryCount, bucket );
-//             // const auto stripElapsed = TimerEnd( stripTimer );
-//             // Log::Line( "  Stripped bucket %u in %.2lf seconds.", bucket, stripElapsed );
-
-//             // Write the map back to disk & release the buffer
-//             queue.ReleaseBuffer( _bucketBuffers[bucket].map );
+        AnonMTJob::Run( *_context.threadPool, _context.p2ThreadCount, [=]( AnonMTJob* self ) { 
             
-//             if( bucket > 0 )
-//                 queue.DeleteFile( rMapId, bucket );
+            BitField lTableMarkedEntries( lTableMarks );
+            BitField rTableMarkedEntries( rTableMarks );
 
-//             queue.WriteFile( rMapId, 0, map, bucketEntryCount * sizeof( uint32 ) );
-//             queue.SignalFence( *_mapWriteFence );
-//             queue.CommitCommands();
-//         }
+            const uint64 bucketEntryCount = _context.ptrTableBucketCounts[(int)table][bucket];
 
-//         // Wait for the pairs to finish loading
-//         _bucketReadFence->Wait( FenceId::PairsLoaded + waitFenceId, _context.readWaitTime );
-
-//         // Mark the entries on this bucket
-//         MTJobRunner<MarkJob> jobs( *context.threadPool );
-
-//         for( uint i = 0; i < threadCount; i++ )
-//         {
-//             MarkJob& job = jobs[i];
-
-//             job.table               = (TableId)table;
-//             job.entryCount          = bucketEntryCount;
-//             job.pairs               = pairs;
-//             job.map                 = map;
-//             job.context             = &context;
-
-//             job.lTableMarkedEntries = lTableMarks;
-//             job.rTableMarkedEntries = rTableMarks;
-
-//             job.lTableOffset        = lTableEntryOffset;
-//             job.pairBucket          = pairBucket;
-//             job.pairBucketOffset    = pairBucketEntryOffset;
-//         }
-
-//         jobs.Run( threadCount );
-
-//         // Release the paiors buffer we just used
-//         ASSERT( _bucketBuffers[bucket].pairs.left < queue.Heap().Heap() + queue.Heap().HeapSize() );
-//         queue.ReleaseBuffer( _bucketBuffers[bucket].pairs.left );
-//         queue.CommitCommands();
-
-//         // Update our offsets
-//         lTableEntryOffset     = jobs[0].lTableOffset;
-//         pairBucket            = jobs[0].pairBucket;
-//         pairBucketEntryOffset = jobs[0].pairBucketOffset;
-//     }
-// }
-
-//-----------------------------------------------------------
-void DiskPlotPhase2::LoadNextBuckets( TableId table, uint32 bucket, uint64*& outMapBuffer, Pairs& outPairsBuffer, uint32& outBucketEntryCount )
-{
-    DiskPlotContext& context = _context;
-    DiskBufferQueue& queue   = *context.ioQueue;
-
-    const FileId rMapId              = table < TableId::Table7 ? TableIdToMapFileId( table ) : FileId::None;
-    const FileId rTableLPtrId        = TableIdToBackPointerFileId( table );
-    const FileId rTableRPtrId        = (FileId)((int)rTableLPtrId + 1 );
-
-    const uint64 maxEntries          = 1ull << _K;
-    const uint32 maxEntriesPerBucket = (uint32)( maxEntries / (uint64)BB_DP_BUCKET_COUNT );
-    const uint64 tableEntryCount     = context.entryCounts[(int)table];
-
-    // Load as many buckets as we're able to
-    const uint32 maxBucketsToLoad = _bucketsLoaded + 2;   // Only load 2 buckets per pass max for now (Need to allow space for map and table writes as well)
-
-    while( _bucketsLoaded < BB_DP_BUCKET_COUNT )
-    {
-        const uint32 bucketToLoadEntryCount = _bucketsLoaded < BB_DP_BUCKET_COUNT - 1 ?
-                                              maxEntriesPerBucket :
-                                              (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
-
-        // #TODO: I think we need to ne loading a different amount for the L table and the R table on the last bucket.
-        // #TODO: Block-align size?
-        // Reserve a buffer to load both a map bucket and the same amount of entries worth of pairs.
-        const size_t mapReadSize  = rMapId != FileId::None ? sizeof( uint64 ) * bucketToLoadEntryCount : 0;
-        const size_t lReadSize    = sizeof( uint32 ) * bucketToLoadEntryCount;
-        const size_t rReadSize    = sizeof( uint16 ) * bucketToLoadEntryCount;
-        const size_t pairReadSize = lReadSize + rReadSize;
-        const size_t totalSize    = mapReadSize + pairReadSize;
-
-        // Break out if a buffer isn't available, and we don't actually require one
-        if( !queue.Heap().CanAllocate( totalSize ) && _bucketsLoaded > bucket )
-            break;
-        
-        PairAndMap& buffer = _bucketBuffers[_bucketsLoaded];  // Store the buffer for the other threads to use
-        ZeroMem( &buffer );
-        
-        if( mapReadSize > 0 )
-            buffer.map = (uint64*)queue.GetBuffer( mapReadSize , true );
-
-        buffer.pairs.left  = (uint32*)queue.GetBuffer( pairReadSize, true );
-        buffer.pairs.right = (uint16*)( buffer.pairs.left + bucketToLoadEntryCount );
-
-        const uint32 loadFenceId = _bucketsLoaded * FenceId::FenceCount;
-
-        if( mapReadSize > 0 )
-        {
-            queue.ReadFile( rMapId, _bucketsLoaded, buffer.map, mapReadSize );
-            queue.SignalFence( *_bucketReadFence, FenceId::MapLoaded + loadFenceId );
-
-            // Seek the file back to origin, and over-write it.
-            // If it's not the origin bucket, then just delete the file, don't need it anymore
-            if( _bucketsLoaded == 0 )
-                queue.SeekFile( rMapId, 0, 0, SeekOrigin::Begin );
-            // else
-            //     queue.DeleteFile( rMapId, _bucketsLoaded );
-        }
-
-        queue.ReadFile( rTableLPtrId, 0, buffer.pairs.left , lReadSize );
-        queue.ReadFile( rTableRPtrId, 0, buffer.pairs.right, rReadSize );
-        queue.SignalFence( *_bucketReadFence, FenceId::PairsLoaded + loadFenceId );
-
-        queue.CommitCommands();
-        _bucketsLoaded++;
-
-        if( _bucketsLoaded >= maxBucketsToLoad )
-            break;
-    }
-
-    {
-        ASSERT( _bucketsLoaded > bucket );
-        
-        const uint32 entryCount = bucket < BB_DP_BUCKET_COUNT - 1 ?
-                                    maxEntriesPerBucket :
-                                    (uint32)( tableEntryCount - maxEntriesPerBucket * ( BB_DP_BUCKET_COUNT - 1 ) ); // Last bucket
-
-        const PairAndMap& buffer = _bucketBuffers[bucket];
-
-        outMapBuffer        = rMapId != FileId::None ? buffer.map : nullptr;
-        outPairsBuffer      = buffer.pairs;
-        outBucketEntryCount = entryCount;
-    }
-}
-
-
-// #TODO: Consolidate this job w/ Phase3 again
-struct UnpackMapJob : MTJob<UnpackMapJob>
-{
-    uint32        bucket;
-    uint32        entryCount;
-    const uint64* mapSrc;
-    uint32*       mapDst;
-
-    //-----------------------------------------------------------
-    static void RunJob( ThreadPool& pool, const uint32 threadCount, const uint32 bucket,
-                        const uint32 entryCount, const uint64* mapSrc, uint32* mapDst )
-    {
-        MTJobRunner<UnpackMapJob> jobs( pool );
-
-        for( uint32 i = 0; i < threadCount; i++ )
-        {
-            auto& job = jobs[i];
-            job.bucket     = bucket;
-            job.entryCount = entryCount;
-            job.mapSrc     = mapSrc;
-            job.mapDst     = mapDst;
-        }
-
-        jobs.Run( threadCount );
-    }
-
-    //-----------------------------------------------------------
-    void Run() override
-    {
-        const uint64 maxEntries         = 1ull << _K ;
-        const uint32 fixedBucketLength  = (uint32)( maxEntries / BB_DP_BUCKET_COUNT );
-        const uint32 bucketOffset       = fixedBucketLength * this->bucket;
-
-
-        const uint32 threadCount = this->JobCount();
-        uint32 entriesPerThread = this->entryCount / threadCount;
-
-        const uint32 offset = entriesPerThread * this->JobId();
-
-        if( this->IsLastThread() )
-            entriesPerThread += this->entryCount - entriesPerThread * threadCount;
-
-        const uint64* mapSrc = this->mapSrc + offset;
-        uint32*       mapDst = this->mapDst;
-
-        // Unpack with the bucket id
-        for( uint32 i = 0; i < entriesPerThread; i++ )
-        {
-            const uint64 m   = mapSrc[i];
-            const uint32 idx = (uint32)m - bucketOffset;
-            
-            ASSERT( idx < this->entryCount );
-
-            mapDst[idx] = (uint32)(m >> 32);
-        }
-    }
-};
-
-//-----------------------------------------------------------
-uint32* DiskPlotPhase2::UnpackMap( uint64* map, uint32 entryCount, const uint32 bucket )
-{
-    auto& context = _context;
-
-    UnpackMapJob::RunJob( 
-            *context.threadPool, context.p2ThreadCount,
-            bucket, entryCount, map, _tmpMap );
-
-    return _tmpMap;
-}
-
-//-----------------------------------------------------------
-void DiskPlotPhase2::UnpackTableMap( TableId table )
-{
-    auto& context = _context;
-    auto& ioQueue = *context.ioQueue;
-
-    Log::Line( "Unpacking table %u's map...", table + 1 );
-    const auto timer = TimerBegin();
-
-    const FileId mapId = TableIdToMapFileId( table );
-
-    const uint64 maxEntries = 1ull << _K;
-
-    uint32 bucketEntryCount = (uint32)( maxEntries / BB_DP_BUCKET_COUNT);
-    uint32 lastBucketCount  = (uint32)( context.entryCounts[(int)table] - bucketEntryCount * (BB_DP_BUCKET_COUNT-1) );
-    
-    size_t bucketSize = bucketEntryCount * sizeof( uint64 );
-
-    // Take some heap space for the tmp stripping buffer
-    // const size_t tmpBucketSize = std::max( bucketEntryCount, lastBucketCount ) * sizeof( uint32);
-    const size_t totalHeapSize = context.heapSize + context.heapSize;
-    
-    byte*   heap      = context.heapBuffer;
-    // uint32* tmpBucket = (uint32*)heap;  
-
-    // Reset our heap to use what remains
-    ioQueue.ResetHeap( totalHeapSize, heap );
-    ioQueue.SeekBucket( mapId, 0, SeekOrigin::Begin );
-    ioQueue.CommitCommands();
-
-    // Load the buckets
-    uint32 maxBucketsToLoadPerIter = 2;
-    uint32 bucketsLoaded           = 1;
-
-    // Load first bucket
-    Fence fence;
-
-    uint64* buckets[BB_DP_BUCKET_COUNT];
-
-    buckets[0] = (uint64*)ioQueue.GetBuffer( bucketSize );
-
-    ioQueue.ReadFile( mapId, 0, buckets[0], bucketSize );
-    ioQueue.SeekFile( mapId, 0, 0, SeekOrigin::Begin );      // Seek back since we will re-write to the first bucket
-    ioQueue.SignalFence( fence, 1 );
-    ioQueue.CommitCommands();
-
-    for( uint32 bucket = 0; bucket < BB_DP_BUCKET_COUNT; bucket++ )
-    {
-        if( bucket == BB_DP_BUCKET_COUNT - 1)
-            bucketEntryCount = lastBucketCount;
-
-        // Obtain a bucket for writing
-        uint32* writeBucket = (uint32*)ioQueue.GetBuffer( bucketEntryCount * sizeof( uint32 ) );
-
-        // Load buckets in the background if we need to
-        if( bucketsLoaded < BB_DP_BUCKET_COUNT )
-        {
-            uint32 bucketsToLoadCount = std::min( BB_DP_BUCKET_COUNT - bucketsLoaded, maxBucketsToLoadPerIter );
-
-            for( uint32 i = 0; i < bucketsToLoadCount; i++ )
+            if( bucket == 0 )
             {
-                const uint32 bucketToLoadEntryCount = bucketsLoaded < BB_DP_BUCKET_COUNT-1 ?
-                                                      bucketEntryCount : lastBucketCount;
+                // Zero-out l marking table
+                const uint64 lTableEntryCount = _context.entryCounts[(int)table];
+                const size_t bitFieldSize     = RoundUpToNextBoundary( (size_t)lTableEntryCount / 8, 8 );  // Round up to 64-bit boundary
 
-                // If we don't currently have a bucket, we need to force to load a bucket now
-                const bool   blockForBuffer   = bucketsLoaded == bucket;
-                const size_t bucketToLoadSize = sizeof( uint64 ) * bucketToLoadEntryCount;
+                size_t count, offset, _;
+                GetThreadOffsets( self, bitFieldSize, count, offset, _ );
 
-                byte* buffer = ioQueue.GetBuffer( bucketToLoadSize, blockForBuffer );
-                if( !buffer )
-                    break;
+                if( count )
+                    memset( ((byte*)lTableMarks) + offset, 0, count );
 
-                ioQueue.ReadFile( mapId, bucketsLoaded, buffer, bucketToLoadSize );
-                ioQueue.SignalFence( fence, bucketsLoaded+1 );
-                ioQueue.DeleteFile( mapId, bucketsLoaded );
-                ioQueue.CommitCommands();
-
-                buckets[bucketsLoaded++] = (uint64*)buffer;
+                self->SyncThreads();
             }
-        }
 
-        // Ensure the bucket has finished loading
-        fence.Wait( bucket + 1, _context.readWaitTime );
+            // Mark entries
+            int64 count, offset, _;
+            GetThreadOffsets( self, (int64)bucketEntryCount, count, offset, _ );
 
-        // Unpack the map to its target position given its origin index
-        uint64* map = buckets[bucket];
+            // We need to do 2 passes to ensure no 2 threads attempt to write to the same field at the same time
+            const int64 firstPassCount = count / 2;
+            
+            MarkTableEntries<table>( offset, firstPassCount, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, pairs, map );
+            self->SyncThreads();
+            MarkTableEntries<table>( offset + firstPassCount, count - firstPassCount, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, pairs, map );
 
-        // const auto jobTimer = TimerBegin();
+        });
 
-        UnpackMapJob::RunJob( 
-            *context.threadPool, context.p2ThreadCount,
-            bucket, bucketEntryCount, map, writeBucket );
-        
-        // const auto jobElapsed = TimerEnd( jobTimer );
-        // Log::Line( " Unpacked bucket %u in %.2lf seconds.", bucket, jobElapsed );
-
-        // Write back to disk
-        ioQueue.ReleaseBuffer( map );
-        ioQueue.WriteFile( mapId, 0, writeBucket, sizeof( uint32 ) * bucketEntryCount );
-        ioQueue.ReleaseBuffer( writeBucket );
-        ioQueue.CommitCommands();
+        lTableOffset += _context.bucketCounts[(int)table-1][bucket];
     }
-
-    // Wait for last write to finish
-    fence.Reset( 0 );
-    ioQueue.SignalFence( fence, 1 );
-    ioQueue.CommitCommands();
-    fence.Wait( 1 );
-    ioQueue.CompletePendingReleases();
-
-    const double elapsed = TimerEnd( timer );
-    Log::Line( "Finished unpacking table %u map in %.2lf seconds.", table + 1, elapsed );
-
 }
 
-
 //-----------------------------------------------------------
-void MarkJob::Run()
+template<TableId table>
+inline void MarkTableEntries( int64 i, const int64 entryCount, BitField lTable, const BitField rTable,
+                              uint64 lTableOffset, const Pair* pairs, const uint64* map )
 {
-    switch( this->table )
+    for( const int64 end = i + entryCount ; i < end; i++ )
     {
-        case TableId::Table7: this->MarkEntries<TableId::Table7>(); return;
-        case TableId::Table6: this->MarkEntries<TableId::Table6>(); return;
-        case TableId::Table5: this->MarkEntries<TableId::Table5>(); return;
-        case TableId::Table4: this->MarkEntries<TableId::Table4>(); return;
-        case TableId::Table3: this->MarkEntries<TableId::Table3>(); return;
+        if constexpr ( table < TableId::Table7 )
+        {
+            const uint64 rTableIdx = map[i];
+            if( !rTable.Get( rTableIdx ) )
+                continue;
+        }
 
-        default:
-            ASSERT( 0 );
-            return;
+        const Pair& pair = pairs[i];
+        
+        const uint64 left  = lTableOffset + pair.left;
+        const uint64 right = lTableOffset + pair.right;
+
+        // #TODO Test with atomic sets so that we can write into the
+        //       mapped index, and not have to do mapped readings when
+        //       reading from the R table here, or in Phase 3.
+        lTable.Set( left  );
+        lTable.Set( right );
     }
-
-    ASSERT( 0 );
 }
 
 //-----------------------------------------------------------
@@ -897,33 +584,5 @@ void MarkJob::MarkEntries()
             this->pairBucketOffset = 0;
         }
     }
-}
-
-//-----------------------------------------------------------
-template<TableId table>
-inline int32 MarkJob::MarkStep( int32 i, const int32 entryCount, BitField lTable, const BitField rTable,
-                                uint64 lTableOffset, const Pairs& pairs, const uint32* map )
-{
-    for( ; i < entryCount; i++ )
-    {
-        if constexpr ( table < TableId::Table7 )
-        {
-            // #TODO: This map needs to support overflow addresses...
-            const uint64 rTableIdx = map[i];
-            if( !rTable.Get( rTableIdx ) )
-                continue;
-        }
-
-        const uint64 left  = lTableOffset + pairs.left [i];
-        const uint64 right = left         + pairs.right[i];
-
-        // #TODO Test with atomic sets so that we can write into the
-        //       mapped index, and not have to do mapped readings when
-        //       reading from the R table here, or in Phase 3.
-        lTable.Set( left  );
-        lTable.Set( right );
-    }
-
-    return i;
 }
 

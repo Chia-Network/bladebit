@@ -21,7 +21,8 @@
 // bucket that continue on to the next bucket. There's around 280-320 entries per group on k32. This should be enough
 #define BB_DP_CROSS_BUCKET_MAX_ENTRIES 768
 
-// #TODO: Increase this, or make the disk queue dynamic. Might need it for buckets = 1024
+// Pretty big right now, but when buckets == 1024 it is needed.
+// Might change it to dynamic.
 #define BB_DISK_QUEUE_MAX_CMDS (4096*8) //1024
 
 // Use at 256 buckets for line points so that
@@ -33,9 +34,9 @@
 /// DEBUG
 ///
 // #define BB_DP_DBG_READ_EXISTING_F1 1
-//#define BB_DP_DBG_VALIDATE_F1   1
+// #define BB_DP_DBG_VALIDATE_F1   1
 // #define BB_DP_DBG_VALIDATE_FX   1
-//#define BB_DP_DBG_VALIDATE_META 1
+// #define BB_DP_DBG_VALIDATE_META 1
 // #define BB_DP_DBG_PROTECT_FP_BUFFERS 1
 
 // #define BB_DP_DBG_DONT_DELETE_TMP_FILES_PHASE 3
@@ -47,12 +48,12 @@
 #define BB_DP_DBG_TEST_DIR      "/mnt/p5510a/disk_dbg/"
 #define BB_DP_DBG_REF_DIR       "/mnt/p5510a/reference/"
 
-#define BB_DP_DBG_SKIP_PHASE_1  1
+// #define BB_DP_DBG_SKIP_PHASE_1  1
 // #define BB_DP_DBG_SKIP_PHASE_2  1
 
 // Skip all of Phase 1 except the C tables writing.
 // #NOTE: BB_DP_DBG_SKIP_PHASE_1 Must be defined
-#define BB_DP_DBG_SKIP_TO_C_TABLES 1
+// #define BB_DP_DBG_SKIP_TO_C_TABLES 1
 
 
 #if _DEBUG

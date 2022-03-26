@@ -25,7 +25,10 @@ private:
     void RunWithBuckets();
 
     template<uint32 _numBuckets>
-    void    MarkTable( TableId table, DiskPairAndMapReader<_numBuckets> reader, uint64* lTableMarks, uint64* rTableMarks );
+    void    MarkTable( const TableId rTable, DiskPairAndMapReader<_numBuckets> reader, Pair* pairs, uint64* map, uint64* lTableMarks, uint64* rTableMarks );
+
+    template<TableId table, uint32 _numBuckets>
+    void    MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader, Pair* pairs, uint64* map, uint64* lTableMarks, uint64* rTableMarks );
 
     // void    MarkTable( TableId table, uint64* lTableMarks, uint64* rTableMarks );
     void    LoadNextBuckets( TableId table, uint32 bucket, uint64*& mapBuffer, Pairs& pairsBuffer, uint32& outBucketEntryCount );

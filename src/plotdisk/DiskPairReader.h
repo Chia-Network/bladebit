@@ -11,11 +11,13 @@ struct DiskMapReader
     static constexpr uint32 _mapBits   = _k + 1 + _k - _savedBits;
 
     //-----------------------------------------------------------
-    DiskMapReader( DiskPlotContext& context, TableId table, IAllocator& allocator )
-        : _context( context )
-        , _table  ( table   )
+    DiskMapReader( DiskPlotContext& context, const uint32 threadCount, const TableId table, IAllocator& allocator )
+        : _context    ( context     )
+        , _table      ( table       )
+        , _threadCount( threadCount )
     {
-        const uint64 maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
+        const uint64 maxKEntries      = ( 1ull << _k );
+        const uint64 maxBucketEntries = maxKEntries / ( _numBuckets - 1 );
         const size_t blockSize        = context.ioQueue->BlockSize( FileId::MAP2 );
         const size_t bufferSize       = CDivT( (size_t)maxBucketEntries * _mapBits, blockSize * 8 ) * blockSize;
 
@@ -28,15 +30,6 @@ struct DiskMapReader
         _unpackdMaps[1] = allocator.CAlloc<uint64>( maxBucketEntries );
 
         ASSERT( _numBuckets == context.numBuckets + 1 );
-        for( uint32 i = 0; i < _numBuckets; i++ )
-            _buffers[i] = _loadBuffers[i & 3]; // i & 3 == i % 4
-
-        memcpy( _bucketCounts, context.bucketCounts[(int)table], sizeof( uint32 ) * ( _numBuckets - 1 ) );
-
-        const uint32 overflowEntries = (uint32)( _context.entryCounts[(int)_table] - (1ull << _k ) );
-        _bucketCounts[_numBuckets-1] =  overflowEntries;
-        _bucketCounts[_numBuckets-2] -= overflowEntries;
-
     }
 
     //-----------------------------------------------------------
@@ -52,14 +45,14 @@ struct DiskMapReader
         const size_t blockSize       = ioQueue.BlockSize( FileId::T1 );
         const size_t blockSizeBits   = blockSize * 8;
 
-        uint64 bucketLength = _bucketCounts[_bucketsLoaded];
+        uint64 bucketLength = GetBucketLength( _bucketsLoaded );
         ASSERT( bucketLength );
 
         // Need to load current bucket?
         if( _bucketEntryOffset == 0 )
         {   
             const size_t loadSize = CDivT( (size_t)bucketLength * _mapBits, blockSizeBits ) * blockSize;
-            ioQueue.ReadFile( mapId, _bucketsLoaded, _buffers[_bucketsLoaded], loadSize );
+            ioQueue.ReadFile( mapId, _bucketsLoaded, GetBucketBuffer( _bucketsLoaded ), loadSize );
         }
 
         _bucketEntryOffset += entryCount;
@@ -73,11 +66,11 @@ struct DiskMapReader
             ASSERT( _bucketsLoaded < _numBuckets );
 
             // Upade bucket length and load the new bucket
-            bucketLength = _bucketCounts[_bucketsLoaded];
+            bucketLength = GetBucketLength( _bucketsLoaded );
             ASSERT( bucketLength );
 
             const size_t loadSize = CDivT( (size_t)bucketLength * _mapBits, blockSizeBits ) * blockSize;
-            ioQueue.ReadFile( mapId, _bucketsLoaded, _buffers[_bucketsLoaded], loadSize );
+            ioQueue.ReadFile( mapId, _bucketsLoaded, GetBucketBuffer( _bucketsLoaded ), loadSize );
         }
     }
 
@@ -86,7 +79,7 @@ struct DiskMapReader
     {
         ASSERT( _bucketsRead < _numBuckets );
 
-        AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
+        AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
 
             uint64  entriesToRead    = entryCount;
             uint64* outWriter        = outMap;
@@ -98,14 +91,14 @@ struct DiskMapReader
                 // Do we need to unpack the buffer first?
                 if( _bucketsUnpacked <= bucketsRead )
                 {
-                    const uint64 bucketLength = _bucketCounts[_bucketsUnpacked];
+                    const uint64 bucketLength = GetBucketLength( _bucketsUnpacked );
                     
                     int64 count, offset, end;
                     GetThreadOffsets( self, (int64)bucketLength, count, offset, end );
                     ASSERT( count > 0 );
 
                     uint64* unpackedMap = _unpackdMaps[_bucketsUnpacked & 1];
-                    BitReader reader( (uint64*)_buffers[_bucketsUnpacked], _mapBits * bucketLength, offset * 8 );
+                    BitReader reader( (uint64*)GetBucketBuffer( _bucketsUnpacked ), _mapBits * bucketLength, offset * 8 );
 
                     const uint32 idxShift     = _k+1;
                     const uint64 finalIdxMask = ( 1ull << idxShift ) - 1;
@@ -129,7 +122,7 @@ struct DiskMapReader
                         self->WaitForRelease();
                 }
 
-                const uint64  bucketLength = _bucketCounts[bucketsRead];
+                const uint64  bucketLength = GetBucketLength( bucketsRead );
                 const uint64  readCount    = std::min( bucketLength - readBucketOffset, entriesToRead );
 
                 const uint64* readMap = _unpackdMaps[bucketsRead & 1];
@@ -154,15 +147,49 @@ struct DiskMapReader
 
             if( self->IsControlThread() )
             {
+                self->LockThreads();
                 _bucketReadOffset = readBucketOffset;
                 _bucketsRead      = bucketsRead;
+                self->ReleaseThreads();
             }
+            else
+                self->WaitForRelease();
         });
+    }
+
+private:
+
+    //-----------------------------------------------------------
+    inline uint64 GetBucketLength( const uint32 bucket )
+    {
+        const uint64 maxKEntries      = ( 1ull << _k );
+        const uint64 maxBucketEntries = maxKEntries / ( _numBuckets - 1 );
+
+        // All buckets before the 2 last buckets have the same entry count which is 2^k / (numBuckets-1)
+        // -1 bucket because we have an extra bucket here that is used for overflow entries.
+        if( bucket < _numBuckets - 2 )
+            return maxBucketEntries;
+
+        // Here 2 things can happen:
+        //  1. We have <= 2^k entries so the penultimate bucket will have <= maxBucketEntries.
+        //  2. We have > 2^k entries so the penultimate bucket has maxBucketEntries and the overflow bucket has tableEntryCount - 2^k
+        const uint64 tableEntryCount = _context.entryCounts[(int)_table];
+
+        return tableEntryCount <= maxKEntries ?
+                maxBucketEntries - ( maxKEntries - tableEntryCount ):
+                tableEntryCount - maxKEntries;
+    }
+
+    //-----------------------------------------------------------
+    inline void* GetBucketBuffer( const uint32 bucket )
+    {
+        return _loadBuffers[bucket & 3];
     }
 
 private:
     DiskPlotContext& _context;
     TableId          _table;
+    uint32           _threadCount       = 0;
     uint32           _bucketsLoaded     = 0;
     uint32           _bucketsRead       = 0;
     uint32           _bucketsUnpacked   = 0;
@@ -170,12 +197,7 @@ private:
     uint64           _bucketReadOffset  = 0;     // Entries that have actually bean read/unpacked in a bucket
 
     uint64*          _unpackdMaps[2];
-    void*            _loadBuffers[4];            // We only actually use 4 buffers for loading. We do double-buffering,
-                                                 // but since a single load may go across bucket boundaries, we need 4.
-    void*            _buffers[_numBuckets];      // Keeps track of the buffers used when a particular bucket was loaded
-
-    uint32           _bucketCounts[_numBuckets]; // We copy the bucket counts because maps have 1 more bucket for
-                                                 // overflow entries.
+    void*            _loadBuffers[4];            // We do double-buffering, but since a single load may go across bucket boundaries, we need 4.
 };
 
 
@@ -191,11 +213,12 @@ struct DiskPairAndMapReader
     static constexpr uint32 _pairBits  = _k + 1 - _savedBits + 9;
 
     //-----------------------------------------------------------
-    DiskPairAndMapReader( DiskPlotContext& context, Fence& fence, const TableId table, IAllocator& allocator )
-        : _context  ( context )
-        , _fence    ( fence   )
-        , _table    ( table   )
-        , _mapReader( context, table, allocator )
+    DiskPairAndMapReader( DiskPlotContext& context, const uint32 threadCount, Fence& fence, const TableId table, IAllocator& allocator )
+        : _context    ( context )
+        , _fence      ( fence   )
+        , _table      ( table   )
+        , _threadCount( threadCount )
+        , _mapReader( context, threadCount, table, allocator )
     {
         DiskBufferQueue& ioQueue = *_context.ioQueue;
 
@@ -282,7 +305,7 @@ struct DiskPairAndMapReader
         
         const int64 bucketLength = (int64)_context.ptrTableBucketCounts[(int)_table][bucket];
 
-        AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
+        AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
             
 
             int64 count, offset, end;
@@ -319,6 +342,7 @@ private:
     uint64           _pairBucketLoadSize[_numBuckets];
 
     TableId          _table;
+    uint32           _threadCount;
     uint32           _bucketsLoaded = 0;
     uint64           _entriesLoaded = 0;
 };
