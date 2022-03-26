@@ -74,6 +74,7 @@ public:
         StackAllocator alloc( _context.heapBuffer, _context.heapSize );
         AllocateBuffers( alloc, _context.tmp2BlockSize, _context.tmp1BlockSize );
 
+        _mapBitWriter.SetFileId( FileId::MAP7 );
         WriteCTables();
     }
 
@@ -643,11 +644,8 @@ public:
         uint32* c1Buffer = (uint32*)_meta[1];
         uint32* c2Buffer = c1Buffer + c1TotalEntries;
 
-        // A prefix region to keep overflowed c3 park entries for the next park
-        const size_t c3ParkOverflowSize = sizeof( uint32 ) * kCheckpoint1Interval;
-
-        uint32 c3ParkOverflowCount = 0; // Overflow entries from a bucket that did not make it into a C3 park this bucket. Saved for the next bucket.
-        uint32 c3ParkOverflow[kCheckpoint1Interval];
+        uint32 c3ParkOverflowCount = 0;                 // Overflow entries from a bucket that did not make it into a C3 park this bucket. Saved for the next bucket.
+        uint32 c3ParkOverflow[kCheckpoint1Interval];    // They are then copied to a "prefix region" in the f7 buffer of the next park.
 
         size_t c3TableSizeBytes = 0; // Total size of the C3 table
 
@@ -671,8 +669,7 @@ public:
 
             const uint32 bucketLength  = (int64)_context.bucketCounts[(int)TableId::Table7][bucket];
             const byte*  packedEntries = GetReadBufferForBucket( bucket );
-            
-            
+
             uint32* f7 = ((uint32*)_y[0]) + kCheckpoint1Interval;
 
             using T7Entry = FpEntry<TableId::Table7>;
@@ -787,13 +784,48 @@ public:
 
                 c3TableSizeBytes += sizeWritten;
 
-
                 // Write the C3 table to the plot file directly
                 _ioQueue.WriteFile( FileId::PLOT, 0, c3Buffer, c3BufferSize );
                 _ioQueue.SignalFence( _writeFence, bucket );
                 _ioQueue.CommitCommands();
             }
         }
+
+
+        // Seek back to the begining of the C1 table and
+        // write C1 and C2 buffers to file, then seek back to the end of the C3 table
+
+        c1Buffer[c1TotalEntries-1] = 0;          // Chiapos adds a trailing 0
+        c2Buffer[c2TotalEntries-1] = 0xFFFFFFFF; // C2 overflow protection
+
+        _readFence.Reset( 0 );
+
+        _ioQueue.SeekBucket( FileId::PLOT, -(int64)( c1TableSizeBytes + c2TableSizeBytes + c3TableSizeBytes ), SeekOrigin::Current );
+        _ioQueue.WriteFile( FileId::PLOT, 0, c1Buffer, c1TableSizeBytes );
+        _ioQueue.WriteFile( FileId::PLOT, 0, c2Buffer, c2TableSizeBytes );
+        _ioQueue.ReleaseBuffer( c1Buffer );
+        _ioQueue.ReleaseBuffer( c2Buffer );
+        _ioQueue.SeekBucket( FileId::PLOT, (int64)c3TableSizeBytes, SeekOrigin::Current );
+
+        _ioQueue.SignalFence( _readFence );
+        _ioQueue.CommitCommands();
+
+        // Save C table addresses into the plot context.
+        // And set the starting address for the table 1 to be written
+        const size_t headerSize = _ioQueue.PlotHeaderSize();
+
+        _context.plotTablePointers[7] = headerSize;                                       // C1
+        _context.plotTablePointers[8] = _context.plotTablePointers[7] + c1TableSizeBytes; // C2
+        _context.plotTablePointers[9] = _context.plotTablePointers[8] + c2TableSizeBytes; // C3
+        _context.plotTablePointers[0] = _context.plotTablePointers[9] + c3TableSizeBytes; // T1
+
+        // Save sizes
+        _context.plotTableSizes[7] = c1TableSizeBytes;
+        _context.plotTableSizes[8] = c2TableSizeBytes;
+        _context.plotTableSizes[9] = c3TableSizeBytes;
+
+        // Wait for all commands to finish
+        _readFence.Wait( _readWaitTime );
     }
 
     //-----------------------------------------------------------

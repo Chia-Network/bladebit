@@ -46,6 +46,9 @@ public:
     // }
 
     //-----------------------------------------------------------
+    inline void SetFileId( const FileId id ) { _fileId = id; }
+
+    //-----------------------------------------------------------
     inline void BeginWriteBuckets( const uint64 bucketBitSizes[_numBuckets] )
     {
         const size_t fsBlockSize     = _queue->BlockSize( _fileId );
