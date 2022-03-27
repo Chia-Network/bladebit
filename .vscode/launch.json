@@ -74,8 +74,8 @@
                 "diskplot",
                 "-t", "/mnt/p5510a/disk_tmp",
                 "--f1-threads", "28",
-                // "--fp-threads", "62",
-                "--fp-threads", "48",
+                "--fp-threads", "62",
+                // "--fp-threads", "48",
 
                 // "--cache", "200G",
                 // "--cache", "96G",

@@ -185,13 +185,13 @@ void DiskPlotPhase2::RunWithBuckets()
         // Log::Line( "Allocated work heap of %.2lf GiB out of %.2lf GiB.", 
         //     (double)(allocator.Size() + markfieldSize*2 ) BtoGB, (double)context.heapSize BtoGB );
 
-        MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
+        // MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
 
         //
         // #TEST
         //
         // #if 0
-        if( 0 )
+        // if( 0 )
         {
             // Debug::ValidatePairs<_numBuckets>( _context, TableId::Table7 );
 
@@ -204,6 +204,9 @@ void DiskPlotPhase2::RunWithBuckets()
             Pair*   pairRefTmp    = bbcvirtalloc<Pair>( 1ull << _K );
 
             uint64* rMap          = bbcvirtalloc<uint64>( maxEntries );
+
+            uint32* refMap        = bbcvirtalloc<uint32>( maxEntries );
+            void*   block         = bbvirtalloc( blockSize );
 
 
             for( TableId rTable = TableId::Table7; rTable > TableId::Table2; rTable = rTable-1 )
@@ -312,18 +315,42 @@ void DiskPlotPhase2::RunWithBuckets()
                         mapReader += length;
                     }
                 }
+
+                // Load reference map
+                // {
+                //     char path[1024];
+                //     sprintf( path, "/mnt/p5510a/reference/maps/table_%d_map_0.tmp", (int)rTable+1 );
+                //     Log::Line( " Loading reference map '%s'.", path );
+
+                //     FileStream mapFile;
+                //     FatalIf( !mapFile.Open( path, FileMode::Open, FileAccess::Read, FileFlags::LargeFile ), "Failed to open file." );
+
+                //     int err;
+                //     FatalIf( !IOJob::ReadFromFile( mapFile, refMap, rEntryCount * sizeof( uint32 ), block, blockSize, err ),
+                //         "Failed to read reference map with error %d", err );
+
+                //     AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
+                        
+                //         uint64 count, offset, end;
+                //         GetThreadOffsets( self, rEntryCount, count, offset, end );
+
+                //         // for( uint64 i = offset; i < end; i++ )
+                //         //     ASSERT( rMap[i] == refMap[i] );
+                //     });
+                // }
  
                 uint64 refEntryCount = 0;
                 {
                     char path[1024];
                     sprintf( path, "%sp1.t%d.tmp", BB_DP_DBG_REF_DIR, (int)rTable+1 );
-                    Log::Line( " Loading reference table '%s'.", path );
+                    Log::Line( " Loading reference pairs '%s'.", path );
 
-                    FatalIf( !Debug::LoadRefTable( path, pairRef, refEntryCount ), "Failed to load reference table." );
+                    FatalIf( !Debug::LoadRefTable( path, pairRef, refEntryCount ), "Failed to load reference pairs." );
 
                     ASSERT( refEntryCount == rEntryCount );
                     RadixSort256::Sort<BB_DP_MAX_JOBS,uint64,4>( *_context.threadPool, (uint64*)pairRef, (uint64*)pairRefTmp, refEntryCount );
                 }
+                ASSERT( refEntryCount == rEntryCount );
 
                 const Pair* pairPtr = pairBuf;
                 
@@ -366,7 +393,7 @@ void DiskPlotPhase2::RunWithBuckets()
                     pairPtr += rBucketCount;
 
                     lEntryOffset += lBucketCount;
-                    rTableOffset += context.bucketCounts[(int)rTable][bucket];
+                    rTableOffset += rBucketCount;// context.bucketCounts[(int)rTable][bucket];
                 }
 
                 uint64 prunedEntryCount = 0;

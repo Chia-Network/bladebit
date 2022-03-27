@@ -288,7 +288,7 @@ void DiskPlotPhase1::ForwardPropagate()
                 Fatal( "Invalid table." );
                 break;
         }
-        Log::Line( "Completed table %u in %.2lf seconds.", table+1, TimerEnd( timer ) );
+        Log::Line( "Completed table %u in %.2lf seconds with %.llu entries.", table+1, TimerEnd( timer ), _cx.entryCounts[(int)table] );
         Log::Line( "Table IO wait time: Read: %.2lf s | Write: %.2lf.", 
                     TicksToSeconds( _tableReadWaitTime ), TicksToSeconds( _tableWriteWaitTime ) );
 
@@ -328,7 +328,6 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
     _cx.readWaitTime   += _tableReadWaitTime;
     _cx.writeWaitTime  += _tableWriteWaitTime;
 
-    Debug::ValidatePairs<256>( _cx, table );
 
     #if BB_DP_DBG_VALIDATE_FX
         #if !_DEBUG
@@ -338,6 +337,7 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
         using TYOut = typename DiskFp<table, _numBuckets>::TYOut;
         Debug::ValidateYForTable<table, _numBuckets, TYOut>( _fxOut, *_cx.ioQueue, *_cx.threadPool, _cx.bucketCounts[(int)table] );
     #endif
+        Debug::ValidatePairs<256>( _cx, table );
 }
 
 //-----------------------------------------------------------

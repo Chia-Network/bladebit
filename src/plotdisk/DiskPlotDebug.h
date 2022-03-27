@@ -358,30 +358,40 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
 
     Log::Line( "Comparing pairs." );
 
-    uint32 b           = 0;
-    uint64 bucketStart = 0;
-    uint32 bucketEnd   = context.ptrTableBucketCounts[(int)table][b];
-    uint64 lOffset     = 0;
+    // uint32 b           = 0;
+    // uint64 bucketStart = 0;
+    // uint32 bucketEnd   = context.ptrTableBucketCounts[(int)table][b];
+    // uint64 lOffset     = 0;
 
-    const uint64 count = std::min( refCount, pairCount );
-    for( uint64 i = 0; i < count; i++ )
-    {
-        const Pair p = pairs   [i];
-        const Pair r = refPairs[i];
+    ASSERT( refCount == pairCount );
+    const uint64 entryCount = std::min( refCount, pairCount );
 
-        if( *(uint64*)&p != *(uint64*)&r )
-            ASSERT( 0 );
+    AnonMTJob::Run( pool, [=]( AnonMTJob* self ) {
 
-        if( i == bucketEnd )
+        uint64 count, offset, end;
+        GetThreadOffsets( self, entryCount, count, offset, end );
+
+        for( uint64 i = offset; i < end; i++ )
         {
-            lOffset     += context.bucketCounts[(int)table][b];
-            bucketStart = bucketEnd;
-            bucketEnd   += context.ptrTableBucketCounts[(int)table][++b];
+            const Pair p = pairs   [i];
+            const Pair r = refPairs[i];
+
+            if( *(uint64*)&p != *(uint64*)&r )
+                ASSERT( 0 );
+
+            // if( i == bucketEnd )
+            // {
+            //     lOffset     += context.bucketCounts[(int)table][b];
+            //     bucketStart = bucketEnd;
+            //     bucketEnd   += context.ptrTableBucketCounts[(int)table][++b];
+            // }
         }
-    }
+    });
+
     
     Log::Line( "OK" );
     bbvirtfree( refPairs );
-    bbvirtfree( pairs );
+    bbvirtfree( pairs    );
+    bbvirtfree( tmpPairs );
 }
 

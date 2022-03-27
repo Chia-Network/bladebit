@@ -231,6 +231,7 @@ public:
         _context.ptrTableBucketCounts[(int)table][bucket] += (uint64)outEntryCount;
 
         _tableEntryCount += writeEntrtyCount;
+        _mapOffset       += (uint64)inEntryCount;
         _crossBucketInfo.matchCount  = 0;
     }
 
@@ -247,7 +248,7 @@ public:
             if( bucket > 1 )
                 _mapWriteFence.Wait( bucket - 2, _writeWaitTime );
 
-             AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
+            AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
 
                 int64 count, offset, end;
                 GetThreadOffsets( self, entryCount, count, offset, end );
@@ -309,8 +310,8 @@ public:
 
             self->CalculatePrefixSum( numBuckets, counts, pfxSum, totalCounts );
 
-            // Convert map entries from source inded to reverse map
-            const uint64 tableOffset = (uint64)( _tableEntryCount + offset );
+            // Convert map entries from source index to reverse map
+            const uint64 tableOffset = _mapOffset + (uint64)offset;
 
             const uint64* reverseMap    = map + offset;
                   uint64* outMapBuckets = outMap; 
@@ -323,8 +324,7 @@ public:
                 const uint32 dstIdx = --pfxSum[b];
                 ASSERT( (int64)dstIdx < entryCount );
 
-                const uint64 finalIdx = (uint64)(tableOffset + i);
-
+                const uint64 finalIdx = tableOffset + (uint64)i;
                 ASSERT( finalIdx < ( 1ull << encodeShift ) );
 
                 outMapBuckets[dstIdx] = (origin << encodeShift) | finalIdx;
@@ -1100,6 +1100,7 @@ private:
     Fence            _crossBucketFence;
 
     int64            _tableEntryCount = 0;  // Current table entry count
+    uint64           _mapOffset       = 0;  // Offset for writing the map entries
 
     Duration         _readWaitTime    = Duration::zero();
     Duration         _writeWaitTime   = Duration::zero();
