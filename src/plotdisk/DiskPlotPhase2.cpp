@@ -185,27 +185,28 @@ void DiskPlotPhase2::RunWithBuckets()
         // Log::Line( "Allocated work heap of %.2lf GiB out of %.2lf GiB.", 
         //     (double)(allocator.Size() + markfieldSize*2 ) BtoGB, (double)context.heapSize BtoGB );
 
-        // MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
+        MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
 
         //
         // #TEST
         //
         // #if 0
-        // if( 0 )
+        if( 0 )
         {
             // Debug::ValidatePairs<_numBuckets>( _context, TableId::Table7 );
 
+            uint64* readbuffer    = bbcvirtalloc<uint64>( maxEntries*2 );
             Pair*   pairBuf       = bbcvirtalloc<Pair>( maxEntries );
-            uint64* pairReadBuf   = bbcvirtalloc<uint64>( maxEntries );
             byte*   rMarkedBuffer = bbcvirtalloc<byte>( maxEntries );
             byte*   lMarkedBuffer = bbcvirtalloc<byte>( maxEntries );
 
             Pair*   pairRef       = bbcvirtalloc<Pair>( 1ull << _K );
             Pair*   pairRefTmp    = bbcvirtalloc<Pair>( 1ull << _K );
 
-            
-            
-            for( TableId rTable = TableId::Table7; rTable > TableId::Table1; rTable = rTable-1 )
+            uint64* rMap          = bbcvirtalloc<uint64>( maxEntries );
+
+
+            for( TableId rTable = TableId::Table7; rTable > TableId::Table2; rTable = rTable-1 )
             {
                 const TableId lTable = rTable-1;
 
@@ -224,7 +225,7 @@ void DiskPlotPhase2::RunWithBuckets()
                     const FileId rTableId     = FileId::T1 + (FileId)rTable;
 
                     Fence fence;
-                    queue.ReadFile( rTableId, 0, pairReadBuf, pairReadSize );
+                    queue.ReadFile( rTableId, 0, readbuffer, pairReadSize );
                     queue.SignalFence( fence );
                     queue.CommitCommands();
                     fence.Wait();
@@ -234,7 +235,7 @@ void DiskPlotPhase2::RunWithBuckets()
                         uint64 count, offset, end;
                         GetThreadOffsets( self, rEntryCount, count, offset, end );
 
-                        BitReader reader( pairReadBuf, rEntryCount * pairBits, offset * pairBits );
+                        BitReader reader( readbuffer, rEntryCount * pairBits, offset * pairBits );
                         const uint32 lBits  = _K - savedBits + 1;
                         const uint32 rBits  = 9;
                         for( uint64 i = offset; i < end; i++ )
@@ -246,6 +247,72 @@ void DiskPlotPhase2::RunWithBuckets()
                     });
                 }
 
+                if( rTable < TableId::Table7 )
+                {
+                    Log::Line( "Reading R map" );
+                    const uint32 _k              = _K;
+                    const uint32 _savedBits      = bblog2( _numBuckets );
+                    const uint32 _mapBits        = _k + 1 + _k - _savedBits;
+
+                    const FileId mapId           = FileId::MAP2 + (FileId)rTable - 1;
+
+                    const uint64 kEntryCount     = ( 1ull << _K );
+                    const uint64 bucketLength    = kEntryCount / _numBuckets;
+
+                    // Last, non-overflow bucket
+                    const uint64 lastBucketLength = rEntryCount > kEntryCount ? 
+                                 bucketLength : bucketLength - ( kEntryCount - rEntryCount );
+                    
+                    // Overflow bucket
+                    const uint64 overflowBucketLength = rEntryCount > kEntryCount ? rEntryCount - kEntryCount : 0;
+
+                    Fence fence;
+                    queue.SeekBucket( mapId, 0, SeekOrigin::Begin );
+                    queue.CommitCommands();
+
+                    uint64* mapReader = rMap;
+                    for( uint32 b = 0; b <= _numBuckets; b++ )
+                    {
+                        const uint64 length = b < _numBuckets - 1 ? bucketLength :
+                                              b < _numBuckets     ? lastBucketLength : overflowBucketLength;
+
+                        if( length < 1 )
+                            break;
+                        const size_t bucketReadSize = RoundUpToNextBoundary( length * _mapBits, (int)blockSize * 8 ) / 8;
+                        
+                        queue.ReadFile( mapId, b, readbuffer, bucketReadSize );
+                        queue.SignalFence( fence );
+                        queue.CommitCommands();
+                        fence.Wait();
+
+                        AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
+
+                            int64 count, offset, end;
+                            GetThreadOffsets( self, (int64)length, count, offset, end );
+                            ASSERT( count > 0 );
+
+                            BitReader reader( (uint64*)readbuffer, _mapBits * length, offset * _mapBits );
+                            
+                            const uint32 idxShift     = _k+1;
+                            const uint64 finalIdxMask = ( 1ull << idxShift ) - 1;
+                            for( int64 i = offset; i < end; i++ )
+                            {
+                                const uint64 packedMap = reader.ReadBits64( (uint32)_mapBits );
+                                const uint64 map       = packedMap & finalIdxMask;
+                                const uint32 dstIdx    = (uint32)( packedMap >> idxShift );
+                                ASSERT( dstIdx < length );
+
+                                mapReader[dstIdx] = map;
+                                // mapReader[dstIdx] = dstIdx;
+                            }
+                        });
+                        // for( uint64 i = 1; i < length; i++ )
+                        //     ASSERT( mapReader[i] == mapReader[i-1]+1 );
+
+                        mapReader += length;
+                    }
+                }
+ 
                 uint64 refEntryCount = 0;
                 {
                     char path[1024];
@@ -278,7 +345,7 @@ void DiskPlotPhase2::RunWithBuckets()
                         //        results from the reference implementation
                         if( rTable < TableId::Table7 )
                         {
-                            const uint64 rIdx = rTableOffset + e;
+                            const uint64 rIdx = rMap[rTableOffset + e];
                             // if( !rMarkedEntries.Get( rIdx ) )
                             if( !rMarkedBuffer[rIdx] )
                                 continue;

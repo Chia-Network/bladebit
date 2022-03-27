@@ -3,11 +3,13 @@
 #include "plotdisk/DiskPlotContext.h"
 #include "util/StackAllocator.h"
 
+/// #NOTE: We actually have _numBuckets+1 because there's an
+//         implicit overflow bucket that may contain entries.
 template<uint32 _numBuckets>
 struct DiskMapReader
 {
     static constexpr uint32 _k         = _K;
-    static constexpr uint32 _savedBits = bblog2( _numBuckets - 1 );
+    static constexpr uint32 _savedBits = bblog2( _numBuckets );
     static constexpr uint32 _mapBits   = _k + 1 + _k - _savedBits;
 
     //-----------------------------------------------------------
@@ -17,7 +19,7 @@ struct DiskMapReader
         , _threadCount( threadCount )
     {
         const uint64 maxKEntries      = ( 1ull << _k );
-        const uint64 maxBucketEntries = maxKEntries / ( _numBuckets - 1 );
+        const uint64 maxBucketEntries = maxKEntries / _numBuckets;
         const size_t blockSize        = context.ioQueue->BlockSize( FileId::MAP2 );
         const size_t bufferSize       = CDivT( (size_t)maxBucketEntries * _mapBits, blockSize * 8 ) * blockSize;
 
@@ -29,7 +31,7 @@ struct DiskMapReader
         _unpackdMaps[0] = allocator.CAlloc<uint64>( maxBucketEntries );
         _unpackdMaps[1] = allocator.CAlloc<uint64>( maxBucketEntries );
 
-        ASSERT( _numBuckets == context.numBuckets + 1 );
+        ASSERT( _numBuckets == context.numBuckets );
     }
 
     //-----------------------------------------------------------
@@ -63,7 +65,7 @@ struct DiskMapReader
         {
             _bucketEntryOffset -= bucketLength;
             _bucketsLoaded++;
-            ASSERT( _bucketsLoaded < _numBuckets );
+            ASSERT( _bucketsLoaded <= _numBuckets );
 
             // Upade bucket length and load the new bucket
             bucketLength = GetBucketLength( _bucketsLoaded );
@@ -98,7 +100,7 @@ struct DiskMapReader
                     ASSERT( count > 0 );
 
                     uint64* unpackedMap = _unpackdMaps[_bucketsUnpacked & 1];
-                    BitReader reader( (uint64*)GetBucketBuffer( _bucketsUnpacked ), _mapBits * bucketLength, offset * 8 );
+                    BitReader reader( (uint64*)GetBucketBuffer( _bucketsUnpacked ), _mapBits * bucketLength, offset * _mapBits );
 
                     const uint32 idxShift     = _k+1;
                     const uint64 finalIdxMask = ( 1ull << idxShift ) - 1;
@@ -125,7 +127,7 @@ struct DiskMapReader
                 const uint64  bucketLength = GetBucketLength( bucketsRead );
                 const uint64  readCount    = std::min( bucketLength - readBucketOffset, entriesToRead );
 
-                const uint64* readMap = _unpackdMaps[bucketsRead & 1];
+                const uint64* readMap      = _unpackdMaps[bucketsRead & 1];
 
                 // Simply copy the unpacked map to the destination buffer
                 uint64 count, offset, end;
@@ -163,21 +165,22 @@ private:
     inline uint64 GetBucketLength( const uint32 bucket )
     {
         const uint64 maxKEntries      = ( 1ull << _k );
-        const uint64 maxBucketEntries = maxKEntries / ( _numBuckets - 1 );
+        const uint64 maxBucketEntries = maxKEntries / _numBuckets;
 
-        // All buckets before the 2 last buckets have the same entry count which is 2^k / (numBuckets-1)
-        // -1 bucket because we have an extra bucket here that is used for overflow entries.
-        if( bucket < _numBuckets - 2 )
+        // All buckets before the last bucket (and before the overflow bucket) have the same entry count which is 2^k / numBuckets
+        if( bucket < _numBuckets - 1 )
             return maxBucketEntries;
-
-        // Here 2 things can happen:
-        //  1. We have <= 2^k entries so the penultimate bucket will have <= maxBucketEntries.
-        //  2. We have > 2^k entries so the penultimate bucket has maxBucketEntries and the overflow bucket has tableEntryCount - 2^k
+        
         const uint64 tableEntryCount = _context.entryCounts[(int)_table];
 
-        return tableEntryCount <= maxKEntries ?
-                maxBucketEntries - ( maxKEntries - tableEntryCount ):
-                tableEntryCount - maxKEntries;
+        // Last, non-overflow bucket?
+        if( bucket == _numBuckets - 1 )
+            return tableEntryCount > maxKEntries ? 
+                     maxBucketEntries :
+                     maxBucketEntries - ( maxKEntries - tableEntryCount );
+        
+        // Last bucket
+        return tableEntryCount > maxKEntries ? tableEntryCount - maxKEntries : 0;
     }
 
     //-----------------------------------------------------------
@@ -335,7 +338,7 @@ private:
     DiskPlotContext& _context;
     Fence&           _fence;
 
-    DiskMapReader<_numBuckets+1> _mapReader;
+    DiskMapReader<_numBuckets> _mapReader;
 
     void*            _pairBuffers       [2];
     uint32           _pairOverflowBits  [_numBuckets];
