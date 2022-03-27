@@ -84,7 +84,7 @@
 
                 // "--c-threads" , "18",
                 // "--p2-threads", "1",
-                "--p2-threads", "24",
+                "--p2-threads", "32",
                 // "--p3-threads", "10",
                 // "--f1", "256MB",
                 // "--fx", "256MB",
