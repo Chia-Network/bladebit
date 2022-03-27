@@ -17,46 +17,6 @@ template<TableId table>
 inline void MarkTableEntries( int64 i, const int64 entryCount, BitField lTable, const BitField rTable,
                               uint64 lTableOffset, const Pair* pairs, const uint64* map );
 
-// Fence ids used when loading buckets
-struct FenceId
-{
-    enum
-    {
-        None = 0,
-        MapLoaded,
-        PairsLoaded,
-
-        FenceCount
-    };
-};
-
-struct MarkJob : MTJob<MarkJob>
-{
-    TableId          table;
-    uint32           entryCount;
-    Pairs            pairs;
-    const uint32*    map;
-
-    DiskPlotContext* context;
-
-    uint64*          lTableMarkedEntries;
-    uint64*          rTableMarkedEntries;
-
-    uint64           lTableOffset;
-    uint32           pairBucket;
-    uint32           pairBucketOffset;
-
-
-public:
-    void Run() override;
-
-    template<TableId table>
-    void MarkEntries();
-
-    template<TableId table>
-    inline int32 MarkStep( int32 i, const int32 entryCount, BitField lTable, const BitField rTable,
-                           uint64 lTableOffset, const Pairs& pairs, const uint32* map );
-};
 
 //-----------------------------------------------------------
 DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
@@ -178,20 +138,20 @@ void DiskPlotPhase2::RunWithBuckets()
         const auto timer = TimerBegin();
         
         const size_t stackMarker = allocator.Size();
-        DiskPairAndMapReader<_numBuckets> reader( context, context.p2ThreadCount, readFence, table, allocator );
+        DiskPairAndMapReader<_numBuckets> reader( context, context.p2ThreadCount, readFence, table, allocator, table == TableId::Table7 );
 
         ASSERT( allocator.Size() < context.heapSize );
 
         // Log::Line( "Allocated work heap of %.2lf GiB out of %.2lf GiB.", 
         //     (double)(allocator.Size() + markfieldSize*2 ) BtoGB, (double)context.heapSize BtoGB );
 
-        // MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
+        MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
 
         //
         // #TEST
         //
         // #if 0
-        // if( 0 )
+        if( 0 )
         {
             // Debug::ValidatePairs<_numBuckets>( _context, TableId::Table7 );
 
@@ -204,10 +164,23 @@ void DiskPlotPhase2::RunWithBuckets()
             Pair*   pairRefTmp    = bbcvirtalloc<Pair>( 1ull << _K );
 
             uint64* rMap          = bbcvirtalloc<uint64>( maxEntries );
+            uint64* refMap        = bbcvirtalloc<uint64>( maxEntries );
 
-            uint32* refMap        = bbcvirtalloc<uint32>( maxEntries );
-            void*   block         = bbvirtalloc( blockSize );
-
+            // Load from the reader as a reference
+            if( 0 )
+            {
+                Log::Line( "Loading with map reader..." );
+                uint64 readCount = 0;
+                uint64* mapReader = refMap;
+                for( uint32 b = 0; b < _numBuckets; b++ )
+                {
+                    reader.LoadNextBucket();
+                    const uint64 readLength = reader.UnpackBucket( b, pairBuf, mapReader );
+                    mapReader += readLength;
+                    readCount += readLength;
+                }
+                ASSERT( readCount ==  context.entryCounts[(int)TableId::Table7] );
+            }
 
             for( TableId rTable = TableId::Table7; rTable > TableId::Table2; rTable = rTable-1 )
             {
@@ -228,6 +201,7 @@ void DiskPlotPhase2::RunWithBuckets()
                     const FileId rTableId     = FileId::T1 + (FileId)rTable;
 
                     Fence fence;
+                    queue.SeekFile( rTableId, 0, 0, SeekOrigin::Begin );
                     queue.ReadFile( rTableId, 0, readbuffer, pairReadSize );
                     queue.SignalFence( fence );
                     queue.CommitCommands();
@@ -250,7 +224,7 @@ void DiskPlotPhase2::RunWithBuckets()
                     });
                 }
 
-                if( rTable < TableId::Table7 )
+                // if( rTable < TableId::Table7 )
                 {
                     Log::Line( "Reading R map" );
                     const uint32 _k              = _K;
@@ -314,99 +288,91 @@ void DiskPlotPhase2::RunWithBuckets()
 
                         mapReader += length;
                     }
-                }
 
-                // Load reference map
+                    // Test against ref
+                    AnonMTJob::Run( *_context.threadPool, 1, [=]( AnonMTJob* self ) {
+                        
+                        uint64 count, offset, end;
+                        GetThreadOffsets( self, rEntryCount, count, offset, end );
+
+                        for( uint64 i = offset; i < end; i++ )
+                            ASSERT( rMap[i] == refMap[i] );
+                    });
+                }
+ 
+                // uint64 refEntryCount = 0;
                 // {
                 //     char path[1024];
-                //     sprintf( path, "/mnt/p5510a/reference/maps/table_%d_map_0.tmp", (int)rTable+1 );
-                //     Log::Line( " Loading reference map '%s'.", path );
+                //     sprintf( path, "%sp1.t%d.tmp", BB_DP_DBG_REF_DIR, (int)rTable+1 );
+                //     Log::Line( " Loading reference pairs '%s'.", path );
 
-                //     FileStream mapFile;
-                //     FatalIf( !mapFile.Open( path, FileMode::Open, FileAccess::Read, FileFlags::LargeFile ), "Failed to open file." );
+                //     FatalIf( !Debug::LoadRefTable( path, pairRef, refEntryCount ), "Failed to load reference pairs." );
 
-                //     int err;
-                //     FatalIf( !IOJob::ReadFromFile( mapFile, refMap, rEntryCount * sizeof( uint32 ), block, blockSize, err ),
-                //         "Failed to read reference map with error %d", err );
-
-                //     AnonMTJob::Run( *_context.threadPool, [=]( AnonMTJob* self ) {
-                        
-                //         uint64 count, offset, end;
-                //         GetThreadOffsets( self, rEntryCount, count, offset, end );
-
-                //         // for( uint64 i = offset; i < end; i++ )
-                //         //     ASSERT( rMap[i] == refMap[i] );
-                //     });
+                //     ASSERT( refEntryCount == rEntryCount );
+                //     RadixSort256::Sort<BB_DP_MAX_JOBS,uint64,4>( *_context.threadPool, (uint64*)pairRef, (uint64*)pairRefTmp, refEntryCount );
                 // }
- 
-                uint64 refEntryCount = 0;
-                {
-                    char path[1024];
-                    sprintf( path, "%sp1.t%d.tmp", BB_DP_DBG_REF_DIR, (int)rTable+1 );
-                    Log::Line( " Loading reference pairs '%s'.", path );
-
-                    FatalIf( !Debug::LoadRefTable( path, pairRef, refEntryCount ), "Failed to load reference pairs." );
-
-                    ASSERT( refEntryCount == rEntryCount );
-                    RadixSort256::Sort<BB_DP_MAX_JOBS,uint64,4>( *_context.threadPool, (uint64*)pairRef, (uint64*)pairRefTmp, refEntryCount );
-                }
-                ASSERT( refEntryCount == rEntryCount );
-
-                const Pair* pairPtr = pairBuf;
-                
-                uint64 lEntryOffset = 0;
-                uint64 rTableOffset = 0;
+                // ASSERT( refEntryCount == rEntryCount );
 
                 Log::Line( "Marking entries..." );
-                for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
-                {
-                    const uint32 rBucketCount = context.ptrTableBucketCounts[(int)rTable][bucket];
-                    const uint32 lBucketCount = context.bucketCounts[(int)lTable][bucket];
+                std::atomic<uint64> prunedEntryCount = 0;
 
-                    for( uint e = 0; e < rBucketCount; e++ )
+                AnonMTJob::Run( *context.threadPool, [&]( AnonMTJob* self ) {
+
+                    const Pair* pairPtr = pairBuf;
+                    
+                    uint64 lEntryOffset = 0;
+                    uint64 rTableOffset = 0;
+
+                    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
                     {
-                        // #NOTE: The bug is related to this.
-                        //        Somehow the entries we get from the R table
-                        //        are not filtering properly...
-                        //        We tested without this and got the exact same
-                        //        results from the reference implementation
-                        if( rTable < TableId::Table7 )
+                        const uint32 rBucketCount = context.ptrTableBucketCounts[(int)rTable][bucket];
+                        const uint32 lBucketCount = context.bucketCounts[(int)lTable][bucket];
+
+                        uint32 count, offset, end;
+                        GetThreadOffsets( self, rBucketCount, count, offset, end );
+
+                        for( uint e = offset; e < end; e++ )
                         {
-                            const uint64 rIdx = rMap[rTableOffset + e];
-                            // if( !rMarkedEntries.Get( rIdx ) )
-                            if( !rMarkedBuffer[rIdx] )
-                                continue;
+                            if( rTable < TableId::Table7 )
+                            {
+                                const uint64 rIdx = rMap[rTableOffset + e];
+                                if( !rMarkedBuffer[rIdx] )
+                                    continue;
+                            }
+
+                            uint64 l = (uint64)pairPtr[e].left  + lEntryOffset;
+                            uint64 r = (uint64)pairPtr[e].right + lEntryOffset;
+
+                            ASSERT( l < lEntryCount );
+                            ASSERT( r < lEntryCount );
+
+                            lMarkedBuffer[l] = 1;
+                            lMarkedBuffer[r] = 1;
                         }
 
-                        uint64 l = (uint64)pairPtr[e].left  + lEntryOffset;
-                        uint64 r = (uint64)pairPtr[e].right + lEntryOffset;
+                        pairPtr += rBucketCount;
 
-                        ASSERT( l < lEntryCount );
-                        ASSERT( r < lEntryCount );
-
-                        lMarkedBuffer[l] = 1;
-                        lMarkedBuffer[r] = 1;
-                        // lMarkedEntries.Set( l );
-                        // lMarkedEntries.Set( r );
+                        lEntryOffset += lBucketCount;
+                        rTableOffset += rBucketCount;
                     }
 
-                    pairPtr += rBucketCount;
+                    self->SyncThreads();
 
-                    lEntryOffset += lBucketCount;
-                    rTableOffset += rBucketCount;// context.bucketCounts[(int)rTable][bucket];
-                }
 
-                uint64 prunedEntryCount = 0;
-                Log::Line( "Counting entries." );
-                for( uint64 e = 0; e < lEntryCount; e++ )
-                {
-                    if( lMarkedBuffer[e] )
-                        prunedEntryCount++;
-                    // if( lMarkedEntries.Get( e ) )
-                }
+                    if( self->IsControlThread() )
+                        Log::Line( "Counting entries." );
 
-                Log::Line( " %llu/%llu (%.2lf%%)", prunedEntryCount, lEntryCount,
-                    ((double)prunedEntryCount / lEntryCount) * 100.0 );
+                    uint64 count, offset, end;
+                    GetThreadOffsets( self, lEntryCount, count, offset, end );
+                    for( uint64 e = offset; e < end; e++ )
+                    {
+                        if( lMarkedBuffer[e] )
+                            prunedEntryCount++;
+                    }
+                });
+
+                Log::Line( " %llu/%llu (%.2lf%%)", prunedEntryCount.load(), lEntryCount,
+                    ((double)prunedEntryCount.load() / lEntryCount) * 100.0 );
                 Log::Line("");
 
                 // Swap marking tables and zero-out the left one.
@@ -446,25 +412,30 @@ void DiskPlotPhase2::RunWithBuckets()
         // if( table < TableId::Table7 )
         // if( 0 )
         {
-            BitField markedEntries( rMarkingTable );
-            uint64 lTableEntries = context.entryCounts[(int)table-1];
+            Log::Line( "Counting marked entries..." );
+            std::atomic<uint64> lTablePrunedEntries = 0;
 
-            uint64 bucketsTotalCount = 0;
-            for( uint64 e = 0; e < _numBuckets; ++e )
-                bucketsTotalCount += context.ptrTableBucketCounts[(int)table-1][e];
+            AnonMTJob::Run( *_context.threadPool, [&]( AnonMTJob* self ) {
+                BitField markedEntries( rMarkingTable );
+                
+                const uint64 lTableEntries = context.entryCounts[(int)table-1];
 
-            ASSERT( bucketsTotalCount == lTableEntries );
+                uint64 count, offset, end;
+                GetThreadOffsets( self, lTableEntries, count, offset, end );
 
-            uint64 lTablePrunedEntries = 0;
+                uint64 prunedCount = 0;
+                for( uint64 e = offset; e < end; ++e )
+                {
+                    if( markedEntries.Get( e ) )
+                        prunedCount++;
+                }
 
-            for( uint64 e = 0; e < lTableEntries; ++e )
-            {
-                if( markedEntries.Get( e ) )
-                    lTablePrunedEntries++;
-            }
+                lTablePrunedEntries += prunedCount;
+            });
 
+            const uint64 lTableEntries = context.entryCounts[(int)table-1];
             Log::Line( "Table %u entries: %llu/%llu (%.2lf%%)", table,
-                       lTablePrunedEntries, lTableEntries, ((double)lTablePrunedEntries / lTableEntries ) * 100.0 );
+                       lTablePrunedEntries.load(), lTableEntries, ((double)lTablePrunedEntries.load() / lTableEntries ) * 100.0 );
             Log::Line( "" );
         }
     }
@@ -500,6 +471,7 @@ void DiskPlotPhase2::MarkTable( const TableId rTable, DiskPairAndMapReader<_numB
             break;
     }
 }
+
 //-----------------------------------------------------------
 template<TableId table, uint32 _numBuckets>
 void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader, 
@@ -580,139 +552,3 @@ inline void MarkTableEntries( int64 i, const int64 entryCount, BitField lTable, 
         lTable.Set( right );
     }
 }
-
-//-----------------------------------------------------------
-template<TableId table>
-void MarkJob::MarkEntries()
-{
-    DiskPlotContext& context = *this->context;
-    DiskBufferQueue& queue   = *context.ioQueue;
-
-    const uint32 jobId               = this->JobId();
-    const uint32 threadCount         = this->JobCount();
-    const uint64 maxEntries          = 1ull << _K;
-    const uint32 maxEntriesPerBucket = (uint32)( maxEntries / (uint64)BB_DP_BUCKET_COUNT );
-    const uint64 tableEntryCount     = context.entryCounts[(int)table];
-
-    BitField lTableMarkedEntries( this->lTableMarkedEntries );
-    BitField rTableMarkedEntries( this->rTableMarkedEntries );
-
-    // Zero-out our portion of the bit field and sync, do this only on the first run
-    if( this->pairBucket == 0 && this->pairBucketOffset == 0 )
-    {
-        const size_t bitFieldSize  = RoundUpToNextBoundary( (size_t)maxEntries / 8, 8 );  // Round up to 64-bit boundary
-
-              size_t sizePerThread = bitFieldSize / threadCount;
-        const size_t sizeRemainder = bitFieldSize - sizePerThread * threadCount;
-
-        byte* buffer = ((byte*)this->lTableMarkedEntries) + sizePerThread * jobId;
-
-        if( jobId == threadCount - 1 )
-            sizePerThread += sizeRemainder;
-
-        memset( buffer, 0, sizePerThread );
-        this->SyncThreads();
-    }
-
-    const uint32* map   = this->map;
-    Pairs         pairs = this->pairs;
-    
-    uint32 bucketEntryCount = this->entryCount;
-
-    // Determine how many passes we need to run for this bucket.
-    // Passes are determined depending on the range were currently processing
-    // on the pairs buffer. Since they have different starting offsets after each
-    // L table bucket length that generated its pairs, we need to update that offset
-    // after we reach the boundary of the buckets that generated the pairs.
-    while( bucketEntryCount )
-    {
-        uint32 pairBucket           = this->pairBucket;
-        uint32 pairBucketOffset     = this->pairBucketOffset;
-        uint64 lTableOffset         = this->lTableOffset;
-
-        uint32 pairBucketEntryCount = context.ptrTableBucketCounts[(int)table][pairBucket];
-
-        uint32 passEntryCount       = std::min( pairBucketEntryCount - pairBucketOffset, bucketEntryCount );
-
-        // Prune the table
-        {
-            // We need a minimum number of entries per thread to ensure that we don't,
-            // write to the same qword in the bit field. So let's ensure that each thread
-            // has at least more than 2 groups worth of entries.
-            // There's an average of 284,190 entries per bucket, which means each group
-            // has an about 236.1 entries. We round up to 280 entries.
-            // We use minimum 3 groups and round up to 896 entries per thread which gives us
-            // 14 QWords worth of area each threads can reference.
-            const uint32 minEntriesPerThread = 896;
-            
-            uint32 threadsToRun     = threadCount;
-            uint32 entriesPerThread = passEntryCount / threadsToRun;
-            
-            while( entriesPerThread < minEntriesPerThread && threadsToRun > 1 )
-                entriesPerThread = passEntryCount / --threadsToRun;
-
-            // Only run with as many threads as we have filtered
-            if( jobId < threadsToRun )
-            {
-                const uint32* jobMap   = map; 
-                Pairs         jobPairs = pairs;
-
-                jobMap         += entriesPerThread * jobId;
-                jobPairs.left  += entriesPerThread * jobId;
-                jobPairs.right += entriesPerThread * jobId;
-
-                // Add any trailing entries to the last thread
-                // #NOTE: Ensure this is only updated after we get the pairs offset
-                uint32 trailingEntries = passEntryCount - entriesPerThread * threadsToRun;
-                uint32 lastThreadId    = threadsToRun - 1;
-                if( jobId == lastThreadId )
-                    entriesPerThread += trailingEntries;
-
-                // Mark entries in 2 steps to ensure the previous thread does NOT
-                // write to the same QWord at the same time as the current thread.
-                // (May happen when the prev thread writes to the end entries & the 
-                //   current thread is writing to its beginning entries)
-                const int32 fistStepEntryCount = (int32)( entriesPerThread / 2 );
-                int32 i = 0;
-
-                // 1st step
-                i = this->MarkStep<table>( i, fistStepEntryCount, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, jobPairs, jobMap );
-                this->SyncThreads();
-
-                // 2nd step
-                this->MarkStep<table>( i, entriesPerThread, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, jobPairs, jobMap );
-            }
-            else
-            {
-                this->SyncThreads();    // Sync for 2nd step
-            }
-
-            this->SyncThreads();    // Sync after marking finished
-        }
-
-
-        // Update our position on the pairs table
-        bucketEntryCount -= passEntryCount;
-        pairBucketOffset += passEntryCount;
-
-        map         += passEntryCount;
-        pairs.left  += passEntryCount;
-        pairs.right += passEntryCount;
-
-        if( pairBucketOffset < pairBucketEntryCount )
-        {
-            this->pairBucketOffset = pairBucketOffset;
-        }
-        else
-        {
-            // Update our left entry offset by adding the number of entries in the
-            // l table bucket index that matches our paid bucket index
-            this->lTableOffset += context.bucketCounts[(int)table-1][pairBucket];
-
-            // Move to next pairs bucket
-            this->pairBucket ++;
-            this->pairBucketOffset = 0;
-        }
-    }
-}
-

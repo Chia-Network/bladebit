@@ -55,6 +55,7 @@ struct DiskMapReader
         {   
             const size_t loadSize = CDivT( (size_t)bucketLength * _mapBits, blockSizeBits ) * blockSize;
             ioQueue.ReadFile( mapId, _bucketsLoaded, GetBucketBuffer( _bucketsLoaded ), loadSize );
+            // _fence.Signal( _bucketsLoaded + 1 );
         }
 
         _bucketEntryOffset += entryCount;
@@ -73,13 +74,16 @@ struct DiskMapReader
 
             const size_t loadSize = CDivT( (size_t)bucketLength * _mapBits, blockSizeBits ) * blockSize;
             ioQueue.ReadFile( mapId, _bucketsLoaded, GetBucketBuffer( _bucketsLoaded ), loadSize );
+            // _fence.Signal( _bucketsLoaded + 1 );
         }
     }
 
     //-----------------------------------------------------------
     void ReadEntries( const uint64 entryCount, uint64* outMap )
     {
-        ASSERT( _bucketsRead < _numBuckets );
+        ASSERT( _bucketsRead <= _numBuckets );
+
+        // #TODO: Check here if we have to unpack a bucket and then check our own fence.
 
         AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
 
@@ -104,13 +108,14 @@ struct DiskMapReader
 
                     const uint32 idxShift     = _k+1;
                     const uint64 finalIdxMask = ( 1ull << idxShift ) - 1;
+
                     for( int64 i = offset; i < end; i++ )
                     {
                         const uint64 packedMap = reader.ReadBits64( (uint32)_mapBits );
                         const uint64 map       = packedMap & finalIdxMask;
                         const uint32 dstIdx    = (uint32)( packedMap >> idxShift );
 
-                        ASSERT( dstIdx < ( 1ull << _k ) / ( _numBuckets - 1 ) );
+                        ASSERT( dstIdx < bucketLength );
                         unpackedMap[dstIdx] = map;
                     }
 
@@ -127,13 +132,14 @@ struct DiskMapReader
                 const uint64  bucketLength = GetBucketLength( bucketsRead );
                 const uint64  readCount    = std::min( bucketLength - readBucketOffset, entriesToRead );
 
-                const uint64* readMap      = _unpackdMaps[bucketsRead & 1];
+                const uint64* readMap      = _unpackdMaps[bucketsRead & 1] + readBucketOffset;
 
                 // Simply copy the unpacked map to the destination buffer
                 uint64 count, offset, end;
                 GetThreadOffsets( self, readCount, count, offset, end );
 
-                memcpy( outWriter + offset, readMap + offset, count * sizeof( uint64 ) );
+                if( count )
+                    memcpy( outWriter + offset, readMap + offset, count * sizeof( uint64 ) );
 
                 // Update read entries
                 entriesToRead -= readCount;
@@ -216,12 +222,13 @@ struct DiskPairAndMapReader
     static constexpr uint32 _pairBits  = _k + 1 - _savedBits + 9;
 
     //-----------------------------------------------------------
-    DiskPairAndMapReader( DiskPlotContext& context, const uint32 threadCount, Fence& fence, const TableId table, IAllocator& allocator )
+    DiskPairAndMapReader( DiskPlotContext& context, const uint32 threadCount, Fence& fence, const TableId table, IAllocator& allocator, bool noMap )
         : _context    ( context )
         , _fence      ( fence   )
         , _table      ( table   )
         , _threadCount( threadCount )
-        , _mapReader( context, threadCount, table, allocator )
+        , _mapReader  ( context, threadCount, table, allocator )
+        , _noMap      ( noMap )
     {
         DiskBufferQueue& ioQueue = *_context.ioQueue;
 
@@ -273,14 +280,15 @@ struct DiskPairAndMapReader
         ioQueue.ReadFile( fileId, 0, buffer, _pairBucketLoadSize[bucket] );
 
         // Load accompanying map entries
-        _mapReader.LoadNextEntries( _context.ptrTableBucketCounts[(int)_table][bucket] );
+        if( !_noMap )
+            _mapReader.LoadNextEntries( _context.ptrTableBucketCounts[(int)_table][bucket] );
 
         ioQueue.SignalFence( _fence, bucket+1 );
         ioQueue.CommitCommands();
     }
 
     //-----------------------------------------------------------
-    void UnpackBucket( const uint32 bucket, Pair* outPairs, uint64* outMap )
+    uint64 UnpackBucket( const uint32 bucket, Pair* outPairs, uint64* outMap )
     {
         DiskBufferQueue& ioQueue = *_context.ioQueue;
 
@@ -331,7 +339,10 @@ struct DiskPairAndMapReader
         });
 
         // #TODO: Try not to start another threaded job, and instead do it in the same MT job?
-        _mapReader.ReadEntries( (uint64)bucketLength, outMap );
+        if( !_noMap )
+            _mapReader.ReadEntries( (uint64)bucketLength, outMap );
+
+        return (uint64)bucketLength;
     }
 
 private:
@@ -348,6 +359,7 @@ private:
     uint32           _threadCount;
     uint32           _bucketsLoaded = 0;
     uint64           _entriesLoaded = 0;
+    bool             _noMap;
 };
 
 
