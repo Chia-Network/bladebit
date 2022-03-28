@@ -2,6 +2,7 @@
 #include "plotdisk/DiskPlotInfo.h"
 #include "plotdisk/DiskPlotContext.h"
 #include "util/StackAllocator.h"
+#include "util/BitView.h"
 
 /// #NOTE: We actually have _numBuckets+1 because there's an
 //         implicit overflow bucket that may contain entries.

@@ -101,12 +101,6 @@ void DiskPlotPhase2::RunWithBuckets()
     bitFields[0] = allocator.AllocT<uint64>( markfieldSize, blockSize );
     bitFields[1] = allocator.AllocT<uint64>( markfieldSize, blockSize );
 
-
-    // reader.LoadNextBucket();
-    // reader.LoadNextBucket();
-    // reader.UnpackBucket( 0, pairs, map );
-    // reader.UnpackBucket( 1, pairs, map );
-
     // _phase3Data.bitFieldSize   = bitFieldSize;
     // _phase3Data.maxTableLength = maxEntries;
 
