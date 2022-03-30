@@ -364,3 +364,127 @@ private:
 };
 
 
+
+/// Reads T-sized elements with fs block size alignment.
+/// Utility class used to hide block alignment stuff from the user.
+/// Loads are double-buffered and meant to be used as if laoding a whole bucket.
+/// After a maximum of 2 LoadEntries are called, 
+/// ReadEntries must be used afterwards/ to read that buffer and make it available again.
+/// There's no check for this at runtime in release mode, so it must be used correctly by the user.
+template<typename T>
+class BlockReader
+{
+public:
+    
+    //-----------------------------------------------------------
+    BlockReader( const FileId fileId, DiskBufferQueue* ioQueue, const uint64 maxLength, 
+                 IAllocator& allocator, const size_t blockSize )
+        : _fileId( fileId )
+        , _entriesPerBlock( blockSize / sizeof( T ) )
+        , _ioQueue( ioQueue )
+    {
+        // #TODO: Check that sizeof( T ) is power of 2
+        ASSERT( _entriesPerBlock * sizeof( T ) == blockSize );
+
+        const size_t allocCount = RoundUpToNextBoundaryT( maxLength, _entriesPerBlock );
+        _loadBuffer[0] = allocator.CAlloc<T>( allocCount, blockSize );
+        _loadBuffer[1] = allocator.CAlloc<T>( allocCount, blockSize );
+    }
+
+    //-----------------------------------------------------------
+    BlockReader()
+    {}
+
+    // #NOTE: User is responsible for using a Fence after this call
+    //-----------------------------------------------------------
+    void LoadEntries( uint64 count )
+    {
+        ASSERT( _loadIdx >= _readIdx );
+        ASSERT( _loadIdx - _readIdx <= 2 );
+        ASSERT( count );
+
+        const uint32 loadIdx    = _loadIdx & 1; // % 2
+        const uint32 preloadIdx = _loadIdx & 3; // % 4
+
+
+        // Substract entries that are already loaded
+        if( _preloadedEntries[preloadIdx] )
+        {
+            ASSERT( count >= _preloadedEntries[preloadIdx] ); // #TODO: Support count < _preloadedEntries
+                                                              // This would mean continually passing left-over entries forward to the next buffers
+                                                              // #TODO: Refactor this. Way too confusing.
+                                                              // Maybe just only allow 1 left over?
+            count -=  std::min( count, _preloadedEntries[preloadIdx] );
+
+            if( count == 0 )
+            {
+                ASSERT( 0 );    // #TODO:: Handle this as per above
+            }
+        }
+
+        uint64 loadCount = count;
+        if( count )
+        {
+            T* buffer = _loadBuffer[loadIdx] + _entriesPerBlock;
+
+            loadCount = RoundUpToNextBoundaryT( count, _entriesPerBlock );
+
+            _ioQueue->ReadFile( _fileId, 0, buffer, loadCount * sizeof( uint32 ) );
+            _ioQueue->CommitCommands();
+        }
+
+        _loadCount[loadIdx] = count;
+
+        // Save overflow count for the next load
+        _loadIdx++;
+        _preloadedEntries[_loadIdx & 3] = loadCount - count;
+    }
+
+    //-----------------------------------------------------------
+    T* ReadEntries()
+    {
+        const uint32 readIdx = _readIdx & 1;
+        
+        T* buffer = _loadBuffer[readIdx];
+
+        // Set the offset if we have any overflow entries
+        const uint64 loadCount = RoundUpToNextBoundaryT( _loadCount[readIdx], _entriesPerBlock );
+        const uint64 overflow  = loadCount - _loadCount[readIdx];
+
+        // Copy any overflow entries we may have loaded to the next buffer
+        if( overflow )
+        {
+            T* dst = _loadBuffer[(readIdx + 1) & 1] + _entriesPerBlock - overflow;
+            memcpy( dst, buffer + loadCount - overflow, overflow * sizeof( T ) );
+        }
+
+        const uint64 offset = GetPreloadedEntryCount();
+        buffer += _entriesPerBlock - offset;
+
+        // #TODO: Copy over more from preloaded if our preload
+
+        _readIdx++;
+        return buffer;
+    }
+
+private:
+    //-----------------------------------------------------------
+    inline uint64 GetPreloadedEntryCount()
+    {
+        return _preloadedEntries[_readIdx & 3];  // % 4
+    }
+
+private:
+    FileId           _fileId              = FileId::None;
+    uint64           _entriesPerBlock     = 0;
+    DiskBufferQueue* _ioQueue             = nullptr;
+    T*               _loadBuffer      [2];
+    uint64           _loadCount       [2] = { 0 };
+    uint64           _preloadedEntries[4] = { 0 };  // Overflow entries loaded by the previous load (due to alignment), kept for the next load
+                                                    //  We use 4-sized array for this so that each load can safely store the read count without overwrites.
+    //uint64         _copyCount[2]                  // How many trailing entries to copy to the next buffer after load
+    uint64           _overflowEntries  = 0;         
+    uint32           _loadIdx          = 0;
+    uint32           _readIdx          = 0;
+};
+

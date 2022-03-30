@@ -22,8 +22,6 @@ inline void MarkTableEntries( int64 i, const int64 entryCount, BitField lTable, 
 DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
     : _context( context )
 {
-    memset( _bucketBuffers, 0, sizeof( _bucketBuffers ) );
-
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
     // #TODO: Give the cache to the marks? Probably not needed for sucha small write...
@@ -59,6 +57,10 @@ DiskPlotPhase2::~DiskPlotPhase2() {}
 //-----------------------------------------------------------
 void DiskPlotPhase2::Run()
 {
+#if BB_DP_DBG_SKIP_PHASE_2
+    return;
+#endif
+
     switch( _context.numBuckets )
     {
         case 128 : RunWithBuckets<128 >(); break;

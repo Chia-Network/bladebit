@@ -59,11 +59,3 @@ struct DiskPlotContext
     Duration readWaitTime;
     Duration writeWaitTime;
 };
-
-struct Phase3Data
-{
-    uint64 maxTableLength;
-    size_t bitFieldSize;
-    uint32 bucketMaxSize;
-};
-

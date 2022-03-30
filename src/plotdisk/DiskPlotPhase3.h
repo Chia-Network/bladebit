@@ -1,11 +1,21 @@
 #pragma once
 
 #include "DiskPlotContext.h"
+#include "plotdisk/BitBucketWriter.h"
+#include "plotdisk/DiskPairReader.h"
 
 class DiskPlotPhase3
 {
+    static constexpr size_t LP_BUCKET_COUNT = 256;
+
+    template<uint32 _numBucets>
+    struct Step1
+    {
+
+    };
+
 public:
-    DiskPlotPhase3( DiskPlotContext& context, const Phase3Data& phase3Data );
+    DiskPlotPhase3( DiskPlotContext& context );
     ~DiskPlotPhase3();
 
     void Run();
@@ -24,14 +34,18 @@ private:
     template<TableId rTable, uint32 _numBuckets>
     void TableSecondStep();
 
-    template<TableId rTable, uint32 _numBuckets>
-    void TableThirdStep();
-
     template<TableId rTable>
-    void ConvertToLinePoints( const int64 bucketLength, const uint32* leftEntries, 
-                              const void* rightMarkedEntries, const Pair* rightPairs, const uint64* rightMap );
+    void ConvertToLinePoints( 
+        const uint32 bucket, const int64 bucketLength, const uint32* leftEntries, 
+        const void* rightMarkedEntries, const Pair* rightPairs, const uint64* rightMap );
 
-    // void ProcessTable( const TableId rTable );
+    void WWriteLinePointsToBuckets( const uint32 bucket,const int64 entryCount, const uint64* linePoints, const uint32* key );
+    
+    uint64 LT1EntryCountToLoad( const uint32 bucket ) const;
+    void LoadLBucket( const TableId table, const uint32 bucket );
+
+    uint32* UnpackLBucket( const TableId table, const uint32 bucket );
+
 
     // void TableFirstStep( const TableId rTable );
     // void BucketFirstStep( const TableId rTable, const uint32 bucket );
@@ -65,16 +79,30 @@ private:
     
     // Phase3Data _phase3Data;
 
-    // uint64* _markedEntries;             // Right table marked entries buffer
-    // uint32* _lMap       [2];
-    // uint32* _rMap       [2];
-    Pairs   _rPrunedPairs;      // Temporary buffer for storing the pruned pairs and map
+    // Read buffers
+    // Pair*   _pairRead[2];
+    // uint64* _rMapRead[2];
+    // uint32* _lMapRead[2];
+
+    // uint32* _lMap       [2];        // Only used for table 1. The rest use a map reader.
+    BlockReader<uint32> _lMap;
+    uint32* _rMap       [2];
+
+    uint64  _lEntriesLoaded = 0;
+
+    // Unpacked working buffers
+    Pair*   _rPrunedPairs;      // Temporary buffer for storing the pruned pairs and map
     uint64* _rPrunedMap;                
-    uint64* _linePoints;                // Used to convert to line points/tmp buffer
+    uint64* _linePoints;        // Used to convert to line points/tmp buffer
 
     Fence   _readFence;
+    Fence   _writeFence;
     // uint64  _rTableOffset;              // 
-
+    
+    BitBucketWriter<LP_BUCKET_COUNT> _lpWriter;
+    BitBucketWriter<LP_BUCKET_COUNT> _mapWriter;
+    uint64*                          _lpWriteBuffer [2];
+    uint32*                          _mapWriteBuffer[2];
 
     // uint64  _tablePrunedEntryCount[7];  // Count of each table, after prunning
 
