@@ -64,11 +64,11 @@ void DiskPlotPhase3::RunBuckets()
         switch( rTable )
         {
             case TableId::Table2: ProcessTable<TableId::Table2, _numBuckets>(); break;
-            case TableId::Table3: ProcessTable<TableId::Table3, _numBuckets>(); break;
-            case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets>(); break;
-            case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets>(); break;
-            case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets>(); break;
-            case TableId::Table7: ProcessTable<TableId::Table7, _numBuckets>(); break;
+            // case TableId::Table3: ProcessTable<TableId::Table3, _numBuckets>(); break;
+            // case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets>(); break;
+            // case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets>(); break;
+            // case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets>(); break;
+            // case TableId::Table7: ProcessTable<TableId::Table7, _numBuckets>(); break;
             default:
                 ASSERT( 0 );
                 break;
@@ -81,7 +81,7 @@ template<TableId rTable, uint32 _numBuckets>
 void DiskPlotPhase3::ProcessTable()
 {
     TableFirstStep <rTable, _numBuckets>();
-    TableSecondStep<rTable, _numBuckets>();
+    // TableSecondStep<rTable, _numBuckets>();
 }
 
 //-----------------------------------------------------------
@@ -111,17 +111,16 @@ void DiskPlotPhase3::TableFirstStep()
 
     void* rMarks = allocator.Alloc( rMarksSize, context.tmp1BlockSize );
 
-    // if( lTable == TableId::Table1 )
-    // {
-    //     _lMap[0] = allocator.AllocT<uint32>( lTableSize, lBlockSize );
-    //     _lMap[1] = allocator.AllocT<uint32>( lTableSize, lBlockSize );
-    // }
-
+    using LReader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
+    LReader lReader;
+    
+    lReader = LReader( FileId::T1, &ioQueue, allocator, maxBucketEntries, context.tmp1BlockSize, context.bucketCounts[(int)TableId::Table1] );
     DiskPairAndMapReader<_numBuckets> rTableReader( context, context.p3ThreadCount, _readFence, rTable, allocator, false );
+    _lMap = &lReader;
 
-    if( lTable == TableId::Table1 )
-        _lMap = BlockReader<uint32>( FileId::T1, &ioQueue, maxBucketEntries + P3_EXTRA_L_ENTRIES_TO_LOAD, 
-                                      allocator, context.tmp1BlockSize );
+    // if( lTable == TableId::Table1 )
+    //     _lMap = BlockReader<uint32>( FileId::T1, &ioQueue, maxBucketEntries + P3_EXTRA_L_ENTRIES_TO_LOAD, 
+    //                                   allocator, context.tmp1BlockSize );
 
     Pair*   pairs = allocator.CAlloc<Pair>  ( maxBucketEntries );
     uint64* map   = allocator.CAlloc<uint64>( maxBucketEntries );
@@ -132,7 +131,8 @@ void DiskPlotPhase3::TableFirstStep()
 
     auto LoadBucket = [&]( const uint32 bucket ) {
         
-        LoadLBucket( lTable, bucket );
+        // LoadLBucket( lTable, bucket );
+        _lMap->LoadNextBucket();
         rTableReader.LoadNextBucket();
     };
 
@@ -152,7 +152,7 @@ void DiskPlotPhase3::TableFirstStep()
             LoadBucket( bucket + 1 );
 
         const uint64  bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
-        const uint32* lEntries     = UnpackLBucket( lTable, bucket );
+        const uint32* lEntries     = _lMap->ReadLoadedBucket(); //UnpackLBucket( lTable, bucket );
 
         // Convert to line points
         ConvertToLinePoints<rTable>( bucket, bucketLength, lEntries, rMarks, pairs, map );
@@ -175,36 +175,49 @@ inline uint64 DiskPlotPhase3::LT1EntryCountToLoad( const uint32 bucket ) const
     return loadCount;
 }
 
+// //-----------------------------------------------------------
+// void DiskPlotPhase3::LoadLBucket( const TableId table, const uint32 bucket )
+// {
+//     if( table == TableId::Table1 )
+//     {
+//         const uint64 loadCount = LT1EntryCountToLoad( bucket );
+//         _lMap.LoadEntries( loadCount );
+//         _lEntriesLoaded += loadCount;
+//     }
+//     else
+//     {
+
+//     }
+
+//     _context.ioQueue->CommitCommands();
+// }
+
 //-----------------------------------------------------------
-void DiskPlotPhase3::LoadLBucket( const TableId table, const uint32 bucket )
-{
-    if( table == TableId::Table1 )
-    {
-        const uint64 loadCount = LT1EntryCountToLoad( bucket );
-        _lMap.LoadEntries( loadCount );
-        _lEntriesLoaded += loadCount;
-    }
-    else
-    {
-    }
+// uint32* DiskPlotPhase3::UnpackLBucket( const TableId table, const uint32 bucket )
+// {
+//     if( table == TableId::Table1 )
+//     {
+//         uint32* buffer = _lMap.ReadEntries();
 
-    _context.ioQueue->CommitCommands();
-}
+//         // Copy-over the last extra entries to the sart of our next buffer
+//         if( bucket < _context.numBuckets - 1 )
+//         {
+//             const uint64 entryCount = LT1EntryCountToLoad( bucket );
+            
+//             uint32* nextBuffer = _lMap.GetBuffer( bucket & 1 );
+//             memcpy( nextBuffer - P3_EXTRA_L_ENTRIES_TO_LOAD, buffer + entryCount - P3_EXTRA_L_ENTRIES_TO_LOAD, 
+//                     P3_EXTRA_L_ENTRIES_TO_LOAD * sizeof( uint32 ) );
+//         }
 
-//-----------------------------------------------------------
-uint32* DiskPlotPhase3::UnpackLBucket( const TableId table, const uint32 bucket )
-{
-    if( table == TableId::Table1 )
-    {
-        return _lMap.ReadEntries();
-    }
-    else
-    {
+//         return buffer;
+//     }
+//     else
+//     {
 
-    }
+//     }
 
-    return nullptr;
-}
+//     return nullptr;
+// }
 
 //-----------------------------------------------------------
 template<TableId rTable, uint32 _numBuckets>

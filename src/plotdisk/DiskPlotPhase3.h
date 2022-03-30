@@ -84,9 +84,9 @@ private:
     // uint64* _rMapRead[2];
     // uint32* _lMapRead[2];
 
-    // uint32* _lMap       [2];        // Only used for table 1. The rest use a map reader.
-    BlockReader<uint32> _lMap;
-    uint32* _rMap       [2];
+    // uint32*             _lMapBuffers[2];        // Only used for table 1. The rest use a map reader.
+    IP3LMapReader<uint32>* _lMap = nullptr;
+    // uint32*                _rMap[2];
 
     uint64  _lEntriesLoaded = 0;
 

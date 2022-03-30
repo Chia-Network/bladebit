@@ -364,7 +364,6 @@ private:
 };
 
 
-
 /// Reads T-sized elements with fs block size alignment.
 /// Utility class used to hide block alignment stuff from the user.
 /// Loads are double-buffered and meant to be used as if laoding a whole bucket.
@@ -378,7 +377,7 @@ public:
     
     //-----------------------------------------------------------
     BlockReader( const FileId fileId, DiskBufferQueue* ioQueue, const uint64 maxLength, 
-                 IAllocator& allocator, const size_t blockSize )
+                 IAllocator& allocator, const size_t blockSize, const uint64 retainOffset )
         : _fileId( fileId )
         , _entriesPerBlock( blockSize / sizeof( T ) )
         , _ioQueue( ioQueue )
@@ -386,9 +385,13 @@ public:
         // #TODO: Check that sizeof( T ) is power of 2
         ASSERT( _entriesPerBlock * sizeof( T ) == blockSize );
 
-        const size_t allocCount = RoundUpToNextBoundaryT( maxLength, _entriesPerBlock );
-        _loadBuffer[0] = allocator.CAlloc<T>( allocCount, blockSize );
-        _loadBuffer[1] = allocator.CAlloc<T>( allocCount, blockSize );
+        const size_t prefixZoneCount = RoundUpToNextBoundaryT( retainOffset, _entriesPerBlock );
+
+        // Add another retain offset here because we space for retained entries at the start and at the end
+        const size_t allocCount = prefixZoneCount + RoundUpToNextBoundaryT( _entriesPerBlock + maxLength + retainOffset, _entriesPerBlock );
+
+        _loadBuffer[0] = allocator.CAlloc<T>( allocCount, blockSize ) + prefixZoneCount;
+        _loadBuffer[1] = allocator.CAlloc<T>( allocCount, blockSize ) + prefixZoneCount;
     }
 
     //-----------------------------------------------------------
@@ -406,62 +409,57 @@ public:
         const uint32 loadIdx    = _loadIdx & 1; // % 2
         const uint32 preloadIdx = _loadIdx & 3; // % 4
 
-
-        // Substract entries that are already loaded
+        // Substract entries that are already pre-loaded
         if( _preloadedEntries[preloadIdx] )
         {
-            ASSERT( count >= _preloadedEntries[preloadIdx] ); // #TODO: Support count < _preloadedEntries
-                                                              // This would mean continually passing left-over entries forward to the next buffers
-                                                              // #TODO: Refactor this. Way too confusing.
-                                                              // Maybe just only allow 1 left over?
-            count -=  std::min( count, _preloadedEntries[preloadIdx] );
+            count -= std::min( count, _preloadedEntries[preloadIdx] );
 
             if( count == 0 )
             {
-                ASSERT( 0 );    // #TODO:: Handle this as per above
+                // <= than our preloaded entries were requested.
+                // Move any left-over preloaded entries to the next load
+                _preloadedEntries[(loadIdx+1) & 3] = _preloadedEntries[preloadIdx] - count;
+                _copyCount[loadIdx]                = _preloadedEntries[preloadIdx] - count;
+                _loadCount[loadIdx]                = 0;
+                return;
             }
         }
 
-        uint64 loadCount = count;
-        if( count )
-        {
-            T* buffer = _loadBuffer[loadIdx] + _entriesPerBlock;
+        T* buffer = _loadBuffer[loadIdx] + _entriesPerBlock;
 
-            loadCount = RoundUpToNextBoundaryT( count, _entriesPerBlock );
+        const uint64 loadCount = RoundUpToNextBoundaryT( count, _entriesPerBlock );
 
-            _ioQueue->ReadFile( _fileId, 0, buffer, loadCount * sizeof( uint32 ) );
-            _ioQueue->CommitCommands();
-        }
+        _ioQueue->ReadFile( _fileId, 0, buffer, loadCount * sizeof( uint32 ) );
+        _ioQueue->CommitCommands();
+
+        const uint64 overflowCount = loadCount - count;
 
         _loadCount[loadIdx] = count;
+        _copyCount[loadIdx] = overflowCount;
 
-        // Save overflow count for the next load
+        // Save overflow as preloaded entries for the next load
         _loadIdx++;
-        _preloadedEntries[_loadIdx & 3] = loadCount - count;
+        _preloadedEntries[_loadIdx & 3] = overflowCount;
     }
 
     //-----------------------------------------------------------
     T* ReadEntries()
     {
         const uint32 readIdx = _readIdx & 1;
+
+        const uint64 copyCount   = _copyCount[readIdx];
+        const uint64 loadedCount = _loadCount[readIdx];
+        const uint64 preloaded   = GetPreloadedEntryCount();
+
+        T* buffer = _loadBuffer[readIdx] + _entriesPerBlock - preloaded;
         
-        T* buffer = _loadBuffer[readIdx];
-
-        // Set the offset if we have any overflow entries
-        const uint64 loadCount = RoundUpToNextBoundaryT( _loadCount[readIdx], _entriesPerBlock );
-        const uint64 overflow  = loadCount - _loadCount[readIdx];
-
         // Copy any overflow entries we may have loaded to the next buffer
-        if( overflow )
+        if( copyCount )
         {
-            T* dst = _loadBuffer[(readIdx + 1) & 1] + _entriesPerBlock - overflow;
-            memcpy( dst, buffer + loadCount - overflow, overflow * sizeof( T ) );
+            const uint64 entryCount = preloaded + loadedCount;
+            T* dst = _loadBuffer[(readIdx + 1) & 1] + _entriesPerBlock - copyCount;
+            memcpy( dst, buffer + entryCount - preloaded, copyCount * sizeof( T ) );
         }
-
-        const uint64 offset = GetPreloadedEntryCount();
-        buffer += _entriesPerBlock - offset;
-
-        // #TODO: Copy over more from preloaded if our preload
 
         _readIdx++;
         return buffer;
@@ -478,13 +476,87 @@ private:
     FileId           _fileId              = FileId::None;
     uint64           _entriesPerBlock     = 0;
     DiskBufferQueue* _ioQueue             = nullptr;
-    T*               _loadBuffer      [2];
-    uint64           _loadCount       [2] = { 0 };
-    uint64           _preloadedEntries[4] = { 0 };  // Overflow entries loaded by the previous load (due to alignment), kept for the next load
+    T*               _loadBuffer      [2] = { nullptr };
+    uint64           _loadCount       [2] = { 0 };  // How many entries actually loaded from disk
+    uint64           _copyCount       [2] = { 0 };  // Trailing entries to copy over to the next buffer
+    uint64           _preloadedEntries[4] = { 0 };  // Overflow entries already loaded by the previous load (due to alignment), kept for the next load
                                                     //  We use 4-sized array for this so that each load can safely store the read count without overwrites.
-    //uint64         _copyCount[2]                  // How many trailing entries to copy to the next buffer after load
-    uint64           _overflowEntries  = 0;         
     uint32           _loadIdx          = 0;
     uint32           _readIdx          = 0;
 };
 
+template<typename T>
+class IP3LMapReader
+{
+public:
+    virtual void LoadNextBucket() = 0;
+    virtual T*   ReadLoadedBucket() = 0;
+};
+
+/// Utility for reading maps for P3 where the left table buckets
+/// have to load more entries than the bucket has in order to allow
+/// the pairs to point correctly to cross-bucket entries.
+/// The extra entries loaded from the next bucket have to be carried over
+/// to the start of the bucket of the next load.
+template<uint32 _numBuckets, uint64 _retainCount, typename T>
+class SingleFileMapReader : public IP3LMapReader<T>
+{
+public:
+//-----------------------------------------------------------
+    SingleFileMapReader() {}
+
+    //-----------------------------------------------------------
+    SingleFileMapReader( const FileId fileId, DiskBufferQueue* ioQueue, IAllocator& allocator, 
+                         const uint64 maxLength, const size_t blockSize,
+                         const uint32 bucketCounts[_numBuckets] )
+        : _reader( fileId, ioQueue, maxLength, allocator, blockSize, _retainCount )
+    {
+        memcpy( _bucketCounts, bucketCounts, sizeof( _bucketCounts ) );
+    }
+
+    //-----------------------------------------------------------
+    void LoadNextBucket() override
+    {
+        ASSERT( _bucketsLoaded < _numBuckets );
+        
+        const uint64 bucketLength = _bucketCounts[_bucketsLoaded];
+        const uint64 loadCount    = _bucketsLoaded == 0 ? bucketLength + _retainCount :
+                                    _bucketsLoaded == _numBuckets - 1 ? bucketLength - _retainCount :
+                                    bucketLength;
+
+        _reader.LoadEntries( loadCount );
+        _bucketsLoaded++;
+    }
+
+    //-----------------------------------------------------------
+    T* ReadLoadedBucket() override
+    {
+        T* entries    = _reader.ReadEntries();
+        T* dstEntries = entries;
+
+        if( _bucketsRead > 0 )
+        {
+            // Copy over the retained entries from the last buffer
+            dstEntries -= _retainCount;
+            memcpy( dstEntries, _retainedEntries, _retainCount * sizeof( uint32 ) );
+        }
+
+        if( _bucketsRead < _numBuckets - 1 )
+        {
+            // Retain our last entries for the next buffer
+            const uint64 entryCount = _bucketCounts[_bucketsRead] + ( _bucketsRead == 0 ? _retainCount : 0 );
+
+            memcpy( _retainedEntries, entries + entryCount - _retainCount, _retainCount * sizeof( uint32 ) );
+        }
+
+        _bucketsRead++;
+        return dstEntries;
+    }
+
+private:
+    BlockReader<T> _reader;
+    uint32         _bucketsLoaded = 0;
+    uint32         _bucketsRead   = 0;
+    uint32         _bucketCounts   [_numBuckets ];
+    T              _retainedEntries[_retainCount];
+};
