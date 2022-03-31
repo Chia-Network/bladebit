@@ -408,8 +408,9 @@ void DiskPlotPhase3::Run()
     ioQueue.CommitCommands();
 
     // Use up any cache for our line points and map
-    const size_t cacheSize = ( _context.cacheSize / 3 / _context.tmp2BlockSize ) * _context.tmp2BlockSize;
+    const size_t cacheSize = ( _context.cacheSize / 3 / _context.numBuckets / _context.tmp2BlockSize ) * _context.numBuckets * _context.tmp2BlockSize;
           byte*  cache     = _context.cache;
+    ASSERT( cacheSize / _context.tmp2BlockSize * _context.tmp2BlockSize == cacheSize );
 
     FileSetOptions opts = FileSetOptions::DirectIO;
 
@@ -477,7 +478,7 @@ void DiskPlotPhase3::ProcessTable()
         P3StepOne<rTable, _numBuckets> stepOne( _context, _readFence, _writeFence );
         prunedEntryCount = stepOne.Run();
 
-        Log::Line( "Table %u now has %.2lf / %.2lf ( %.2lf%% ) entries.", 
+        Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
             rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
             prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
     }

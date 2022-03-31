@@ -77,15 +77,15 @@
                 "--fp-threads", "62",
                 // "--fp-threads", "48",
 
-                // "--cache", "200G",
-                "--cache", "96G",
+                "--cache", "200G",
+                // "--cache", "96G",
                 // "-s",
                 // "-b", "128",
 
                 // "--c-threads" , "18",
                 // "--p2-threads", "1",
                 "--p2-threads", "32",
-                // "--p3-threads", "10",
+                "--p3-threads", "62",
                 // "--f1", "256MB",
                 // "--fx", "256MB",
                 // "-b", "64",
