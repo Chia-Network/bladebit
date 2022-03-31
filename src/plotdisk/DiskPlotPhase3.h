@@ -6,14 +6,6 @@
 
 class DiskPlotPhase3
 {
-    static constexpr size_t LP_BUCKET_COUNT = 256;
-
-    template<uint32 _numBucets>
-    struct Step1
-    {
-
-    };
-
 public:
     DiskPlotPhase3( DiskPlotContext& context );
     ~DiskPlotPhase3();
@@ -71,8 +63,17 @@ private:
 
 private:
     DiskPlotContext& _context;
+    DiskBufferQueue& _ioQueue;
+
+    Fence _readFence;
+    Fence _writeFence;
+    Fence _stepFence;
+
+    Duration _readWaitTime  = Duration::zero();
+    Duration _WriteWaitTime = Duration::zero();
     
-    // Phase3Data _phase3Data;
+    FileId _mapReadId  = FileId::LP_MAP_0;
+    FileId _mapWriteId = FileId::LP_MAP_1;
 
     // Read buffers
     // Pair*   _pairRead[2];
@@ -80,24 +81,22 @@ private:
     // uint32* _lMapRead[2];
 
     // uint32*             _lMapBuffers[2];        // Only used for table 1. The rest use a map reader.
-    IP3LMapReader<uint32>* _lMap = nullptr;
+    // IP3LMapReader<uint32>* _lMap = nullptr;
     // uint32*                _rMap[2];
 
-    uint64  _lEntriesLoaded = 0;
+    // uint64  _lEntriesLoaded = 0;
 
     // Unpacked working buffers
-    Pair*   _rPrunedPairs;      // Temporary buffer for storing the pruned pairs and map
-    uint64* _rPrunedMap;                
-    uint64* _linePoints;        // Used to convert to line points/tmp buffer
+    // Pair*   _rPrunedPairs;      // Temporary buffer for storing the pruned pairs and map
+    // uint64* _rPrunedMap;                
+    // uint64* _linePoints;        // Used to convert to line points/tmp buffer
 
-    Fence   _readFence;
-    Fence   _writeFence;
     // uint64  _rTableOffset;              // 
     
     // BitBucketWriter<LP_BUCKET_COUNT> _lpWriter;
     // BitBucketWriter<LP_BUCKET_COUNT> _mapWriter;
-    uint64*                          _lpWriteBuffer [2];
-    uint32*                          _mapWriteBuffer[2];
+    // uint64*                          _lpWriteBuffer [2];
+    // uint32*                          _mapWriteBuffer[2];
 
     // uint64  _tablePrunedEntryCount[7];  // Count of each table, after prunning
 

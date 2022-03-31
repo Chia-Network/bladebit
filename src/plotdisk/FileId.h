@@ -37,7 +37,6 @@ enum class FileId
 
     // Line points
     LP,
-    LP_IDX,
     LP_MAP_0,
     LP_MAP_1,
 
