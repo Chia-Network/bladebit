@@ -27,11 +27,7 @@ public:
     {
         _readFence .Reset();
         _writeFence.Reset();
-
     }
-
-    //-----------------------------------------------------------
-    ~P3StepOne() {}
 
     //-----------------------------------------------------------
     inline Duration GetReadWaitTime() const { return _readWaitTime; }
@@ -110,6 +106,9 @@ public:
 
             _prunedEntryCount += prunedEntryCount;
         }
+
+        // Re-write L table's bucket count w/ our new bucket count
+        memcpy( context.bucketCounts[(int)lTable], _lpBucketCounts, sizeof( _lpBucketCounts ) );
 
         return _prunedEntryCount;
     }
@@ -350,24 +349,107 @@ private:
     DiskPlotContext& _context;
     DiskBufferQueue& _ioQueue;
     uint32           _threadCount;
-
     Fence&           _readFence;
     Fence&           _writeFence;
+    Duration         _writeWaitTime = Duration::zero();
+    Duration         _readWaitTime  = Duration::zero();
 
-    // Work buffers
     // Temporary buffer for storing the pruned pairs/linePoints and map
     uint64*          _rPrunedLinePoints = nullptr;
     uint64*          _rPrunedMap        = nullptr;
 
     BitBucketWriter<_numBuckets> _lpWriter;
-    byte* _lpWriteBuffer[2] = { nullptr };
+    byte*            _lpWriteBuffer[2] = { nullptr };
 
+    uint64           _prunedEntryCount = 0;
+    uint32           _lpBucketCounts[_numBuckets] = { 0 };
+};
 
-    Duration _writeWaitTime = Duration::zero();
-    Duration _readWaitTime  = Duration::zero();
+template<TableId rTable, uint32 _numBuckets>
+class P3StepTwo
+{
+public:
 
-    uint64   _prunedEntryCount = 0;
-    uint32   _lpBucketCounts[_numBuckets] = { 0 };
+    //-----------------------------------------------------------
+    P3StepTwo( DiskPlotContext& context, Fence& readFence, Fence& writeFence, const FileId readId, const FileId writeId )
+        : _context    ( context )
+        , _ioQueue    ( *context.ioQueue )
+        , _threadCount( context.p3ThreadCount )
+        , _readFence  ( readFence  )
+        , _writeFence ( writeFence )
+        , _readId     ( readId )
+        , _writeId    ( writeId )
+    {
+        _readFence .Reset();
+        _writeFence.Reset();
+    }
+
+    //-----------------------------------------------------------
+    inline Duration GetReadWaitTime() const { return _readWaitTime; }
+    inline Duration GetWriteWaitTime() const { return _writeWaitTime; }
+
+    //-----------------------------------------------------------
+    void Run()
+    {
+        StackAllocator allocator( context.heapBuffer, context.heapSize );
+
+        ioQueue.SeekBucket( FileId::LP, 0, SeekOrigin::Begin );
+        ioQueue.CommitCommands();
+
+        const TableId lTable           = rTable - 1;
+        const uint64  maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
+
+        // context.bucketCounts[(int)lTable]
+        for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+        {
+            // Load bucket
+
+            // Unpack bucket
+
+            // Sort on LP
+
+            // Write reverse map to disk
+
+            // Write LP's as parks into the plot file
+        }
+    }
+
+private:
+
+    //-----------------------------------------------------------
+    void UnpackEntries()
+    {
+
+    }
+
+    //-----------------------------------------------------------
+    void SortEntries()
+    {
+
+    }
+
+    //-----------------------------------------------------------
+    void WriteReverseMap()
+    {
+
+    }
+
+    //-----------------------------------------------------------
+    void WriteLinePointsToPlot()
+    {
+        
+    }
+
+private:
+    DiskPlotContext& _context;
+    DiskBufferQueue& _ioQueue;
+    uint32           _threadCount;
+    Fence&           _readFence;
+    Fence&           _writeFence;
+    Duration         _writeWaitTime = Duration::zero();
+    Duration         _readWaitTime  = Duration::zero();
+    FileId           _readId;
+    FileId           _writeId;
 };
 
 
@@ -497,3 +579,4 @@ void DiskPlotPhase3::ProcessTable()
 
     }
 }
+
