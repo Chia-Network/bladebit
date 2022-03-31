@@ -23,19 +23,22 @@ public:
     MapWriter() {}
 
     //-----------------------------------------------------------
-    MapWriter( DiskBufferQueue& ioQueue, const FileId fileId, IAllocator& allocator, const uint64 maxEntries, const size_t blockSize )
+    MapWriter( DiskBufferQueue& ioQueue, const FileId fileId, IAllocator& allocator, const uint64 maxEntries, const size_t blockSize,
+               Fence& writeFence, Duration& writeWaitTime )
         : _ioQueue( &ioQueue )
-        , _bucketWriter( queue, fileId, allocator.CAlloc( _numBuckets+1, blockSize, blockSize ) )
+        , _bucketWriter( ioQueue, fileId, (byte*)allocator.CAlloc( _numBuckets+1, blockSize, blockSize ) )
+        , _writeFence( &writeFence )
+        , _writeWaitTime( &writeWaitTime )
     {
         const size_t writeBufferSize = RoundUpToNextBoundary( CDiv( maxEntries * EntryBitSize, 8 ), (int)blockSize );
 
-        _writebuffers[0] = allocator.Alloc( writeBufferSize, blockSize );
-        _writebuffers[1] = allocator.Alloc( writeBufferSize, blockSize );
+        _writebuffers[0] = allocator.AllocT<byte>( writeBufferSize, blockSize );
+        _writebuffers[1] = allocator.AllocT<byte>( writeBufferSize, blockSize );
     }
 
     //-----------------------------------------------------------
-    void Write( ThreadPool& pool, const uint32 threadCount, Fence& writeFence, Duration& writeWaitTime,
-                const uint32 bucket, const int64 entryCount, const uint64 entryOffset, 
+    void Write( ThreadPool& pool, const uint32 threadCount,
+                const uint32 bucket, const int64 entryCount, const uint64 mapOffset, 
                 const uint64* map, uint64* outMap )
     {
         // Write the key as a map to the final entry location.
@@ -46,12 +49,12 @@ public:
         uint32 _totalCounts   [_numBuckets+1]; uint32* totalCounts    = _totalCounts;
         uint64 _totalBitCounts[_numBuckets+1]; uint64* totalBitCounts = _totalBitCounts;
 
-        Job::Run( _pool, _threadCount, [=]( Job* self ) {
+        Job::Run( pool, threadCount, [=]( Job* self ) {
             
             const uint32 bucketBits   = BucketBits;
             const uint32 bucketShift  = _k - bucketBits;
             const uint32 bitSize      = EntryBitSize;
-            const uint32 encodeShift  = AdressBitSize;
+            const uint32 encodeShift  = AddressBitSize;
             const uint32 numBuckets   = _numBuckets + 1;
 
             int64 count, offset, end;
@@ -73,7 +76,7 @@ public:
             self->CalculatePrefixSum( numBuckets, counts, pfxSum, totalCounts );
 
             // Convert map entries from source index to reverse map
-            const uint64 tableOffset = _mapOffset + (uint64)offset;
+            const uint64 tableOffset = mapOffset + (uint64)offset;
 
             const uint64* reverseMap    = map + offset;
                   uint64* outMapBuckets = outMap; 
@@ -107,7 +110,7 @@ public:
 
                 // Wait for the buffer to be available first
                 if( bucket > 1 )
-                    writeFence.Wait( bucket - 2, writeWaitTime );
+                    _writeFence->Wait( bucket - 2, *_writeWaitTime );
 
                 bitWriter.BeginWriteBuckets( bitCounts, writeBuffer );
 
@@ -161,8 +164,8 @@ public:
             if( self->IsControlThread() )
             {
                 bitWriter.Submit();
-                _ioQueue.SignalFence( writeFence, bucket );
-                _ioQueue.CommitCommands();
+                _ioQueue->SignalFence( *_writeFence, bucket );
+                _ioQueue->CommitCommands();
             }
         });
     }
@@ -170,18 +173,21 @@ public:
 private:
     inline byte* GetWriteBuffer( const uint32 bucket )
     {
-        return _writebuffers[bucket & 1]
+        return _writebuffers[bucket & 1];
     }
 
 private:
     DiskBufferQueue*               _ioQueue         = nullptr;
     BitBucketWriter<_numBuckets+1> _bucketWriter;
     byte*                          _writebuffers[2] = { nullptr };
+    Fence*                         _writeFence      = nullptr;
+    Duration*                      _writeWaitTime   = nullptr;
 };
 
 template<TableId rTable, uint32 _numBuckets>
 class P3StepOne
 {
+public:
     static constexpr uint32 _k             = _K;
     static constexpr uint32 _bucketBits    = bblog2( _numBuckets );
     static constexpr uint32 _lpBits        = _k * 2 - _bucketBits;
@@ -577,12 +583,12 @@ public:
         const uint64  maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
 
         // Allocate buffers and needed structures
-        StackAllocator allocator( context.heapBuffer, context.heapSize );
+        StackAllocator allocator( _context.heapBuffer, _context.heapSize );
 
         const size_t readBufferSize = RoundUpToNextBoundary( CDiv( maxBucketEntries * _entrySizeBits, 8 ), (int)_context.tmp2BlockSize );
         byte* readBuffers[2] = {
-            allocator.Alloc( readBufferSize, _context.tmp2BlockSize ),
-            allocator.Alloc( readBufferSize, _context.tmp2BlockSize ),
+            allocator.AllocT<byte>( readBufferSize, _context.tmp2BlockSize ),
+            allocator.AllocT<byte>( readBufferSize, _context.tmp2BlockSize ),
         };
 
         uint64* linePoints    = allocator.CAlloc<uint64>( maxBucketEntries );
@@ -590,7 +596,7 @@ public:
         uint64* tmpLinePoints = allocator.CAlloc<uint64>( maxBucketEntries );
         uint64* tmpIndices    = allocator.CAlloc<uint64>( maxBucketEntries );
 
-        MapWriter<_numBuckets> mapWriter( _ioQueue, _writeId, maxBucketEntries, _context.tmp2BlockSize );
+        MapWriter<_numBuckets> mapWriter( _ioQueue, _writeId, allocator, maxBucketEntries, _context.tmp2BlockSize, _writeFence, _writeWaitTime );
 
         Log::Line( "Step 2 using %.2lf / %.2lf GiB.", (double)allocator.Size() BtoGB, (double)allocator.Capacity() BtoGB );
 
@@ -607,6 +613,8 @@ public:
 
         LoadBucket( 0 );
 
+        uint64 mapOffset = 0;
+
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
             // Load bucket
@@ -619,19 +627,19 @@ public:
             const byte* packedEntries = readBuffers[bucket & 1];
 
             // Unpack bucket
-            UnpackBucket( entryCount, packedEntries, linePoints, indices );
-            
-            // Sort on LP
-            constexpr uint32 maxSortIter = CDiv( 64 - _bucketBits, 8 );
+            UnpackEntries( bucket, entryCount, packedEntries, linePoints, indices );
 
-            RadixSort256::SortWithKey<BB_DP_MAX_JOBS, uint64. uint64, maxSortIter>(
+            // Sort on LP
+            constexpr int32 maxSortIter = (int)CDiv( 64 - _bucketBits, 8 );
+
+            RadixSort256::SortWithKey<BB_DP_MAX_JOBS, uint64, uint64, maxSortIter>(
                 *_context.threadPool, _threadCount, linePoints, tmpLinePoints, indices, tmpIndices, (uint64)entryCount );
-            
+
             uint64* sortedLinePoints  = linePoints;
             uint64* sortedIndices     = indices;
             uint64* scratchLinePoints = tmpLinePoints;
             uint64* scratchIndices    = tmpIndices;
-            
+
             // If our iteration count is not even, it means the final
             // output of the sort is saved in the tmp buffers.
             if( ( maxSortIter & 1 ) != 0)
@@ -643,21 +651,35 @@ public:
             // Write reverse map to disk
             if( rTable < TableId::Table7 )
             {
-                mapWriter.Write( *_context.threadPool, _threadCount, _writeFence, _writeWaitTime, 
-                                 bucket, entryCount, entryOffset, sortedIndices, scratchIndices );
+                mapWriter.Write( *_context.threadPool, _threadCount, bucket, entryCount, mapOffset, sortedIndices, scratchIndices );
             }
             
             // Write LP's as parks into the plot file
-            WriteLinePointsToPlot( entryCount, sortedLinePoints );
+            WriteLinePointsToPlot( entryCount, sortedLinePoints );  // #TODO: Need a single-bucket writer so that we save unaligned data
+
+            mapOffset += (uint64)entryCount;
         }
     }
 
 private:
 
     //-----------------------------------------------------------
-    void UnpackEntries( const int64 entryCount, const byte* packedEntries, uint64 outLinePoints, uint64 outIndices )
+    void UnpackEntries( const uint32 bucket, const int64 entryCount, const byte* packedEntries, uint64* outLinePoints, uint64* outIndices )
     {
+        AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
 
+            int64 count, offset, end;
+            GetThreadOffsets( self, entryCount, count, offset, end );
+
+            BitReader reader( (uint64*)packedEntries, _entrySizeBits, (uint64)offset * _entrySizeBits );
+
+            const uint64 bucketMask = ((uint64)bucket) << _lpBits;
+            for( int64 i = offset; i < end; i++ )
+            {
+                outLinePoints[i] = reader.ReadBits64( _lpBits  ) | bucketMask;
+                outIndices   [i] = reader.ReadBits64( _idxBits );
+            }
+        });
     }
 
     //-----------------------------------------------------------
@@ -716,9 +738,13 @@ void DiskPlotPhase3::Run()
     ioQueue.CommitCommands();
 
     // Use up any cache for our line points and map
-    const size_t cacheSize = ( _context.cacheSize / 3 / _context.numBuckets / _context.tmp2BlockSize ) * _context.numBuckets * _context.tmp2BlockSize;
-          byte*  cache     = _context.cache;
-    ASSERT( cacheSize / _context.tmp2BlockSize * _context.tmp2BlockSize == cacheSize );
+    size_t lpCacheSize, mapCacheSize;
+    GetCacheSizes( lpCacheSize, mapCacheSize );
+
+    ASSERT( lpCacheSize / _context.tmp2BlockSize * _context.tmp2BlockSize == lpCacheSize );
+    ASSERT( mapCacheSize / _context.tmp2BlockSize * _context.tmp2BlockSize == mapCacheSize );
+
+    byte* cache = _context.cache;
 
     FileSetOptions opts = FileSetOptions::DirectIO;
 
@@ -727,16 +753,17 @@ void DiskPlotPhase3::Run()
 
     FileSetInitData fdata = {
         .cache     = cache,
-        .cacheSize = cacheSize
+        .cacheSize = lpCacheSize
     };
 
-    ioQueue.InitFileSet( FileId::LP      , "lp"      , _context.numBuckets, opts, &fdata );   // LP+origin idx buckets
-    fdata.cache = (cache += cacheSize);
+    ioQueue.InitFileSet( FileId::LP, "lp", _context.numBuckets, opts, &fdata );   // LP+origin idx buckets
     
-    ioQueue.InitFileSet( FileId::LP_MAP_0, "lp_map_0", _context.numBuckets, opts, &fdata );   // Reverse map write/read
-    fdata.cache = (cache += cacheSize);
+    fdata.cache     = (cache += lpCacheSize);
+    fdata.cacheSize = mapCacheSize;
 
-    ioQueue.InitFileSet( FileId::LP_MAP_1, "lp_map_1", _context.numBuckets, opts, &fdata );   // Reverse map read/write
+    ioQueue.InitFileSet( FileId::LP_MAP_0, "lp_map_0", _context.numBuckets+1, opts, &fdata );   // Reverse map write/read
+    fdata.cache = (cache += mapCacheSize);
+    ioQueue.InitFileSet( FileId::LP_MAP_1, "lp_map_1", _context.numBuckets+1, opts, &fdata );   // Reverse map read/write
 
 
     switch( _context.numBuckets )
@@ -750,6 +777,44 @@ void DiskPlotPhase3::Run()
             ASSERT( 0 );
             break;
     }
+}
+
+//-----------------------------------------------------------
+void DiskPlotPhase3::GetCacheSizes( size_t& outCacheSizeLP, size_t& outCacheSizeMap )
+{
+    switch( _context.numBuckets )
+    {
+        case 128 : GetCacheSizesForBuckets<128 >( outCacheSizeLP, outCacheSizeMap ); break;
+        case 256 : GetCacheSizesForBuckets<256 >( outCacheSizeLP, outCacheSizeMap ); break;
+        case 512 : GetCacheSizesForBuckets<512 >( outCacheSizeLP, outCacheSizeMap ); break;
+        case 1024: GetCacheSizesForBuckets<1024>( outCacheSizeLP, outCacheSizeMap ); break;
+    
+    default:
+        Fatal( "Invalid bucket count %u.", _context.numBuckets );
+        break;
+    }
+}
+
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
+void DiskPlotPhase3::GetCacheSizesForBuckets( size_t& outCacheSizeLP, size_t& outCacheSizeMap )
+{
+    const size_t lpEntrySize    = P3StepOne<TableId::Table2, _numBuckets>::_entrySizeBits;
+    const size_t mapEntrySizeX2 = MapWriter<_numBuckets>::EntryBitSize * 2;
+    
+    static_assert( mapEntrySizeX2 >= lpEntrySize );
+
+    const size_t fullCache = _context.cacheSize;
+    const size_t blockSize = _context.tmp2BlockSize;
+
+    double mapRatio = (double)mapEntrySizeX2 / ( mapEntrySizeX2 + lpEntrySize );
+
+    const uint32 mapBuckets = _numBuckets + 1;
+    
+    outCacheSizeMap = ((size_t)(fullCache * mapRatio) / 2 ) / mapBuckets / blockSize * mapBuckets * blockSize;
+    outCacheSizeLP  = ( fullCache - outCacheSizeMap * 2 ) / _numBuckets / blockSize * _numBuckets * blockSize;
+
+    ASSERT( outCacheSizeMap + outCacheSizeLP <= fullCache );
 }
 
 //-----------------------------------------------------------
@@ -770,6 +835,8 @@ void DiskPlotPhase3::RunBuckets()
                 ASSERT( 0 );
                 break;
         }
+
+        std::swap( _mapReadId, _mapWriteId );
     }
 }
 
@@ -789,6 +856,10 @@ void DiskPlotPhase3::ProcessTable()
         Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
             rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
             prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
+
+
+        _context.readWaitTime  += stepOne.GetReadWaitTime();
+        _context.writeWaitTime += stepOne.GetWriteWaitTime();
     }
 
     _ioQueue.SignalFence( _stepFence );
@@ -802,7 +873,11 @@ void DiskPlotPhase3::ProcessTable()
     //         a reverse map into their origin buckets. This reverse map serves
     //         as the L table input for the next table.
     {
+        P3StepTwo<rTable, _numBuckets> stepTwo( _context, _readFence, _writeFence, _mapReadId, _mapWriteId );
+        stepTwo.Run();
 
+        _context.readWaitTime  += stepTwo.GetReadWaitTime();
+        _context.writeWaitTime += stepTwo.GetWriteWaitTime();
     }
 }
 

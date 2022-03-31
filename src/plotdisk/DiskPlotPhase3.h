@@ -61,6 +61,11 @@ private:
     // void DeleteFile( FileId fileId, uint32 bucket );
     // void DeleteBucket( FileId fileId );
 
+    void GetCacheSizes( size_t& outCacheSizeLP, size_t& outCacheSizeMap );
+
+    template<uint32 _numBuckets>
+    void GetCacheSizesForBuckets( size_t& outCacheSizeLP, size_t& outCacheSizeMap );
+
 private:
     DiskPlotContext& _context;
     DiskBufferQueue& _ioQueue;

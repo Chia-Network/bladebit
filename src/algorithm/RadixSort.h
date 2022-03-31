@@ -31,9 +31,9 @@ class RadixSort256
 
     enum SortMode
     {
-        Void                    = 0,
-        ModeSingle              = 1 << 0,
-        SortAndGenKey           = 1 << 1,   // Sort input and generate a key in keyInput at the same time
+        Void          = 0,
+        ModeSingle    = 1 << 0,
+        SortAndGenKey = 1 << 1,   // Sort input and generate a key in keyInput at the same time
     };
 
 public:
