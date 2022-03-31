@@ -2,8 +2,342 @@
 #include "util/BitField.h"
 #include "plotmem/LPGen.h"
 
-#define P3_EXTRA_L_ENTRIES_TO_LOAD 1024     // Extra L entries to load per bucket to ensure we
-                                            // have cross bucket entries accounted for
+// Extra L entries to load per bucket to ensure we
+// have cross bucket entries accounted for
+#define P3_EXTRA_L_ENTRIES_TO_LOAD BB_DP_CROSS_BUCKET_MAX_ENTRIES
+
+template<TableId rTable, uint32 _numBuckets>
+class P3StepOne
+{
+public:
+
+    //-----------------------------------------------------------
+    P3StepOne()
+    {
+        _readFence .Reset();
+        _writeFence.Reset();
+    }
+
+    //-----------------------------------------------------------
+    ~P3StepOne() {}
+
+    //-----------------------------------------------------------
+    inline Duration GetReadWaitTime() const { return _readWaitTime; }
+    inline Duration GetWriteWaitTime() const { return _writeWaitTime; }
+
+    //-----------------------------------------------------------
+    uint64 Run()
+    {
+        DiskPlotContext& context = _context;
+        DiskBufferQueue& ioQueue = *context.ioQueue;
+
+        const uint32  _k               = _K;
+        const TableId lTable           = rTable - 1;
+        const uint64  maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
+        const size_t  rMarksSize       = RoundUpToNextBoundary( context.entryCounts[(int)rTable] / 8, (int)context.tmp1BlockSize );
+
+        StackAllocator allocator( context.heapBuffer, context.heapSize );
+
+        void* rMarks = allocator.Alloc( rMarksSize, context.tmp1BlockSize );
+
+        using LReader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
+
+        LReader lTableReader = LReader( FileId::T1, &ioQueue, allocator, maxBucketEntries, context.tmp1BlockSize, context.bucketCounts[(int)TableId::Table1] );
+
+        DiskPairAndMapReader<_numBuckets> rTableReader( context, context.p3ThreadCount, _readFence, rTable, allocator, false );
+
+        // if( lTable == TableId::Table1 )
+        //     _lMap = BlockReader<uint32>( FileId::T1, &ioQueue, maxBucketEntries + P3_EXTRA_L_ENTRIES_TO_LOAD, 
+        //                                   allocator, context.tmp1BlockSize );
+
+        Pair*   pairs = allocator.CAlloc<Pair>  ( maxBucketEntries );
+        uint64* map   = allocator.CAlloc<uint64>( maxBucketEntries );
+
+        _rPrunedLinePoints = allocator.CAlloc<uint64>( maxBucketEntries );
+        _rPrunedMap        = allocator.CAlloc<uint64>( maxBucketEntries );
+
+        auto LoadBucket = [&]( const uint32 bucket ) {
+
+            lTableReader.LoadNextBucket();
+            rTableReader.LoadNextBucket();
+        };
+
+        // Load initial bucket and the whole marking table
+        ioQueue.ReadFile( FileId::MARKED_ENTRIES_2 + (FileId)rTable - 1, 0, rMarks, rMarksSize );
+        LoadBucket( 0 );
+
+        Log::Line( "Allocated %.2lf / %.2lf MiB", (double)allocator.Size() BtoMB, (double)allocator.Capacity() BtoMB );
+
+        for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+        {
+            const bool isLastbucket = bucket + 1 == _numBuckets;
+
+            // Load next bucket in the background
+            if( !isLastbucket )
+                LoadBucket( bucket + 1 );
+
+            const uint64  bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
+            const uint32* lEntries     = lTableReader.ReadLoadedBucket();
+
+            // Convert to line points
+            uint64 prunedEntryCount = ConvertToLinePoints<rTable>( bucket, bucketLength, lEntries, rMarks, pairs, map );
+
+            WriteLinePointsToBuckets( bucket, (int64)prunedEntryCount, _rPrunedLinePoints, _rPrunedMap, (uint64*)pairs, map );
+
+            _prunedEntryCount += prunedEntryCount;
+        }
+
+        return _prunedEntryCount;
+    }
+
+private:
+
+    //-----------------------------------------------------------
+    uint64 ConvertToLinePoints( 
+        const uint32 bucket, const int64 bucketLength, const uint32* leftEntries, 
+        const void* rightMarkedEntries, const Pair* rightPairs, const uint64* rightMap )
+    {
+        int64 _prunedEntryCount[BB_DP_MAX_JOBS];
+
+        AnonMTJob::Run( *_context.threadPool, _threadCount, [=, this]( AnonMTJob* self ) {
+
+            int64 count, offset, end;
+            GetThreadOffsets( self, bucketLength, count, offset, end );
+
+            const uint32*  lMap     = leftEntries;
+            const Pair*    pairs    = rightPairs;
+            const uint64*  rMap     = rightMap;
+            const BitField markedEntries( (uint64*)rightMarkedEntries );
+
+            // First, scan our entries in order to prune them
+            int64  prunedLength     = 0;
+            int64* allPrunedLengths = (int64*)_prunedEntryCount;
+
+            if constexpr ( rTable < TableId::Table7 )
+            {
+                for( int64 i = offset; i < end; i++)
+                {
+                    if( markedEntries.Get( rMap[i] ) )
+                        prunedLength ++;
+                }
+            }
+            else
+            {
+                prunedLength = bucketLength;
+            }
+
+            allPrunedLengths[self->_jobId] = prunedLength;
+            self->SyncThreads();
+
+            // Set our destination offset
+            // #NOTE: Not necesarry for T7, but let's avoid code duplication for now.
+            int64 dstOffset = 0;
+
+            for( int32 i = 0; i < (int32)self->_jobId; i++ )
+                dstOffset += allPrunedLengths[i];
+
+            // Copy pruned entries into new buffer and expend R pointers to absolute address
+            // #TODO: check if doing 1 pass per buffer performs better
+            Pair*   outPairsStart = (Pair*)(_rPrunedLinePoints + dstOffset);
+            Pair*   outPairs      = outPairsStart;
+            uint64* outRMap       = _rPrunedMap + dstOffset;
+            uint64* mapWriter     = outRMap;
+
+            for( int64 i = offset; i < end; i++ )
+            {
+                const uint32 mapIdx = rMap[i];
+
+                if constexpr ( rTable < TableId::Table7 )
+                {
+                    if( !markedEntries.Get( mapIdx ) )
+                        continue;
+                }
+
+                outPairs->left  = pairs[i].left;
+                outPairs->right = outPairs->left + pairs[i].right;
+
+                *mapWriter      = mapIdx;
+
+                outPairs++;
+                mapWriter++;
+            }
+
+            // Now we can convert our pruned pairs to line points
+            uint64* outLinePoints = _rPrunedLinePoints + dstOffset;
+            {
+                const uint32* lTable = lMap;
+                
+                for( int64 i = 0; i < prunedLength; i++ )
+                {
+                    Pair p = outPairsStart[i];
+                    const uint64 x = lTable[p.left ];
+                    const uint64 y = lTable[p.right];
+
+                    outLinePoints[i] = SquareToLinePoint( x, y );
+                }
+
+                // const uint64* lpEnd = outPairsStart + prunedLength;
+                // do
+                // {
+                //     Pair p = *((Pair*)outPairsStart);
+                //     const uint64 x = lTable[p.left ];
+                //     const uint64 y = lTable[p.right];
+                    
+                //     *outLinePoints = SquareToLinePoint( x, y );
+
+                // } while( ++outLinePoints < lpEnd );
+            }
+        });
+
+        int64 prunedEntryCount = 0;
+        for( int32 i = 0; i < (int32)_threadCount; i++ )
+            prunedEntryCount += _prunedEntryCount[i];
+
+        return (uint64)prunedEntryCount;
+    }
+
+    //-----------------------------------------------------------
+    void WriteLinePointsToBuckets( const uint32 bucket, const int64 entryCount, const uint64* linePoints, const uint64* indices,
+                                   uint64* tmpLPs, uint64* tmpIndices )
+    {
+        using LPJob = AnonPrefixSumJob<uint32>;
+
+        uint32 totalCounts[_numBuckets];
+        uint64 bitCounts  [_numBuckets];
+
+        LPJob::Run( *_context.threadPool, _threadCount, [=, this]( LPJob* self ) {
+
+            const uint32 bucketBits    = bblog2( _numBuckets );
+            const uint32 lpBits        = _k * 2 - bucketbits;
+            const uint32 idxBits       = _k + 1;
+            const uint32 entrySizeBits = lpBits + idxBits; // LP, origin index
+            const uint32 bucketShift   = lpBits;
+
+            const uint64* srcLinePoints = linePoints;
+            const uint64* srcIndices    = indices;
+
+            uint32 counts[_numBuckets];
+            uint32 pfxSum[_numBuckets];
+
+            memset( counts, 0, sizeof( counts ) );
+
+            int64 count, offset, end;
+            GetThreadOffsets( self, entryCount, count, offset, end );
+
+            /// Count entries per bucket
+            for( const uint64* lp = srcLinePoints + offset, *lpEnd = lp + end; lp < lpEnd; lp++ )
+            {
+                const uint64 bucket = (*lp) >> bucketShift; ASSERT( bucket < _numBuckets );
+                counts[bucket]++;
+            }
+
+            self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
+
+            /// Distribute entries to their respective buckets
+            uint64* lpBuckets  = tmpLPs;
+            uint64* idxBuckets = tmpIndices;
+
+            for( int64 i = offset; i < end; i++ )
+            {
+                const uint64 lp       = srcLinePoints[i];
+                const uint64 bucket   = lp >> bucketShift;  ASSERT( bucket < _numBuckets );
+                const uint32 dstIndex = --pfxSum[bucket];
+
+                ASSERT( dstIndex < entryCount );
+
+                lpBuckets [dstIndex] = lp;
+                idxBuckets[dstIndex] = indices[i];
+            }
+
+            /// Prepare to write to disk
+            auto&   writer               = _lpWriter;
+            uint64* totalBucketBitCounts = (uint64*)bitCounts;
+
+            if( self->IsControlThread() )
+            {
+                self->LockThreads();
+
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                    totalBucketBitCounts[i] = totalCounts[i] * (uint64)entrySizeBits;
+
+                writer.BeginWriteBuckets( bitCounts, GetLPWriteBuffer( bucket ) );
+                self->ReleaseThreads();
+            }
+            else
+                self->WaitForRelease();
+
+            /// Bit-pack entries and write to disk
+            uint64 bitsWritten = 0;
+
+            for( uint32 i = 0; i < _numBuckets; i++ )
+            {
+                const uint64 writeOffset = pfxSum[i];
+                const uint64 bitOffset   = writeOffset * entrySizeBits - bitsWritten;
+                bitsWritten += totalBucketBitCounts[i];
+
+                ASSERT( bitOffset + counts[i] * entrySizeBits <= totalBucketBitCounts[i] );
+
+                BitWriter writer = bitWriter.GetWriter( i, bitOffset );
+
+                const EntryOut* entry = dstEntries + writeOffset;
+
+                // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
+                PackLPs( entry, 2, writer );
+                self->SyncThreads();
+                PackEntries( entry + 2, (int64)counts[i]-2, writer );
+            }
+
+            /// Write buckets to disk
+            if( self->IsControlThread() )
+            {
+                self->LockThreads();
+                bitWriter.Submit();
+                _ioQueue.SignalFence( _writeFence, bucket );
+                _ioQueue.CommitCommands();
+                self->ReleaseThreads();
+            }
+            else
+                self->WaitForRelease(); // Don't go out of scope
+        });
+
+
+        // for( int32 b = 0; b < (int32)_numBuckets; b++ )
+        //     _prunedBucketCounts
+    }
+
+    //-----------------------------------------------------------
+    uint64* GetLPWriteBuffer( const uint32 bucket ) const
+    {
+        if( bucket > 1 )
+            _writeFence.Wait( bucket - 2, _writeWaitTime );
+
+        return _lpWriteBuffer[bucket & 1];
+    }
+
+
+private:
+    DiskPlotContext& _context;
+    DiskBufferQueue& _ioQueue;
+    uint32           _threadCount;
+
+    Fence&           _readFence;
+    Fence&           _writeFence;
+
+    // Work buffers
+    // Temporary buffer for storing the pruned pairs/linePoints and map
+    uint64*          _rPrunedLinePoints;
+    uint64*          _rPrunedMap;
+
+    BitBucketWriter<_numBuckets>  _lpWriter;
+
+    uint64* _lpWriteBuffer[2];
+
+    Duration _writeWaitTime = Duration::zero();
+    Duration _readWaitTime  = Duration::zero();
+
+    uint64   _prunedEntryCount = 0;
+    uint32   _lpBucketCounts[_numBuckets] = { 0 };
+};
 
 
 //-----------------------------------------------------------                        
@@ -40,6 +374,14 @@ void DiskPlotPhase3::Run()
     ioQueue.SeekFile( FileId::MARKED_ENTRIES_5, 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile( FileId::MARKED_ENTRIES_6, 0, 0, SeekOrigin::Begin );
 
+    // Use up any cache for our line points and map
+    const size_t cacheSize = _context.cacheSize / 4;
+
+    ioQueue.InitFileSet( FileId::LP      , "lp"      , _context.numBuckets );
+    ioQueue.InitFileSet( FileId::LP_KEY  , "lp_key"  , _context.numBuckets );
+    ioQueue.InitFileSet( FileId::LP_MAP_0, "lp_map_0", _context.numBuckets );
+    ioQueue.InitFileSet( FileId::LP_MAP_1, "lp_map_1", _context.numBuckets );
+
     ioQueue.CommitCommands();
 
     switch( _context.numBuckets )
@@ -48,7 +390,7 @@ void DiskPlotPhase3::Run()
         case 256 : RunBuckets<256 >(); break;
         case 512 : RunBuckets<512 >(); break;
         case 1024: RunBuckets<1024>(); break;
-    
+
         default:
             ASSERT( 0 );
             break;
@@ -92,11 +434,11 @@ void DiskPlotPhase3::TableFirstStep()
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
     const uint32  _k               = _K;
-    const uint32  _lMapBits        = _k + _k - bblog2( _numBuckets );    // For tables > 1, the map is k + k - log2( buckets )
+    // const uint32  _lMapBits        = _k + _k - bblog2( _numBuckets );    // For tables > 1, the map is k + k - log2( buckets )
     const TableId lTable           = rTable - 1;
     const uint64  maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
     const size_t  rMarksSize       = RoundUpToNextBoundary( context.entryCounts[(int)rTable] / 8, (int)context.tmp1BlockSize );
-    const size_t  lBlockSize       = lTable == TableId::Table1 ? context.tmp1BlockSize : context.tmp2BlockSize;
+    // const size_t  lBlockSize       = lTable == TableId::Table1 ? context.tmp1BlockSize : context.tmp2BlockSize;
 
     // Table 1 is loaded differently than the other tables as it is serialized simply as a single file of uint32's
     // L Tables > 1 are serialized as a reverse map lookup.
@@ -130,7 +472,7 @@ void DiskPlotPhase3::TableFirstStep()
     _linePoints   = allocator.CAlloc<uint64>( maxBucketEntries );
 
     auto LoadBucket = [&]( const uint32 bucket ) {
-        
+
         // LoadLBucket( lTable, bucket );
         _lMap->LoadNextBucket();
         rTableReader.LoadNextBucket();
@@ -161,19 +503,19 @@ void DiskPlotPhase3::TableFirstStep()
     }
 }
 
-//-----------------------------------------------------------
-inline uint64 DiskPlotPhase3::LT1EntryCountToLoad( const uint32 bucket ) const
-{
-    const uint64 bucketLength = _context.bucketCounts[(int)TableId::Table1][bucket];
-          uint64 loadCount    = bucketLength;
+// //-----------------------------------------------------------
+// inline uint64 DiskPlotPhase3::LT1EntryCountToLoad( const uint32 bucket ) const
+// {
+//     const uint64 bucketLength = _context.bucketCounts[(int)TableId::Table1][bucket];
+//           uint64 loadCount    = bucketLength;
 
-    if( bucket == 0 )
-        loadCount += P3_EXTRA_L_ENTRIES_TO_LOAD;
-    else
-        loadCount = std::min( loadCount, _context.entryCounts[(int)TableId::Table1] - _lEntriesLoaded );    // Don't overflow the load
+//     if( bucket == 0 )
+//         loadCount += P3_EXTRA_L_ENTRIES_TO_LOAD;
+//     else
+//         loadCount = std::min( loadCount, _context.entryCounts[(int)TableId::Table1] - _lEntriesLoaded );    // Don't overflow the load
 
-    return loadCount;
-}
+//     return loadCount;
+// }
 
 // //-----------------------------------------------------------
 // void DiskPlotPhase3::LoadLBucket( const TableId table, const uint32 bucket )
@@ -227,204 +569,210 @@ void DiskPlotPhase3::TableSecondStep()
 }
 
 //-----------------------------------------------------------
-template<TableId rTable>
-void DiskPlotPhase3::ConvertToLinePoints( 
-    const uint32 bucket, const int64 bucketLength, const uint32* leftEntries, 
-    const void* rightMarkedEntries, const Pair* rightPairs, const uint64* rightMap )
-{
+// template<TableId rTable>
+// void DiskPlotPhase3::ConvertToLinePoints( 
+//     const uint32 bucket, const int64 bucketLength, const uint32* leftEntries, 
+//     const void* rightMarkedEntries, const Pair* rightPairs, const uint64* rightMap )
+// {
+//     int64 _prunedEntryCount[BB_DP_MAX_JOBS];
 
-    int64 __prunedEntryCount[BB_DP_MAX_JOBS];
-    int64*  _prunedEntryCount = __prunedEntryCount;
+//     AnonMTJob::Run( *_context.threadPool, _context.p3ThreadCount, [=]( AnonMTJob* self ) {
 
+//         int64 count, offset, end;
+//         GetThreadOffsets( self, bucketLength, count, offset, end );
 
-    AnonMTJob::Run( *_context.threadPool, _context.p3ThreadCount, [=]( AnonMTJob* self ) {
+//         const uint32*  lMap     = leftEntries;
+//         const Pair*    pairs    = rightPairs;
+//         const uint64*  rMap     = rightMap;
+//         const BitField markedEntries( (uint64*)rightMarkedEntries );
 
-        int64 count, offset, end;
-        GetThreadOffsets( self, bucketLength, count, offset, end );
+//         // First, scan our entries in order to prune them
+//         int64  prunedLength     = 0;
+//         int64* allPrunedLengths = (int64*)_prunedEntryCount;
 
-        const uint32*  lMap     = leftEntries;
-        const Pair*    pairs    = rightPairs;
-        const uint64*  rMap     = rightMap;
-        const BitField markedEntries( (uint64*)rightMarkedEntries );
+//         if constexpr ( rTable < TableId::Table7 )
+//         {
+//             for( int64 i = offset; i < end; i++)
+//             {
+//                 if( markedEntries.Get( rMap[i] ) )
+//                     prunedLength ++;
+//             }
+//         }
+//         else
+//         {
+//             prunedLength = bucketLength;
+//         }
 
-        // First, scan our entries in order to prune them
-        int64  prunedLength     = 0;
-        int64* allPrunedLengths = _prunedEntryCount;
+//         allPrunedLengths[self->_jobId] = prunedLength;
+//         self->SyncThreads();
 
-        if constexpr ( rTable < TableId::Table7 )
-        {
-            for( int64 i = offset; i < end; i++)
-            {
-                if( markedEntries.Get( rMap[i] ) )
-                    prunedLength ++;
-            }
-        }
-        else
-        {
-            prunedLength = bucketLength;
-        }
+//         // #NOTE: Not necesarry for T7, but let's avoid code duplication for now.
+//         // Set our destination offset
+//         int64 dstOffset = 0;
 
-        allPrunedLengths[self->_jobId] = prunedLength;
-        self->SyncThreads();
+//         for( int32 i = 0; i < (int32)self->_jobId; i++ )
+//             dstOffset += allPrunedLengths[i];
 
-        // #NOTE: Not necesarry for T7, but let's avoid code duplication for now.
-        // Set our destination offset
-        int64 dstOffset = 0;
+//         // Copy pruned entries into new buffer and expend R pointers to absolute address
+//         // #TODO: check if doing 1 pass per buffer performs better
 
-        for( int32 i = 0; i < (int32)self->_jobId; i++ )
-            dstOffset += allPrunedLengths[i];
+//         Pair*   outPairsStart = (Pair*)(_linePoints + dstOffset);
+//         Pair*   outPairs      = outPairsStart;
+//         uint64* outRMap       = _rPrunedMap + dstOffset;
+//         uint64* mapWriter     = outRMap;
 
-        // Copy pruned entries into new buffer and expend R pointers to absolute address
-        // #TODO: check if doing 1 pass per buffer performs better
+//         for( int64 i = offset; i < end; i++ )
+//         {
+//             const uint32 mapIdx = rMap[i];
 
-        Pair*   outPairsStart = (Pair*)(_linePoints + dstOffset);
-        Pair*   outPairs      = outPairsStart;
-        uint64* outRMap       = _rPrunedMap + dstOffset;
-        uint64* mapWriter     = outRMap;
+//             if constexpr ( rTable < TableId::Table7 )
+//             {
+//                 if( !markedEntries.Get( mapIdx ) )
+//                     continue;
+//             }
 
-        for( int64 i = offset; i < end; i++ )
-        {
-            const uint32 mapIdx = rMap[i];
+//             outPairs->left  = pairs[i].left;
+//             outPairs->right = outPairs->left + pairs[i].right;
 
-            if constexpr ( rTable < TableId::Table7 )
-            {
-                if( !markedEntries.Get( mapIdx ) )
-                    continue;
-            }
+//             *mapWriter      = mapIdx;
 
-            outPairs->left  = pairs[i].left;
-            outPairs->right = outPairs->left + pairs[i].right;
+//             outPairs++;
+//             mapWriter++;
+//         }
 
-            *mapWriter      = mapIdx;
-
-            outPairs++;
-            mapWriter++;
-        }
-
-        // Now we can convert our pruned pairs to line points
-        uint64* outLinePoints = _linePoints + dstOffset;
-        {
-            const uint32* lTable = lMap;
+//         // Now we can convert our pruned pairs to line points
+//         uint64* outLinePoints = _linePoints + dstOffset;
+//         {
+//             const uint32* lTable = lMap;
             
-            for( int64 i = 0; i < prunedLength; i++ )
-            {
-                Pair p = outPairsStart[i];
-                const uint64 x = lTable[p.left ];
-                const uint64 y = lTable[p.right];
+//             for( int64 i = 0; i < prunedLength; i++ )
+//             {
+//                 Pair p = outPairsStart[i];
+//                 const uint64 x = lTable[p.left ];
+//                 const uint64 y = lTable[p.right];
 
-                outLinePoints[i] = SquareToLinePoint( x, y );
-            }
+//                 outLinePoints[i] = SquareToLinePoint( x, y );
+//             }
 
-            // const uint64* lpEnd = outPairsStart + prunedLength;
-            // do
-            // {
-            //     Pair p = *((Pair*)outPairsStart);
-            //     const uint64 x = lTable[p.left ];
-            //     const uint64 y = lTable[p.right];
+//             // const uint64* lpEnd = outPairsStart + prunedLength;
+//             // do
+//             // {
+//             //     Pair p = *((Pair*)outPairsStart);
+//             //     const uint64 x = lTable[p.left ];
+//             //     const uint64 y = lTable[p.right];
                 
-            //     *outLinePoints = SquareToLinePoint( x, y );
+//             //     *outLinePoints = SquareToLinePoint( x, y );
 
-            // } while( ++outLinePoints < lpEnd );
-        }
+//             // } while( ++outLinePoints < lpEnd );
+//         }
 
-        // DistributeToBuckets( prunedLength, outLinePoints, outRMap );
+//         // WriteLinePointsToBuckets( prunedLength, outLinePoints, outRMap );
         
-    });
-}
+//     });
+// }
 
 // //-----------------------------------------------------------
-// void DiskPlotPhase3::WriteLinePointsToBuckets( 
-//     LPWriteJob* self, const int64 entryCount, const uint64* linePoints, const uint32* key )
+// template<TableId rTable, uint32 _numBuckets>
+// void DiskPlotPhase3::WriteLinePointsToBuckets( const uint32 bucket, const int64 entryCount, const uint64* linePoints, const uint32* key )
 // {
-//     uint32 totalCounts[LP_BUCKET_COUNT];
-//     uint32 counts     [LP_BUCKET_COUNT];
-//     uint32 pfxSum     [LP_BUCKET_COUNT];
+//     using LPJob = AnonPrefixSumJob<uint32>;
 
-//     memset( counts, 0, sizeof( counts ) );
+//     uint32 totalCounts[_numBuckets];
 
-//     int64 count, offset, end;
-//     GetThreadOffsets( self, entryCount, count, offset, end );
+//     LPJob::Run( *_context.threadPool, [=]( LPJob* self ) {
 
-//     // Count entries per bucket
-//     for( const uint64* lp = linePoints + offset, *lpEnd = lp + end; lp < lpEnd; lp++ )
-//     {
-//         const uint64 bucket = (*lp) >> 56; ASSERT( bucket < entryCount );
-//         counts[bucket]++;
-//     }
-    
-//     self->CalculatePrefixSum( LP_BUCKET_COUNT, counts, pfxSum, totalCounts );
+//         const uint32 bucketBits  = bblog2( _numBuckets );
+//         const uint32 bucketShift = 64 - bucketbits;
 
-//     uint64* lpOutBuffer  = nullptr;
-//     uint32* keyOutBuffer = nullptr;
+//         uint32 counts[_numBuckets];
+//         uint32 pfxSum[_numBuckets];
 
-//     // Grab write buffers for distribution
-//     if( self->IsControlThread() )
-//     {
-//         self->LockThreads();
+//         memset( counts, 0, sizeof( counts ) );
 
-//         uint64 bitCounts[LP_BUCKET_COUNT];
+//         int64 count, offset, end;
+//         GetThreadOffsets( self, entryCount, count, offset, end );
 
-//         for( uint32 i = 0; i < LP_BUCKET_COUNT; i++ )
-//             bitCounts[i] = 8ull * totalCounts[i];
+//         // Count entries per bucket
+//         for( const uint64* lp = linePoints + offset, *lpEnd = lp + end; lp < lpEnd; lp++ )
+//         {
+//             const uint64 bucket = (*lp) >> 56; ASSERT( bucket < entryCount );
+//             counts[bucket]++;
+//         }
 
-//         _lpWriter.BeginWriteBuckets( bitCounts );
+//         self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
 
-//         self->ReleaseThreads();
-//     }
-//     else
-//         self->WaitForRelease();
+//         uint64* lpOutBuffer  = nullptr;
+//         uint32* keyOutBuffer = nullptr;
 
-//     // Distribute entries to their respective buckets
-//     for( int64 i = offset; i < end; i++ )
-//     {
-//         const uint64 lp       = linePoints[i];
-//         const uint64 bucket   = lp >> 56;           ASSERT( bucket < BB_DPP3_LP_BUCKET_COUNT );
-//         const uint32 dstIndex = --pfxSum[bucket];
+//         // Grab write buffers for distribution
+//         if( self->IsControlThread() )
+//         {
+//             self->LockThreads();
 
-//         ASSERT( dstIndex < entryCount );
+//             uint64 bitCounts[_numBuckets];
 
-//         // lpOutBuffer [dstIndex] = lp;
-//         // keyOutBuffer[dstIndex] = key[i];
-//     }
+//             for( uint32 i = 0; i < _numBuckets; i++ )
+//                 bitCounts[i] = 8ull * totalCounts[i];
 
-//     if( self->IsControlThread() )
-//     {
-//         DiskBufferQueue& ioQueue = *context->ioQueue;
+//             _lpWriter.BeginWriteBuckets( bitCounts );
 
-//         uint32* lpSizes  = (uint32*)ioQueue.GetBuffer( BB_DPP3_LP_BUCKET_COUNT * sizeof( uint32 ) );
-//         uint32* keySizes = (uint32*)ioQueue.GetBuffer( BB_DPP3_LP_BUCKET_COUNT * sizeof( uint32 ) );
+//             self->ReleaseThreads();
+//         }
+//         else
+//             self->WaitForRelease();
 
-//         const uint32* bucketCounts = this->bucketCounts;
+//         // Distribute entries to their respective buckets
+//         for( int64 i = offset; i < end; i++ )
+//         {
+//             const uint64 lp       = linePoints[i];
+//             const uint64 bucket   = lp >> 56;           ASSERT( bucket < BB_DPP3_LP_BUCKET_COUNT );
+//             const uint32 dstIndex = --pfxSum[bucket];
 
-//         for( int64 i = 0; i < (int)BB_DPP3_LP_BUCKET_COUNT; i++ )
-//             lpSizes[i] = bucketCounts[i] * sizeof( uint64 );
+//             ASSERT( dstIndex < entryCount );
 
-//         for( int64 i = 0; i < (int)BB_DPP3_LP_BUCKET_COUNT; i++ )
-//             keySizes[i] = bucketCounts[i] * sizeof( uint32 );
+//             // lpOutBuffer [dstIndex] = lp;
+//             // keyOutBuffer[dstIndex] = key[i];
+//         }
 
-//         const FileId lpFileId   = TableIdToLinePointFileId   ( this->rTable );
-//         const FileId lpKeyFilId = TableIdToLinePointKeyFileId( this->rTable );
+//         if( self->IsControlThread() )
+//         {
+//             DiskBufferQueue& ioQueue = *context->ioQueue;
 
-//         // Wait for all threads to finish writing
-//         self->LockThreads();
+//             uint32* lpSizes  = (uint32*)ioQueue.GetBuffer( BB_DPP3_LP_BUCKET_COUNT * sizeof( uint32 ) );
+//             uint32* keySizes = (uint32*)ioQueue.GetBuffer( BB_DPP3_LP_BUCKET_COUNT * sizeof( uint32 ) );
 
-//         ioQueue.WriteBuckets( lpFileId, lpOutBuffer, lpSizes );
-//         ioQueue.ReleaseBuffer( lpOutBuffer );
-//         ioQueue.ReleaseBuffer( lpSizes );
+//             const uint32* bucketCounts = this->bucketCounts;
 
-//         ioQueue.WriteBuckets( lpKeyFilId, keyOutBuffer, keySizes );
-//         ioQueue.ReleaseBuffer( keyOutBuffer );
-//         ioQueue.ReleaseBuffer( keySizes );
+//             for( int64 i = 0; i < (int)BB_DPP3_LP_BUCKET_COUNT; i++ )
+//                 lpSizes[i] = bucketCounts[i] * sizeof( uint64 );
 
-//         ioQueue.CommitCommands();
+//             for( int64 i = 0; i < (int)BB_DPP3_LP_BUCKET_COUNT; i++ )
+//                 keySizes[i] = bucketCounts[i] * sizeof( uint32 );
 
-//         self->ReleaseThreads();
-//     }
-//     else
-//         self->WaitForRelease();
+//             const FileId lpFileId   = TableIdToLinePointFileId   ( this->rTable );
+//             const FileId lpKeyFilId = TableIdToLinePointKeyFileId( this->rTable );
 
-//     // #NOTE: If we move the write from here, we still need to sync the 
-//     //        threads before existing to ensure the counts[] buffer
-//     //        doesn't go out of scope.
+//             // Wait for all threads to finish writing
+//             self->LockThreads();
+
+//             ioQueue.WriteBuckets( lpFileId, lpOutBuffer, lpSizes );
+//             ioQueue.ReleaseBuffer( lpOutBuffer );
+//             ioQueue.ReleaseBuffer( lpSizes );
+
+//             ioQueue.WriteBuckets( lpKeyFilId, keyOutBuffer, keySizes );
+//             ioQueue.ReleaseBuffer( keyOutBuffer );
+//             ioQueue.ReleaseBuffer( keySizes );
+
+//             ioQueue.CommitCommands();
+
+//             self->ReleaseThreads();
+//         }
+//         else
+//             self->WaitForRelease();
+
+//         // #NOTE: If we move the write from here, we still need to sync the 
+//         //        threads before existing to ensure the counts[] buffer
+//         //        doesn't go out of scope.
+//     });
 // }
 

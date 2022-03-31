@@ -39,13 +39,8 @@ private:
         const uint32 bucket, const int64 bucketLength, const uint32* leftEntries, 
         const void* rightMarkedEntries, const Pair* rightPairs, const uint64* rightMap );
 
-    void WWriteLinePointsToBuckets( const uint32 bucket,const int64 entryCount, const uint64* linePoints, const uint32* key );
-    
-    uint64 LT1EntryCountToLoad( const uint32 bucket ) const;
-    void LoadLBucket( const TableId table, const uint32 bucket );
-
-    uint32* UnpackLBucket( const TableId table, const uint32 bucket );
-
+    template<TableId rTable, uint32 _numBuckets>
+    void WriteLinePointsToBuckets( const uint32 bucket,const int64 entryCount, const uint64* linePoints, const uint32* key );
 
     // void TableFirstStep( const TableId rTable );
     // void BucketFirstStep( const TableId rTable, const uint32 bucket );
@@ -99,8 +94,8 @@ private:
     Fence   _writeFence;
     // uint64  _rTableOffset;              // 
     
-    BitBucketWriter<LP_BUCKET_COUNT> _lpWriter;
-    BitBucketWriter<LP_BUCKET_COUNT> _mapWriter;
+    // BitBucketWriter<LP_BUCKET_COUNT> _lpWriter;
+    // BitBucketWriter<LP_BUCKET_COUNT> _mapWriter;
     uint64*                          _lpWriteBuffer [2];
     uint32*                          _mapWriteBuffer[2];
 
