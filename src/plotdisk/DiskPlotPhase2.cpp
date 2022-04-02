@@ -85,7 +85,6 @@ void DiskPlotPhase2::RunWithBuckets()
     
     Fence readFence;
     Fence bitFieldFence;
-    
 
     const uint64 maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
     Pair*   pairs = allocator.CAlloc<Pair>  ( maxBucketEntries );

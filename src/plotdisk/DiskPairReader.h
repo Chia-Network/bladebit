@@ -14,14 +14,18 @@ struct DiskMapReader
     static constexpr uint32 _mapBits   = _k + 1 + _k - _savedBits;
 
     //-----------------------------------------------------------
-    DiskMapReader( DiskPlotContext& context, const uint32 threadCount, const TableId table, IAllocator& allocator )
-        : _context    ( context     )
+    DiskMapReader() {}
+
+    //-----------------------------------------------------------
+    DiskMapReader( DiskPlotContext& context, const uint32 threadCount, const TableId table, const FileId fileId, IAllocator& allocator )
+        : _context    ( &context    )
         , _table      ( table       )
+        , _fileId     ( fileId      )
         , _threadCount( threadCount )
     {
         const uint64 maxKEntries      = ( 1ull << _k );
         const uint64 maxBucketEntries = maxKEntries / _numBuckets;
-        const size_t blockSize        = context.ioQueue->BlockSize( FileId::MAP2 );
+        const size_t blockSize        = context.ioQueue->BlockSize( fileId );
         const size_t bufferSize       = CDivT( (size_t)maxBucketEntries * _mapBits, blockSize * 8 ) * blockSize;
 
         _loadBuffers[0] = allocator.Alloc( bufferSize, blockSize );
@@ -41,9 +45,9 @@ struct DiskMapReader
         if( _bucketsLoaded >= _numBuckets )
             return;
 
-        DiskBufferQueue& ioQueue = *_context.ioQueue;
+        DiskBufferQueue& ioQueue = *_context->ioQueue;
 
-        const FileId mapId           = FileId::MAP2 + (FileId)_table - 1;
+        const FileId mapId           = _fileId; //FileId::MAP2 + (FileId)_table - 1;
 
         const size_t blockSize       = ioQueue.BlockSize( FileId::T1 );
         const size_t blockSizeBits   = blockSize * 8;
@@ -80,16 +84,16 @@ struct DiskMapReader
     }
 
     //-----------------------------------------------------------
-    void ReadEntries( const uint64 entryCount, uint64* outMap )
+    template<typename TMap>
+    void ReadEntries( const uint64 entryCount, TMap* outMap )
     {
         ASSERT( _bucketsRead <= _numBuckets );
 
         // #TODO: Check here if we have to unpack a bucket and then check our own fence.
-
-        AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
+        AnonMTJob::Run( *_context->threadPool, _threadCount, [=]( AnonMTJob* self ) {
 
             uint64  entriesToRead    = entryCount;
-            uint64* outWriter        = outMap;
+            TMap*   outWriter        = outMap;
             uint64  readBucketOffset = _bucketReadOffset;
             uint32  bucketsRead      = _bucketsRead;
 
@@ -118,6 +122,11 @@ struct DiskMapReader
 
                         ASSERT( dstIdx < bucketLength );
                         unpackedMap[dstIdx] = map;
+
+                        #if _DEBUG
+                            if constexpr ( sizeof( TMap ) == 4 )
+                                ASSERT( map <= 0xFFFFFFFF)
+                        #endif
                     }
 
                     if( self->IsControlThread() )
@@ -136,11 +145,19 @@ struct DiskMapReader
                 const uint64* readMap      = _unpackdMaps[bucketsRead & 1] + readBucketOffset;
 
                 // Simply copy the unpacked map to the destination buffer
-                uint64 count, offset, end;
-                GetThreadOffsets( self, readCount, count, offset, end );
+                int64 count, offset, end;
+                GetThreadOffsets( self, (int64)readCount, count, offset, end );
 
                 if( count )
-                    memcpy( outWriter + offset, readMap + offset, count * sizeof( uint64 ) );
+                {
+                    if constexpr ( sizeof( TMap ) == sizeof( uint64 ) )
+                        memcpy( outWriter + offset, readMap + offset, (size_t)count * sizeof( uint64 ) );
+                    else
+                    {
+                        for( int64 i = offset; i < end; i++ )
+                            outWriter[i] = (TMap)readMap[i];
+                    }
+                }
 
                 // Update read entries
                 entriesToRead -= readCount;
@@ -178,7 +195,7 @@ private:
         if( bucket < _numBuckets - 1 )
             return maxBucketEntries;
         
-        const uint64 tableEntryCount = _context.entryCounts[(int)_table];
+        const uint64 tableEntryCount = _context->entryCounts[(int)_table];
 
         // Last, non-overflow bucket?
         if( bucket == _numBuckets - 1 )
@@ -197,8 +214,9 @@ private:
     }
 
 private:
-    DiskPlotContext& _context;
-    TableId          _table;
+    DiskPlotContext* _context           = nullptr;
+    TableId          _table             = TableId::Table1;
+    FileId           _fileId            = FileId::None;
     uint32           _threadCount       = 0;
     uint32           _bucketsLoaded     = 0;
     uint32           _bucketsRead       = 0;
@@ -228,7 +246,7 @@ struct DiskPairAndMapReader
         , _fence      ( fence   )
         , _table      ( table   )
         , _threadCount( threadCount )
-        , _mapReader  ( context, threadCount, table, allocator )
+        , _mapReader  ( context, threadCount, table, FileId::MAP2 + (FileId)table - 1, allocator )
         , _noMap      ( noMap )
     {
         DiskBufferQueue& ioQueue = *_context.ioQueue;

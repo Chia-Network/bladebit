@@ -241,12 +241,15 @@ public:
             {
                 const uint64 origin = reverseMap[i];
                 const uint64 b      = origin >> bucketShift;
+if( origin == 4878142636 ) BBDebugBreak();
+                    ASSERT( origin <= 0xFFFFFFFF );
 
                 const uint32 dstIdx = --pfxSum[b];
-                ASSERT( (int64)dstIdx < entryCount );
+                    ASSERT( (int64)dstIdx < entryCount );
 
                 const uint64 finalIdx = tableOffset + (uint64)i;
-                ASSERT( finalIdx < ( 1ull << encodeShift ) );
+                    ASSERT( finalIdx < 0xFFFFFFFF );
+                    ASSERT( finalIdx < ( 1ull << encodeShift ) );
 
                 outMapBuckets[dstIdx] = (origin << encodeShift) | finalIdx;
             }
@@ -359,10 +362,11 @@ public:
 
 public:
     //-----------------------------------------------------------
-    P3StepOne( DiskPlotContext& context, Fence& readFence, Fence& writeFence )
+    P3StepOne( DiskPlotContext& context, const FileId mapReadId, Fence& readFence, Fence& writeFence )
         : _context    ( context )
         , _ioQueue    ( *context.ioQueue )
         , _threadCount( context.p3ThreadCount )
+        , _mapReadId  ( mapReadId  )
         , _readFence  ( readFence  )
         , _writeFence ( writeFence )
     {
@@ -394,8 +398,20 @@ public:
 
         DiskPairAndMapReader<_numBuckets> rTableReader( context, context.p3ThreadCount, _readFence, rTable, allocator, false );
 
-        using LReader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
-        LReader lTableReader = LReader( FileId::T1, &ioQueue, allocator, maxBucketEntries, context.tmp1BlockSize, context.bucketCounts[(int)TableId::Table1] );
+        using L1Reader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
+        using LNReader = DiskMapReader<_numBuckets>;
+        
+        L1Reader lTable1Reader;
+        DiskMapReader<_numBuckets> lTableNReader;
+        uint32* lTableNEntries = nullptr;
+        
+        if constexpr ( lTable == TableId::Table1 )
+            lTable1Reader = L1Reader( FileId::T1, &ioQueue, allocator, maxBucketEntries, context.tmp1BlockSize, context.bucketCounts[(int)TableId::Table1] ); 
+        else
+        {
+            lTableNReader  = DiskMapReader<_numBuckets>( _context, _context.p3ThreadCount, lTable, _mapReadId, allocator );
+            lTableNEntries = allocator.CAlloc<uint32>( maxBucketEntries + P3_EXTRA_L_ENTRIES_TO_LOAD );
+        }
 
         {
             const size_t perBucketWriteSize   = CDiv( maxBucketEntries * _entrySizeBits / _numBuckets, (int)context.tmp2BlockSize * 8 ) * context.tmp2BlockSize;
@@ -414,9 +430,23 @@ public:
         _rPrunedLinePoints = allocator.CAlloc<uint64>( maxBucketEntries );
         _rPrunedMap        = allocator.CAlloc<uint64>( maxBucketEntries );
 
+        auto GetLLoadCount = [=]( const uint32 bucket ) { 
+            
+            const uint64 lEntryCount = _context.bucketCounts[(int)lTable][bucket];
+            const uint64 loadCount   = bucket == 0 ? lEntryCount + P3_EXTRA_L_ENTRIES_TO_LOAD :
+                                        bucket == _numBuckets - 1 ? lEntryCount - P3_EXTRA_L_ENTRIES_TO_LOAD :
+                                        lEntryCount;
+
+            return loadCount;
+        };
+
         auto LoadBucket = [&]( const uint32 bucket ) {
 
-            lTableReader.LoadNextBucket();
+            if( lTable == TableId::Table1 )
+                lTable1Reader.LoadNextBucket();
+            else
+                lTableNReader.LoadNextEntries( GetLLoadCount( bucket ) );
+
             rTableReader.LoadNextBucket();
         };
 
@@ -445,8 +475,18 @@ public:
                 LoadBucket( bucket + 1 );
 
             // Wait for and unpack our current bucket
-            const uint64  bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
-            const uint32* lEntries     = lTableReader.ReadLoadedBucket();
+            const uint64 bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
+            
+
+            uint32* lEntries;
+            if( lTable == TableId::Table1 )
+                lEntries = lTable1Reader.ReadLoadedBucket();
+            else
+            {
+                lEntries = lTableNEntries;
+                lTableNReader.ReadEntries( GetLLoadCount( bucket ), lEntries );
+            }
+
             ASSERT( bucketLength <= maxBucketEntries );
 
             // Convert to line points
@@ -739,6 +779,7 @@ private:
     DiskPlotContext& _context;
     DiskBufferQueue& _ioQueue;
     uint32           _threadCount;
+    FileId           _mapReadId;
     Fence&           _readFence;
     Fence&           _writeFence;
     Duration         _writeWaitTime = Duration::zero();
@@ -1069,7 +1110,7 @@ void DiskPlotPhase3::RunBuckets()
         switch( rTable )
         {
             case TableId::Table2: ProcessTable<TableId::Table2, _numBuckets>(); break;
-            // case TableId::Table3: ProcessTable<TableId::Table3, _numBuckets>(); break;
+            case TableId::Table3: ProcessTable<TableId::Table3, _numBuckets>(); break;
             // case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets>(); break;
             // case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets>(); break;
             // case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets>(); break;
@@ -1080,6 +1121,10 @@ void DiskPlotPhase3::RunBuckets()
         }
 
         std::swap( _mapReadId, _mapWriteId );
+
+        _ioQueue.SeekBucket( _mapReadId , 0, SeekOrigin::Begin );
+        _ioQueue.SeekBucket( _mapWriteId, 0, SeekOrigin::Begin );
+        _ioQueue.CommitCommands();
     }
 }
 
@@ -1093,12 +1138,8 @@ void DiskPlotPhase3::ProcessTable()
     //         then writes them to buckets, alog with their source index,
     //         for sorting in the second step.
     {
-        P3StepOne<rTable, _numBuckets> stepOne( _context, _readFence, _writeFence );
+        P3StepOne<rTable, _numBuckets> stepOne( _context, _mapReadId, _readFence, _writeFence );
         prunedEntryCount = stepOne.Run();
-
-        Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
-            rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
-            prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
 
         _context.readWaitTime  += stepOne.GetReadWaitTime();
         _context.writeWaitTime += stepOne.GetWriteWaitTime();
@@ -1121,5 +1162,11 @@ void DiskPlotPhase3::ProcessTable()
         _context.readWaitTime  += stepTwo.GetReadWaitTime();
         _context.writeWaitTime += stepTwo.GetWriteWaitTime();
     }
+
+    Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
+        rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
+        prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
+
+    _context.entryCounts[(int)rTable] = prunedEntryCount;
 }
 
