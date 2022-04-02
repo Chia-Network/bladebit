@@ -6,12 +6,12 @@
 
 /// #NOTE: We actually have _numBuckets+1 because there's an
 //         implicit overflow bucket that may contain entries.
-template<uint32 _numBuckets>
+template<uint32 _numBuckets, uint32 _finalIdxBits>
 struct DiskMapReader
 {
     static constexpr uint32 _k         = _K;
     static constexpr uint32 _savedBits = bblog2( _numBuckets );
-    static constexpr uint32 _mapBits   = _k + 1 + _k - _savedBits;
+    static constexpr uint32 _mapBits   = _k - _savedBits + _finalIdxBits; // ( origin address | final address )
 
     //-----------------------------------------------------------
     DiskMapReader() {}
@@ -47,7 +47,7 @@ struct DiskMapReader
 
         DiskBufferQueue& ioQueue = *_context->ioQueue;
 
-        const FileId mapId           = _fileId; //FileId::MAP2 + (FileId)_table - 1;
+        const FileId mapId           = _fileId;
 
         const size_t blockSize       = ioQueue.BlockSize( FileId::T1 );
         const size_t blockSizeBits   = blockSize * 8;
@@ -111,7 +111,7 @@ struct DiskMapReader
                     uint64* unpackedMap = _unpackdMaps[_bucketsUnpacked & 1];
                     BitReader reader( (uint64*)GetBucketBuffer( _bucketsUnpacked ), _mapBits * bucketLength, offset * _mapBits );
 
-                    const uint32 idxShift     = _k+1;
+                    const uint32 idxShift     = _finalIdxBits;
                     const uint64 finalIdxMask = ( 1ull << idxShift ) - 1;
 
                     for( int64 i = offset; i < end; i++ )
@@ -368,7 +368,7 @@ private:
     DiskPlotContext& _context;
     Fence&           _fence;
 
-    DiskMapReader<_numBuckets> _mapReader;
+    DiskMapReader<_numBuckets, _k+1> _mapReader;
 
     void*            _pairBuffers       [2];
     uint32           _pairOverflowBits  [_numBuckets];

@@ -40,7 +40,7 @@ public:
 
             constexpr uint   Radix      = 256;
             constexpr uint32 MaxIter    = CDiv( entryBitSize, 8 );
-            constexpr int32  iterations = MaxIter - remainderBits / 8;
+            constexpr int32  iterations = 8;//MaxIter - remainderBits / 8;
             constexpr uint32 shiftBase  = 8;
 
             BucketT counts     [Radix];
@@ -56,7 +56,7 @@ public:
             uint32 shift = 0;
 
             const uint32 lastByteMask   = 0xFF >> remainderBits;
-                  uint32 masks[MaxIter] = { 0xFF, 0xFF, 0xFF, lastByteMask };
+                  uint32 masks[MaxIter] = { 0xFF, 0xFF, 0xFF, 0xFF };// lastByteMask };
 
             for( int32 iter = 0; iter < iterations ; iter++, shift += shiftBase )
             {
@@ -170,8 +170,8 @@ class MapWriter
 public:
     static constexpr uint32 _k             = _K;
     static constexpr uint32 BucketBits     = bblog2( _numBuckets );
-    static constexpr uint32 AddressBitSize = _k + 1;
-    static constexpr uint32 EntryBitSize   = AddressBitSize + _k - BucketBits;
+    static constexpr uint32 AddressBitSize = _k;
+    static constexpr uint32 EntryBitSize   = _k - BucketBits + AddressBitSize;  // ( origin address | final address ) ( k-log2(buckets) | 32 )
 
 public:
 
@@ -210,7 +210,7 @@ public:
             const uint32 bucketBits   = BucketBits;
             const uint32 bucketShift  = _k - bucketBits;
             const uint32 bitSize      = EntryBitSize;
-            const uint32 encodeShift  = AddressBitSize;
+            const uint32 encodeShift  = _k;
             const uint32 numBuckets   = _numBuckets + 1;
 
             int64 count, offset, end;
@@ -239,20 +239,37 @@ public:
 
             for( int64 i = 0; i < count; i++ )
             {
-                const uint64 origin = reverseMap[i];
-                const uint64 b      = origin >> bucketShift;
-if( origin == 4878142636 ) BBDebugBreak();
-                    ASSERT( origin <= 0xFFFFFFFF );
-
-                const uint32 dstIdx = --pfxSum[b];
-                    ASSERT( (int64)dstIdx < entryCount );
+                const uint64 origin = reverseMap[i];            ASSERT( origin < 0x100000000 + (1ull<<_k) / _numBuckets );
+                const uint64 b      = origin >> bucketShift;    ASSERT( b <= _numBuckets );
+                const uint32 dstIdx = --pfxSum[b];              ASSERT( (int64)dstIdx < entryCount );
 
                 const uint64 finalIdx = tableOffset + (uint64)i;
-                    ASSERT( finalIdx < 0xFFFFFFFF );
-                    ASSERT( finalIdx < ( 1ull << encodeShift ) );
+                ASSERT( finalIdx < ( 1ull << encodeShift ) );
 
                 outMapBuckets[dstIdx] = (origin << encodeShift) | finalIdx;
             }
+
+#if _DEBUG
+            {
+                self->SyncThreads();
+
+                const uint32 idxShift      = _k;
+                const uint64 finalIdxMask  = ( 1ull << idxShift    ) - 1;
+                const uint64 bucketIdxMask = ( 1ull << bucketShift ) - 1;
+
+                for( int64 i = offset; i < end; i++ )
+                {
+                    const uint64 packedMap = outMapBuckets[i];
+                    const uint64 bucketIdx = ( packedMap >> idxShift ) & bucketIdxMask;
+                    const uint64 map       = packedMap & finalIdxMask;
+// if( i == 12109888 ) BBDebugBreak();
+                    ASSERT( bucketIdx < (1ull<<_k) / _numBuckets );
+                    ASSERT( map <= 0xFFFFFFFF );
+                }
+
+                self->SyncThreads();
+            }
+#endif
 
             auto&   bitWriter = _bucketWriter;
             uint64* bitCounts = totalBitCounts;
@@ -304,18 +321,12 @@ if( origin == 4878142636 ) BBDebugBreak();
                 const uint64* mapToWriteEndPass1 = mapToWrite + std::min( counts[i], 2u ); 
 
                 while( mapToWrite < mapToWriteEndPass1 )
-                {
-                    writer.Write( *mapToWrite, bitSize );
-                    mapToWrite++;
-                }
+                    writer.Write( *mapToWrite++, bitSize );
 
                 self->SyncThreads();
 
                 while( mapToWrite < mapToWriteEnd )
-                {
-                    writer.Write( *mapToWrite, bitSize );
-                    mapToWrite++;
-                }
+                    writer.Write( *mapToWrite++, bitSize );
             }
 
             // Write to disk
@@ -399,17 +410,17 @@ public:
         DiskPairAndMapReader<_numBuckets> rTableReader( context, context.p3ThreadCount, _readFence, rTable, allocator, false );
 
         using L1Reader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
-        using LNReader = DiskMapReader<_numBuckets>;
+        using LNReader = DiskMapReader<_numBuckets, _k>;
         
         L1Reader lTable1Reader;
-        DiskMapReader<_numBuckets> lTableNReader;
+        LNReader lTableNReader;
         uint32* lTableNEntries = nullptr;
         
         if constexpr ( lTable == TableId::Table1 )
             lTable1Reader = L1Reader( FileId::T1, &ioQueue, allocator, maxBucketEntries, context.tmp1BlockSize, context.bucketCounts[(int)TableId::Table1] ); 
         else
         {
-            lTableNReader  = DiskMapReader<_numBuckets>( _context, _context.p3ThreadCount, lTable, _mapReadId, allocator );
+            lTableNReader  = LNReader( _context, _context.p3ThreadCount, lTable, _mapReadId, allocator );
             lTableNEntries = allocator.CAlloc<uint32>( maxBucketEntries + P3_EXTRA_L_ENTRIES_TO_LOAD );
         }
 
@@ -477,14 +488,19 @@ public:
             // Wait for and unpack our current bucket
             const uint64 bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
             
-
             uint32* lEntries;
-            if( lTable == TableId::Table1 )
+            uint64  lEntryCount;
+
+            if constexpr ( lTable == TableId::Table1 )
                 lEntries = lTable1Reader.ReadLoadedBucket();
             else
             {
-                lEntries = lTableNEntries;
-                lTableNReader.ReadEntries( GetLLoadCount( bucket ), lEntries );
+                lEntries    = lTableNEntries;
+                lEntryCount = GetLLoadCount( bucket );
+                
+                const uintptr_t offset = bucket == 0 ? 0 : P3_EXTRA_L_ENTRIES_TO_LOAD;
+
+                lTableNReader.ReadEntries( lEntryCount, lEntries + offset );
             }
 
             ASSERT( bucketLength <= maxBucketEntries );
@@ -494,6 +510,12 @@ public:
 
             WriteLinePointsToBuckets( bucket, (int64)prunedEntryCount, _rPrunedLinePoints, _rPrunedMap, (uint64*)pairs, map );
 
+            if constexpr ( lTable > TableId::Table1 )
+            {
+                if( bucket < _numBuckets - 1 )
+                    memcpy( lTableNEntries, lTableNEntries + lEntryCount - P3_EXTRA_L_ENTRIES_TO_LOAD, P3_EXTRA_L_ENTRIES_TO_LOAD * sizeof( uint32 ) );
+            }
+
             _prunedEntryCount += prunedEntryCount;
         }
 
@@ -501,6 +523,10 @@ public:
         _lpWriter.SubmitLeftOvers();
 
         // Re-write L table's bucket count w/ our new bucket count
+        #if _DEBUG
+            for( uint32 b = 0; b < _numBuckets; b++ )
+                ASSERT( _lpBucketCounts[b] <= context.bucketCounts[(int)lTable][b] );
+        #endif
         memcpy( context.bucketCounts[(int)lTable], _lpBucketCounts, sizeof( _lpBucketCounts ) );
 
         return _prunedEntryCount;
@@ -696,7 +722,9 @@ private:
                 ASSERT( bitOffset + counts[i] * entrySizeBits <= totalBucketBitCounts[i] );
 
                 BitWriter writer = bucketWriter.GetWriter( i, bitOffset );
-                // const uint64 bitReadStart = writer.Position();
+#if _DEBUG
+                const uint64 bitReadStart = writer.Position();
+#endif
 
                 const uint64* lp  = lpBuckets  + writeOffset;
                 const uint64* idx = idxBuckets + writeOffset;
@@ -704,27 +732,28 @@ private:
                 // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
                 const int64 firstWrite  = (int64)std::min( 2u, counts[i] );
                 const int64 secondWrite = (int64)counts[i] >= 2 ? counts[i] - 2 : 0;
+                ASSERT( counts[i] > 2 );
 
                 PackEntries( firstWrite, writer, lp, idx, i );
                 self->SyncThreads();
                 PackEntries( secondWrite, writer, lp+2, idx+2, i );
                 
-                #if _DEBUG
-                // if( 0 )
-                // {
-                //     BitReader reader( (uint64*)writer.Fields(), (uint64)counts[i] * entrySizeBits, bitReadStart );
-                //     const uint64 mask = (uint64)i << _lpBits;
+#if _DEBUG
+                if( 0 )
+                {
+                    BitReader reader( (uint64*)writer.Fields(), (uint64)counts[i] * entrySizeBits, bitReadStart );
+                    const uint64 mask = (uint64)i << _lpBits;
 
-                //     for( int64 j = 0; j < counts[i]; j++ )
-                //     {
-                //         const uint64 rlp  = reader.ReadBits64( _lpBits  ) | mask;
-                //         const uint64 ridx = reader.ReadBits64( _idxBits );
+                    for( int64 j = 0; j < counts[i]; j++ )
+                    {
+                        const uint64 rlp  = reader.ReadBits64( _lpBits  ) | mask;
+                        const uint64 ridx = reader.ReadBits64( _idxBits );
 
-                //         ASSERT( rlp  == lp [j] );
-                //         ASSERT( ridx == idx[j] );
-                //     }
-                // }
-                #endif
+                        ASSERT( rlp  == lp [j] );
+                        ASSERT( ridx == idx[j] );
+                    }
+                }
+#endif
             }
 
             /// Write buckets to disk
@@ -748,9 +777,9 @@ private:
     inline void PackEntries( const int64 count, BitWriter& writer, const uint64* lps, const uint64* indices, const uint32 bucket )
     {
         // TEST:
-        // BitReader reader( (uint64*)writer.Fields(), writer.Capacity(), writer.Position() );
-        // const uint64 mask = (uint64)bucket  << _lpBits;
-        static uint64 entriesWritten = 0;
+        BitReader reader( (uint64*)writer.Fields(), writer.Capacity(), writer.Position() );
+        const uint64 mask = (uint64)bucket  << _lpBits;
+        
         for( int64 i = 0; i < count; i++ )
         {
             writer.Write( lps    [i], _lpBits  );
@@ -759,10 +788,10 @@ private:
             ASSERT( indices[i] < (1ull << _K) + ((1ull << _K) / _numBuckets) );
 
             // #TEST
-            // const uint64 rlp  = reader.ReadBits64( _lpBits  ) | mask;
-            // const uint64 ridx = reader.ReadBits64( _idxBits );
-            // ASSERT( rlp  == lps    [i] );
-            // ASSERT( ridx == indices[i] );
+            const uint64 rlp  = reader.ReadBits64( _lpBits  ) | mask;
+            const uint64 ridx = reader.ReadBits64( _idxBits );
+            ASSERT( rlp  == lps    [i] );
+            ASSERT( ridx == indices[i] );
         }
     }
 
@@ -884,25 +913,28 @@ public:
             // Unpack bucket
             const byte* packedEntries = readBuffers[bucket & 1];
             UnpackEntries( bucket, entryCount, packedEntries, linePoints, indices );
-#if _DEBUG
-            {
-                // uint64 bucketCounts[_numBuckets] = { 0 };
-                // for( int64 i = 0; i < entryCount; i++ )
-                // {
-                //     ASSERT( _linePointRef[i] == linePoints[i] );
-                //     ASSERT( _indexRef[i] == indices[i] );
-                //     ASSERT( indices[i] < (1ull << _K) + ((1ull << _K) / _numBuckets) );
 
-                //     bucketCounts[linePoints[i] & 0xFF]++;
-                // }
-                // ASSERT( bucketCounts[0] > 0 );
-            }
+#if _DEBUG
+            // {
+            //     uint64 bucketCounts[_numBuckets] = { 0 };
+            //     for( int64 i = 0; i < entryCount; i++ )
+            //     {
+            //         ASSERT( _linePointRef[i] == linePoints[i] );
+            //         ASSERT( _indexRef[i] == indices[i] );
+            //         ASSERT( indices[i] < (1ull << _K) + ((1ull << _K) / _numBuckets) );
+
+            //         bucketCounts[linePoints[i] & 0xFF]++;
+            //     }
+            //     ASSERT( bucketCounts[0] > 0 );
+            // }
 #endif
             // Sort on LP
             constexpr int32 maxSortIter = (int)CDiv( 64 - _bucketBits, 8 );
 
-            EntrySort::SortEntries<_numBuckets, _lpBits>( *_context.threadPool, _threadCount, entryCount, 
-                                                          linePoints, tmpLinePoints, indices, tmpIndices );
+            // EntrySort::SortEntries<_numBuckets, _lpBits>( *_context.threadPool, _threadCount, entryCount, 
+            //                                               linePoints, tmpLinePoints, indices, tmpIndices );
+
+            RadixSort256::SortWithKey<BB_DP_MAX_JOBS>( *_context.threadPool, _threadCount, linePoints, tmpLinePoints, indices, tmpIndices, entryCount );
 
             uint64* sortedLinePoints  = linePoints;
             uint64* sortedIndices     = indices;
@@ -911,11 +943,11 @@ public:
 
             // If our iteration count is not even, it means the final
             // output of the sort is saved in the tmp buffers.
-            if( ( maxSortIter & 1 ) != 0)
-            {
-                std::swap( sortedLinePoints, scratchLinePoints );
-                std::swap( sortedIndices   , scratchIndices    );
-            }
+            // if( ( maxSortIter & 1 ) != 0)
+            // {
+            //     std::swap( sortedLinePoints, scratchLinePoints );
+            //     std::swap( sortedIndices   , scratchIndices    );
+            // }
 
             // Write reverse map to disk
             if( rTable < TableId::Table7 )
@@ -1107,6 +1139,8 @@ void DiskPlotPhase3::RunBuckets()
 {
     for( TableId rTable = TableId::Table2; rTable < TableId::Table7; rTable++ )
     {
+        Log::Line( "Compressing tables %u and %u.", rTable, rTable+1 );
+        const auto timer = TimerBegin();
         switch( rTable )
         {
             case TableId::Table2: ProcessTable<TableId::Table2, _numBuckets>(); break;
@@ -1119,6 +1153,9 @@ void DiskPlotPhase3::RunBuckets()
                 ASSERT( 0 );
                 break;
         }
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished compressing tables %u and %u in %.2lf seconds.", rTable, rTable+1, elapsed );
 
         std::swap( _mapReadId, _mapWriteId );
 
@@ -1143,6 +1180,10 @@ void DiskPlotPhase3::ProcessTable()
 
         _context.readWaitTime  += stepOne.GetReadWaitTime();
         _context.writeWaitTime += stepOne.GetWriteWaitTime();
+
+    Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
+        rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
+        prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
     }
 
     _ioQueue.SignalFence( _stepFence );
@@ -1163,10 +1204,6 @@ void DiskPlotPhase3::ProcessTable()
         _context.writeWaitTime += stepTwo.GetWriteWaitTime();
     }
 
-    Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
-        rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
-        prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
-
-    _context.entryCounts[(int)rTable] = prunedEntryCount;
+    _context.entryCounts[(int)rTable-1] = prunedEntryCount;
 }
 
