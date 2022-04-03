@@ -102,9 +102,6 @@ void DiskPlotPhase2::RunWithBuckets()
     bitFields[0] = allocator.AllocT<uint64>( markfieldSize, blockSize );
     bitFields[1] = allocator.AllocT<uint64>( markfieldSize, blockSize );
 
-    // _phase3Data.bitFieldSize   = bitFieldSize;
-    // _phase3Data.maxTableLength = maxEntries;
-
     #if _DEBUG && BB_DP_DBG_SKIP_PHASE_2
         return;
     #endif
@@ -219,7 +216,7 @@ void DiskPlotPhase2::RunWithBuckets()
                     });
                 }
 
-                // if( rTable < TableId::Table7 )
+                if( rTable < TableId::Table7 )
                 {
                     Log::Line( "Reading R map" );
                     const uint32 _k              = _K;
@@ -404,6 +401,33 @@ void DiskPlotPhase2::RunWithBuckets()
         //     TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 
         // #TEST:
+        // if( 0 )
+        // {
+        //     std::atomic<uint64> prunedEntryCount = 0;
+
+        //     const uint64 lEntryCount = context.entryCounts[(int)table-1];
+
+        //     AnonMTJob::Run( *context.threadPool, [&]( AnonMTJob* self ) {
+
+        //         if( self->IsControlThread() )
+        //             Log::Line( "Counting entries." );
+
+        //         BitField markedEntries( rMarkingTable );
+
+        //         uint64 count, offset, end;
+        //         GetThreadOffsets( self, lEntryCount, count, offset, end );
+        //         for( uint64 e = offset; e < end; e++ )
+        //         {
+        //             if( markedEntries.Get( e ) )
+        //                 prunedEntryCount++;
+        //         }
+        //     });
+
+        //     Log::Line( " %llu/%llu (%.2lf%%)", prunedEntryCount.load(), lEntryCount,
+        //               ((double)prunedEntryCount.load() / lEntryCount) * 100.0 );
+        //     Log::Line("");
+        // }
+
         // if( table < TableId::Table7 )
         // if( 0 )
         {
@@ -484,15 +508,15 @@ void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader,
 
         AnonMTJob::Run( *_context.threadPool, _context.p2ThreadCount, [=]( AnonMTJob* self ) { 
             
-            BitField lTableMarkedEntries( lTableMarks );
-            BitField rTableMarkedEntries( rTableMarks );
+                  BitField lTableMarkedEntries( lTableMarks );
+            const BitField rTableMarkedEntries( rTableMarks );
 
             const uint64 bucketEntryCount = _context.ptrTableBucketCounts[(int)table][bucket];
 
             if( bucket == 0 )
             {
                 // Zero-out l marking table
-                const uint64 lTableEntryCount = _context.entryCounts[(int)table];
+                const uint64 lTableEntryCount = _context.entryCounts[(int)table-1];
                 const size_t bitFieldSize     = RoundUpToNextBoundary( (size_t)lTableEntryCount / 8, 8 );  // Round up to 64-bit boundary
 
                 size_t count, offset, _;

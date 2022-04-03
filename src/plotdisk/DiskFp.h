@@ -63,7 +63,9 @@ public:
         _context.entryCounts[(int)table] = (uint64)_tableEntryCount;
 
         // #TODO: Pass in the fences and then wait before we start the next table...
-        _writeFence.Wait( _numBuckets - 1 );
+        _ioQueue.SignalFence( _writeFence, _numBuckets+1 );
+        _ioQueue.CommitCommands();
+        _writeFence.Wait( _numBuckets+1 );
     }
 
     //-----------------------------------------------------------
@@ -77,6 +79,10 @@ public:
 
         _mapBitWriter.SetFileId( FileId::MAP7 );
         WriteCTables();
+
+        _ioQueue.SignalFence( _writeFence, _numBuckets+1 );
+        _ioQueue.CommitCommands();
+        _writeFence.Wait( _numBuckets+1 );
     }
 
     //-----------------------------------------------------------
@@ -135,7 +141,7 @@ public:
         if( !dryRun )
         {
             const FileId mapWriterId = table == TableId::Table2 ? FileId::T1 : FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
-
+// #TODO: These need to have buffers rounded-up to block size per bucket
             _fxBitWriter   = BitBucketWriter<_numBuckets>   ( _ioQueue, _outFxId, (byte*)fxBlocks );
             _pairBitWriter = BitBucketWriter<1>             ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
             _mapBitWriter  = BitBucketWriter<MapBucketCount>( _ioQueue, mapWriterId, (byte*)mapBlocks );
@@ -239,6 +245,7 @@ public:
     void WriteMap( const uint32 bucket, const int64 entryCount, const uint64* map, uint64* outMap )
     {
         using TMap = typename FpMapType<table>::Type;
+
         ASSERT( entryCount < (1ll << _k) );
         
         if constexpr ( table == TableId::Table2 )
