@@ -3,6 +3,7 @@
 #include "threading/MTJob.h"
 #include "util/Util.h"
 #include "io/IStream.h"
+#include "io/FileStream.h"
 
 //-----------------------------------------------------------
 bool IOJob::MTWrite( ThreadPool& pool, uint32 threadCount, 
@@ -171,6 +172,43 @@ bool IOJob::WriteToFile( IStream& file, const void* writeBuffer, const size_t si
     }
 
     return true;
+}
+
+//-----------------------------------------------------------
+void* IOJob::ReadAllBytesDirect( const char* path, int& error )
+{
+    FileStream file;
+    if( !file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::NoBuffering ) )
+        return nullptr;
+
+    const size_t blockSize = file.BlockSize();
+    const size_t readSize  = file.Size();
+    const size_t allocSize = RoundUpToNextBoundaryT( readSize, blockSize );
+
+    void* block  = bbvirtalloc( blockSize );
+    void* buffer = bbvirtalloc( allocSize );
+
+    const bool r = ReadFromFile( file, buffer, readSize, block, blockSize, error );
+
+    bbvirtfree( block );
+    if( !r )
+    {
+        bbvirtfree( buffer );
+        return nullptr;
+    }
+
+    return buffer;
+}
+
+//-----------------------------------------------------------
+bool IOJob::ReadFromFile( const char* path, void* buffer, const size_t size,
+                          void* blockBuffer, const size_t blockSize, int& error )
+{
+    FileStream file;
+    if( !file.Open( path, FileMode::Open, FileAccess::Read ) )
+        return false;
+
+    return ReadFromFile( file, buffer, size, blockBuffer, blockSize, error );
 }
 
 //-----------------------------------------------------------

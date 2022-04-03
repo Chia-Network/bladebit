@@ -38,6 +38,11 @@ struct IOJob : MTJob<IOJob>
     static bool ReadFromFile( IStream& file, void* buffer, const size_t size,
                               void* blockBuffer, const size_t blockSize, int& error );
 
+    static bool ReadFromFile( const char* path, void* buffer, const size_t size,
+                              void* blockBuffer, const size_t blockSize, int& error );
+
+    static void* ReadAllBytesDirect( const char* path, int& error );
+
 private:
     static bool RunIOJob( bool write, ThreadPool& pool, uint32 threadCount, 
         IStream** files, 
