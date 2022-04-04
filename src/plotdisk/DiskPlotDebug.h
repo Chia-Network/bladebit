@@ -246,7 +246,7 @@ inline bool Debug::LoadRefTable( const char* path, T*& buffer, uint64& outEntryC
 }
 
 //-----------------------------------------------------------
-inline void LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount )
+inline void Debug::LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount )
 {
     ASSERT( table < TableId::Table7 );
 

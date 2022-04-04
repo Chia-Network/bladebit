@@ -427,17 +427,19 @@ public:
         const uint32 preloadIdx = _loadIdx & 3; // % 4
 
         // Substract entries that are already pre-loaded
-        if( _preloadedEntries[preloadIdx] )
+        const uint64 numPreloaded = _preloadedEntries[preloadIdx];
+
+        if( numPreloaded )
         {
-            count -= std::min( count, _preloadedEntries[preloadIdx] );
+            count -= std::min( count, numPreloaded );
 
             if( count == 0 )
             {
                 // <= than our preloaded entries were requested.
                 // Move any left-over preloaded entries to the next load
-                _preloadedEntries[(loadIdx+1) & 3] = _preloadedEntries[preloadIdx] - count;
-                _copyCount[loadIdx]                = _preloadedEntries[preloadIdx] - count;
-                _loadCount[loadIdx]                = 0;
+                _preloadedEntries[(_loadIdx+1) & 3] = numPreloaded - count;
+                _copyCount[loadIdx]                 = numPreloaded - count;
+                _loadCount[loadIdx]                 = 0;
                 return;
             }
         }
@@ -446,12 +448,12 @@ public:
 
         const uint64 loadCount = RoundUpToNextBoundaryT( count, _entriesPerBlock );
 
-        _ioQueue->ReadFile( _fileId, 0, buffer, loadCount * sizeof( uint32 ) );
+        _ioQueue->ReadFile( _fileId, 0, buffer, loadCount * sizeof( T ) );
         _ioQueue->CommitCommands();
 
         const uint64 overflowCount = loadCount - count;
 
-        _loadCount[loadIdx] = count;
+        _loadCount[loadIdx] = loadCount;
         _copyCount[loadIdx] = overflowCount;
 
         // Save overflow as preloaded entries for the next load
@@ -475,7 +477,7 @@ public:
         {
             const uint64 entryCount = preloaded + loadedCount;
             T* dst = _loadBuffer[(readIdx + 1) & 1] + _entriesPerBlock - copyCount;
-            memcpy( dst, buffer + entryCount - preloaded, copyCount * sizeof( T ) );
+            memcpy( dst, buffer + entryCount - copyCount, copyCount * sizeof( T ) );
         }
 
         _readIdx++;

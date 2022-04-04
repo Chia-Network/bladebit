@@ -19,7 +19,7 @@
 #define P3_EXTRA_L_ENTRIES_TO_LOAD BB_DP_CROSS_BUCKET_MAX_ENTRIES
 
 #if _DEBUG
-static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, uint64* linePoints, uint64 length );
+static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length );
 #endif
 
 class EntrySort
@@ -637,9 +637,10 @@ private:
                     outLinePoints[i] = SquareToLinePoint( x, y );
 
 #if _DEBUG
+if( outLinePoints[i] == 41631646582366 ) BBDebugBreak();
 // if( outLinePoints[i] == 2664297094 ) BBDebugBreak();
-// if( p.left  + _bpOffset == 3117075349 ) BBDebugBreak();
-// if( p.right + _bpOffset == 3117075692 ) BBDebugBreak();
+if( p.left  + _bpOffset == 738199293 && p.right + _bpOffset == 738199423) BBDebugBreak();
+// if( p.right + _bpOffset == 738199423 ) BBDebugBreak();
 #endif
                 }
 
@@ -976,6 +977,10 @@ public:
                 std::swap( sortedIndices   , scratchIndices    );
             }
 
+#if _DEBUG
+            ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
+#endif
+
             // Write reverse map to disk
             if( rTable < TableId::Table7 )
                 mapWriter.Write( *_context.threadPool, _threadCount, bucket, entryCount, mapOffset, sortedIndices, scratchIndices );
@@ -1058,7 +1063,7 @@ DiskPlotPhase3::~DiskPlotPhase3() {}
 void DiskPlotPhase3::Run()
 {
 #if _DEBUG
-    if( 0 )
+    // if( 0 )
     {
         Log::Line( "Validating Xs" );
         uint32* xRef     = nullptr;
@@ -1068,9 +1073,47 @@ void DiskPlotPhase3::Run()
             "Failed to load ref table" );
         ASSERT( refCount == (1ull << _K) );
 
-        int err;
-        uint32* xs = (uint32*)IOJob::ReadAllBytesDirect( "/mnt/p5510a/disk_tmp/t1_0.tmp", err );
-        FatalIf( !xs, "Failed to rad Xs with error: %d", err );
+        // int err;
+        // uint32* xs = (uint32*)IOJob::ReadAllBytesDirect( "/mnt/p5510a/disk_tmp/t1_0.tmp", err );
+        // FatalIf( !xs, "Failed to rad Xs with error: %d", err );
+
+        uint32* xs = bbcvirtallocbounded<uint32>( 1ull << _K );
+        {
+            auto& ioQueue = *_context.ioQueue;
+
+            const uint64  maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, 256>::MaxBucketEntries;
+            // using XReader = SingleFileMapReader<256, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
+            StackAllocator allocator( _context.heapBuffer, _context.heapSize );
+            // XReader lTable1Reader( FileId::T1, &ioQueue, allocator, maxBucketEntries, _context.tmp1BlockSize, _context.bucketCounts[(int)TableId::Table1] ); 
+
+            BlockReader<uint32> lTableReader( FileId::T1, &ioQueue, maxBucketEntries, allocator, _context.tmp1BlockSize, 0 );
+            
+            uint32* xWriter = xs;
+
+            Fence readFence;
+            lTableReader.LoadEntries( _context.bucketCounts[(int)TableId::Table1][0] );
+            ioQueue.SignalFence( readFence, 0 );
+            ioQueue.CommitCommands();
+
+            for( uint32 b = 0; b < 256; b++ )
+            {
+                if( b + 1 < 256 )
+                {
+                    lTableReader.LoadEntries( _context.bucketCounts[(int)TableId::Table1][b+1] );
+                    ioQueue.SignalFence( readFence, b+1 );
+                    ioQueue.CommitCommands();
+                }
+
+                readFence.Wait( b );
+
+                const uint64  entryCount = _context.bucketCounts[(int)TableId::Table1][b];
+                const uint32* loadedXs   = lTableReader.ReadEntries();
+
+                bbmemcpy_t( xWriter, loadedXs, entryCount );
+                xWriter += entryCount;
+            }
+        }
+
 
         for( uint64 i = 0; i < refCount; i++ )
         {
@@ -1100,7 +1143,8 @@ void DiskPlotPhase3::Run()
         }
 
         bbvirtfree( xRef );
-        bbvirtfree( xs );
+        // bbvirtfree( xs );
+        bbvirtfreebounded( xs );
         Log::Line( "All good!" );
         }
 #endif
@@ -1284,12 +1328,12 @@ void DiskPlotPhase3::ProcessTable()
 
 #if _DEBUG
 //-----------------------------------------------------------
-void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, uint64* linePoints, uint64 length )
+void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length )
 {
     static TableId _loadedTable   = TableId::_Count;
     static uint64* _refLPs        = nullptr;
-    static uint64* _refLPReader   = nullptr;
     static uint64  _refEntryCount = 0;
+    static uint64  _refLPOffset   = 0;
 
     if( _refLPs == nullptr )
     {
@@ -1301,10 +1345,27 @@ void ValidateLinePoints( const TableId table, const DiskPlotContext& context, co
     {
         // Time to load a new table and reset the reader to the beginning
         _loadedTable = table;
-        
+
         Debug::LoadRefLinePointTable( table, _refLPs, _refEntryCount );
         ASSERT( _refEntryCount <= context.entryCounts[(int)TableId::Table7] );
-        _refLPReader = _refLPReader
+
+        _refLPOffset = 0;
     }
+
+    ASSERT( _refLPOffset + length <= _refEntryCount );
+
+    AnonMTJob::Run( *context.threadPool, 1, [=]( AnonMTJob* self ) {
+
+        uint64 count, offset, end;
+        GetThreadOffsets( self, length, count, offset, end );
+
+        const uint64* refLPReader = _refLPs + _refLPOffset + offset;
+        const uint64* lpReader    = linePoints + offset;
+
+        for( uint64 i = 0; i < count; i++ )
+        {
+            ASSERT( lpReader[i] == refLPReader[i] );
+        }
+    });
 }
 #endif
