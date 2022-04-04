@@ -35,6 +35,8 @@ namespace Debug
     template<typename T>
     bool LoadRefTable( const char* path, T*& buffer, uint64& outEntryCount );
 
+    void LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount );
+
     template<uint32 _numBuckets>
     void ValidatePairs(  DiskPlotContext& context, const TableId table );
 }
@@ -241,6 +243,18 @@ inline bool Debug::LoadRefTable( const char* path, T*& buffer, uint64& outEntryC
 
     bbvirtfree( block );
     return success;
+}
+
+//-----------------------------------------------------------
+inline void LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount )
+{
+    ASSERT( table < TableId::Table7 );
+
+    char path[1024];
+    sprintf( path, "%slp.t%d.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
+    Log::Line( " Loading reference table '%s'.", path );
+
+    FatalIf( !Debug::LoadRefTable( path, buffer, outEntryCount ), "Failed to load reference line point table." );
 }
 
 //-----------------------------------------------------------

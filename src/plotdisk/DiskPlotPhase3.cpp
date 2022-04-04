@@ -5,6 +5,9 @@
 #include "algorithm/RadixSort.h"
 
 #if _DEBUG
+    #include "DiskPlotDebug.h"
+    #include "jobs/IOJob.h"
+
     uint64* _linePointRef = nullptr;
     uint64* _indexRef     = nullptr;
     uint64* _lpRefWriter  = nullptr;
@@ -14,6 +17,10 @@
 // Extra L entries to load per bucket to ensure we
 // have cross bucket entries accounted for
 #define P3_EXTRA_L_ENTRIES_TO_LOAD BB_DP_CROSS_BUCKET_MAX_ENTRIES
+
+#if _DEBUG
+static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, uint64* linePoints, uint64 length );
+#endif
 
 class EntrySort
 {
@@ -40,7 +47,7 @@ public:
 
             constexpr uint   Radix      = 256;
             constexpr uint32 MaxIter    = CDiv( entryBitSize, 8 );
-            constexpr int32  iterations = 8;//MaxIter - remainderBits / 8;
+            constexpr int32  iterations = MaxIter - remainderBits / 8;
             constexpr uint32 shiftBase  = 8;
 
             BucketT counts     [Radix];
@@ -55,8 +62,10 @@ public:
 
             uint32 shift = 0;
 
-            const uint32 lastByteMask   = 0xFF >> remainderBits;
-                  uint32 masks[MaxIter] = { 0xFF, 0xFF, 0xFF, 0xFF };// lastByteMask };
+            const uint32 lastByteMask = 0xFF >> remainderBits;
+                  uint32 masks[8]     = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+            
+            masks[MaxIter-1] = lastByteMask;
 
             for( int32 iter = 0; iter < iterations ; iter++, shift += shiftBase )
             {
@@ -319,6 +328,7 @@ public:
 
                 // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
                 const uint64* mapToWriteEndPass1 = mapToWrite + std::min( counts[i], 2u ); 
+                ASSERT( counts[i] > 2 );
 
                 while( mapToWrite < mapToWriteEndPass1 )
                     writer.Write( *mapToWrite++, bitSize );
@@ -344,6 +354,8 @@ public:
     void SubmitFinalBits()
     {
         _bucketWriter.SubmitLeftOvers();
+        _ioQueue->SignalFence( *_writeFence, _numBuckets );
+        _ioQueue->CommitCommands();
     }
 
 private:
@@ -371,6 +383,9 @@ public:
     static constexpr uint32 _idxBits       = _k + 1;
     static constexpr uint32 _entrySizeBits = _lpBits + _idxBits; // LP, origin index
 
+#if _DEBUG
+uint64 _bpOffset = 0;
+#endif
 public:
     //-----------------------------------------------------------
     P3StepOne( DiskPlotContext& context, const FileId mapReadId, Fence& readFence, Fence& writeFence )
@@ -410,7 +425,7 @@ public:
         DiskPairAndMapReader<_numBuckets> rTableReader( context, context.p3ThreadCount, _readFence, rTable, allocator, false );
 
         using L1Reader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
-        using LNReader = DiskMapReader<_numBuckets, _k>;
+        using LNReader = DiskMapReader<uint32, _numBuckets, _k>;
         
         L1Reader lTable1Reader;
         LNReader lTableNReader;
@@ -462,10 +477,10 @@ public:
         };
 
     #if _DEBUG
-        _linePointRef = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
-        _indexRef     = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
-        _lpRefWriter  = _linePointRef;
-        _idxRefWriter = _indexRef;
+        // _linePointRef = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
+        // _indexRef     = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
+        // _lpRefWriter  = _linePointRef;
+        // _idxRefWriter = _indexRef;
     #endif
 
 
@@ -497,10 +512,11 @@ public:
             {
                 lEntries    = lTableNEntries;
                 lEntryCount = GetLLoadCount( bucket );
-                
+
                 const uintptr_t offset = bucket == 0 ? 0 : P3_EXTRA_L_ENTRIES_TO_LOAD;
 
                 lTableNReader.ReadEntries( lEntryCount, lEntries + offset );
+                BBDebugBreak();
             }
 
             ASSERT( bucketLength <= maxBucketEntries );
@@ -517,6 +533,10 @@ public:
             }
 
             _prunedEntryCount += prunedEntryCount;
+
+            #if _DEBUG
+                _bpOffset += _context.bucketCounts[(int)lTable][bucket];
+            #endif
         }
 
         // Submit trailing bits
@@ -613,7 +633,14 @@ private:
                     const uint64 x = lTable[p.left ];
                     const uint64 y = lTable[p.right];
 
+                    ASSERT( x || y );
                     outLinePoints[i] = SquareToLinePoint( x, y );
+
+#if _DEBUG
+// if( outLinePoints[i] == 2664297094 ) BBDebugBreak();
+// if( p.left  + _bpOffset == 3117075349 ) BBDebugBreak();
+// if( p.right + _bpOffset == 3117075692 ) BBDebugBreak();
+#endif
                 }
 
                 // const uint64* lpEnd = outPairsStart + prunedLength;
@@ -695,10 +722,10 @@ private:
                 self->LockThreads();
 
 #if _DEBUG
-        memcpy( _lpRefWriter , lpBuckets, totalCounts[0] * sizeof( uint64 ) );
-        memcpy( _idxRefWriter, idxBuckets, totalCounts[0] * sizeof( uint64 ) );
-        _lpRefWriter  += totalCounts[0];
-        _idxRefWriter += totalCounts[0];
+        // memcpy( _lpRefWriter , lpBuckets, totalCounts[0] * sizeof( uint64 ) );
+        // memcpy( _idxRefWriter, idxBuckets, totalCounts[0] * sizeof( uint64 ) );
+        // _lpRefWriter  += totalCounts[0];
+        // _idxRefWriter += totalCounts[0];
 #endif
 
                 for( uint32 i = 0; i < _numBuckets; i++ )
@@ -732,7 +759,7 @@ private:
                 // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
                 const int64 firstWrite  = (int64)std::min( 2u, counts[i] );
                 const int64 secondWrite = (int64)counts[i] >= 2 ? counts[i] - 2 : 0;
-                ASSERT( counts[i] > 2 );
+                ASSERT( counts[i] == 0 || counts[i] > 2 );
 
                 PackEntries( firstWrite, writer, lp, idx, i );
                 self->SyncThreads();
@@ -931,10 +958,10 @@ public:
             // Sort on LP
             constexpr int32 maxSortIter = (int)CDiv( 64 - _bucketBits, 8 );
 
-            // EntrySort::SortEntries<_numBuckets, _lpBits>( *_context.threadPool, _threadCount, entryCount, 
-            //                                               linePoints, tmpLinePoints, indices, tmpIndices );
+            EntrySort::SortEntries<_numBuckets, _lpBits>( *_context.threadPool, _threadCount, entryCount, 
+                                                          linePoints, tmpLinePoints, indices, tmpIndices );
 
-            RadixSort256::SortWithKey<BB_DP_MAX_JOBS>( *_context.threadPool, _threadCount, linePoints, tmpLinePoints, indices, tmpIndices, entryCount );
+            // RadixSort256::SortWithKey<BB_DP_MAX_JOBS>( *_context.threadPool, _threadCount, linePoints, tmpLinePoints, indices, tmpIndices, entryCount );
 
             uint64* sortedLinePoints  = linePoints;
             uint64* sortedIndices     = indices;
@@ -943,11 +970,11 @@ public:
 
             // If our iteration count is not even, it means the final
             // output of the sort is saved in the tmp buffers.
-            // if( ( maxSortIter & 1 ) != 0)
-            // {
-            //     std::swap( sortedLinePoints, scratchLinePoints );
-            //     std::swap( sortedIndices   , scratchIndices    );
-            // }
+            if( ( maxSortIter & 1 ) != 0)
+            {
+                std::swap( sortedLinePoints, scratchLinePoints );
+                std::swap( sortedIndices   , scratchIndices    );
+            }
 
             // Write reverse map to disk
             if( rTable < TableId::Table7 )
@@ -960,6 +987,7 @@ public:
         }
 
         mapWriter.SubmitFinalBits();
+        _writeFence.Wait( _numBuckets );
     }
 
 private:
@@ -984,11 +1012,11 @@ private:
                 const uint64 lp  = reader.ReadBits64( _lpBits  ) | bucketMask;
                 const uint64 idx = reader.ReadBits64( _idxBits );
 
-                if( bucket == 0 )
-                {
-                    ASSERT( lp  == _linePointRef[i] );
-                    ASSERT( idx == _indexRef[i] );
-                }
+                // if( bucket == 0 )
+                // {
+                //     ASSERT( lp  == _linePointRef[i] );
+                //     ASSERT( idx == _indexRef[i] );
+                // }
                 
                 ASSERT( idx < (1ull << _K) + ((1ull << _K) / _numBuckets) );
 
@@ -1029,6 +1057,53 @@ DiskPlotPhase3::~DiskPlotPhase3() {}
 //-----------------------------------------------------------
 void DiskPlotPhase3::Run()
 {
+#if _DEBUG
+    if( 0 )
+    {
+        Log::Line( "Validating Xs" );
+        uint32* xRef     = nullptr;
+        uint64  refCount = 0;
+
+        FatalIf( !Debug::LoadRefTable( "/mnt/p5510a/reference/t1.x.tmp", xRef, refCount ),
+            "Failed to load ref table" );
+        ASSERT( refCount == (1ull << _K) );
+
+        int err;
+        uint32* xs = (uint32*)IOJob::ReadAllBytesDirect( "/mnt/p5510a/disk_tmp/t1_0.tmp", err );
+        FatalIf( !xs, "Failed to rad Xs with error: %d", err );
+
+        for( uint64 i = 0; i < refCount; i++ )
+        {
+            if( xs[i] != xRef[i] )
+            {
+                if( xs[i+1] == xRef[i] || xs[i] == xRef[i+1] )
+                {
+                    i++;
+                    continue;
+                }
+                else
+                {
+                    uint32 xA[3] = { xs[i], xs[i+1], xs[i+2] };
+                    uint32 xB[3] = { xRef[i], xRef[i+1], xRef[i+2] };
+
+                    std::sort( xA, &xA[3] );
+                    std::sort( xB, &xB[3] );
+
+                    if( memcmp( xA, xB, sizeof( xA ) ) == 0 )
+                    {
+                        i+=2;
+                        continue;
+                    }
+                }
+                ASSERT( 0 );
+            }
+        }
+
+        bbvirtfree( xRef );
+        bbvirtfree( xs );
+        Log::Line( "All good!" );
+        }
+#endif
     DiskBufferQueue& ioQueue = *_context.ioQueue;
 
     ioQueue.SeekFile( FileId::T1, 0, 0, SeekOrigin::Begin );
@@ -1038,7 +1113,7 @@ void DiskPlotPhase3::Run()
     ioQueue.SeekFile( FileId::T5, 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile( FileId::T6, 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile( FileId::T7, 0, 0, SeekOrigin::Begin );
-    
+
     ioQueue.SeekFile( FileId::MAP2, 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile( FileId::MAP3, 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile( FileId::MAP4, 0, 0, SeekOrigin::Begin );
@@ -1190,7 +1265,6 @@ void DiskPlotPhase3::ProcessTable()
     _ioQueue.CommitCommands();
     _stepFence.Wait();
 
-    
     // Step 1: Loads line points & their source indices from buckets,
     //         sorts them on the line points and then writes the line points 
     //         as parks into the plot file. The sorted indices are then written as
@@ -1207,3 +1281,30 @@ void DiskPlotPhase3::ProcessTable()
     _context.entryCounts[(int)rTable-1] = prunedEntryCount;
 }
 
+
+#if _DEBUG
+//-----------------------------------------------------------
+void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, uint64* linePoints, uint64 length )
+{
+    static TableId _loadedTable   = TableId::_Count;
+    static uint64* _refLPs        = nullptr;
+    static uint64* _refLPReader   = nullptr;
+    static uint64  _refEntryCount = 0;
+
+    if( _refLPs == nullptr )
+    {
+        _refLPs = bbvirtallocbounded<uint64>( sizeof( uint64 ) * context.entryCounts[(int)TableId::Table7] );   // T7 is the only one that won't be pruned.
+                                                                                                                // So all other tables should fit here.
+    }
+
+    if( table != _loadedTable )
+    {
+        // Time to load a new table and reset the reader to the beginning
+        _loadedTable = table;
+        
+        Debug::LoadRefLinePointTable( table, _refLPs, _refEntryCount );
+        ASSERT( _refEntryCount <= context.entryCounts[(int)TableId::Table7] );
+        _refLPReader = _refLPReader
+    }
+}
+#endif

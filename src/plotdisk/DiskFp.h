@@ -74,7 +74,7 @@ public:
         _writeFence.Wait( _numBuckets+1 );
 
 #if _DEBUG
-        if( 0 && table == TableId::Table2 )
+        if( /*0 &&*/ table == TableId::Table2 )
         {
             Log::Line( "Validating Xs" );
             uint32* xRef     = nullptr;
@@ -262,8 +262,6 @@ public:
     //-----------------------------------------------------------
     inline void FpBucket( const uint32 bucket )
     {
-        using TMap = typename FpMapType<table>::Type;
-
         // Log::Verbose( " Bucket %u", bucket );
         const int64 inEntryCount = (int64)_context.bucketCounts[(int)table-1][bucket];
         // const bool  isLastBucket = bucket + 1 == _numBuckets;
@@ -274,18 +272,16 @@ public:
         uint64*  y     = _y   [0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
         TMetaIn* meta  = _meta[0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES; 
         Pair*    pairs = _pair[0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
-
-              TMap*    map    = ( table == TableId::Table2 ) ? (TMap*)_xWriter.GetNextBuffer( _writeWaitTime ) : (TMap*)_map[0];  // Unpack x's directly to the write buffer
-        const TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)map : meta;                                              // Table 2 input meta is x, which is encoded into the ykey field, not meta
-
+        uint64*  map   = _map [0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES; // Needs prefix offset because it is used as meta input in cross-bucket matches
 
         // Expand entries to be 64-bit aligned, sort them, then unpack them to individual components
         ExpandEntries( packedEntries, 0, _entries[0], inEntryCount );
         SortEntries<Entry, InInfo::YBitSize>( _entries[0], _entries[1], inEntryCount );
-        UnpackEntries( bucket, _entries[0], inEntryCount, y, (uint64*)map, meta );
+        UnpackEntries( bucket, _entries[0], inEntryCount, y, map, meta );
 
-        WriteMap( bucket, inEntryCount, (uint64*)map, (uint64*)_meta[1] );
+        WriteMap( bucket, inEntryCount, map, (uint64*)_meta[1] );
 
+        const TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)map : meta;
 
         TYOut*    outY    = (TYOut*)_y[1];
         TMetaOut* outMeta = (TMetaOut*)_meta[1];
@@ -325,10 +321,25 @@ public:
         
         if constexpr ( table == TableId::Table2 )
         {
-            // We've already unpacked our map directly to the write buffer, so we only need to submit it.
+            // #NOTE: We don't unpack xs directly into the write buffer because
+            //        map is used as meta during matching, which needs a prefix zone
+            //        to perfrom cross-bucket matches.
+            uint32* xBuffer = _xWriter.GetNextBuffer( _writeWaitTime );
+
+            AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
+                
+                int64 count, offset, end;
+                GetThreadOffsets( self, entryCount, count, offset, end );
+
+                if( count )
+                    memcpy( xBuffer + offset, ((uint32*)map) + offset, (size_t)count * sizeof( uint32 ) );
+            });
+            
             _xWriter.SubmitBuffer( _ioQueue, (size_t)entryCount );
+
             if( bucket == _numBuckets - 1 )
                 _xWriter.SubmitFinalBlock( _ioQueue );
+
             return;
         }
 
