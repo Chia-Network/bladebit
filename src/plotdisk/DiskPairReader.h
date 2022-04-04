@@ -6,7 +6,7 @@
 
 /// #NOTE: We actually have _numBuckets+1 because there's an
 //         implicit overflow bucket that may contain entries.
-template<uint32 _numBuckets, uint32 _finalIdxBits>
+template<typename TMap, uint32 _numBuckets, uint32 _finalIdxBits>
 struct DiskMapReader
 {
     static constexpr uint32 _k         = _K;
@@ -33,8 +33,8 @@ struct DiskMapReader
         _loadBuffers[2] = allocator.Alloc( bufferSize, blockSize );
         _loadBuffers[3] = allocator.Alloc( bufferSize, blockSize );
 
-        _unpackdMaps[0] = allocator.CAlloc<uint64>( maxBucketEntries );
-        _unpackdMaps[1] = allocator.CAlloc<uint64>( maxBucketEntries );
+        _unpackdMaps[0] = allocator.CAlloc<TMap>( maxBucketEntries );
+        _unpackdMaps[1] = allocator.CAlloc<TMap>( maxBucketEntries );
 
         ASSERT( _numBuckets == context.numBuckets );
     }
@@ -57,7 +57,7 @@ struct DiskMapReader
 
         // Need to load current bucket?
         if( _bucketEntryOffset == 0 )
-        {   
+        {
             const size_t loadSize = CDivT( (size_t)bucketLength * _mapBits, blockSizeBits ) * blockSize;
             ioQueue.ReadFile( mapId, _bucketsLoaded, GetBucketBuffer( _bucketsLoaded ), loadSize );
             // _fence.Signal( _bucketsLoaded + 1 );
@@ -84,7 +84,6 @@ struct DiskMapReader
     }
 
     //-----------------------------------------------------------
-    template<typename TMap>
     void ReadEntries( const uint64 entryCount, TMap* outMap )
     {
         ASSERT( _bucketsRead <= _numBuckets );
@@ -108,7 +107,7 @@ struct DiskMapReader
                     GetThreadOffsets( self, (int64)bucketLength, count, offset, end );
                     ASSERT( count > 0 );
 
-                    uint64* unpackedMap = _unpackdMaps[_bucketsUnpacked & 1];
+                    TMap* unpackedMap = _unpackdMaps[_bucketsUnpacked & 1];
                     BitReader reader( (uint64*)GetBucketBuffer( _bucketsUnpacked ), _mapBits * bucketLength, offset * _mapBits );
 
                     const uint32 idxShift     = _finalIdxBits;
@@ -121,11 +120,11 @@ struct DiskMapReader
                         const uint32 dstIdx    = (uint32)( packedMap >> idxShift );
 
                         ASSERT( dstIdx < bucketLength );
-                        unpackedMap[dstIdx] = map;
+                        unpackedMap[dstIdx] = (TMap)map;
 
                         #if _DEBUG
                             if constexpr ( sizeof( TMap ) == 4 )
-                                ASSERT( map <= 0xFFFFFFFF)
+                                ASSERT( map <= 0xFFFFFFFF )
                         #endif
                     }
 
@@ -142,7 +141,7 @@ struct DiskMapReader
                 const uint64  bucketLength = GetBucketLength( bucketsRead );
                 const uint64  readCount    = std::min( bucketLength - readBucketOffset, entriesToRead );
 
-                const uint64* readMap      = _unpackdMaps[bucketsRead & 1] + readBucketOffset;
+                const TMap* readMap      = _unpackdMaps[bucketsRead & 1] + readBucketOffset;
 
                 // Simply copy the unpacked map to the destination buffer
                 int64 count, offset, end;
@@ -150,13 +149,13 @@ struct DiskMapReader
 
                 if( count )
                 {
-                    if constexpr ( sizeof( TMap ) == sizeof( uint64 ) )
-                        memcpy( outWriter + offset, readMap + offset, (size_t)count * sizeof( uint64 ) );
-                    else
-                    {
-                        for( int64 i = offset; i < end; i++ )
-                            outWriter[i] = (TMap)readMap[i];
-                    }
+                    // if constexpr ( sizeof( TMap ) == sizeof( uint64 ) )
+                        memcpy( outWriter + offset, readMap + offset, (size_t)count * sizeof( TMap ) );
+                    // else
+                    // {
+                    //     for( int64 i = offset; i < end; i++ )
+                    //         outWriter[i] = (TMap)readMap[i];
+                    // }
                 }
 
                 // Update read entries
@@ -224,7 +223,7 @@ private:
     uint64           _bucketEntryOffset = 0;
     uint64           _bucketReadOffset  = 0;     // Entries that have actually bean read/unpacked in a bucket
 
-    uint64*          _unpackdMaps[2];
+    TMap*            _unpackdMaps[2];
     void*            _loadBuffers[4];            // We do double-buffering, but since a single load may go across bucket boundaries, we need 4.
 };
 
@@ -368,7 +367,7 @@ private:
     DiskPlotContext& _context;
     Fence&           _fence;
 
-    DiskMapReader<_numBuckets, _k+1> _mapReader;
+    DiskMapReader<uint64, _numBuckets, _k+1> _mapReader;
 
     void*            _pairBuffers       [2];
     uint32           _pairOverflowBits  [_numBuckets];

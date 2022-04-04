@@ -7,8 +7,13 @@
 #include "plotdisk/FpFxGen.h"
 #include "DiskPlotInfo.h"
 #include "BitBucketWriter.h"
+#include "BlockWriter.h"
 #include "util/StackAllocator.h"
 #include "plotting/TableWriter.h"
+
+#if _DEBUG
+    #include "DiskPlotDebug.h"
+#endif
 
 template<TableId table>
 struct FpMapType { using Type = uint64; };
@@ -63,9 +68,58 @@ public:
         _context.entryCounts[(int)table] = (uint64)_tableEntryCount;
 
         // #TODO: Pass in the fences and then wait before we start the next table...
+        // Wait for all writes to finish
         _ioQueue.SignalFence( _writeFence, _numBuckets+1 );
         _ioQueue.CommitCommands();
         _writeFence.Wait( _numBuckets+1 );
+
+#if _DEBUG
+        if( 0 && table == TableId::Table2 )
+        {
+            Log::Line( "Validating Xs" );
+            uint32* xRef     = nullptr;
+            uint64  refCount = 0;
+
+            FatalIf( !Debug::LoadRefTable( "/mnt/p5510a/reference/t1.x.tmp", xRef, refCount ),
+                "Failed to load ref table" );
+            ASSERT( refCount == (1ull << _K) );
+
+            int err;
+            uint32* xs = (uint32*)IOJob::ReadAllBytesDirect( "/mnt/p5510a/disk_tmp/t1_0.tmp", err );
+            FatalIf( !xs, "Failed to rad Xs with error: %d", err );
+
+            for( uint64 i = 0; i < refCount; i++ )
+            {
+                if( xs[i] != xRef[i] )
+                {
+                    if( xs[i+1] == xRef[i] || xs[i] == xRef[i+1] )
+                    {
+                        i++;
+                        continue;
+                    }
+                    else
+                    {
+                        uint32 xA[3] = { xs[i], xs[i+1], xs[i+2] };
+                        uint32 xB[3] = { xRef[i], xRef[i+1], xRef[i+2] };
+
+                        std::sort( xA, &xA[3] );
+                        std::sort( xB, &xB[3] );
+
+                        if( memcmp( xA, xB, sizeof( xA ) ) == 0 )
+                        {
+                            i+=2;
+                            continue;
+                        }
+                    }
+                    ASSERT( 0 );
+                }
+            }
+
+            bbvirtfree( xRef );
+            bbvirtfree( xs );
+            Log::Line( "All good!" );
+        }
+#endif
     }
 
     //-----------------------------------------------------------
@@ -80,6 +134,7 @@ public:
         _mapBitWriter.SetFileId( FileId::MAP7 );
         WriteCTables();
 
+        // Wait for all writes to finish
         _ioQueue.SignalFence( _writeFence, _numBuckets+1 );
         _ioQueue.CommitCommands();
         _writeFence.Wait( _numBuckets+1 );
@@ -121,7 +176,6 @@ public:
         const size_t pairWriteSize = CDiv( ( maxEntriesX ) * pairBits, 8 );
         const size_t mapWriteSize  = CDiv( ( maxEntriesX ) * mapBits , 8 );
 
-        // #TODO: Set actual buffers
         _fxRead [0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
         _fxRead [1]   = alloc.Alloc( fxWriteSize, fxBlockSize );
         _fxWrite[0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
@@ -134,17 +188,26 @@ public:
         _mapWrite[1]  = alloc.Alloc( mapWriteSize, pairBlockSize );
 
         // Block bit buffers
-        byte* fxBlocks   = (byte*)alloc.CAlloc( _numBuckets   , fxBlockSize  , fxBlockSize   );  // Fx write
-        byte* pairBlocks = (byte*)alloc.CAlloc( 1             , pairBlockSize, pairBlockSize );  // Pair write
-        byte* mapBlocks  = (byte*)alloc.CAlloc( MapBucketCount, pairBlockSize, pairBlockSize );  // Map write
+        byte* fxBlocks   = (byte*)alloc.CAlloc( _numBuckets, fxBlockSize  , fxBlockSize   );  // Fx write
+        byte* pairBlocks = (byte*)alloc.CAlloc( 1          , pairBlockSize, pairBlockSize );  // Pair write
+        byte* mapBlocks  = nullptr;
+
+        // #TODO: Just re-use another buffer for x in T2. mapWriteSize will be already biffer than we need I think.
+        //        Or do NOT allocate map write buffers in T2. Just allocate xWriter.
+        if( table == TableId::Table2 )
+            _xWriter = BlockWriter<uint32>( alloc, FileId::T1, _mapWriteFence, pairBlockSize, maxEntries );
+        else
+            mapBlocks = (byte*)alloc.CAlloc( MapBucketCount, pairBlockSize, pairBlockSize );  // Map write
 
         if( !dryRun )
         {
             const FileId mapWriterId = table == TableId::Table2 ? FileId::T1 : FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
-// #TODO: These need to have buffers rounded-up to block size per bucket
-            _fxBitWriter   = BitBucketWriter<_numBuckets>   ( _ioQueue, _outFxId, (byte*)fxBlocks );
-            _pairBitWriter = BitBucketWriter<1>             ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
-            _mapBitWriter  = BitBucketWriter<MapBucketCount>( _ioQueue, mapWriterId, (byte*)mapBlocks );
+// #TODO: These need to have buffers rounded-up to block size per bucket I think
+            _fxBitWriter   = BitBucketWriter<_numBuckets>( _ioQueue, _outFxId, (byte*)fxBlocks );
+            _pairBitWriter = BitBucketWriter<1>          ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
+
+            if( table > TableId::Table2 )
+                _mapBitWriter = BitBucketWriter<MapBucketCount>( _ioQueue, mapWriterId, (byte*)mapBlocks );
         }
     }
 
@@ -152,12 +215,17 @@ public:
     inline static size_t GetRequiredHeapSize( const size_t fxBlockSize, const size_t pairBlockSize )
     {
         DiskPlotContext cx = { 0 };
-        DiskFp<TableId::Table4, _numBuckets> fp( cx, FileId::None, FileId::None );
+        DiskFp<TableId::Table2, _numBuckets> fp2( cx, FileId::None, FileId::None );
+        DiskFp<TableId::Table4, _numBuckets> fp4( cx, FileId::None, FileId::None );
 
-        DummyAllocator alloc;
-        fp.AllocateBuffers( alloc, fxBlockSize, pairBlockSize, true );
+        //  #TODO: Revert checking both, use whichever is bigger after testing explicitly
+        DummyAllocator alloc2;
+        DummyAllocator alloc4;
+        fp2.AllocateBuffers( alloc2, fxBlockSize, pairBlockSize, true );
+        fp4.AllocateBuffers( alloc4, fxBlockSize, pairBlockSize, true );
         
-        return alloc.Size();
+        const size_t reqSize = std::max( alloc2.Size(), alloc4.Size() );
+        return reqSize;
     }
 
     //-----------------------------------------------------------
@@ -186,12 +254,16 @@ public:
 
         _fxBitWriter  .SubmitLeftOvers();
         _pairBitWriter.SubmitLeftOvers();
-        _mapBitWriter .SubmitLeftOvers();
+
+        if( table > TableId::Table2 )
+            _mapBitWriter .SubmitLeftOvers();
     }
 
     //-----------------------------------------------------------
     inline void FpBucket( const uint32 bucket )
     {
+        using TMap = typename FpMapType<table>::Type;
+
         // Log::Verbose( " Bucket %u", bucket );
         const int64 inEntryCount = (int64)_context.bucketCounts[(int)table-1][bucket];
         // const bool  isLastBucket = bucket + 1 == _numBuckets;
@@ -203,14 +275,17 @@ public:
         TMetaIn* meta  = _meta[0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES; 
         Pair*    pairs = _pair[0] + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
 
+              TMap*    map    = ( table == TableId::Table2 ) ? (TMap*)_xWriter.GetNextBuffer( _writeWaitTime ) : (TMap*)_map[0];  // Unpack x's directly to the write buffer
+        const TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)map : meta;                                              // Table 2 input meta is x, which is encoded into the ykey field, not meta
+
+
         // Expand entries to be 64-bit aligned, sort them, then unpack them to individual components
         ExpandEntries( packedEntries, 0, _entries[0], inEntryCount );
         SortEntries<Entry, InInfo::YBitSize>( _entries[0], _entries[1], inEntryCount );
-        UnpackEntries( bucket, _entries[0], inEntryCount, y, _map[0], meta );
+        UnpackEntries( bucket, _entries[0], inEntryCount, y, (uint64*)map, meta );
 
-        WriteMap( bucket, inEntryCount, _map[0], (uint64*)_meta[1] );
+        WriteMap( bucket, inEntryCount, (uint64*)map, (uint64*)_meta[1] );
 
-        const TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)_map[0] : meta;
 
         TYOut*    outY    = (TYOut*)_y[1];
         TMetaOut* outMeta = (TMetaOut*)_meta[1];
@@ -250,35 +325,10 @@ public:
         
         if constexpr ( table == TableId::Table2 )
         {
-            byte* writeBuffer = GetMapWriteBuffer( bucket );
-            
-            if( bucket > 1 )
-                _mapWriteFence.Wait( bucket - 2, _writeWaitTime );
-
-            AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
-
-                int64 count, offset, end;
-                GetThreadOffsets( self, entryCount, count, offset, end );
-
-                const TMap* inMap  = ((TMap*)map) + offset;
-                      TMap* outMap = ((TMap*)writeBuffer) + offset;
-                
-                // Just copy to the write buffer
-                memcpy( outMap, inMap, sizeof( TMap ) * count );
-
-                // Write sorted x back to disk
-                self->SyncThreads();
-                if( self->IsControlThread() )
-                {
-                    const uint64 totalBits = entryCount * sizeof( TMap ) * 8;
-
-                    _mapBitWriter.BeginWriteBuckets( &totalBits, writeBuffer );
-                    _mapBitWriter.Submit();
-                    _ioQueue.SignalFence( _mapWriteFence, bucket );
-                    _ioQueue.CommitCommands();
-                }
-            });
-
+            // We've already unpacked our map directly to the write buffer, so we only need to submit it.
+            _xWriter.SubmitBuffer( _ioQueue, (size_t)entryCount );
+            if( bucket == _numBuckets - 1 )
+                _xWriter.SubmitFinalBlock( _ioQueue );
             return;
         }
 
@@ -1130,7 +1180,9 @@ private:
 
     BitBucketWriter<_numBuckets>    _fxBitWriter;
     BitBucketWriter<1>              _pairBitWriter;
-    BitBucketWriter<MapBucketCount> _mapBitWriter;
+
+    BlockWriter<uint32>             _xWriter;       // Used for Table2  (there's no map, but just x.)
+    BitBucketWriter<MapBucketCount> _mapBitWriter;  // Used after Table2
 
     FpCrossBucketInfo _crossBucketInfo;
 };

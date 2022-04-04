@@ -336,8 +336,8 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
         
         using TYOut = typename DiskFp<table, _numBuckets>::TYOut;
         Debug::ValidateYForTable<table, _numBuckets, TYOut>( _fxOut, *_cx.ioQueue, *_cx.threadPool, _cx.bucketCounts[(int)table] );
-    #endif
         Debug::ValidatePairs<256>( _cx, table );
+    #endif
 }
 
 //-----------------------------------------------------------
