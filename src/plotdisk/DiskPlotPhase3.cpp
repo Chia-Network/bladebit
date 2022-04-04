@@ -426,15 +426,22 @@ public:
 
         using L1Reader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
         using LNReader = DiskMapReader<uint32, _numBuckets, _k>;
+
+
+        IP3LMapReader<uint32>* lReader = nullptr;
         
         L1Reader lTable1Reader;
         LNReader lTableNReader;
-        uint32* lTableNEntries = nullptr;
+        uint32*  lTableNEntries = nullptr;
         
         if constexpr ( lTable == TableId::Table1 )
+        {
             lTable1Reader = L1Reader( FileId::T1, &ioQueue, allocator, maxBucketEntries, context.tmp1BlockSize, context.bucketCounts[(int)TableId::Table1] ); 
+            lReader       = &lTable1Reader;
+        }
         else
         {
+            ASSERT( 0 );
             lTableNReader  = LNReader( _context, _context.p3ThreadCount, lTable, _mapReadId, allocator );
             lTableNEntries = allocator.CAlloc<uint32>( maxBucketEntries + P3_EXTRA_L_ENTRIES_TO_LOAD );
         }
@@ -469,7 +476,8 @@ public:
         auto LoadBucket = [&]( const uint32 bucket ) {
 
             if( lTable == TableId::Table1 )
-                lTable1Reader.LoadNextBucket();
+                lReader->LoadNextBucket();
+                // lTable1Reader.LoadNextBucket();
             else
                 lTableNReader.LoadNextEntries( GetLLoadCount( bucket ) );
 
@@ -507,7 +515,8 @@ public:
             uint64  lEntryCount;
 
             if constexpr ( lTable == TableId::Table1 )
-                lEntries = lTable1Reader.ReadLoadedBucket();
+                // lEntries = lTable1Reader.ReadLoadedBucket();
+                lEntries = lReader->ReadLoadedBucket();
             else
             {
                 lEntries    = lTableNEntries;
@@ -526,8 +535,10 @@ public:
 
             WriteLinePointsToBuckets( bucket, (int64)prunedEntryCount, _rPrunedLinePoints, _rPrunedMap, (uint64*)pairs, map );
 
+            // #TODO: Remove this after making our T2+ table reader an IP3LMapReader
             if constexpr ( lTable > TableId::Table1 )
             {
+                ASSERT( 0 );
                 if( bucket < _numBuckets - 1 )
                     memcpy( lTableNEntries, lTableNEntries + lEntryCount - P3_EXTRA_L_ENTRIES_TO_LOAD, P3_EXTRA_L_ENTRIES_TO_LOAD * sizeof( uint32 ) );
             }
@@ -637,9 +648,9 @@ private:
                     outLinePoints[i] = SquareToLinePoint( x, y );
 
 #if _DEBUG
-if( outLinePoints[i] == 41631646582366 ) BBDebugBreak();
+// if( outLinePoints[i] == 41631646582366 ) BBDebugBreak();
 // if( outLinePoints[i] == 2664297094 ) BBDebugBreak();
-if( p.left  + _bpOffset == 738199293 && p.right + _bpOffset == 738199423) BBDebugBreak();
+// if( p.left  + _bpOffset == 738199293 && p.right + _bpOffset == 738199423) BBDebugBreak();
 // if( p.right + _bpOffset == 738199423 ) BBDebugBreak();
 #endif
                 }
@@ -1063,7 +1074,7 @@ DiskPlotPhase3::~DiskPlotPhase3() {}
 void DiskPlotPhase3::Run()
 {
 #if _DEBUG
-    // if( 0 )
+    if( 0 )
     {
         Log::Line( "Validating Xs" );
         uint32* xRef     = nullptr;
@@ -1092,7 +1103,7 @@ void DiskPlotPhase3::Run()
 
             Fence readFence;
             lTableReader.LoadEntries( _context.bucketCounts[(int)TableId::Table1][0] );
-            ioQueue.SignalFence( readFence, 0 );
+            ioQueue.SignalFence( readFence, 1 );
             ioQueue.CommitCommands();
 
             for( uint32 b = 0; b < 256; b++ )
@@ -1100,11 +1111,11 @@ void DiskPlotPhase3::Run()
                 if( b + 1 < 256 )
                 {
                     lTableReader.LoadEntries( _context.bucketCounts[(int)TableId::Table1][b+1] );
-                    ioQueue.SignalFence( readFence, b+1 );
+                    ioQueue.SignalFence( readFence, b+2 );
                     ioQueue.CommitCommands();
                 }
 
-                readFence.Wait( b );
+                readFence.Wait( b+1 );
 
                 const uint64  entryCount = _context.bucketCounts[(int)TableId::Table1][b];
                 const uint32* loadedXs   = lTableReader.ReadEntries();
@@ -1366,6 +1377,11 @@ void ValidateLinePoints( const TableId table, const DiskPlotContext& context, co
         {
             ASSERT( lpReader[i] == refLPReader[i] );
         }
+
+        _refLPOffset += length;
     });
+
+    if( bucket == context.numBuckets - 1 )
+        Log::Line( "LinePoints Validated Successfully!" );
 }
 #endif
