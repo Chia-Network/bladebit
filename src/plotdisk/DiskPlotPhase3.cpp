@@ -21,15 +21,13 @@
 // Because entries are pruned here, we will need bigger bucket sizes as the
 // entries will be piled into the first buckets and not the latter ones.
 // This is because the line points will be smaller given the L table indices
-// are smaller as they were pruned. The smallest table comes out at 79.85%,
-// so to be conservative we will bring that down to 70%, thus we need to increase
-// the bucket size by the inverse of 30%.
-#define P3_BUCKET_MULTIPLER 1.3
+// are smaller as they were pruned. 
+#define P3_BUCKET_MULTIPLER 1.4
 
 #if _DEBUG
 static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length );
-
 static void ValidateIndices( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* indices, const uint64 length );
+static void SavePrunedBucketCount( const TableId table, const uint32 numBuckets, const uint64* bucketCounts );
 #endif
 
 class EntrySort
@@ -548,7 +546,7 @@ public:
 
             WriteLinePointsToBuckets( bucket, (int64)prunedEntryCount, _rPrunedLinePoints, _rPrunedMap, (uint64*)pairs, map, outLPBucketCounts );
 
-            // #TODO: Remove this after making our T2+ table reader an IP3LMapReader
+            // #TODO: Remove this after making our T2+ table reader an IP3LMapReader? Or just remove the IP3LMapReader thing?
             if constexpr ( lTable > TableId::Table1 )
             {
                 // ASSERT( 0 );
@@ -573,9 +571,9 @@ public:
             if( lTable > TableId::Table1 )
             {
                 // Pruned buckets after the inverse of P3_BUCKET_MULTIPLER must be empty.
-                const uint32 startEmptyBucket = (uint32)((2-P3_BUCKET_MULTIPLER) * _numBuckets);
-                for( uint32 b = startEmptyBucket; b < _numBuckets; b++ )
-                    ASSERT( outLPBucketCounts[b] == 0 );
+                // const uint32 startEmptyBucket = (uint32)((2-P3_BUCKET_MULTIPLER) * _numBuckets);
+                // for( uint32 b = startEmptyBucket; b < _numBuckets; b++ )
+                //     ASSERT( outLPBucketCounts[b] == 0 );
 
             }
         #endif
@@ -616,7 +614,7 @@ private:
             }
             else
             {
-                prunedLength = bucketLength;
+                prunedLength = count;
             }
 
             allPrunedLengths[self->_jobId] = prunedLength;
@@ -1028,15 +1026,13 @@ public:
             }
 
 #if _DEBUG
-            // if( lTable > TableId::Table1 )
-            ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
+            // ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
 
             // ValidateIndices( lTable, _context, bucket, sortedIndices, (uint64)entryCount );
 #endif
 
             // Write reverse map to disk
-            if( rTable < TableId::Table7 )
-                mapWriter.Write( *_context.threadPool, _threadCount, bucket, entryCount, mapOffset, sortedIndices, scratchIndices, outLMapBucketCounts );
+            mapWriter.Write( *_context.threadPool, _threadCount, bucket, entryCount, mapOffset, sortedIndices, scratchIndices, outLMapBucketCounts );
             
             // Write LP's as parks into the plot file
             WriteLinePointsToPlot( entryCount, sortedLinePoints );  // #TODO: Need a single-bucket writer so that we save unaligned data
@@ -1270,11 +1266,6 @@ void DiskPlotPhase3::Run()
     fdata.cache = (cache += mapCacheSize);
     ioQueue.InitFileSet( FileId::LP_MAP_1, "lp_map_1", _context.numBuckets+1, opts, &fdata );   // Reverse map read/write
 
-    // Copy the initial bucket count for the first L table
-    // #TODO: Erase this, not needed for the first table.
-    // for( int32 b = 0; b <= _context.numBuckets; b++ )
-    //     _lMapPrunedBucketCounts[b] = _context.bucketCounts[(int)TableId::Table1][b];
-
     switch( _context.numBuckets )
     {
         case 128 : RunBuckets<128 >(); break;
@@ -1338,7 +1329,7 @@ void DiskPlotPhase3::RunBuckets()
         std::swap( _mapReadId, _mapWriteId );
 #endif
 
-    for( TableId rTable = startTable; rTable < TableId::Table7; rTable++ )
+    for( TableId rTable = startTable; rTable <= TableId::Table7; rTable++ )
     {
         Log::Line( "Compressing tables %u and %u.", rTable, rTable+1 );
         const auto timer = TimerBegin();
@@ -1349,7 +1340,7 @@ void DiskPlotPhase3::RunBuckets()
             case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets>(); break;
             case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets>(); break;
             case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets>(); break;
-            // case TableId::Table7: ProcessTable<TableId::Table7, _numBuckets>(); break;
+            case TableId::Table7: ProcessTable<TableId::Table7, _numBuckets>(); break;
             default:
                 ASSERT( 0 );
                 break;
@@ -1364,6 +1355,8 @@ void DiskPlotPhase3::RunBuckets()
         _ioQueue.SeekBucket( _mapWriteId, 0, SeekOrigin::Begin );
         _ioQueue.CommitCommands();
     }
+
+    // Finish up with table 7 which needs to be sorted on f7. We use its map for that
 }
 
 //-----------------------------------------------------------
@@ -1411,6 +1404,40 @@ void DiskPlotPhase3::ProcessTable()
     _tablePrunedEntryCount[(int)rTable-1] = prunedEntryCount;
 }
 
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
+void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
+{
+    DiskPlotContext& context = _context;
+    DiskBufferQueue& ioQueue = *context.ioQueue;
+
+    _readFence .Reset();
+    _writeFence.Reset();
+
+    const uint64 maxBucketEntries = (uint64)( ( (1ull << _K) / _numBuckets ) * P3_BUCKET_MULTIPLER );
+    StackAllocator allocator( context.heapBuffer, context.heapSize );
+
+    DiskMapReader<uint32, _numBuckets, _K> mapReader( context, context.p3ThreadCount, TableId::Table7, _mapReadId, allocator, inMapBucketCounts );
+
+    auto LoadBucket = [&]( const uint32 bucket ) {
+
+        const uint64 bucketLength = inMapBucketCounts[bucket];
+        if( bucketLength < 1 )
+            return;
+
+        mapReader.LoadNextEntries( bucketLength );
+        ioQueue.SignalFence( _readFence, bucket + 1 );
+        ioQueue.CommitCommands();
+    };
+
+    LoadBucket( 0 );
+
+    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+    {
+        if( bucket + 1 < _numBuckets )
+            LoadBucket( bucket + 1 );
+    }
+}
 
 #if _DEBUG
 //-----------------------------------------------------------
@@ -1515,4 +1542,11 @@ void ValidateIndices( const TableId table, const DiskPlotContext& context, const
         Log::Line( "LinePoints Validated Successfully!" );
 
 }
+
+//-----------------------------------------------------------
+void SavePrunedBucketCount( const TableId table, const uint32 numBuckets, const uint64* bucketCounts )
+{
+    
+}
 #endif
+

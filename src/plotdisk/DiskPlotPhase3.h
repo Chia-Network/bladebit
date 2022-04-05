@@ -33,6 +33,12 @@ private:
 
     template<TableId rTable, uint32 _numBuckets>
     void WriteLinePointsToBuckets( const uint32 bucket,const int64 entryCount, const uint64* linePoints, const uint32* key );
+    
+    template<uint32 _numBuckets>
+    void WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] );
+
+    // template<uint32 _numBuckets>
+    // void WritePark7();
 
     // void TableFirstStep( const TableId rTable );
     // void BucketFirstStep( const TableId rTable, const uint32 bucket );
