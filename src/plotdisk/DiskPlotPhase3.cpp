@@ -18,6 +18,14 @@
 // have cross bucket entries accounted for
 #define P3_EXTRA_L_ENTRIES_TO_LOAD BB_DP_CROSS_BUCKET_MAX_ENTRIES
 
+// Because entries are pruned here, we will need bigger bucket sizes as the
+// entries will be piled into the first buckets and not the latter ones.
+// This is because the line points will be smaller given the L table indices
+// are smaller as they were pruned. The smallest table comes out at 79.85%,
+// so to be conservative we will bring that down to 70%, thus we need to increase
+// the bucket size by the inverse of 30%.
+#define P3_BUCKET_MULTIPLER 1.3
+
 #if _DEBUG
 static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length );
 
@@ -419,7 +427,7 @@ public:
         ioQueue.CommitCommands();
 
         const TableId lTable           = rTable - 1;
-        const uint64  maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
+        const uint64  maxBucketEntries = (uint64)( ( (1ull << _k) / _numBuckets ) * P3_BUCKET_MULTIPLER );
         const size_t  rMarksSize       = RoundUpToNextBoundary( context.entryCounts[(int)rTable] / 8, (int)context.tmp1BlockSize );
 
         // Allocate buffers
@@ -558,10 +566,19 @@ public:
         // Submit trailing bits
         _lpWriter.SubmitLeftOvers();
 
-        // #if _DEBUG
-        //     for( uint32 b = 0; b < _numBuckets; b++ )
-        //         ASSERT( outLPBucketCounts[b] <= context.bucketCounts[(int)lTable][b] );
-        // #endif
+        #if _DEBUG
+            for( uint32 b = 0; b < _numBuckets; b++ )
+                ASSERT( outLPBucketCounts[b] <= maxBucketEntries );
+
+            if( lTable > TableId::Table1 )
+            {
+                // Pruned buckets after the inverse of P3_BUCKET_MULTIPLER must be empty.
+                const uint32 startEmptyBucket = (uint32)((2-P3_BUCKET_MULTIPLER) * _numBuckets);
+                for( uint32 b = startEmptyBucket; b < _numBuckets; b++ )
+                    ASSERT( outLPBucketCounts[b] == 0 );
+
+            }
+        #endif
 
         return _prunedEntryCount;
     }
@@ -622,7 +639,12 @@ private:
             for( int64 i = offset; i < end; i++ )
             {
                 const uint32 mapIdx = rMap[i];
-
+// #if _DEBUG
+// if( rTable == TableId::Table3 )
+// {
+//     if( pairs[i].left == 4213663 && pairs[i].right == 4214002 ) BBDebugBreak();
+// }
+// #endif
                 if constexpr ( rTable < TableId::Table7 )
                 {
                     if( !markedEntries.Get( mapIdx ) )
@@ -655,8 +677,7 @@ const uint64 rr = p.right + _bpOffset;
                     outLinePoints[i] = SquareToLinePoint( x, y );
 
 #if _DEBUG
-// if( outLinePoints[i] == 41631646582366 ) BBDebugBreak();
-// if( outLinePoints[i] == 2664297094 ) BBDebugBreak();
+if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak();
 // if( p.left  + _bpOffset == 738199293 && p.right + _bpOffset == 738199423) BBDebugBreak();
 // if( p.right + _bpOffset == 738199423 ) BBDebugBreak();
 #endif
@@ -920,7 +941,7 @@ public:
         _ioQueue.CommitCommands();
 
         const TableId lTable           = rTable - 1;
-        const uint64  maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
+        const uint64  maxBucketEntries = (uint64)( ( (1ull << _k) / _numBuckets ) * P3_BUCKET_MULTIPLER );
 
         // Allocate buffers and needed structures
         StackAllocator allocator( _context.heapBuffer, _context.heapSize );
@@ -1325,9 +1346,9 @@ void DiskPlotPhase3::RunBuckets()
         {
             case TableId::Table2: ProcessTable<TableId::Table2, _numBuckets>(); break;
             case TableId::Table3: ProcessTable<TableId::Table3, _numBuckets>(); break;
-            // case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets>(); break;
-            // case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets>(); break;
-            // case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets>(); break;
+            case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets>(); break;
+            case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets>(); break;
+            case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets>(); break;
             // case TableId::Table7: ProcessTable<TableId::Table7, _numBuckets>(); break;
             default:
                 ASSERT( 0 );
@@ -1429,7 +1450,18 @@ void ValidateLinePoints( const TableId table, const DiskPlotContext& context, co
 
         for( uint64 i = 0; i < count; i++ )
         {
-            ASSERT( lpReader[i] == refLPReader[i] );
+            // ASSERT( lpReader[i] == refLPReader[i] );
+            // To skip the extra entry for now, lets test like this:
+            if( lpReader[i] != refLPReader[i] )
+            {
+                ASSERT( 0 );
+                if( lpReader[i+1] == refLPReader[i] )
+                {
+                    lpReader++;
+                    continue;
+                }
+                ASSERT( 0 );
+            }
         }
 
         _refLPOffset += length;

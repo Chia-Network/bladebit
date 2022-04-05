@@ -552,6 +552,10 @@ inline void MarkTableEntries( int64 i, const int64 entryCount, BitField lTable, 
 {
     for( const int64 end = i + entryCount ; i < end; i++ )
     {
+#if _DEBUG
+    if( table == TableId::Table3 && pairs[i].left == 4213663 && pairs[i].right == 4214002 ) BBDebugBreak();
+    if( table == TableId::Table3 && pairs[i].left + lTableOffset == 910154188 && pairs[i].right + lTableOffset == 910154527 ) BBDebugBreak();
+#endif
         if constexpr ( table < TableId::Table7 )
         {
             const uint64 rTableIdx = map[i];
@@ -560,7 +564,6 @@ inline void MarkTableEntries( int64 i, const int64 entryCount, BitField lTable, 
         }
 
         const Pair& pair = pairs[i];
-        
         const uint64 left  = lTableOffset + pair.left;
         const uint64 right = lTableOffset + pair.right;
 
