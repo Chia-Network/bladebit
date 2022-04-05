@@ -38,7 +38,7 @@ struct DiskPlotContext
     const byte*  plotMemo;
     uint16       plotMemoSize;
 
-    uint32       bucketCounts[(uint)TableId::_Count][BB_DP_MAX_BUCKET_COUNT];
+    uint32       bucketCounts[(uint)TableId::_Count][BB_DP_MAX_BUCKET_COUNT+1];
     uint64       entryCounts [(uint)TableId::_Count];
 
     // Since back pointer table entries are not sorted along with y,

@@ -37,6 +37,8 @@ namespace Debug
 
     void LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount );
 
+    void LoadRefLPIndexTable( const TableId table, uint32*& buffer, uint64& outEntryCount );
+
     template<uint32 _numBuckets>
     void ValidatePairs(  DiskPlotContext& context, const TableId table );
 }
@@ -252,9 +254,21 @@ inline void Debug::LoadRefLinePointTable( const TableId table, uint64*& buffer, 
 
     char path[1024];
     sprintf( path, "%slp.t%d.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
-    Log::Line( " Loading reference table '%s'.", path );
+    Log::Line( " Loading reference line point table '%s'.", path );
 
     FatalIf( !Debug::LoadRefTable( path, buffer, outEntryCount ), "Failed to load reference line point table." );
+}
+
+//-----------------------------------------------------------
+inline void Debug::LoadRefLPIndexTable( const TableId table, uint32*& buffer, uint64& outEntryCount )
+{
+    ASSERT( table < TableId::Table7 );
+
+    char path[1024];
+    sprintf( path, "%slpmap.t%d.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
+    Log::Line( " Loading reference line point index table '%s'.", path );
+
+    FatalIf( !Debug::LoadRefTable( path, buffer, outEntryCount ), "Failed to load reference line index map table." );
 }
 
 //-----------------------------------------------------------

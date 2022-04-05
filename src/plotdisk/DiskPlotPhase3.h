@@ -103,15 +103,13 @@ private:
     // uint64*                          _lpWriteBuffer [2];
     // uint32*                          _mapWriteBuffer[2];
 
-    // uint64  _tablePrunedEntryCount[7];  // Count of each table, after prunning
 
-    // // Entry count for the current R table after it has been pruned
+    // Entry count for the current R table after it has been pruned
     // uint64  _prunedEntryCount;
 
-    // // Entry count for each bucket of our current R table after
-    // // it has been converted to line points.
-    // uint32  _lpBucketCounts  [BB_DPP3_LP_BUCKET_COUNT];
-    // uint32  _lMapBucketCounts[BB_DP_BUCKET_COUNT];
+    uint64  _tablePrunedEntryCount [7] = { 0 };                   // Count of each table, after prunning
+    uint64  _lpPrunedBucketCounts  [BB_DP_MAX_BUCKET_COUNT+1];    // Entry count per bucket of our current R table after it has been converted to buckets.
+    uint64  _lMapPrunedBucketCounts[BB_DP_MAX_BUCKET_COUNT+1];    // Entry count per bucket for the lMap table after it has been pruned by the previous table compression.
 
     // // Left over entries in a bucket (which is not the last bucket)
     // // that did not fit into a full park, these need to be included in
