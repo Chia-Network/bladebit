@@ -113,71 +113,6 @@ public:
         });
     }
 
-    //-----------------------------------------------------------
-    // template<uint32 remainderBits, typename T, typename TKey, typename TJob, typename BucketT>
-    // inline static void EntrySort( PrefixSumJob<TJob, BucketT>* self, const int64 entryCount, const int64 offset, 
-    //                               T* entries, T* tmpEntries, TKey* keys, TKey* tmpKeys )
-    // {
-    //     ASSERT( self );
-    //     ASSERT( entries );
-    //     ASSERT( tmpEntries );
-    //     ASSERT( entryCount > 0 );
-
-    //     constexpr uint Radix = 256;
-
-    //     constexpr uint32 MaxIter    = 4;
-    //     constexpr int32  iterations = MaxIter - remainderBits / 8;
-    //     constexpr uint32 shiftBase  = 8;
-
-    //     BucketT counts     [Radix];
-    //     BucketT pfxSum     [Radix];
-    //     BucketT totalCounts[Radix];
-
-    //     uint32 shift = 0;
-    //     T* input  = entries;
-    //     T* output = tmpEntries;
-
-    //     TKey* keyInput = keys;
-    //     TKey* keyTmp   = tmpKeys;
-
-    //     const uint32 lastByteMask   = 0xFF >> remainderBits;
-    //           uint32 masks[MaxIter] = { 0xFF, 0xFF, 0xFF, lastByteMask };
-
-    //     for( int32 iter = 0; iter < iterations ; iter++, shift += shiftBase )
-    //     {
-    //         const uint32 mask = masks[iter];
-
-    //         // Zero-out the counts
-    //         memset( counts, 0, sizeof( BucketT ) * Radix );
-
-    //         T*       src    = input + offset;
-    //         const T* start  = src;
-    //         const T* end    = start + entryCount;
-    //         T*       keySrc = keyInput + offset;
-
-    //         do {
-    //             counts[(src->ykey >> shift) & mask]++;
-    //         } while( ++src < end );
-
-    //         self->CalculatePrefixSum( Radix, counts, pfxSum, totalCounts );
-
-    //         while( --src >= start )
-    //         {
-    //             const T       value  = *src;
-    //             const uint64  bucket = (value.ykey >> shift) & mask;
-
-    //             const BucketT dstIdx = --pfxSum[bucket];
-                
-    //             output[dstIdx] = value;
-    //             keyTmp[dstIdx] = keySrc[i];
-
-    //         }
-
-    //         std::swap( input   , output );
-    //         std::swap( keyInput, keyTmp );
-    //         self->SyncThreads();
-    //     }
-    // }
 };
 
 template<uint32 _numBuckets, bool _overflow>
@@ -612,7 +547,7 @@ private:
 
                     ASSERT( x || y );
                     outLinePoints[i] = SquareToLinePoint( x, y );
-
+                }
             }
         });
 
