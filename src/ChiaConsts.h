@@ -145,7 +145,7 @@ constexpr inline static size_t CalculateC3Size()
 }
 
 //-----------------------------------------------------------
-inline static size_t CalculatePark7Size( uint k )
+inline constexpr static size_t CalculatePark7Size( const uint k )
 {
     return CDiv( (k + 1) * (uint64)kEntriesPerPark, 8 );
 }
