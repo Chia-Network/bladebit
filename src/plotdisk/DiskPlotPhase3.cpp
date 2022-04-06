@@ -25,9 +25,12 @@
 #define P3_BUCKET_MULTIPLER 1.4
 
 #if _DEBUG
-static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length );
-static void ValidateIndices( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* indices, const uint64 length );
-static void SavePrunedBucketCount( const TableId table, const uint32 numBuckets, const uint64* bucketCounts );
+    static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length );
+    static void ValidateIndices( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* indices, const uint64 length );
+    static void SavePrunedBucketCount( const TableId table, uint64* bucketCounts, bool read );
+
+    // #define BB_DP_DBG_P3_SKIP_TO_TABLE
+    #define BB_DP_DBG_P3_START_TABLE TableId::Table7
 #endif
 
 class EntrySort
@@ -181,13 +184,13 @@ public:
     // }
 };
 
-template<uint32 _numBuckets>
+template<uint32 _numBuckets, bool _overflow>
 class MapWriter
 {
 public:
     static constexpr uint32 _k             = _K;
     static constexpr uint32 BucketBits     = bblog2( _numBuckets );
-    static constexpr uint32 AddressBitSize = _k;
+    static constexpr uint32 AddressBitSize = _overflow ? _k + 1 : _k;
     static constexpr uint32 EntryBitSize   = _k - BucketBits + AddressBitSize;  // ( origin address | final address ) ( k-log2(buckets) | 32 )
 
 public:
@@ -227,7 +230,7 @@ public:
             const uint32 bucketBits   = BucketBits;
             const uint32 bucketShift  = _k - bucketBits;
             const uint32 bitSize      = EntryBitSize;
-            const uint32 encodeShift  = _k;
+            const uint32 encodeShift  = AddressBitSize;
             const uint32 numBuckets   = _numBuckets + 1;
 
             int64 count, offset, end;
@@ -370,6 +373,7 @@ public:
     }
 
 private:
+    //-----------------------------------------------------------
     inline byte* GetWriteBuffer( const uint32 bucket )
     {
         return _writebuffers[bucket & 1];
@@ -935,6 +939,8 @@ public:
     //-----------------------------------------------------------
     void Run( const uint64 inLPBucketCounts[_numBuckets+1], uint64 outLMapBucketCounts[_numBuckets+1] )
     {
+        constexpr bool _overflow = rTable == TableId::Table7;
+
         _ioQueue.SeekBucket( FileId::LP, 0, SeekOrigin::Begin );
         _ioQueue.CommitCommands();
 
@@ -955,7 +961,7 @@ public:
         uint64* tmpLinePoints = allocator.CAlloc<uint64>( maxBucketEntries );
         uint64* tmpIndices    = allocator.CAlloc<uint64>( maxBucketEntries );
 
-        MapWriter<_numBuckets> mapWriter( _ioQueue, _writeId, allocator, maxBucketEntries, _context.tmp2BlockSize, _writeFence, _writeWaitTime );
+        MapWriter<_numBuckets, _overflow> mapWriter( _ioQueue, _writeId, allocator, maxBucketEntries, _context.tmp2BlockSize, _writeFence, _writeWaitTime );
 
         Log::Line( "Step 2 using %.2lf / %.2lf GiB.", (double)allocator.Size() BtoGB, (double)allocator.Capacity() BtoGB );
 
@@ -1026,12 +1032,13 @@ public:
             }
 
 #if _DEBUG
-            // ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
+            ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
 
             // ValidateIndices( lTable, _context, bucket, sortedIndices, (uint64)entryCount );
 #endif
 
             // Write reverse map to disk
+
             mapWriter.Write( *_context.threadPool, _threadCount, bucket, entryCount, mapOffset, sortedIndices, scratchIndices, outLMapBucketCounts );
             
             // Write LP's as parks into the plot file
@@ -1197,22 +1204,6 @@ void DiskPlotPhase3::Run()
         Log::Line( "All good!" );
         }
 
-        if( 0 )
-        {
-            const uint32 numBuckets = 256;
-
-            // Test Table 2->3 to ensure all map indices are valid
-            StackAllocator allocator( _context.heapBuffer, _context.heapSize );
-            DiskMapReader<uint32, numBuckets, 32> lReader( _context, _context.p3ThreadCount, TableId::Table2, FileId::LP_MAP_1, allocator );
-
-            uint32* lEntries = bbcvirtallocbounded<uint32>( 1ull << _K );
-
-            for( uint32 b = 0; b < numBuckets; b++ )
-            {
-                
-            }
-
-        }
 #endif
     DiskBufferQueue& ioQueue = *_context.ioQueue;
 
@@ -1224,12 +1215,12 @@ void DiskPlotPhase3::Run()
     ioQueue.SeekFile( FileId::T6, 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile( FileId::T7, 0, 0, SeekOrigin::Begin );
 
-    ioQueue.SeekFile( FileId::MAP2, 0, 0, SeekOrigin::Begin );
-    ioQueue.SeekFile( FileId::MAP3, 0, 0, SeekOrigin::Begin );
-    ioQueue.SeekFile( FileId::MAP4, 0, 0, SeekOrigin::Begin );
-    ioQueue.SeekFile( FileId::MAP5, 0, 0, SeekOrigin::Begin );
-    ioQueue.SeekFile( FileId::MAP6, 0, 0, SeekOrigin::Begin );
-    ioQueue.SeekFile( FileId::MAP7, 0, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( FileId::MAP2, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( FileId::MAP3, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( FileId::MAP4, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( FileId::MAP5, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( FileId::MAP6, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( FileId::MAP7, 0, SeekOrigin::Begin );
 
     ioQueue.SeekFile( FileId::MARKED_ENTRIES_2, 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile( FileId::MARKED_ENTRIES_3, 0, 0, SeekOrigin::Begin );
@@ -1300,7 +1291,7 @@ template<uint32 _numBuckets>
 void DiskPlotPhase3::GetCacheSizesForBuckets( size_t& outCacheSizeLP, size_t& outCacheSizeMap )
 {
     const size_t lpEntrySize    = P3StepOne<TableId::Table2, _numBuckets>::_entrySizeBits;
-    const size_t mapEntrySizeX2 = MapWriter<_numBuckets>::EntryBitSize * 2;
+    const size_t mapEntrySizeX2 = MapWriter<_numBuckets, true>::EntryBitSize * 2;
     
     static_assert( mapEntrySizeX2 >= lpEntrySize );
 
@@ -1323,10 +1314,14 @@ void DiskPlotPhase3::RunBuckets()
 {
     TableId startTable = TableId::Table2;
 
-#if _DEBUG
-    // startTable = TableId::Table3;
+#if _DEBUG && defined( BB_DP_DBG_P3_SKIP_TO_TABLE )
+    startTable = BB_DP_DBG_P3_START_TABLE;
+
     if( ((int)startTable & 1) == 0 )
         std::swap( _mapReadId, _mapWriteId );
+
+    if( startTable > TableId::Table2 )
+        SavePrunedBucketCount( startTable - 1, _lMapPrunedBucketCounts, true );
 #endif
 
     for( TableId rTable = startTable; rTable <= TableId::Table7; rTable++ )
@@ -1400,6 +1395,10 @@ void DiskPlotPhase3::ProcessTable()
         _context.readWaitTime  += stepTwo.GetReadWaitTime();
         _context.writeWaitTime += stepTwo.GetWriteWaitTime();
     }
+
+#if _DEBUG
+    SavePrunedBucketCount( rTable, _lMapPrunedBucketCounts, false );
+#endif
 
     _tablePrunedEntryCount[(int)rTable-1] = prunedEntryCount;
 }
@@ -1544,9 +1543,32 @@ void ValidateIndices( const TableId table, const DiskPlotContext& context, const
 }
 
 //-----------------------------------------------------------
-void SavePrunedBucketCount( const TableId table, const uint32 numBuckets, const uint64* bucketCounts )
+void SavePrunedBucketCount( const TableId table, uint64* bucketCounts, bool read )
 {
-    
+    FileStream file;
+
+    char path[1024];
+    sprintf( path, "%sp3.t%d.buckets.tmp", BB_DP_DBG_TEST_DIR, (int)table+1 );
+
+    const size_t fileSize = sizeof( uint64 ) * ( BB_DP_MAX_BUCKET_COUNT+1 );
+
+    if( file.Open(path, read ? FileMode::Open : FileMode::Create, read ? FileAccess::Read : FileAccess::Write ) )
+    {
+        if( read )
+        {
+            if( file.Read( bucketCounts, fileSize ) != fileSize )
+                Log::Error( "Failed to read from bucket counts file." );
+        }
+        else
+        {
+            if( file.Write( bucketCounts, fileSize ) != fileSize )
+                Log::Error( "Failed to write to bucket counts file." );
+        }
+    }
+    else
+        Log::Error( "Failed to open bucket counts file." );
 }
+
+
 #endif
 

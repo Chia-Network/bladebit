@@ -751,6 +751,8 @@ public:
             UnpackEntries<T7Entry, uint32, true>( bucket, sortedEntries, (int64)bucketLength, f7, _map[0], nullptr );
             WriteMap( bucket, (int64)bucketLength, _map[0], (uint64*)_meta[0] );
 
+            _mapOffset += (uint64)bucketLength;
+
             /// Now handle f7 and write them into C tables
             /// We will set the addersses to these tables accordingly.
 
