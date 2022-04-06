@@ -3,6 +3,7 @@
 #include "plotdisk/BitBucketWriter.h"
 #include "plotmem/LPGen.h"
 #include "algorithm/RadixSort.h"
+#include "plotting/TableWriter.h"
 
 #if _DEBUG
     #include "DiskPlotDebug.h"
@@ -29,7 +30,7 @@
     static void ValidateIndices( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* indices, const uint64 length );
     static void SavePrunedBucketCount( const TableId table, uint64* bucketCounts, bool read );
 
-    // #define BB_DP_DBG_P3_SKIP_TO_TABLE
+    #define BB_DP_DBG_P3_SKIP_TO_TABLE
     #define BB_DP_DBG_P3_START_TABLE TableId::Table7
 #endif
 
@@ -267,13 +268,20 @@ public:
                 ASSERT( finalIdx < ( 1ull << encodeShift ) );
 
                 outMapBuckets[dstIdx] = (origin << encodeShift) | finalIdx;
+#if _DEBUG
+                ASSERT( origin < 4293903249 );
+                if( b == 255 )
+                {
+                    ASSERT( ( origin & ((1ull << bucketShift)-1) ) < 15851695 );
+                }
+#endif
             }
 
 #if _DEBUG
             {
                 self->SyncThreads();
 
-                const uint32 idxShift      = _k;
+                const uint32 idxShift      = AddressBitSize;
                 const uint64 finalIdxMask  = ( 1ull << idxShift    ) - 1;
                 const uint64 bucketIdxMask = ( 1ull << bucketShift ) - 1;
 
@@ -285,6 +293,8 @@ public:
 // if( i == 12109888 ) BBDebugBreak();
                     ASSERT( bucketIdx < (1ull<<_k) / _numBuckets );
                     ASSERT( map <= 0xFFFFFFFF );
+
+                    // ASSERT( bucketIdx < 15851695 );
                 }
 
                 self->SyncThreads();
@@ -499,12 +509,12 @@ public:
             rTableReader.LoadNextBucket();
         };
 
-    #if _DEBUG
-        // _linePointRef = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
-        // _indexRef     = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
-        // _lpRefWriter  = _linePointRef;
-        // _idxRefWriter = _indexRef;
-    #endif
+#if _DEBUG
+    // _linePointRef = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
+    // _indexRef     = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
+    // _lpRefWriter  = _linePointRef;
+    // _idxRefWriter = _indexRef;
+#endif
 
 
         // Load initial bucket and the whole marking table
@@ -525,22 +535,24 @@ public:
 
             // Wait for and unpack our current bucket
             const uint64 bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
-            
+#if _DEBUG
+// for( uint64 i = 0; i < bucketLength; i++ )
+// {
+//     ASSERT( map[i] < _context.entryCounts[(int)rTable] );
+// }
+#endif
             uint32* lEntries;
-            uint64  lEntryCount;
 
             if constexpr ( lTable == TableId::Table1 )
                 // lEntries = lTable1Reader.ReadLoadedBucket();
                 lEntries = lReader->ReadLoadedBucket();
             else
             {
-                lEntries    = lTableNEntries;
-                lEntryCount = GetLLoadCount( bucket );
+                lEntries = lTableNEntries;
 
                 const uintptr_t offset = bucket == 0 ? 0 : P3_EXTRA_L_ENTRIES_TO_LOAD;
 
-                lTableNReader.ReadEntries( lEntryCount, lEntries + offset );
-                // BBDebugBreak();
+                lTableNReader.ReadEntries( GetLLoadCount( bucket ), lEntries + offset );
             }
 
             ASSERT( bucketLength <= maxBucketEntries );
@@ -560,15 +572,15 @@ public:
 
             _prunedEntryCount += prunedEntryCount;
 
-            #if _DEBUG
-                _bpOffset += _context.bucketCounts[(int)lTable][bucket];
-            #endif
+#if _DEBUG
+            _bpOffset += _context.bucketCounts[(int)lTable][bucket];
+#endif
         }
 
         // Submit trailing bits
         _lpWriter.SubmitLeftOvers();
 
-        #if _DEBUG
+#if _DEBUG
             for( uint32 b = 0; b < _numBuckets; b++ )
                 ASSERT( outLPBucketCounts[b] <= maxBucketEntries );
 
@@ -580,7 +592,7 @@ public:
                 //     ASSERT( outLPBucketCounts[b] == 0 );
 
             }
-        #endif
+#endif
 
         return _prunedEntryCount;
     }
@@ -1032,7 +1044,7 @@ public:
             }
 
 #if _DEBUG
-            ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
+            // ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
 
             // ValidateIndices( lTable, _context, bucket, sortedIndices, (uint64)entryCount );
 #endif
@@ -1073,12 +1085,14 @@ private:
                 const uint64 lp  = reader.ReadBits64( _lpBits  ) | bucketMask;
                 const uint64 idx = reader.ReadBits64( _idxBits );
 
+#if _DEBUG
+                ASSERT( idx < 4293903249 );
                 // if( bucket == 0 )
                 // {
                 //     ASSERT( lp  == _linePointRef[i] );
                 //     ASSERT( idx == _indexRef[i] );
                 // }
-                
+#endif      
                 ASSERT( idx < (1ull << _K) + ((1ull << _K) / _numBuckets) );
 
                 linePoints[i] = lp;
@@ -1352,6 +1366,14 @@ void DiskPlotPhase3::RunBuckets()
     }
 
     // Finish up with table 7 which needs to be sorted on f7. We use its map for that
+    {
+        // #TODO: Need to get wait times from WritePark7()
+        Log::Line( "Writing P7 parks." );
+        const auto timer = TimerBegin();
+        WritePark7<_numBuckets>( _lMapPrunedBucketCounts );
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished writing P7 parks in %.2lf seconds.", elapsed );
+    }
 }
 
 //-----------------------------------------------------------
@@ -1409,34 +1431,144 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
 {
     DiskPlotContext& context = _context;
     DiskBufferQueue& ioQueue = *context.ioQueue;
+    ThreadPool&      pool    = *context.threadPool;
+
+    Duration readTime  = Duration::zero();
+    Duration writeTime = Duration::zero();
 
     _readFence .Reset();
     _writeFence.Reset();
 
-    const uint64 maxBucketEntries = (uint64)( ( (1ull << _K) / _numBuckets ) * P3_BUCKET_MULTIPLER );
+    const uint64 maxBucketEntries = inMapBucketCounts[0];   // All buckets are the same size at this point, except the last one which could be less
+    const uint64 maxParkCount     = maxBucketEntries / kEntriesPerPark;
+    const size_t parkSize         = CalculatePark7Size( _K );
+
     StackAllocator allocator( context.heapBuffer, context.heapSize );
 
-    DiskMapReader<uint32, _numBuckets, _K> mapReader( context, context.p3ThreadCount, TableId::Table7, _mapReadId, allocator, inMapBucketCounts );
+    DiskMapReader<uint64, _numBuckets, _K+1> mapReader( context, context.p3ThreadCount, TableId::Table7, _mapReadId, allocator, inMapBucketCounts );
+
+    // Allocate an extra park's worth of entries so that we can use it as a 'prefix zone'
+    // to copy left over entries from a bucket that did not fit into a park.
+    uint64* t6Indices = allocator.AllocT<uint64>( maxBucketEntries + kEntriesPerPark );
+    
+    byte* parkBuffers[2] = {
+        allocator.AllocT<byte>( parkSize * ( maxParkCount + 1 ) ),  // Allocate an extra park in case we need to serialize
+        allocator.AllocT<byte>( parkSize * ( maxParkCount + 1 ) )   // the overflow park in the last bucket
+    };
+
+    /// Internal Funcs
+    auto GetParkBuffer = [&]( const uint32 bucket ) {
+
+        if( bucket > 1 )
+            _writeFence.Wait( bucket - 2, writeTime );
+
+        return parkBuffers[bucket & 1];
+    };
 
     auto LoadBucket = [&]( const uint32 bucket ) {
 
-        const uint64 bucketLength = inMapBucketCounts[bucket];
-        if( bucketLength < 1 )
-            return;
+        const uint64 bucketLength = inMapBucketCounts[bucket];// mapReader.GetVirtualBucketLength( bucket );
 
-        mapReader.LoadNextEntries( bucketLength );
+        if( bucketLength )
+            mapReader.LoadNextEntries( bucketLength );
+
         ioQueue.SignalFence( _readFence, bucket + 1 );
         ioQueue.CommitCommands();
     };
 
+
+    /// Start writeing buckets to park 7
+    uint64 leftOverEntryCount = 0;
+
     LoadBucket( 0 );
 
-    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+    for( uint32 bucket = 0; bucket <= _numBuckets; bucket++ )
     {
-        if( bucket + 1 < _numBuckets )
+        const bool isLastBucket     = bucket == _numBuckets;
+        const bool nextBucketEmpty  = !isLastBucket && inMapBucketCounts[bucket+1] == 0;
+        const bool hasNextBucket    = !isLastBucket && !nextBucketEmpty;
+
+        if( hasNextBucket )
             LoadBucket( bucket + 1 );
+
+        /// Read bucket
+        const uint64 bucketLength = inMapBucketCounts[bucket];      ASSERT( bucketLength <= maxBucketEntries );
+
+        _readFence.Wait( bucket + 1, readTime );
+        mapReader.ReadEntries( bucketLength, t6Indices + leftOverEntryCount );  // Load entries to the buffer starting 
+                                                                                // at the point after the left-over entries.
+        const uint64 entriesToEncode = bucketLength + leftOverEntryCount;
+
+
+        /// Encode into parks
+        const uint64 parkCount       = entriesToEncode / kEntriesPerPark;              ASSERT( parkCount <= maxParkCount );
+        const uint64 overflowEntries = entriesToEncode - parkCount * kEntriesPerPark;
+
+        byte* parkBuffer = GetParkBuffer( bucket );
+
+        AnonMTJob::Run( pool, context.p3ThreadCount, [=]( AnonMTJob* self ){
+
+            uint64 count, offset, end;
+            GetThreadOffsets( self, parkCount, count, offset, end );
+
+            const uint64* parkT6Indices   = t6Indices  + offset * kEntriesPerPark;
+                  byte*   parkWriteBuffer = parkBuffer + offset * parkSize;
+            
+            for( uint64 i = 0; i < count; i++ )
+            {
+                TableWriter::WriteP7Entries( kEntriesPerPark, parkT6Indices, parkWriteBuffer, self->_jobId );
+                parkT6Indices   += kEntriesPerPark;
+                parkWriteBuffer += parkSize;
+            }
+        });
+
+        const size_t sizeWritten = parkSize * parkCount;
+
+        ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
+        ioQueue.SignalFence( _writeFence, bucket );
+        ioQueue.CommitCommands();
+        
+        context.plotTableSizes[(int)TableId::Table7] += sizeWritten;
+
+
+        // If it's the last bucket or the next bucket has no entries (might happen with the overflow bucket),
+        // then write an extra left-over park, if we have left-over entries.
+        uint64* indexOverflowStart = t6Indices + entriesToEncode - overflowEntries;
+
+        if( !hasNextBucket )
+        {
+            if( overflowEntries )
+            {
+                byte* finalPark = allocator.AllocT<byte>( parkSize );
+                TableWriter::WriteP7Entries( overflowEntries, indexOverflowStart, finalPark, 0 );
+
+                context.plotTableSizes[(int)TableId::Table7] += parkSize;
+
+                ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
+                ioQueue.SignalFence( _writeFence, bucket + 1 );
+                ioQueue.CommitCommands();
+            }
+
+            break;
+        }
+
+        /// Copy overflow entries for the next bucket
+        leftOverEntryCount = overflowEntries;
+
+        if( overflowEntries )
+            memcpy( t6Indices, indexOverflowStart, sizeof( uint64 ) * overflowEntries );
     }
+
+    // Wait for all writes to finish
+    ioQueue.SignalFence( _writeFence, _numBuckets + 2 );
+    ioQueue.CommitCommands();
+    _writeFence.Wait( _numBuckets + 2, writeTime );
+
+    // Save IO wait times
+    _writeWaitTime += writeTime;
+    _readWaitTime  += readTime;
 }
+
 
 #if _DEBUG
 //-----------------------------------------------------------

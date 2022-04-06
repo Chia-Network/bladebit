@@ -139,7 +139,7 @@ struct DiskMapReader
                     {
                         const uint64 packedMap = reader.ReadBits64( (uint32)_mapBits );
                         const uint64 map       = packedMap & finalIdxMask;
-                        const uint32 dstIdx    = (uint32)( packedMap >> idxShift );
+                        const uint32 dstIdx    = (uint32)( packedMap >> idxShift ); // #TODO: Use uint64 here
 
                         ASSERT( dstIdx < virtBucketLength );
                         unpackedMap[dstIdx] = (TMap)map;
@@ -196,7 +196,6 @@ struct DiskMapReader
         });
     }
 
-private:
     //-----------------------------------------------------------
     inline uint64 GetVirtualBucketLength( const uint32 bucket )
     {
@@ -219,6 +218,7 @@ private:
         return tableEntryCount > maxKEntries ? tableEntryCount - maxKEntries : 0;
     }
 
+private:
     //-----------------------------------------------------------
     inline void* GetBucketBuffer( const uint32 bucket )
     {

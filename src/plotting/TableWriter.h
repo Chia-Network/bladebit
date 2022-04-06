@@ -14,7 +14,9 @@ struct TableWriter
                            const uint32* indices, byte* parkBuffer );
 
     static void WriteP7Parks( const uint64 parkCount, const uint32* indices, byte* parkBuffer, uint32 jobId = 0 );
-    static void WriteP7Entries( const uint64 length, const uint32* indices, byte* parkBuffer, uint32 jobId = 0 );
+
+    template<typename TIdx>
+    static void WriteP7Entries( const uint64 length, const TIdx* indices, byte* parkBuffer, uint32 jobId = 0 );
 
 
     /// C1 & C2 tables
@@ -148,8 +150,11 @@ inline void TableWriter::WriteP7Parks( const uint64 parkCount, const uint32* ind
 }
 
 //-----------------------------------------------------------
-inline void TableWriter::WriteP7Entries( const uint64 length, const uint32* indices, byte* parkBuffer, uint32 jobId )
+template<typename TIdx>
+inline void TableWriter::WriteP7Entries( const uint64 length, const TIdx* indices, byte* parkBuffer, uint32 jobId )
 {
+    ASSERT( length <= kEntriesPerPark );
+
     uint64* fieldWriter = (uint64*)parkBuffer;
     
     // chiapos requires this to have an extra bit 

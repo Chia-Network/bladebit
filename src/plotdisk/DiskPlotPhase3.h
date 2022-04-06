@@ -81,7 +81,7 @@ private:
     Fence _stepFence;
 
     Duration _readWaitTime  = Duration::zero();
-    Duration _WriteWaitTime = Duration::zero();
+    Duration _writeWaitTime = Duration::zero();
     
     FileId _mapReadId  = FileId::LP_MAP_0;
     FileId _mapWriteId = FileId::LP_MAP_1;
