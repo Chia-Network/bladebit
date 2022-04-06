@@ -79,6 +79,7 @@ private:
     Fence _readFence;
     Fence _writeFence;
     Fence _stepFence;
+    Fence _plotFence;
 
     Duration _readWaitTime  = Duration::zero();
     Duration _writeWaitTime = Duration::zero();
