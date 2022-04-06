@@ -48,8 +48,8 @@
 #define BB_DP_DBG_TEST_DIR      "/mnt/p5510a/disk_dbg/"
 #define BB_DP_DBG_REF_DIR       "/mnt/p5510a/reference/"
 
-#define BB_DP_DBG_SKIP_PHASE_1  1
-#define BB_DP_DBG_SKIP_PHASE_2  1
+// #define BB_DP_DBG_SKIP_PHASE_1  1
+// #define BB_DP_DBG_SKIP_PHASE_2  1
 
 // Skip all of Phase 1 except the C tables writing.
 // #NOTE: BB_DP_DBG_SKIP_PHASE_1 Must be defined

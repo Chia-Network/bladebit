@@ -29,4 +29,5 @@ private:
     Fence*           _bucketReadFence;
     Fence*           _mapWriteFence;
     size_t           _markingTableSize = 0;
+    Duration         _readWaitTime     = Duration::zero();
 };

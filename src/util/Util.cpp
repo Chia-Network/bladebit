@@ -4,6 +4,7 @@
 //-----------------------------------------------------------
 void FatalExit()
 {
+    SysHost::DumpStackTrace();
     exit( 1 );
 }
 

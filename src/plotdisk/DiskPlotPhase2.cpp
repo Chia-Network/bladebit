@@ -106,16 +106,6 @@ void DiskPlotPhase2::RunWithBuckets()
         return;
     #endif
 
-    // // Prepare map buffer
-    // _tmpMap = (uint32*)( context.heapBuffer + bitFieldSize*2 );
-
-    // // Prepare our fences
-    // Fence bitFieldFence, bucketLoadFence, mapWriteFence;
-    // _bucketReadFence = &bucketLoadFence;
-    // _mapWriteFence   = &mapWriteFence;
-
-    // // Set write fence as signalled initially
-    // _mapWriteFence->Signal();
 
     // Mark all tables
     FileId  lTableFileId  = FileId::MARKED_ENTRIES_6;
@@ -401,36 +391,8 @@ void DiskPlotPhase2::RunWithBuckets()
         // Log::Line( " Table %u IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", table,
         //     TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 
-        // #TEST:
-        // if( 0 )
-        // {
-        //     std::atomic<uint64> prunedEntryCount = 0;
-
-        //     const uint64 lEntryCount = context.entryCounts[(int)table-1];
-
-        //     AnonMTJob::Run( *context.threadPool, [&]( AnonMTJob* self ) {
-
-        //         if( self->IsControlThread() )
-        //             Log::Line( "Counting entries." );
-
-        //         BitField markedEntries( rMarkingTable );
-
-        //         uint64 count, offset, end;
-        //         GetThreadOffsets( self, lEntryCount, count, offset, end );
-        //         for( uint64 e = offset; e < end; e++ )
-        //         {
-        //             if( markedEntries.Get( e ) )
-        //                 prunedEntryCount++;
-        //         }
-        //     });
-
-        //     Log::Line( " %llu/%llu (%.2lf%%)", prunedEntryCount.load(), lEntryCount,
-        //               ((double)prunedEntryCount.load() / lEntryCount) * 100.0 );
-        //     Log::Line("");
-        // }
-
-        // if( table < TableId::Table7 )
-        // if( 0 )
+        /// #TEST Marked entries
+        if( 0 )
         {
             Log::Line( "Counting marked entries..." );
             std::atomic<uint64> lTablePrunedEntries = 0;
@@ -458,16 +420,16 @@ void DiskPlotPhase2::RunWithBuckets()
                        lTablePrunedEntries.load(), lTableEntries, ((double)lTablePrunedEntries.load() / lTableEntries ) * 100.0 );
             Log::Line( "" );
         }
-    }
+    } 
 
-    // bitFieldFence.Wait( _context.writeWaitTime );
-    // queue.CompletePendingReleases();
 
-    // // Unpack table 2 and 7's map here to to make Phase 3 easier, though this will issue more read/writes
-    // UnpackTableMap( TableId::Table7 );
-    // UnpackTableMap( TableId::Table2 );
+        // Log::Line( " Phase 2 IO write wait time: %.2lf seconds.", TicksToSeconds( writeWaitTime ) );
 
-    
+        // Wait for final write
+
+        queue.SignalFence( bitFieldFence, 0xFFFFFFFF );
+        queue.CommitCommands();
+        bitFieldFence.Wait( 0xFFFFFFFF, _context.writeWaitTime );
 
     // Log::Line( " Phase 2 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
     //         TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );

@@ -11,7 +11,6 @@
     #include "jobs/IOJob.h"
 
     static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length );
-    static void ValidateIndices( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* indices, const uint64 length );
     static void SavePrunedBucketCount( const TableId table, uint64* bucketCounts, bool read );
 
     // #define BB_DP_DBG_P3_SKIP_TO_TABLE
@@ -329,7 +328,7 @@ public:
     uint64 Run( const uint64 inLMapBucketCounts[_numBuckets+1], uint64 outLPBucketCounts[_numBuckets+1] )
     {
         DiskPlotContext& context = _context;
-        DiskBufferQueue& ioQueue = *context.ioQueue;
+        DiskBufferQueue& ioQueue = _ioQueue;
 
         ioQueue.SeekBucket( FileId::LP, 0, SeekOrigin::Begin );
         ioQueue.CommitCommands();
@@ -343,7 +342,7 @@ public:
         
         void* rMarks = allocator.Alloc( rMarksSize, context.tmp1BlockSize );
 
-        DiskPairAndMapReader<_numBuckets> rTableReader( context, context.p3ThreadCount, _readFence, rTable, allocator, false );
+        DiskPairAndMapReader<_numBuckets> rTableReader( context, _threadCount, _readFence, rTable, allocator, false );
 
         using L1Reader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
         using LNReader = DiskMapReader<uint32, _numBuckets, _k>;
@@ -848,8 +847,7 @@ public:
             }
 
             #if _DEBUG
-                ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
-                // ValidateIndices( lTable, _context, bucket, sortedIndices, (uint64)entryCount );
+                // ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
             #endif
 
             // Write reverse map to disk
@@ -963,8 +961,6 @@ private:
 
         // If it's the last bucket or the next bucket has no entries (might happen with the overflow bucket),
         // then write an extra left-over park, if we have left-over entries.
-       
-
         if( !hasNextBucket )
         {
             if( overflowEntries )
@@ -1165,6 +1161,9 @@ void DiskPlotPhase3::RunBuckets()
         _ioQueue.SeekBucket( _mapReadId , 0, SeekOrigin::Begin );
         _ioQueue.SeekBucket( _mapWriteId, 0, SeekOrigin::Begin );
         _ioQueue.CommitCommands();
+
+        // Set the table offset for the next table
+        _context.plotTablePointers[(int)rTable] = _context.plotTablePointers[(int)rTable-1] + _context.plotTableSizes[(int)rTable-1];
     }
 
     // Finish up with table 7 which needs to be sorted on f7. We use its map for that
@@ -1437,51 +1436,6 @@ void ValidateLinePoints( const TableId table, const DiskPlotContext& context, co
 
     if( bucket == context.numBuckets - 1 )
         Log::Line( "LinePoints Validated Successfully!" );
-}
-
-//-----------------------------------------------------------
-void ValidateIndices( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* indices, const uint64 length )
-{
-    static TableId _loadedTable    = TableId::_Count;
-    static uint32* _refIndicess    = nullptr;
-    static uint64  _refEntryCount  = 0;
-    static uint64  _refIndexOffset = 0;
-
-    if( _refIndicess == nullptr )
-        _refIndicess = bbvirtallocbounded<uint32>( sizeof( uint32 ) * context.entryCounts[(int)TableId::Table7] );
-    
-     if( table != _loadedTable )
-    {
-        // Time to load a new table and reset the reader to the beginning
-        _loadedTable = table;
-
-        Debug::LoadRefLPIndexTable( table, _refIndicess, _refEntryCount );
-        ASSERT( _refEntryCount <= context.entryCounts[(int)TableId::Table7] );
-
-        _refIndexOffset = 0;
-    }
-
-    ASSERT( _refIndexOffset + length <= _refEntryCount );
-
-    AnonMTJob::Run( *context.threadPool, 1, [=]( AnonMTJob* self ) {
-
-        uint64 count, offset, end;
-        GetThreadOffsets( self, length, count, offset, end );
-
-        const uint32* refIdxReader = _refIndicess + _refIndexOffset + offset;
-        const uint64* idxReader    = indices + offset;
-
-        for( uint64 i = 0; i < count; i++ )
-        {
-            ASSERT( idxReader[i] == refIdxReader[i] );
-        }
-
-        _refIndexOffset += length;
-    });
-
-    if( bucket == context.numBuckets - 1 )
-        Log::Line( "LinePoints Validated Successfully!" );
-
 }
 
 //-----------------------------------------------------------

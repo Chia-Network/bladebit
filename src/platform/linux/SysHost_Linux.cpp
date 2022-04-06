@@ -9,12 +9,14 @@
 #include <numa.h>
 #include <numaif.h>
 #include <stdio.h>
+#include <mutex>
 
 // #if _DEBUG
     #include "util/Log.h"
 // #endif
 
 std::atomic<bool> _crashed = false;
+
 
 //-----------------------------------------------------------
 size_t SysHost::GetPageSize()
@@ -224,6 +226,33 @@ void CrashHandler( int signal )
 void SysHost::InstallCrashHandler()
 {
     signal( SIGSEGV, CrashHandler ); 
+}
+
+//-----------------------------------------------------------
+void SysHost::DumpStackTrace()
+{
+    static std::mutex _lock;
+    _lock.lock();
+
+    const size_t MAX_POINTERS = 256;
+    void* stackTrace[256] = { 0 };
+
+    int traceSize = backtrace( stackTrace, (int)MAX_POINTERS );
+    backtrace_symbols_fd( stackTrace, traceSize, fileno( stderr ) );
+    fflush( stderr );
+
+    // FILE* crashFile = fopen( "stack.log", "w" );
+    // if( crashFile )
+    // {
+    //     fprintf( stderr, "Dumping crash to crash.log\n" );
+    //     fflush( stderr );
+        
+    //     backtrace_symbols_fd( stackTrace, traceSize, fileno( crashFile ) );
+    //     fflush( crashFile );
+    //     fclose( crashFile );
+    // }
+
+    _lock.unlock();
 }
 
 //-----------------------------------------------------------

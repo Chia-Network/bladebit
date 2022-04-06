@@ -59,6 +59,9 @@ public:
     /// Install a crash handler to dump stack traces upon crash
     static void InstallCrashHandler();
 
+    /// Dump stack trace to stderr
+    static void DumpStackTrace();
+
     /// Generate random data
     /// (We basically do what libsodium does here)
     static void Random( byte* buffer, size_t size );

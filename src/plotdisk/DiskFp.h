@@ -814,11 +814,13 @@ public:
                 // Dump f7's that have the value of 0xFFFFFFFF for now,
                 // this is just for compatibility with RAM bladebit
                 // for testing plots against it.
-                if( isLastBucket )
-                {
-                    while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
-                        c3BucketLength--;
-                }
+            // #if _DEBUG
+            //     if( isLastBucket )
+            //     {
+            //         while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
+            //             c3BucketLength--;
+            //     }
+            // #endif
 
                 // See TableWriter::GetC3ParkCount for details
                 uint32 parkCount       = c3BucketLength / kCheckpoint1Interval;
@@ -847,7 +849,7 @@ public:
 
                 // #NOTE: This function uses re-writes our f7 buffer, so ensure it is done after
                 //        that buffer is no longer needed.
-                const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_MAX_JOBS>( *_context.threadPool, 
+                const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_DP_MAX_JOBS>( *_context.threadPool, 
                                                 _context.cThreadCount, c3BucketLength, c3F7, c3Buffer );
                 ASSERT( sizeWritten == c3BufferSize );
 
@@ -874,11 +876,9 @@ public:
         _ioQueue.SeekBucket( FileId::PLOT, -(int64)( c1TableSizeBytes + c2TableSizeBytes + c3TableSizeBytes ), SeekOrigin::Current );
         _ioQueue.WriteFile( FileId::PLOT, 0, c1Buffer, c1TableSizeBytes );
         _ioQueue.WriteFile( FileId::PLOT, 0, c2Buffer, c2TableSizeBytes );
-        _ioQueue.ReleaseBuffer( c1Buffer );
-        _ioQueue.ReleaseBuffer( c2Buffer );
         _ioQueue.SeekBucket( FileId::PLOT, (int64)c3TableSizeBytes, SeekOrigin::Current );
 
-        _ioQueue.SignalFence( _readFence );
+        _ioQueue.SignalFence( _readFence, 1 );
         _ioQueue.CommitCommands();
 
         // Save C table addresses into the plot context.
@@ -896,7 +896,7 @@ public:
         _context.plotTableSizes[9] = c3TableSizeBytes;
 
         // Wait for all commands to finish
-        _readFence.Wait( _readWaitTime );
+        _readFence.Wait( 1, _readWaitTime );
     }
 
     //-----------------------------------------------------------
