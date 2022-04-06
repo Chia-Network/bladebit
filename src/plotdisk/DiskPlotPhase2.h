@@ -26,10 +26,7 @@ private:
 
 private:
     DiskPlotContext& _context;
-
-    uint32*     _tmpMap;
-    Fence*      _bucketReadFence;
-    Fence*      _mapWriteFence;
-
-    uint32      _bucketsLoaded;
+    Fence*           _bucketReadFence;
+    Fence*           _mapWriteFence;
+    size_t           _markingTableSize = 0;
 };

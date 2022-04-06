@@ -679,7 +679,7 @@ const uint64 rr = p.right + _bpOffset;
                     outLinePoints[i] = SquareToLinePoint( x, y );
 
 #if _DEBUG
-if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak();
+if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak(); // Should not be here
 // if( p.left  + _bpOffset == 738199293 && p.right + _bpOffset == 738199423) BBDebugBreak();
 // if( p.right + _bpOffset == 738199423 ) BBDebugBreak();
 #endif

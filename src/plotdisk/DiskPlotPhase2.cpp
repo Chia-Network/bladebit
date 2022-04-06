@@ -94,13 +94,13 @@ void DiskPlotPhase2::RunWithBuckets()
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
         maxEntries = std::max( maxEntries, context.entryCounts[(int)table] );
 
-    const size_t blockSize     = _context.tmp2BlockSize;
-    const size_t markfieldSize = RoundUpToNextBoundaryT( maxEntries / 8, (uint64)blockSize );
+    const size_t blockSize = _context.tmp2BlockSize;
+    _markingTableSize      = RoundUpToNextBoundaryT( maxEntries / 8, (uint64)blockSize );
 
     // Prepare 2 marking bitfields for dual-buffering
     uint64* bitFields[2];
-    bitFields[0] = allocator.AllocT<uint64>( markfieldSize, blockSize );
-    bitFields[1] = allocator.AllocT<uint64>( markfieldSize, blockSize );
+    bitFields[0] = allocator.AllocT<uint64>( _markingTableSize, blockSize );
+    bitFields[1] = allocator.AllocT<uint64>( _markingTableSize, blockSize );
 
     #if _DEBUG && BB_DP_DBG_SKIP_PHASE_2
         return;
@@ -135,8 +135,9 @@ void DiskPlotPhase2::RunWithBuckets()
         ASSERT( allocator.Size() < context.heapSize );
 
         // Log::Line( "Allocated work heap of %.2lf GiB out of %.2lf GiB.", 
-        //     (double)(allocator.Size() + markfieldSize*2 ) BtoGB, (double)context.heapSize BtoGB );
+        //     (double)(allocator.Size() + _markingTableSize*2 ) BtoGB, (double)context.heapSize BtoGB );
 
+        memset( lMarkingTable, 0, _markingTableSize );
         MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
 
         //
@@ -381,7 +382,7 @@ void DiskPlotPhase2::RunWithBuckets()
             bitFieldFence.Wait( writeWaitTime );
 
         // Submit l marking table for writing
-        queue.WriteFile( lTableFileId, 0, lMarkingTable, markfieldSize );
+        queue.WriteFile( lTableFileId, 0, lMarkingTable, _markingTableSize );
         queue.SignalFence( bitFieldFence );
         queue.CommitCommands();
 
@@ -511,22 +512,19 @@ void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader,
                   BitField lTableMarkedEntries( lTableMarks );
             const BitField rTableMarkedEntries( rTableMarks );
 
+            // if( bucket == 0 )
+            // {
+            //     // Zero-out l marking table
+            //     size_t clearCount, clearOffset, _;
+            //     GetThreadOffsets( self, _markingTableSize, clearCount, clearOffset, _ );
+
+            //     if( clearCount )
+            //         memset( ((byte*)lTableMarks) + clearOffset, 0, clearCount );
+
+            //     self->SyncThreads();
+            // }
+
             const uint64 bucketEntryCount = _context.ptrTableBucketCounts[(int)table][bucket];
-
-            if( bucket == 0 )
-            {
-                // Zero-out l marking table
-                const uint64 lTableEntryCount = _context.entryCounts[(int)table-1];
-                const size_t bitFieldSize     = RoundUpToNextBoundary( (size_t)lTableEntryCount / 8, 8 );  // Round up to 64-bit boundary
-
-                size_t count, offset, _;
-                GetThreadOffsets( self, bitFieldSize, count, offset, _ );
-
-                if( count )
-                    memset( ((byte*)lTableMarks) + offset, 0, count );
-
-                self->SyncThreads();
-            }
 
             // Mark entries
             int64 count, offset, _;
@@ -563,7 +561,7 @@ inline void MarkTableEntries( int64 i, const int64 entryCount, BitField lTable, 
                 continue;
         }
 
-        const Pair& pair = pairs[i];
+        const Pair&  pair  = pairs[i];
         const uint64 left  = lTableOffset + pair.left;
         const uint64 right = lTableOffset + pair.right;
 

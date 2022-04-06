@@ -74,7 +74,7 @@ public:
         _writeFence.Wait( _numBuckets+1 );
 
 #if _DEBUG
-        if( /*0 &&*/ table == TableId::Table2 )
+        if( 0 && table == TableId::Table2 )
         {
             Log::Line( "Validating Xs" );
             uint32* xRef     = nullptr;
