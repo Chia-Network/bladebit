@@ -10,11 +10,6 @@
     #include "DiskPlotDebug.h"
     #include "jobs/IOJob.h"
 
-    uint64* _linePointRef = nullptr;
-    uint64* _indexRef     = nullptr;
-    uint64* _lpRefWriter  = nullptr;
-    uint64* _idxRefWriter = nullptr;
-
     static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length );
     static void ValidateIndices( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* indices, const uint64 length );
     static void SavePrunedBucketCount( const TableId table, uint64* bucketCounts, bool read );
@@ -270,30 +265,6 @@ public:
                 outMapBuckets[dstIdx] = (origin << encodeShift) | finalIdx;
             }
 
-#if _DEBUG
-            {
-                self->SyncThreads();
-
-                const uint32 idxShift      = AddressBitSize;
-                const uint64 finalIdxMask  = ( 1ull << idxShift    ) - 1;
-                const uint64 bucketIdxMask = ( 1ull << bucketShift ) - 1;
-
-                for( int64 i = offset; i < end; i++ )
-                {
-                    const uint64 packedMap = outMapBuckets[i];
-                    const uint64 bucketIdx = ( packedMap >> idxShift ) & bucketIdxMask;
-                    const uint64 map       = packedMap & finalIdxMask;
-// if( i == 12109888 ) BBDebugBreak();
-                    ASSERT( bucketIdx < (1ull<<_k) / _numBuckets );
-                    ASSERT( map <= 0xFFFFFFFF );
-
-                    // ASSERT( bucketIdx < 15851695 );
-                }
-
-                self->SyncThreads();
-            }
-#endif
-
             auto&   bitWriter = _bucketWriter;
             uint64* bitCounts = totalBitCounts;
 
@@ -401,9 +372,6 @@ public:
     static constexpr uint32 _idxBits       = _k + 1;
     static constexpr uint32 _entrySizeBits = _lpBits + _idxBits; // LP, origin index
 
-#if _DEBUG
-uint64 _bpOffset = 0;
-#endif
 public:
     //-----------------------------------------------------------
     P3StepOne( DiskPlotContext& context, const FileId mapReadId, Fence& readFence, Fence& writeFence )
@@ -502,13 +470,6 @@ public:
             rTableReader.LoadNextBucket();
         };
 
-#if _DEBUG
-    // _linePointRef = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
-    // _indexRef     = bbcvirtallocbounded<uint64>( context.entryCounts[(int)rTable] * sizeof( uint64 ) );
-    // _lpRefWriter  = _linePointRef;
-    // _idxRefWriter = _indexRef;
-#endif
-
 
         // Load initial bucket and the whole marking table
         if( rTable < TableId::Table7 )
@@ -528,12 +489,7 @@ public:
 
             // Wait for and unpack our current bucket
             const uint64 bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
-#if _DEBUG
-// for( uint64 i = 0; i < bucketLength; i++ )
-// {
-//     ASSERT( map[i] < _context.entryCounts[(int)rTable] );
-// }
-#endif
+
             uint32* lEntries;
 
             if constexpr ( lTable == TableId::Table1 )
@@ -564,28 +520,10 @@ public:
             }
 
             _prunedEntryCount += prunedEntryCount;
-
-#if _DEBUG
-            _bpOffset += _context.bucketCounts[(int)lTable][bucket];
-#endif
         }
 
         // Submit trailing bits
         _lpWriter.SubmitLeftOvers();
-
-#if _DEBUG
-            for( uint32 b = 0; b < _numBuckets; b++ )
-                ASSERT( outLPBucketCounts[b] <= maxBucketEntries );
-
-            if( lTable > TableId::Table1 )
-            {
-                // Pruned buckets after the inverse of P3_BUCKET_MULTIPLER must be empty.
-                // const uint32 startEmptyBucket = (uint32)((2-P3_BUCKET_MULTIPLER) * _numBuckets);
-                // for( uint32 b = startEmptyBucket; b < _numBuckets; b++ )
-                //     ASSERT( outLPBucketCounts[b] == 0 );
-
-            }
-#endif
 
         return _prunedEntryCount;
     }
@@ -646,12 +584,7 @@ private:
             for( int64 i = offset; i < end; i++ )
             {
                 const uint32 mapIdx = rMap[i];
-// #if _DEBUG
-// if( rTable == TableId::Table3 )
-// {
-//     if( pairs[i].left == 4213663 && pairs[i].right == 4214002 ) BBDebugBreak();
-// }
-// #endif
+
                 if constexpr ( rTable < TableId::Table7 )
                 {
                     if( !markedEntries.Get( mapIdx ) )
@@ -673,33 +606,13 @@ private:
                 for( int64 i = 0; i < prunedLength; i++ )
                 {
                     Pair p = outPairsStart[i];
-#if _DEBUG
-const uint64 ll = p.left  + _bpOffset;
-const uint64 rr = p.right + _bpOffset;
-#endif
+
                     const uint64 x = lTable[p.left ];
                     const uint64 y = lTable[p.right];
 
                     ASSERT( x || y );
                     outLinePoints[i] = SquareToLinePoint( x, y );
 
-#if _DEBUG
-if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak(); // Should not be here
-// if( p.left  + _bpOffset == 738199293 && p.right + _bpOffset == 738199423) BBDebugBreak();
-// if( p.right + _bpOffset == 738199423 ) BBDebugBreak();
-#endif
-                }
-
-                // const uint64* lpEnd = outPairsStart + prunedLength;
-                // do
-                // {
-                //     Pair p = *((Pair*)outPairsStart);
-                //     const uint64 x = lTable[p.left ];
-                //     const uint64 y = lTable[p.right];
-                    
-                //     *outLinePoints = SquareToLinePoint( x, y );
-
-                // } while( ++outLinePoints < lpEnd );
             }
         });
 
@@ -771,13 +684,6 @@ if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak(); // Should not be her
             {
                 self->LockThreads();
 
-#if _DEBUG
-        // memcpy( _lpRefWriter , lpBuckets, totalCounts[0] * sizeof( uint64 ) );
-        // memcpy( _idxRefWriter, idxBuckets, totalCounts[0] * sizeof( uint64 ) );
-        // _lpRefWriter  += totalCounts[0];
-        // _idxRefWriter += totalCounts[0];
-#endif
-
                 for( uint32 i = 0; i < _numBuckets; i++ )
                     totalBucketBitCounts[i] = totalCounts[i] * (uint64)entrySizeBits;
 
@@ -799,9 +705,6 @@ if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak(); // Should not be her
                 ASSERT( bitOffset + counts[i] * entrySizeBits <= totalBucketBitCounts[i] );
 
                 BitWriter writer = bucketWriter.GetWriter( i, bitOffset );
-#if _DEBUG
-                const uint64 bitReadStart = writer.Position();
-#endif
 
                 const uint64* lp  = lpBuckets  + writeOffset;
                 const uint64* idx = idxBuckets + writeOffset;
@@ -824,23 +727,6 @@ if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak(); // Should not be her
                 PackEntries( firstWrite, writer, lp, idx, i );
                 self->SyncThreads();
                 PackEntries( secondWrite, writer, lp+2, idx+2, i );
-                
-#if _DEBUG
-                if( 0 )
-                {
-                    BitReader reader( (uint64*)writer.Fields(), (uint64)counts[i] * entrySizeBits, bitReadStart );
-                    const uint64 mask = (uint64)i << _lpBits;
-
-                    for( int64 j = 0; j < counts[i]; j++ )
-                    {
-                        const uint64 rlp  = reader.ReadBits64( _lpBits  ) | mask;
-                        const uint64 ridx = reader.ReadBits64( _idxBits );
-
-                        ASSERT( rlp  == lp [j] );
-                        ASSERT( ridx == idx[j] );
-                    }
-                }
-#endif
             }
 
             /// Write buckets to disk
@@ -863,9 +749,7 @@ if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak(); // Should not be her
     //-----------------------------------------------------------
     inline void PackEntries( const int64 count, BitWriter& writer, const uint64* lps, const uint64* indices, const uint32 bucket )
     {
-        // TEST:
         BitReader reader( (uint64*)writer.Fields(), writer.Capacity(), writer.Position() );
-        const uint64 mask = (uint64)bucket  << _lpBits;
         
         for( int64 i = 0; i < count; i++ )
         {
@@ -873,12 +757,6 @@ if( outLinePoints[i] == 61678028895904571 ) BBDebugBreak(); // Should not be her
             writer.Write( indices[i], _idxBits );
 
             ASSERT( indices[i] < (1ull << _K) + ((1ull << _K) / _numBuckets) );
-
-            // #TEST
-            const uint64 rlp  = reader.ReadBits64( _lpBits  ) | mask;
-            const uint64 ridx = reader.ReadBits64( _idxBits );
-            ASSERT( rlp  == lps    [i] );
-            ASSERT( ridx == indices[i] );
         }
     }
 
@@ -1086,14 +964,6 @@ private:
                 const uint64 lp  = reader.ReadBits64( _lpBits  ) | bucketMask;
                 const uint64 idx = reader.ReadBits64( _idxBits );
 
-#if _DEBUG
-
-                // if( bucket == 0 )
-                // {
-                //     ASSERT( lp  == _linePointRef[i] );
-                //     ASSERT( idx == _indexRef[i] );
-                // }
-#endif      
                 ASSERT( idx < (1ull << _K) + ((1ull << _K) / _numBuckets) );
 
                 linePoints[i] = lp;
@@ -1216,93 +1086,6 @@ DiskPlotPhase3::~DiskPlotPhase3() {}
 //-----------------------------------------------------------
 void DiskPlotPhase3::Run()
 {
-#if _DEBUG
-    if( 0 )
-    {
-        Log::Line( "Validating Xs" );
-        uint32* xRef     = nullptr;
-        uint64  refCount = 0;
-
-        FatalIf( !Debug::LoadRefTable( "/mnt/p5510a/reference/t1.x.tmp", xRef, refCount ),
-            "Failed to load ref table" );
-        ASSERT( refCount == (1ull << _K) );
-
-        // int err;
-        // uint32* xs = (uint32*)IOJob::ReadAllBytesDirect( "/mnt/p5510a/disk_tmp/t1_0.tmp", err );
-        // FatalIf( !xs, "Failed to rad Xs with error: %d", err );
-
-        uint32* xs = bbcvirtallocbounded<uint32>( 1ull << _K );
-        {
-            auto& ioQueue = *_context.ioQueue;
-
-            const uint64  maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, 256>::MaxBucketEntries;
-            // using XReader = SingleFileMapReader<256, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
-            StackAllocator allocator( _context.heapBuffer, _context.heapSize );
-            // XReader lTable1Reader( FileId::T1, &ioQueue, allocator, maxBucketEntries, _context.tmp1BlockSize, _context.bucketCounts[(int)TableId::Table1] ); 
-
-            BlockReader<uint32> lTableReader( FileId::T1, &ioQueue, maxBucketEntries, allocator, _context.tmp1BlockSize, 0 );
-            
-            uint32* xWriter = xs;
-
-            Fence readFence;
-            lTableReader.LoadEntries( _context.bucketCounts[(int)TableId::Table1][0] );
-            ioQueue.SignalFence( readFence, 1 );
-            ioQueue.CommitCommands();
-
-            for( uint32 b = 0; b < 256; b++ )
-            {
-                if( b + 1 < 256 )
-                {
-                    lTableReader.LoadEntries( _context.bucketCounts[(int)TableId::Table1][b+1] );
-                    ioQueue.SignalFence( readFence, b+2 );
-                    ioQueue.CommitCommands();
-                }
-
-                readFence.Wait( b+1 );
-
-                const uint64  entryCount = _context.bucketCounts[(int)TableId::Table1][b];
-                const uint32* loadedXs   = lTableReader.ReadEntries();
-
-                bbmemcpy_t( xWriter, loadedXs, entryCount );
-                xWriter += entryCount;
-            }
-        }
-
-
-        for( uint64 i = 0; i < refCount; i++ )
-        {
-            if( xs[i] != xRef[i] )
-            {
-                if( xs[i+1] == xRef[i] || xs[i] == xRef[i+1] )
-                {
-                    i++;
-                    continue;
-                }
-                else
-                {
-                    uint32 xA[3] = { xs[i], xs[i+1], xs[i+2] };
-                    uint32 xB[3] = { xRef[i], xRef[i+1], xRef[i+2] };
-
-                    std::sort( xA, &xA[3] );
-                    std::sort( xB, &xB[3] );
-
-                    if( memcmp( xA, xB, sizeof( xA ) ) == 0 )
-                    {
-                        i+=2;
-                        continue;
-                    }
-                }
-                ASSERT( 0 );
-            }
-        }
-
-        bbvirtfree( xRef );
-        // bbvirtfree( xs );
-        bbvirtfreebounded( xs );
-        Log::Line( "All good!" );
-        }
-
-#endif
     DiskBufferQueue& ioQueue = *_context.ioQueue;
 
     ioQueue.SeekFile( FileId::T1, 0, 0, SeekOrigin::Begin );
@@ -1451,12 +1234,16 @@ void DiskPlotPhase3::RunBuckets()
 
     // Finish up with table 7 which needs to be sorted on f7. We use its map for that
     {
-        // #TODO: Need to get wait times from WritePark7()
         Log::Line( "Writing P7 parks." );
         const auto timer = TimerBegin();
         WritePark7<_numBuckets>( _lMapPrunedBucketCounts );
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished writing P7 parks in %.2lf seconds.", elapsed );
+        Log::Line( "P7 IO wait time: Read: %.2lf s | Write: %.2lf.", 
+                TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ) );
+
+        _context.readWaitTime += _readWaitTime;
+        _context.writeWaitTime+= _writeWaitTime;
     }
 }
 
@@ -1475,17 +1262,13 @@ void DiskPlotPhase3::ProcessTable()
         P3StepOne<rTable, _numBuckets> stepOne( _context, _mapReadId, _readFence, _writeFence );
         prunedEntryCount = stepOne.Run( _lMapPrunedBucketCounts, _lpPrunedBucketCounts );
 
-        _context.readWaitTime  += stepOne.GetReadWaitTime();
-        _context.writeWaitTime += stepOne.GetWriteWaitTime();
-
-    Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
-        rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
-        prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
+        _readWaitTime  = stepOne.GetReadWaitTime();
+        _writeWaitTime = stepOne.GetWriteWaitTime();
     }
 
     _ioQueue.SignalFence( _stepFence );
     _ioQueue.CommitCommands();
-    _stepFence.Wait();
+    _stepFence.Wait( 0, _writeWaitTime );   // #TODO: Wait on Step1 instead
 
     // Step 1: Loads line points & their source indices from buckets,
     //         sorts them on the line points and then writes the line points 
@@ -1498,14 +1281,23 @@ void DiskPlotPhase3::ProcessTable()
         P3StepTwo<rTable, _numBuckets> stepTwo( _context, _readFence, _writeFence, _plotFence, _mapReadId, _mapWriteId );
         stepTwo.Run( _lpPrunedBucketCounts, _lMapPrunedBucketCounts );
 
-        _context.readWaitTime  += stepTwo.GetReadWaitTime();
-        _context.writeWaitTime += stepTwo.GetWriteWaitTime();
+        _readWaitTime  += stepTwo.GetReadWaitTime();
+        _writeWaitTime += stepTwo.GetWriteWaitTime();
     }
+
+    Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
+        rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
+        prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
+
+    Log::Line( "Table IO wait time: Read: %.2lf s | Write: %.2lf.", 
+                TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ) );
 
 #if _DEBUG
     SavePrunedBucketCount( rTable, _lMapPrunedBucketCounts, false );
 #endif
 
+    _context.readWaitTime += _readWaitTime;
+    _context.writeWaitTime+= _writeWaitTime;
     _tablePrunedEntryCount[(int)rTable-1] = prunedEntryCount;
 }
 
@@ -1648,8 +1440,8 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
     _writeFence.Wait( _numBuckets + 2, writeTime );
 
     // Save IO wait times
-    _writeWaitTime += writeTime;
-    _readWaitTime  += readTime;
+    _writeWaitTime = writeTime;
+    _readWaitTime  = readTime;
 }
 
 

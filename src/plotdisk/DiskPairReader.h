@@ -124,14 +124,6 @@ struct DiskMapReader
                     TMap* unpackedMap = _unpackdMaps[_bucketsUnpacked & 1];
                     BitReader reader( (uint64*)GetBucketBuffer( _bucketsUnpacked ), _mapBits * bucketLength, offset * _mapBits );
 
-#if _DEBUG
-{
-    if( self->_jobId == 0 )
-        memset( unpackedMap, 0, virtBucketLength * sizeof( TMap ) );
-
-    self->SyncThreads();
-}
-#endif
                     const uint32 idxShift     = _finalIdxBits;
                     const uint64 finalIdxMask = ( 1ull << idxShift ) - 1;
 
@@ -143,11 +135,6 @@ struct DiskMapReader
 
                         ASSERT( dstIdx < virtBucketLength );
                         unpackedMap[dstIdx] = (TMap)map;
-
-                        #if _DEBUG
-                            if constexpr ( sizeof( TMap ) == 4 )
-                                ASSERT( map <= 0xFFFFFFFF )
-                        #endif
                     }
 
                     if( self->IsControlThread() )
