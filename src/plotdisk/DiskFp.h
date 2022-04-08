@@ -125,6 +125,8 @@ public:
     //-----------------------------------------------------------
     inline void RunF7()
     {
+        _threadCount = _context.cThreadCount;
+
         _ioQueue.SeekBucket( _inFxId, 0, SeekOrigin::Begin );
         _ioQueue.CommitCommands();
 
@@ -717,7 +719,7 @@ public:
         size_t c3TableSizeBytes = 0; // Total size of the C3 table
 
         // Seek to the start of the C3 table instead of writing garbage data.
-        _ioQueue.SeekFile( FileId::PLOT, 0, (int64)(c1TableSizeBytes + c2TableSizeBytes), SeekOrigin::Begin );
+        _ioQueue.SeekFile( FileId::PLOT, 0, (int64)(c1TableSizeBytes + c2TableSizeBytes), SeekOrigin::Current );
         _ioQueue.CommitCommands();
 
         // Load initial bucket
@@ -726,6 +728,7 @@ public:
         uint32* c1Writer = c1Buffer;
         uint32* c2Writer = c2Buffer;
 
+        // #TODO: We have to allow extra entries here so <= _numBuckets
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
             // Load next bucket in the background
@@ -810,17 +813,17 @@ public:
                 }
                 
                 
-                // #TODO: Remove this
+                // #TODO: TEST: Remove this
                 // Dump f7's that have the value of 0xFFFFFFFF for now,
                 // this is just for compatibility with RAM bladebit
                 // for testing plots against it.
-            // #if _DEBUG
-            //     if( isLastBucket )
-            //     {
-            //         while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
-            //             c3BucketLength--;
-            //     }
-            // #endif
+            #if _DEBUG
+                if( isLastBucket )
+                {
+                    while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
+                        c3BucketLength--;
+                }
+            #endif
 
                 // See TableWriter::GetC3ParkCount for details
                 uint32 parkCount       = c3BucketLength / kCheckpoint1Interval;
@@ -850,7 +853,7 @@ public:
                 // #NOTE: This function uses re-writes our f7 buffer, so ensure it is done after
                 //        that buffer is no longer needed.
                 const size_t sizeWritten = TableWriter::WriteC3Parallel<BB_DP_MAX_JOBS>( *_context.threadPool, 
-                                                _context.cThreadCount, c3BucketLength, c3F7, c3Buffer );
+                                                _threadCount, c3BucketLength, c3F7, c3Buffer );
                 ASSERT( sizeWritten == c3BufferSize );
 
                 c3TableSizeBytes += sizeWritten;

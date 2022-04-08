@@ -4,7 +4,7 @@
 #include "util/Util.h"
 #include <vector>
 
-class BitReader;
+class CPBitReader;
 
 enum class PlotTable
 {
@@ -167,7 +167,7 @@ public:
     ~PlotReader();
 
     uint64 GetC3ParkCount() const;
-    uint64 GetF7EntryCount() const;
+    uint64 GetMaxF7EntryCount() const;
 
     // Read a whole C3 park into f7Buffer.
     // f7Buffer must hold at least as many as the amount of entries
@@ -192,7 +192,7 @@ public:
 private:
 
     bool ReadLPParkComponents( TableId table, uint64 parkIndex, 
-                               BitReader& outStubs, byte*& outDeltas, 
+                               CPBitReader& outStubs, byte*& outDeltas, 
                                uint128& outBaseLinePoint, uint64& outDeltaCounts );
 
 private:

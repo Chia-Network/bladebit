@@ -25,6 +25,46 @@ typedef Bits<MAX_Y_BIT_SIZE>    YBits;
 typedef Bits<MAX_META_BIT_SIZE> MetaBits;
 typedef Bits<MAX_FX_BIT_SIZE>   FxBits;
 
+//-----------------------------------------------------------
+const char USAGE[] = R"(validate [OPTIONS] <plot_path>
+
+Validates all of a plot's values to ensure they all contain valid proofs.
+
+[NOTES]
+You can specify the thread count in the bladebit global option '-t'.
+
+[ARGUMENTS]
+<plot_path>   : Path to the plot file to be validated.
+
+[OPTIOINS]
+ -m, --in-ram : Loads the whole plot file into memory before validating.
+
+ -o, --offset : Percentage offset at which to start validating.
+                Ex (start at 50%): bladebit validate -o 50 /path/to/my/plot
+
+ -h, --help   : Print this help message and exit.
+)";
+
+void PlotValidatorPrintUsage()
+{
+    Log::Line( USAGE );
+}
+
+struct UnpackedK32Plot
+{
+    Span<uint32> table1;    // Xs
+    Span<Pair>   table2;
+    Span<Pair>   table3;
+    Span<Pair>   table4;
+    Span<Pair>   table5;
+    Span<Pair>   table6;
+    Span<Pair>   table7;
+    Span<uint32> f7;
+    
+    static UnpackedK32Plot Load( IPlotFile** plotFile, ThreadPool& pool, uint32 threadCount );
+    bool FetchProof( uint64 index );
+};
+
 
 void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
 
@@ -67,6 +107,8 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
     {
         if( cli.ReadSwitch( opts.inRAM, "-m", "--in-ram" ) )
             continue;
+        else if( cli.ReadSwitch( opts.unpacked, "-u", "--unpacked" ) )
+            continue;
         else if( cli.ReadValue( opts.startOffset, "-o", "--offset" ) )
             continue;
         else if( cli.ArgConsume( "-h", "--help" ) )
@@ -105,7 +147,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     IPlotFile*  plotFile  = nullptr;
     IPlotFile** plotFiles = new IPlotFile*[threadCount];
 
-    if( options.inRAM )
+    if( options.inRAM && !options.unpacked )
     {
         auto* memPlot = new MemoryPlot();
         plotFile = memPlot;
@@ -129,10 +171,12 @@ bool ValidatePlot( const ValidatePlotOptions& options )
         }
     }
 
-    FatalIf( !plotFile->IsOpen(), "Failed to open plot at path '%s'.", options.plotPath.c_str() );
+    ExitIf( !plotFile->IsOpen(), "Failed to open plot at path '%s'.", options.plotPath.c_str() );
+    ExitIf( options.unpacked && plotFile->K() != 32, "Unpacked plots are only supported for k=32 plots." );
 
     Log::Line( "Validating plot %s", options.plotPath.c_str() );
     Log::Line( "K       : %u", plotFile->K() );
+    Log::Line( "Unpacked: %s", options.unpacked? "true" : "false" );;
 
     const uint64 plotC3ParkCount = plotFile->TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
     Log::Line( "C3 Parks: %llu", plotC3ParkCount );
@@ -141,6 +185,13 @@ bool ValidatePlot( const ValidatePlotOptions& options )
 
     // Duplicate the plot file,     
     ThreadPool pool( threadCount );
+    
+    UnpackedK32Plot unpackedPlot;
+    if( options.unpacked )
+    {
+        unpackedPlot = UnpackedK32Plot::Load( plotFiles, pool, threadCount );
+        exit( 0 );
+    }
 
     MTJobRunner<ValidateJob> jobs( pool );
 
@@ -393,11 +444,11 @@ bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uin
             // Get the starting and end locations of y in bits relative to our block
             const uint64 bitStart = x * k - blockIdx * kF1BlockSizeBits;
 
-            BitReader hashBits( (uint64*)blocks, sizeof( blocks ) * 8 );
+            CPBitReader hashBits( blocks, sizeof( blocks ) * 8 );
             hashBits.Seek( bitStart );
 
             // uint64 y = SliceUInt64FromBits( blocks, bitStart, k ); // #TODO: Figure out what's wrong with this method.
-            uint64 y = hashBits.ReadBits64( k );
+            uint64 y = hashBits.Read64( k );
             y = ( y << kExtraBits ) | ( x >> xShift );
 
             fx  [i] = y;
@@ -521,11 +572,11 @@ void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs
         // Get the starting and end locations of y in bits relative to our block
         const uint64 bitStart = x * k - blockIdx * kF1BlockSizeBits;
 
-        BitReader hashBits( (uint64*)blocks, sizeof( blocks ) * 8 );
+        CPBitReader hashBits( blocks, sizeof( blocks ) * 8 );
         hashBits.Seek( bitStart );
 
         // uint64 y = SliceUInt64FromBits( blocks, bitStart, k ); // #TODO: Figure out what's wrong with this method.
-        uint64 y = hashBits.ReadBits64( k );
+        uint64 y = hashBits.Read64( k );
         y = ( y << kExtraBits ) | ( x >> xShift );
 
         fx[i] = y;
@@ -660,27 +711,70 @@ inline uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 b
     return field;
 }
 
+
 //-----------------------------------------------------------
-const char USAGE[] = R"(validate [OPTIONS] <plot_path>
-
-Validates all of a plot's values to ensure they all contain valid proofs.
-
-[NOTES]
-You can specify the thread count in the bladebit global option '-t'.
-
-[ARGUMENTS]
-<plot_path>   : Path to the plot file to be validated.
-
-[OPTIOINS]
- -m, --in-ram : Loads the whole plot file into memory before validating.
-
- -o, --offset : Percentage offset at which to start validating.
-                Ex (start at 50%): bladebit validate -o 50 /path/to/my/plot
-
- -h, --help   : Print this help message and exit.
-)";
-
-void PlotValidatorPrintUsage()
+UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, uint32 threadCount )
 {
-    Log::Line( USAGE );
+    ASSERT( plotFile );
+    const uint32 k = plotFile[0]->K();
+    ExitIf( k != 32, "Only k=32 plots are supported for unpacked validation." );
+
+    threadCount = threadCount == 0 ? pool.ThreadCount() : threadCount;
+
+    auto LoadBackPtrTable = [=]() {
+        
+    };
+
+    UnpackedK32Plot plot;
+
+    PlotReader plotReader( *plotFile[0] );
+    const uint64 f7Count = plotReader.GetMaxF7EntryCount(); ExitIf( f7Count < 1, "No F7s found." );
+
+    // Load F7s
+    {
+        Log::Line( "Unpacking f7 values..." );
+        uint32* f7 = bbcvirtallocboundednuma<uint32>( f7Count );
+
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+
+            PlotReader reader( *plotFile[self->_jobId] );
+
+            const uint64 plotParkCount = reader.GetC3ParkCount();
+
+            uint64 parkCount, parkOffset, parkEnd;
+            GetThreadOffsets( self, plotParkCount, parkCount, parkOffset, parkEnd );
+
+            uint64 f7Buffer[kCheckpoint1Interval];
+            uint32* f7Writer = f7 + parkOffset * kCheckpoint1Interval;
+
+            for( uint64 i = parkOffset; i < parkEnd; i++ )
+            {
+                const int64 entryCount = reader.ReadC3Park( i, f7Buffer );
+
+                ExitIf( entryCount == 0, "Empty C3 park @ %llu.", i );
+                ExitIf( entryCount < kCheckpoint1Interval && i+1 != parkEnd, "C3 park is not full and it is not the last park." );
+
+                for( int64 e = 0; e < entryCount; e++ )
+                    f7Writer[e] = (uint32)f7Buffer[e];
+
+                f7Writer += entryCount;
+            }
+        });
+
+        plot.f7.length = f7Count;
+        plot.f7.values = f7;
+    }
+    
+    // Read Park 7
+    Log::Line( "Reding park 7..." );
+    {
+        const size_t parkSize = CalculatePark7Size( k );
+    }
+
+}
+
+//-----------------------------------------------------------
+bool UnpackedK32Plot::FetchProof( uint64 index )
+{
+    return false;
 }

@@ -33,6 +33,7 @@
 ///
 /// Assorted utility functions
 /// 
+void Exit( int code );
 void FatalExit();
 void FatalErrorMsg( const char* message, ... );
 void _Fatal( const char* message, ... );
@@ -47,6 +48,7 @@ void _Fatal( const char* message, ... );
 
 #define FatalIf( cond, message, ... ) if( (cond) ) { Fatal( message, ## __VA_ARGS__ ); }
 
+#define ExitIf( cond, message, ... )  if( (cond) ) { Fatal( message, ## __VA_ARGS__ ); }
 
 //-----------------------------------------------------------
 template <typename T>

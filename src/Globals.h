@@ -204,9 +204,23 @@ struct Span
         , length( length )
     {}
 
-    inline T& operator[]( unsigned int index ) const { return this->values[index]; }
-    inline T& operator[]( size_t index ) const { return this->values[index]; }
-    inline T& operator[]( int index ) const { return this->values[index]; }
+    inline T& operator[]( unsigned int index ) const
+    { 
+        ASSERT( index < length );
+        return this->values[index]; 
+    }
+
+    inline T& operator[]( size_t index ) const
+    { 
+        ASSERT( index < length );
+        return this->values[index]; 
+    }
+
+    inline T& operator[]( int index ) const
+    { 
+        ASSERT( index > -1 && (size_t)index < length );
+        return this->values[index];
+    }
 };
 
 typedef Span<uint8_t> ByteSpan;

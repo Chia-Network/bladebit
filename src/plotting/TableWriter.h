@@ -154,11 +154,10 @@ template<typename TIdx>
 inline void TableWriter::WriteP7Entries( const uint64 length, const TIdx* indices, byte* parkBuffer, uint32 jobId )
 {
     ASSERT( length <= kEntriesPerPark );
+    ASSERT( ((uintptr_t)parkBuffer & 7 ) == 0 );
 
     uint64* fieldWriter = (uint64*)parkBuffer;
-    
-    // chiapos requires this to have an extra bit 
-    // (for overflows, but we don't support them yet)
+
     const uint32 bitsPerEntry = _K + 1;
 
     uint64 field = 0;

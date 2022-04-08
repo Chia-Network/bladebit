@@ -1,6 +1,217 @@
 #pragma once
 #include "util/Util.h"
 
+// Chiapos-compatible bitreader
+class CPBitReader
+{
+public:
+
+    //-----------------------------------------------------------
+    inline CPBitReader() 
+        : _fields  ( nullptr )
+        , _sizeBits( 0 )
+        , _position( 0 )
+    {}
+
+    // Expects bytesBE to be 64-bit fields in BigEndian format.
+    //-----------------------------------------------------------
+    inline CPBitReader( const byte* bytesBE, size_t sizeBits, uint64 bitOffset = 0 )
+        : _fields  ( bytesBE      )
+        , _sizeBits( sizeBits  )
+        , _position( bitOffset )
+    {}
+
+    //-----------------------------------------------------------
+    inline void Seek( uint64 position )
+    {
+        ASSERT( position <= _sizeBits );
+        _position = position;
+    }
+
+    //-----------------------------------------------------------
+    inline uint64 Read64( const uint32 bitCount )
+    {
+        ASSERT( _position + bitCount <= _sizeBits );
+        const uint64 value = Read64( bitCount, _fields, _position, _sizeBits );
+        _position += bitCount;
+        return value;
+    }
+
+    //-----------------------------------------------------------
+    inline uint128 Read128Aligned( const uint32 bitCount )
+    {
+        const uint128 value = Read128Aligned( bitCount, (uint64*)_fields, _position, _sizeBits );
+        _position += bitCount;
+        return value;
+    }
+
+    //-----------------------------------------------------------
+    inline uint64 Read64Aligned( const uint32 bitCount )
+    {
+        ASSERT( _position + bitCount <= _sizeBits );
+        const uint64 value = Read64Aligned( bitCount, _fields, _position, _sizeBits );
+        _position += bitCount;
+        return value;
+    }
+
+     //-----------------------------------------------------------
+    inline bool Read64Safe( const uint32 bitCount, uint64& outValue )
+    {
+        if( _position + bitCount > _sizeBits || bitCount > 64 )
+            return false;
+        
+        outValue = Read64( bitCount, _fields, _position, _sizeBits );
+        _position += bitCount;
+        return true;
+    }
+
+    //-----------------------------------------------------------
+    static inline uint64 Read64( const uint32 bitCount, const byte* fields, const uint64 position, const size_t sizeBits )
+    {
+        return _Read64<true>( bitCount, fields, position, sizeBits );
+    }
+
+    //-----------------------------------------------------------
+    // Only use if you an guarantee that bytesBE are 
+    // aligned to 8-byte boundaries, and that the last field
+    // round-up to a uint64,
+    //-----------------------------------------------------------
+    static inline uint64 Read64Aligned( const uint32 bitCount, const byte* fields, const uint64 position, const size_t sizeBits )
+    {
+        ASSERT( ((uintptr_t)((uint64*)fields + (position >> 6)) & 7) == 0 )
+        return _Read64<false>( bitCount, fields, position, sizeBits );
+    }
+
+    // Read 128 bits or less
+    //-----------------------------------------------------------
+    inline uint128 Read128Aligned( const uint32 bitCount, const uint64* fields, const uint64 position, const size_t sizeBits  )
+    {
+        ASSERT( ((uintptr_t)(fields + (position >> 6)) & 7) == 0 )
+        ASSERT( bitCount <= 128 );
+        ASSERT( position + bitCount <= sizeBits && position + bitCount > position );
+
+        const uint64 fieldIndex    = _position >> 6; // _position / 64
+        const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - _position;
+        const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
+
+        uint128 value = Swap64( fields[fieldIndex] ) >> shift;
+
+        if( bitsAvailable < bitCount )
+        {
+            // Have to read one more field
+            const uint32 bitsNeeded = bitCount - bitsAvailable;
+
+            if( bitsNeeded > 64 )
+            {
+                // Need data from 2 more fields
+                const uint32 lastFieldBitsNeeded = bitsNeeded - 64;
+                value = ( value << bitsNeeded ) | ( Swap64( fields[fieldIndex+1] ) << lastFieldBitsNeeded );
+                value |= Swap64( fields[fieldIndex+2] ) >> ( 64 - lastFieldBitsNeeded );
+            }
+            else
+            {
+                // Only need data from 1 more field
+                value = ( value << bitsNeeded ) | ( Swap64( fields[fieldIndex+1] ) >> ( 64 - bitsNeeded ) );
+            }
+        }
+
+        // Mask-out part of the fields we don't need
+        value &= ( ( ( (uint128)0xFFFFFFFFFFFFFFFFull << 64 ) | 0xFFFFFFFFFFFFFFFFull ) >> ( 128 - bitCount ) );
+
+        _position += bitCount;
+        return value;
+    }
+
+private:
+    //-----------------------------------------------------------
+    template<bool CheckAlignment>
+    static inline uint64 _Read64( const uint32 bitCount, const byte* fields, const uint64 position, const size_t sizeBits )
+    {
+        const uint64 fieldIndex    = position >> 6;                 // position / 64
+        const uint32 fieldBitIdx   = position - fieldIndex * 64;    // Value start bit position from the left (MSb) in the field itself
+        const uint32 bitsAvailable = 64 - fieldBitIdx;
+
+        uint32 shift = 64 - std::min( fieldBitIdx + bitCount, 64u );
+
+        const byte* pField = fields + fieldIndex * 8;
+        
+        uint64 field;
+        uint64 value;
+
+        // Check for aligned pointer
+        bool isPtrAligned;
+        bool isLastField;
+
+        if constexpr ( CheckAlignment )
+        {
+            isPtrAligned = ((uintptr_t)pField & 7) == 0; // % 8
+            isLastField  = fieldIndex == ( sizeBits >> 6 ) - 1;
+            
+            if( isPtrAligned && !isLastField )
+                field = *((uint64*)pField);
+            else if( !isLastField )
+                memcpy( &field, pField, sizeof( uint64 ) );
+            else
+            {
+                // No guarantee that the last field is complete, so copy only the bytes we know we have
+                const size_t totalBytes     = CDiv( sizeBits, 8 );
+                const int32  remainderBytes = (int32)( totalBytes - fieldIndex * 8 );
+
+                field = 0;
+                byte* fieldBytes = (byte*)&field;
+                for( int32 i = 0; i < remainderBytes; i++ )
+                    fieldBytes[i] = pField[i];
+            }
+
+            field = Swap64( field );
+        }
+        else
+            field = Swap64( *((uint64*)pField) );
+
+        value = field >> shift;
+
+        // Need to read 1 more field?
+        if( bitsAvailable < bitCount )
+        {
+            if constexpr ( CheckAlignment )
+            {
+                pField += 8;
+                    
+                if( isPtrAligned && !isLastField )    
+                    field = *((uint64*)pField);
+                else if( !isLastField )
+                    memcpy( &field, pField, sizeof( uint64 ) );
+                else
+                {
+                    const size_t totalBytes     = CDiv( sizeBits, 8 );
+                    const int32  remainderBytes = (int32)( totalBytes - fieldIndex * 8 );
+
+                    field = 0;
+                    byte* fieldBytes = (byte*)&field;
+                    for( int32 i = 0; i < remainderBytes; i++ )
+                        fieldBytes[i] = pField[i];
+                }
+
+                field = Swap64( field );
+            }
+            else
+                field = Swap64( ((uint64*)pField)[1] );
+
+            const uint32 remainder = bitCount - bitsAvailable;
+            shift = 64 - remainder;
+            
+            value = ( value << remainder ) | ( field >> shift );
+        }
+
+        return value & ( 0xFFFFFFFFFFFFFFFFull >> ( 64 - bitCount ) );
+    }
+
+private:
+    const byte* _fields  ;  // Our fields buffer. Expected to be 64-bit field sizes in BigEndian format
+    size_t      _sizeBits;  // Size of the how much data we currently have in bits
+    uint64      _position;  // Read poisition in bits
+};
+
 class BitReader
 {
 public:
@@ -12,9 +223,6 @@ public:
         , _position( 0 )
     {}
 
-    // bytesBE must be rounded-up to 64-bit boundaries
-    // This expects the bytes to be encoded as 64-bit big-endian fields.
-    // The last bytes will be shifted to the right then swaped as 64-bits as well.
     //-----------------------------------------------------------
     inline BitReader( const uint64* bits, size_t sizeBits, uint64 bitOffset = 0 )
         : _fields  ( bits      )
@@ -41,7 +249,7 @@ public:
     //-----------------------------------------------------------
     inline uint64 ReadBits64( const uint32 bitCount )
     {
-        // ASSERT( _position + bitCount <= _sizeBits );
+        // ASSERT( _position + bitCount <= _sizeBits ); // #TODO: Enable this
 
         const auto value = ReadBits64( bitCount, _fields, _position );
 
@@ -95,10 +303,33 @@ public:
         ASSERT( bitCount <= 64 );
 
         const uint64 fieldIndex    = position >> 6; // position / 64
-        const uint32 fieldBits     = position - fieldIndex * 64; 
+        const uint32 fieldBits     = position - fieldIndex * 64;        // Bit offset in the field itself
         const uint32 bitsAvailable = 64 - fieldBits;
 
         uint64 value = fields[fieldIndex] >> fieldBits;
+
+        if( bitsAvailable < bitCount )
+        {
+            // Have to read one more field
+            const uint64 mask = ( 1ull << bitsAvailable ) - 1 ;
+            value = ( value & mask ) | ( fields[fieldIndex+1] << bitsAvailable );
+        }
+
+        // Mask-out part of the value we don't need
+        return value & ( 0xFFFFFFFFFFFFFFFFull >> (64 - bitCount) );
+    }
+
+    // Read in BigEndian mode for compatibility w/ chiapos
+    //-----------------------------------------------------------
+    inline static uint64 ReadBits64BE( const uint32 bitCount, const uint64* fields, const uint64 position )
+    {
+        ASSERT( bitCount <= 64 );
+
+        const uint64 fieldIndex    = position >> 6; // position / 64
+        const uint32 fieldBits     = position - fieldIndex * 64;        // Bit offset in the field itself
+        const uint32 bitsAvailable = 64 - fieldBits;
+
+        uint64 value = Swap64( fields[fieldIndex] ) >> fieldBits;
 
         if( bitsAvailable < bitCount )
         {
@@ -265,12 +496,11 @@ public:
         _position += bitCount;
     }
 
-    /*
-    Chiapos compatible method. Disabling this here for now since this makes it hard to use in a multi-threaded manner
     //-----------------------------------------------------------
+    // Chiapos compatible method. Disabling this here for now since this makes it hard to use in a multi-threaded manner
     // dstOffset: Offset in bits as to where to start writing in fields
     //-----------------------------------------------------------
-    inline static void WriteBits64( uint64* fields, const uint64 dstOffset, const uint64 value, const uint32 bitCount )
+    inline static void WriteBits64BE( uint64* fields, const uint64 dstOffset, const uint64 value, const uint32 bitCount )
     {
         ASSERT( bitCount <= 64 );
         ASSERT( dstOffset + bitCount > dstOffset );
@@ -296,7 +526,6 @@ public:
             fields[fieldIndex+1]   = value & mask;
         }
     }
-    */
 
 private:
     uint64* _fields  ;  // Our fields buffer
@@ -408,7 +637,7 @@ public:
     //-----------------------------------------------------------
     inline void Write( uint64 value, uint32 bitCount )
     {
-        BitWriter::WriteBits64( _fields, _length, value, bitCount );
+        BitWriter::WriteBits64BE( _fields, _length, value, bitCount );
         _length += bitCount;
     }
 
@@ -434,7 +663,7 @@ public:
     inline uint64 ReadUInt64( uint32 bitCount )
     {
         ASSERT( bitCount <= BitSize );
-        const uint64 value = BitReader::ReadBits64( bitCount, _fields, 0 );
+        const uint64 value = CPBitReader::Read64( bitCount, _fields, 0 );
         
         return value;
     }

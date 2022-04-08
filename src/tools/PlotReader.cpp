@@ -28,20 +28,26 @@ PlotReader::~PlotReader()
 }
 
 //-----------------------------------------------------------
-// uint64 PlotReader::GetC3ParkCount() const
-// {
-//     // We know how many C3 parks there are by how many 
-//     // entries we have in the C1 table - 1 (extra 0 entry added)
-//     // However, to make sure this is the case, we'll have to 
-//     // read-in all C1 entries and ensure we hit an empty one,
-//     // to ensure we don't run into dead/alignment-space
-//     const size_t c1Size = _plot.TableSize( PlotTable::C1 );
-// }
+uint64 PlotReader::GetC3ParkCount() const
+{
+    // We know how many C3 parks there are by how many 
+    // entries we have in the C1 table - 1 (extra 0 entry added)
+    // However, to make sure this is the case, we'll have to 
+    // read-in all C1 entries and ensure we hit an empty one,
+    // to ensure we don't run into dead/alignment-space
+    const size_t c1Size    = _plot.TableSize( PlotTable::C1 );
+    const size_t kByteSize = CDiv( _plot.K(), 8 );
 
-// //-----------------------------------------------------------
-// uint64 PlotReader::GetF7EntryCount() const
-// {
-// }
+    const uint64 plotC3ParkCount = std::max( c1Size / kByteSize, (size_t)1 ) - 1;
+    return plotC3ParkCount;
+
+}
+
+//-----------------------------------------------------------
+uint64 PlotReader::GetMaxF7EntryCount() const
+{
+    return GetC3ParkCount() * kCheckpoint1Interval;
+}
 
 //-----------------------------------------------------------
 int64 PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
@@ -146,17 +152,17 @@ bool PlotReader::ReadP7Entries( uint64 parkIndex, uint64* p7Indices )
     if( _plot.Read( parkSizeBytes, _parkBuffer ) != (ssize_t)parkSizeBytes )
         return false;
 
-    BitReader parkReader( _parkBuffer, parkSizeBytes * 8 );
+    CPBitReader parkReader( (byte*)_parkBuffer, parkSizeBytes * 8 );
 
     for( uint32 i = 0; i < kEntriesPerPark; i++ )
-        p7Indices[i] = parkReader.ReadBits64( p7EntrySize );
+        p7Indices[i] = parkReader.Read64( p7EntrySize );
 
     return true;
 }
 
 //-----------------------------------------------------------
 bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex, 
-                                       BitReader& outStubs, byte*& outDeltas, 
+                                       CPBitReader& outStubs, byte*& outDeltas, 
                                        uint128& outBaseLinePoint, uint64& outDeltaCounts )
 {
     outDeltaCounts = 0;
@@ -190,8 +196,8 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
 
         const size_t lpSizeBits = LinePointSizeBits( k );
 
-        BitReader lpReader( baseLPBytes, RoundUpToNextBoundary( lpSizeBits, 64 ) );
-        baseLinePoint = lpReader.ReadBits128( lpSizeBits );
+        CPBitReader lpReader( (byte*)baseLPBytes, RoundUpToNextBoundary( lpSizeBits, 64 ) );
+        baseLinePoint = lpReader.Read128Aligned( lpSizeBits );
     }
 
     // Read stubs
@@ -239,7 +245,7 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
             return false;
     }
     
-    outStubs         = BitReader( stubsBuffer, RoundUpToNextBoundary( stubsSizeBytes * 8, 64 ) );
+    outStubs         = CPBitReader( (byte*)stubsBuffer, RoundUpToNextBoundary( stubsSizeBytes * 8, 64 ) );
     outBaseLinePoint = baseLinePoint;
     outDeltas        = deltaBuffer;
     outDeltaCounts   = deltaCount;
@@ -252,10 +258,10 @@ bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints
 {
     outEntryCount = 0;
 
-    BitReader stubReader;
-    byte*     deltaBuffer   = nullptr;
-    uint128   baseLinePoint = 0;
-    uint64    deltaCount    = 0;
+    CPBitReader stubReader;
+    byte*       deltaBuffer   = nullptr;
+    uint128     baseLinePoint = 0;
+    uint64      deltaCount    = 0;
 
     if( !ReadLPParkComponents( table, parkIndex, stubReader, deltaBuffer, baseLinePoint, deltaCount ) )
         return false;
@@ -269,7 +275,7 @@ bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints
         for( uint64 i = 1; i <= deltaCount; i++ )
         {
             // Since these entries are still deltafied, we can fit them in 64-bits
-            const uint64 stub = stubReader.ReadBits64( stubBitSize );
+            const uint64 stub = stubReader.Read64( stubBitSize );
             const uint64 lp   = stub | (((uint64)deltaBuffer[i-1]) << stubBitSize );
 
             // Get absolute LP from delta
@@ -287,10 +293,10 @@ bool PlotReader::ReadLP( TableId table, uint64 index, uint128& outLinePoint )
 {
     outLinePoint = 0;
 
-    BitReader stubReader;
-    byte*     deltaBuffer   = nullptr;
-    uint128   baseLinePoint = 0;
-    uint64    deltaCount    = 0;
+    CPBitReader stubReader;
+    byte*       deltaBuffer   = nullptr;
+    uint128     baseLinePoint = 0;
+    uint64      deltaCount    = 0;
 
     const uint64 parkIndex  = index / kEntriesPerPark;
 
@@ -310,7 +316,7 @@ bool PlotReader::ReadLP( TableId table, uint64 index, uint128& outLinePoint )
         for( uint64 i = 0; i < maxIter; i++ )
         {
             // Since these entries are still deltafied, we can fit them in 64-bits
-            const uint64 stub    = stubReader.ReadBits64( stubBitSize );
+            const uint64 stub    = stubReader.Read64( stubBitSize );
             const uint64 lpDelta = stub | (((uint64)deltaBuffer[i]) << stubBitSize );
 
             // Get absolute LP from delta

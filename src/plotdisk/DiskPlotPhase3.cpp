@@ -9,9 +9,11 @@
 #if _DEBUG
     #include "DiskPlotDebug.h"
     #include "jobs/IOJob.h"
+    #include <algorithm>
 
     static void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length );
     static void SavePrunedBucketCount( const TableId table, uint64* bucketCounts, bool read );
+    static void UnpackPark7( const byte* srcBits, uint64* dstEntries );
 
     // #define BB_DP_DBG_P3_SKIP_TO_TABLE
     #define BB_DP_DBG_P3_START_TABLE TableId::Table7
@@ -1134,6 +1136,8 @@ void DiskPlotPhase3::RunBuckets()
 
     if( startTable > TableId::Table2 )
         SavePrunedBucketCount( startTable - 1, _lMapPrunedBucketCounts, true );
+
+    _context.plotTablePointers[(int)startTable-1] = _ioQueue.PlotTablePointersAddress();
 #endif
 
     for( TableId rTable = startTable; rTable <= TableId::Table7; rTable++ )
@@ -1253,17 +1257,19 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
     const uint64 maxParkCount     = maxBucketEntries / kEntriesPerPark;
     const size_t parkSize         = CalculatePark7Size( _K );
 
+    const size_t plotBlockSize    = ioQueue.BlockSize( FileId::PLOT );
+
     StackAllocator allocator( context.heapBuffer, context.heapSize );
 
     DiskMapReader<uint64, _numBuckets, _K+1> mapReader( context, context.p3ThreadCount, TableId::Table7, _mapReadId, allocator, inMapBucketCounts );
 
     // Allocate an extra park's worth of entries so that we can use it as a 'prefix zone'
     // to copy left over entries from a bucket that did not fit into a park.
-    uint64* t6Indices = allocator.AllocT<uint64>( maxBucketEntries + kEntriesPerPark );
+    uint64* t6Indices = allocator.CAlloc<uint64>( maxBucketEntries + kEntriesPerPark );
     
     byte* parkBuffers[2] = {
-        allocator.AllocT<byte>( parkSize * maxParkCount ),
-        allocator.AllocT<byte>( parkSize * maxParkCount )
+        allocator.AllocT<byte>( parkSize * maxParkCount, plotBlockSize ),
+        allocator.AllocT<byte>( parkSize * maxParkCount, plotBlockSize )
     };
 
     /// Internal Funcs
@@ -1286,6 +1292,21 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
         ioQueue.CommitCommands();
     };
 
+#if _DEBUG
+    uint32* refP7Entries = nullptr;
+
+    Log::Line( "Loading Reference P7");
+    {
+        uint64 refEntryCount = 0;
+        Debug::LoadRefTableByName( "plot_p7.tmp", refP7Entries, refEntryCount );
+    }
+    const uint32* refP7Reader = refP7Entries;
+
+    uint64* allP7Entries    = bbcvirtalloc<uint64>( context.entryCounts[6] );
+    uint64* allP7EntriesTmp = bbcvirtalloc<uint64>( context.entryCounts[6] );
+    uint64* p7Writer        = allP7Entries;
+    uint64 _parkIdx         = 0;
+#endif
 
     /// Start writeing buckets to park 7
     uint64 leftOverEntryCount = 0;
@@ -1294,9 +1315,9 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
 
     for( uint32 bucket = 0; bucket <= _numBuckets; bucket++ )
     {
-        const bool isLastBucket     = bucket == _numBuckets;
-        const bool nextBucketEmpty  = !isLastBucket && inMapBucketCounts[bucket+1] == 0;
-        const bool hasNextBucket    = !isLastBucket && !nextBucketEmpty;
+        const bool isLastBucket    = bucket == _numBuckets;
+        const bool nextBucketEmpty = !isLastBucket && inMapBucketCounts[bucket+1] == 0;
+        const bool hasNextBucket   = !isLastBucket && !nextBucketEmpty;
 
         if( hasNextBucket )
             LoadBucket( bucket + 1 );
@@ -1309,12 +1330,52 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
                                                                                 // at the point after the left-over entries.
         const uint64 entriesToEncode = bucketLength + leftOverEntryCount;
 
-
         /// Encode into parks
         const uint64 parkCount       = entriesToEncode / kEntriesPerPark;              ASSERT( parkCount <= maxParkCount );
         const uint64 overflowEntries = entriesToEncode - parkCount * kEntriesPerPark;
 
         byte* parkBuffer = GetParkBuffer( bucket );
+#if _DEBUG
+    bbmemcpy_t( p7Writer, t6Indices, bucketLength );
+    p7Writer += bucketLength;
+
+    {
+        const uint64* entries = t6Indices;
+        for( uint64 i = 0; i < entriesToEncode; i++ )
+        {
+            if( entries[i] != refP7Reader[i] )
+            {
+                // Out-of-order? (Because of the sort on y can yield different indices)
+                if( entries[i+1] == refP7Reader[i] && refP7Reader[i+1] == entries[i] )
+                {
+                    i++;
+                    continue;
+                }
+
+                if( i + 3 <= entriesToEncode )
+                {
+                    uint64 ref[3] = { refP7Reader[i],  refP7Reader[i+1], refP7Reader[i+2] };
+                    uint64 ent[3] = { entries[i], entries[i+1], entries[i+2] };
+
+                    std::sort( ref, ref+3 );
+                    std::sort( ent, ent+3 );
+
+                    if( memcmp( ref, ent, sizeof( ref ) ) == 0 )
+                    {
+                        i+=2;
+                        continue;
+                    }
+                }
+
+                ASSERT( 0 );
+            }
+        }
+
+        refP7Reader += entriesToEncode;
+    }
+    
+    _parkIdx += parkCount;
+#endif
 
         AnonMTJob::Run( pool, context.p3ThreadCount, [=]( AnonMTJob* self ){
 
@@ -1322,16 +1383,66 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
             GetThreadOffsets( self, parkCount, count, offset, end );
 
             const size_t  parkSize        = CalculatePark7Size( _K );
-            const uint64* parkT6Indices   = t6Indices  + offset * kEntriesPerPark;
+            const uint64* park7Entries    = t6Indices  + offset * kEntriesPerPark;
                   byte*   parkWriteBuffer = parkBuffer + offset * parkSize;
-            
+
             for( uint64 i = 0; i < count; i++ )
             {
-                TableWriter::WriteP7Entries( kEntriesPerPark, parkT6Indices, parkWriteBuffer, self->_jobId );
-                parkT6Indices   += kEntriesPerPark;
+                TableWriter::WriteP7Entries( kEntriesPerPark, park7Entries, parkWriteBuffer, self->_jobId );
+                park7Entries    += kEntriesPerPark;
                 parkWriteBuffer += parkSize;
             }
         });
+
+#if _DEBUG
+
+        // Validate parks
+        // i( 0 )
+        // {
+        //     uint64 entries[kEntriesPerPark];
+        //     const byte*   parkReader = parkBuffer;
+        //     const uint32* refParks   = refP7Reader - entriesToEncode;
+
+        //     for( uint64 p = 0; p < parkCount; p++ )
+        //     {
+        //         UnpackPark7( parkReader, entries );
+
+        //         for( uint64 i = 0; i < kEntriesPerPark; i++ )
+        //         {
+        //             if( entries[i] != refParks[i] )
+        //             {
+        //                 // Out-of-order? (Because of the sort on y can yield different indices)
+        //                 if( entries[i+1] == refParks[i] && 
+        //                     refParks[i+1] == entries[i] )
+        //                 {
+        //                     i++;
+        //                     continue;
+        //                 }
+
+        //                 if( i + 3 <= kEntriesPerPark )
+        //                 {
+        //                     uint64 ref[3] = { refParks[i],  refParks[i+1], refParks[i+2] };
+        //                     uint64 ent[3] = { entries[i], entries[i+1], entries[i+2] };
+
+        //                     std::sort( ref, ref+3 );
+        //                     std::sort( ent, ent+3 );
+
+        //                     if( memcmp( ref, ent, sizeof( ref ) ) == 0 )
+        //                     {
+        //                         i+=2;
+        //                         continue;
+        //                     }
+        //                 }
+
+        //                 ASSERT( 0 );
+        //             }
+        //         }
+
+        //         parkReader += parkSize;
+        //         refParks += kEntriesPerPark;
+        //     }
+        // }
+#endif
 
         const size_t sizeWritten = parkSize * parkCount;
         context.plotTableSizes[(int)TableId::Table7] += sizeWritten;
@@ -1339,7 +1450,6 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
         ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
         ioQueue.SignalFence( _writeFence, bucket );
         ioQueue.CommitCommands();
-        
 
 
         // If it's the last bucket or the next bucket has no entries (might happen with the overflow bucket),
@@ -1367,6 +1477,15 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
         if( overflowEntries )
             memcpy( t6Indices, indexOverflowStart, sizeof( uint64 ) * overflowEntries );
     }
+#if _DEBUG
+    // RadixSort256::Sort<BB_DP_MAX_JOBS>( *context.threadPool, allP7Entries, allP7EntriesTmp, context.entryCounts[6] );
+
+    // for( uint64 i = 0; i < context.entryCounts[6]; i++ )
+    // {
+    //     ASSERT( allP7Entries[i] == i );
+    //     // if( allP7Entries[i] == 3149846143 ) BBDebugBreak();
+    // }
+#endif
 
     // Wait for all writes to finish
     ioQueue.SignalFence( _writeFence, _numBuckets + 2 );
@@ -1465,6 +1584,78 @@ void SavePrunedBucketCount( const TableId table, uint64* bucketCounts, bool read
         Log::Error( "Failed to open bucket counts file." );
 }
 
+// Unpack a single park 7
+//-----------------------------------------------------------
+void UnpackPark7( const byte* srcBits, uint64* dstEntries )
+{
+    const uint32 _k = _K;
+
+    const uint32 bitsPerEntry = _k + 1;
+    CPBitReader reader( (byte*)srcBits, CalculatePark7Size( _k ) * 8, 0  );
+
+    for( int32 i = 0; i < kEntriesPerPark; i++ )
+    {
+        dstEntries[i] = reader.Read64( bitsPerEntry );
+    }
+
+    // BitReader reader( srcBits, CalculatePark7Size( _k ) * bitsPerEntry, 0  );
+    
+    // const uint32 fieldShift     = 64 - bitsPerEntry;
+    // const uint32 dFieldsPerPark = kEntriesPerPark * bitsPerEntry / 64;
+    // const uint64 mask           = 0xFFFFFFFFFFFFFFFF >> ( 64 - bitsPerEntry );
+
+    // ASSERT( dFieldsPerPark * 64 / bitsPerEntry == kEntriesPerPark );
+
+    // uint64 sField = 0;  // Source field
+    // uint64 dField = 0;  // Destination field
+
+    // uint32 dBits  = 0;
+
+    // #if _DEBUG
+    // uint64 didx = 0;
+    // #endif
+
+    // for( uint i = 0; i < dFieldsPerPark; i++  )
+    // {
+    //     sField = Swap64( srcBits[i] );
+        
+    //     const uint32 shift = ( fieldShift + dBits ) & 63;
+        
+    // #if _DEBUG
+    //     didx++;
+    // #endif
+    //     // New S field, so we're sure we have a enough to fill a full D field
+    //     dField |= sField >> shift;
+    //     *dstEntries++ = dField & mask;
+
+    //     sField <<= 64 - shift;          // Clear out unpacked entries from S field
+    //     dField = sField >> fieldShift;  // Place what remains of S field on a new D fIeld (always guaranteed to have a remainder)
+
+
+    //     // Still have bits to unpack?
+    //     const uint32 sUsed = ( bitsPerEntry - dBits ) + bitsPerEntry;
+    //     if( sUsed < 64 )
+    //     {
+    //     #if _DEBUG
+    //         didx++;
+    //     #endif
+    //         // S field still has bits, we can begin to fill one more D field
+    //         *dstEntries++ = dField & mask;
+            
+    //         sField <<= 64 - fieldShift;     // Use up the S bits we just unpacked
+    //         dField = sField >> fieldShift;  // Add final S remainders to new D field
+
+    //         dBits = 64 - sUsed;
+    //     }
+    //     else
+    //     {
+    //         // S field used-up completely, D field not yet filled
+    //         dBits = shift;
+    //     }
+    // }
+}
+
 
 #endif
+
 
