@@ -157,8 +157,8 @@ void PruneTablesMemory()
 
         const uint64 tableEntryCount = tableEntryCounts[(int)table];
 
-        BitField leftMarks ( bitFields[0] );
-        BitField rightMarks( bitFields[1] );
+        BitField leftMarks ( bitFields[0], tableEntryCounts[(int)table-1] );
+        BitField rightMarks( bitFields[1], tableEntryCounts[(int)table]   );
 
         // Load map
         uint32* map = nullptr;

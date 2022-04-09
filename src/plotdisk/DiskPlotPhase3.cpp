@@ -164,6 +164,8 @@ public:
             const uint32 bitSize      = EntryBitSize;
             const uint32 encodeShift  = AddressBitSize;
             const uint32 numBuckets   = _numBuckets + 1;
+            const uint32 threadCount  = self->JobCount();
+
 
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
@@ -225,10 +227,11 @@ public:
             else
                 self->WaitForRelease();
 
-            // Bit-compress/pack each bucket entries
+
+            // Bit-compress/pack each bucket entries (except the overflow bucket)
             uint64 bitsWritten = 0;
 
-            for( uint32 i = 0; i < numBuckets; i++ )
+            for( uint32 i = 0; i < _numBuckets; i++ )
             {
                 if( counts[i] < 1 )
                 {
@@ -244,7 +247,7 @@ public:
 
                 BitWriter writer = bitWriter.GetWriter( i, bitOffset );
 
-                const uint64* mapToWrite    = outMapBuckets + writeOffset; 
+                const uint64* mapToWrite    = outMapBuckets + writeOffset;
                 const uint64* mapToWriteEnd = mapToWrite + counts[i]; 
 
                 // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
@@ -260,10 +263,26 @@ public:
                     writer.Write( *mapToWrite++, bitSize );
             }
 
-            // Write to disk
+            // Write the overflow bucket and then write to disk
             self->SyncThreads();
             if( self->IsControlThread() )
             {
+                const uint32 overflowBucket = _numBuckets;
+                const uint64 overflowCount  = totalCounts[overflowBucket];
+
+                if( overflowCount )
+                {
+                    const uint64 writeOffset = pfxSum[overflowBucket];
+                    ASSERT( writeOffset * bitSize - bitsWritten == 0 );
+                    
+                    BitWriter writer = bitWriter.GetWriter( overflowBucket, 0 );
+
+                    const uint64* mapToWrite  = outMapBuckets + writeOffset;
+                    const uint64* mapWriteEnd = mapToWrite + overflowCount;
+                    while( mapToWrite < mapWriteEnd )
+                        writer.Write( *mapToWrite++, bitSize );
+                }
+
                 bitWriter.Submit();
                 _ioQueue->SignalFence( *_writeFence, bucket );
                 _ioQueue->CommitCommands();
@@ -443,7 +462,9 @@ public:
             ASSERT( bucketLength <= maxBucketEntries );
 
             // Convert to line points
-            uint64 prunedEntryCount = ConvertToLinePoints( bucket, bucketLength, lEntries, rMarks, pairs, map );    ASSERT( prunedEntryCount <= bucketLength );
+            uint64 prunedEntryCount = ConvertToLinePoints( bucket, bucketLength, lEntries, 
+                                                          BitField( (uint64*)rMarks, context.entryCounts[(int)rTable] ), pairs, map );
+            ASSERT( prunedEntryCount <= bucketLength );
 
             WriteLinePointsToBuckets( bucket, (int64)prunedEntryCount, _rPrunedLinePoints, _rPrunedMap, (uint64*)pairs, map, outLPBucketCounts );
 
@@ -468,20 +489,20 @@ private:
     //-----------------------------------------------------------
     uint64 ConvertToLinePoints( 
         const uint32 bucket, const int64 bucketLength, const uint32* leftEntries, 
-        const void* rightMarkedEntries, const Pair* rightPairs, const uint64* rightMap )
+        const BitField& rightMarkedEntries, const Pair* rightPairs, const uint64* rightMap )
     {
         int64 __prunedEntryCount[BB_DP_MAX_JOBS];
         int64* _prunedEntryCount = __prunedEntryCount;
 
-        AnonMTJob::Run( *_context.threadPool, _threadCount, [=, this]( AnonMTJob* self ) {
+        AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
 
             int64 count, offset, end;
             GetThreadOffsets( self, bucketLength, count, offset, end );
 
-            const uint32*  lMap     = leftEntries;
-            const Pair*    pairs    = rightPairs;
-            const uint64*  rMap     = rightMap;
-            const BitField markedEntries( (uint64*)rightMarkedEntries );
+            const uint32*  lMap          = leftEntries;
+            const Pair*    pairs         = rightPairs;
+            const uint64*  rMap          = rightMap;
+            const BitField markedEntries = rightMarkedEntries;
 
             // First, scan our entries in order to prune them
             int64  prunedLength     = 0;
@@ -489,7 +510,7 @@ private:
 
             if constexpr ( rTable < TableId::Table7 )
             {
-                for( int64 i = offset; i < end; i++)
+                for( int64 i = offset; i < end; i++ )
                 {
                     if( markedEntries.Get( rMap[i] ) )
                         prunedLength ++;
@@ -503,6 +524,7 @@ private:
             allPrunedLengths[self->_jobId] = prunedLength;
             self->SyncThreads();
 
+
             // Set our destination offset
             // #NOTE: Not necesarry for T7, but let's avoid code duplication for now.
             int64 dstOffset = 0;
@@ -512,14 +534,20 @@ private:
 
             // Copy pruned entries into a new, contiguous buffer
             // #TODO: check if doing 1 pass per buffer performs better
+            static_assert( sizeof( Pair ) == sizeof( uint64 ) );
+
             Pair*   outPairsStart = (Pair*)(_rPrunedLinePoints + dstOffset);
             Pair*   outPairs      = outPairsStart;
             uint64* outRMap       = _rPrunedMap + dstOffset;
             uint64* mapWriter     = outRMap;
 
+            #if _DEBUG
+                int64 secondPassPruneCount = 0;
+            #endif
+
             for( int64 i = offset; i < end; i++ )
             {
-                const uint32 mapIdx = rMap[i];
+                const uint64 mapIdx = rMap[i];
 
                 if constexpr ( rTable < TableId::Table7 )
                 {
@@ -527,15 +555,23 @@ private:
                         continue;
                 }
 
+            #if _DEBUG
+                secondPassPruneCount ++;
+            #endif
+
                 *outPairs  = pairs[i];
                 *mapWriter = mapIdx;
-
+    
                 outPairs++;
                 mapWriter++;
             }
+            ASSERT( secondPassPruneCount == prunedLength );
+            ASSERT( (uintptr_t)outPairs == (uintptr_t)(_rPrunedLinePoints + dstOffset + prunedLength) );
+
 
             // Now we can convert our pruned pairs to line points
             uint64* outLinePoints = _rPrunedLinePoints + dstOffset;
+            ASSERT( (uintptr_t)outLinePoints == (uintptr_t)outPairsStart);
             {
                 const uint32* lTable = lMap;
                 
@@ -568,7 +604,7 @@ private:
         uint32 __totalCounts[_numBuckets]; uint32* _totalCounts = __totalCounts;
         uint64 _bitCounts   [_numBuckets]; uint64*  bitCounts   = _bitCounts;
 
-        LPJob::Run( *_context.threadPool, _threadCount, [=, this]( LPJob* self ) {
+        LPJob::Run( *_context.threadPool, _threadCount, [=]( LPJob* self ) {
 
             const uint32 threadCount   = self->JobCount();
 
@@ -1292,21 +1328,21 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
         ioQueue.CommitCommands();
     };
 
-#if _DEBUG
-    uint32* refP7Entries = nullptr;
+// #if _DEBUG
+//     uint32* refP7Entries = nullptr;
 
-    Log::Line( "Loading Reference P7");
-    {
-        uint64 refEntryCount = 0;
-        Debug::LoadRefTableByName( "plot_p7.tmp", refP7Entries, refEntryCount );
-    }
-    const uint32* refP7Reader = refP7Entries;
+//     Log::Line( "Loading Reference P7");
+//     {
+//         uint64 refEntryCount = 0;
+//         Debug::LoadRefTableByName( "plot_p7.tmp", refP7Entries, refEntryCount );
+//     }
+//     const uint32* refP7Reader = refP7Entries;
 
-    uint64* allP7Entries    = bbcvirtalloc<uint64>( context.entryCounts[6] );
-    uint64* allP7EntriesTmp = bbcvirtalloc<uint64>( context.entryCounts[6] );
-    uint64* p7Writer        = allP7Entries;
-    uint64 _parkIdx         = 0;
-#endif
+//     uint64* allP7Entries    = bbcvirtalloc<uint64>( context.entryCounts[6] );
+//     uint64* allP7EntriesTmp = bbcvirtalloc<uint64>( context.entryCounts[6] );
+//     uint64* p7Writer        = allP7Entries;
+//     uint64 _parkIdx         = 0;
+// #endif
 
     /// Start writeing buckets to park 7
     uint64 leftOverEntryCount = 0;
@@ -1336,45 +1372,45 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
 
         byte* parkBuffer = GetParkBuffer( bucket );
 #if _DEBUG
-    bbmemcpy_t( p7Writer, t6Indices, bucketLength );
-    p7Writer += bucketLength;
+//     bbmemcpy_t( p7Writer, t6Indices, bucketLength );
+//     p7Writer += bucketLength;
 
-    {
-        const uint64* entries = t6Indices;
-        for( uint64 i = 0; i < entriesToEncode; i++ )
-        {
-            if( entries[i] != refP7Reader[i] )
-            {
-                // Out-of-order? (Because of the sort on y can yield different indices)
-                if( entries[i+1] == refP7Reader[i] && refP7Reader[i+1] == entries[i] )
-                {
-                    i++;
-                    continue;
-                }
+//     {
+//         const uint64* entries = t6Indices;
+//         for( uint64 i = 0; i < entriesToEncode; i++ )
+//         {
+//             if( entries[i] != refP7Reader[i] )
+//             {
+//                 // Out-of-order? (Because of the sort on y can yield different indices)
+//                 if( entries[i+1] == refP7Reader[i] && refP7Reader[i+1] == entries[i] )
+//                 {
+//                     i++;
+//                     continue;
+//                 }
 
-                if( i + 3 <= entriesToEncode )
-                {
-                    uint64 ref[3] = { refP7Reader[i],  refP7Reader[i+1], refP7Reader[i+2] };
-                    uint64 ent[3] = { entries[i], entries[i+1], entries[i+2] };
+//                 if( i + 3 <= entriesToEncode )
+//                 {
+//                     uint64 ref[3] = { refP7Reader[i],  refP7Reader[i+1], refP7Reader[i+2] };
+//                     uint64 ent[3] = { entries[i], entries[i+1], entries[i+2] };
 
-                    std::sort( ref, ref+3 );
-                    std::sort( ent, ent+3 );
+//                     std::sort( ref, ref+3 );
+//                     std::sort( ent, ent+3 );
 
-                    if( memcmp( ref, ent, sizeof( ref ) ) == 0 )
-                    {
-                        i+=2;
-                        continue;
-                    }
-                }
+//                     if( memcmp( ref, ent, sizeof( ref ) ) == 0 )
+//                     {
+//                         i+=2;
+//                         continue;
+//                     }
+//                 }
 
-                ASSERT( 0 );
-            }
-        }
+//                 ASSERT( 0 );
+//             }
+//         }
 
-        refP7Reader += entriesToEncode;
-    }
+//         refP7Reader += entriesToEncode;
+//     }
     
-    _parkIdx += parkCount;
+//     _parkIdx += parkCount;
 #endif
 
         AnonMTJob::Run( pool, context.p3ThreadCount, [=]( AnonMTJob* self ){

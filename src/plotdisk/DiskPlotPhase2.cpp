@@ -128,7 +128,8 @@ void DiskPlotPhase2::RunWithBuckets()
         //     (double)(allocator.Size() + _markingTableSize*2 ) BtoGB, (double)context.heapSize BtoGB );
 
         memset( lMarkingTable, 0, _markingTableSize );
-        MarkTable<_numBuckets>( table, reader, pairs, map, lMarkingTable, rMarkingTable );
+        MarkTable<_numBuckets>( table, reader, pairs, map, BitField( lMarkingTable, context.entryCounts[(int)table-1] ), 
+                                                           BitField( rMarkingTable, context.entryCounts[(int)table] ) );
 
         //
         // #TEST
@@ -172,8 +173,8 @@ void DiskPlotPhase2::RunWithBuckets()
                 const uint64 rEntryCount = context.entryCounts[(int)rTable];
                 const uint64 lEntryCount = context.entryCounts[(int)lTable];
 
-                // BitField rMarkedEntries( (uint64*)rMarkedBuffer );
-                // BitField lMarkedEntries( (uint64*)lMarkedBuffer );
+                // BitField rMarkedEntries( (uint64*)rMarkedBuffer, rEntryCount );
+                // BitField lMarkedEntries( (uint64*)lMarkedBuffer, lEntryCount );
 
                 Log::Line( "Reading R table %u...", rTable+1 );
                 {
@@ -398,7 +399,7 @@ void DiskPlotPhase2::RunWithBuckets()
             std::atomic<uint64> lTablePrunedEntries = 0;
 
             AnonMTJob::Run( *_context.threadPool, [&]( AnonMTJob* self ) {
-                BitField markedEntries( rMarkingTable );
+                BitField markedEntries( rMarkingTable, context.entryCounts[(int)table] );
                 
                 const uint64 lTableEntries = context.entryCounts[(int)table-1];
 
@@ -422,7 +423,6 @@ void DiskPlotPhase2::RunWithBuckets()
         }
     } 
 
-
         // Log::Line( " Phase 2 IO write wait time: %.2lf seconds.", TicksToSeconds( writeWaitTime ) );
 
         // Wait for final write
@@ -438,7 +438,7 @@ void DiskPlotPhase2::RunWithBuckets()
 //-----------------------------------------------------------
 template<uint32 _numBuckets>
 void DiskPlotPhase2::MarkTable( const TableId rTable, DiskPairAndMapReader<_numBuckets> reader,
-                                Pair* pairs, uint64* map, uint64* lTableMarks, uint64* rTableMarks )
+                                Pair* pairs, uint64* map, BitField lTableMarks, const BitField rTableMarks )
 {
     switch( rTable )
     {
@@ -455,9 +455,9 @@ void DiskPlotPhase2::MarkTable( const TableId rTable, DiskPairAndMapReader<_numB
 }
 
 //-----------------------------------------------------------
-template<TableId table, uint32 _numBuckets>
+template<TableId rTable, uint32 _numBuckets>
 void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader, 
-                                       Pair* pairs, uint64* map, uint64* lTableMarks, uint64* rTableMarks )
+                                       Pair* pairs, uint64* map, BitField lTableMarks, const BitField rTableMarks )
 {
     // Load initial bucket
     reader.LoadNextBucket();
@@ -471,9 +471,6 @@ void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader,
 
         AnonMTJob::Run( *_context.threadPool, _context.p2ThreadCount, [=]( AnonMTJob* self ) { 
             
-                  BitField lTableMarkedEntries( lTableMarks );
-            const BitField rTableMarkedEntries( rTableMarks );
-
             // if( bucket == 0 )
             // {
             //     // Zero-out l marking table
@@ -486,7 +483,7 @@ void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader,
             //     self->SyncThreads();
             // }
 
-            const uint64 bucketEntryCount = _context.ptrTableBucketCounts[(int)table][bucket];
+            const uint64 bucketEntryCount = _context.ptrTableBucketCounts[(int)rTable][bucket];
 
             // Mark entries
             int64 count, offset, _;
@@ -495,13 +492,13 @@ void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader,
             // We need to do 2 passes to ensure no 2 threads attempt to write to the same field at the same time
             const int64 firstPassCount = count / 2;
             
-            MarkTableEntries<table>( offset, firstPassCount, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, pairs, map );
+            MarkTableEntries<rTable>( offset, firstPassCount, lTableMarks, rTableMarks, lTableOffset, pairs, map );
             self->SyncThreads();
-            MarkTableEntries<table>( offset + firstPassCount, count - firstPassCount, lTableMarkedEntries, rTableMarkedEntries, lTableOffset, pairs, map );
+            MarkTableEntries<rTable>( offset + firstPassCount, count - firstPassCount, lTableMarks, rTableMarks, lTableOffset, pairs, map );
 
         });
 
-        lTableOffset += _context.bucketCounts[(int)table-1][bucket];
+        lTableOffset += _context.bucketCounts[(int)rTable-1][bucket];
     }
 }
 

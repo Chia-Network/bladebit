@@ -131,7 +131,7 @@ struct DiskMapReader
                     {
                         const uint64 packedMap = reader.ReadBits64( (uint32)_mapBits );
                         const uint64 map       = packedMap & finalIdxMask;
-                        const uint32 dstIdx    = (uint32)( packedMap >> idxShift ); // #TODO: Use uint64 here
+                        const uint64 dstIdx    = packedMap >> idxShift;
 
                         ASSERT( dstIdx < virtBucketLength );
                         unpackedMap[dstIdx] = (TMap)map;
@@ -374,10 +374,10 @@ private:
     uint32           _pairOverflowBits  [_numBuckets];
     uint64           _pairBucketLoadSize[_numBuckets];
 
-    TableId          _table;
-    uint32           _threadCount;
-    uint32           _bucketsLoaded = 0;
     uint64           _entriesLoaded = 0;
+    uint32           _bucketsLoaded = 0;
+    uint32           _threadCount;
+    TableId          _table;
     bool             _noMap;
 };
 
