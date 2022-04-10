@@ -57,7 +57,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.p2ThreadCount = cfg.p2ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p2ThreadCount, sysLogicalCoreCount );
     _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
 
-    Log::Line( "[Bladebit Disk PLotter]" );
+    Log::Line( "[Bladebit Disk Plotter]" );
     Log::Line( " Heap size      : %.2lf GiB ( %.2lf MiB )", (double)_cx.heapSize BtoGB, (double)_cx.heapSize BtoMB );
     Log::Line( " Cache size     : %.2lf GiB ( %.2lf MiB )", (double)_cx.cacheSize BtoGB, (double)_cx.cacheSize BtoMB );
     Log::Line( " Bucket count   : %u"       , _cx.numBuckets    );
@@ -470,7 +470,7 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
 
 static const char* USAGE = R"(diskplot [OPTIONS] <out_dir>
 
-Creates a plots by making use of a disk to temporarily store and read values.
+Creates plots by making use of a disk to temporarily store and read values.
 
 <out_dir> : The output directory where the plot will be copied to after completion.
 
@@ -490,13 +490,13 @@ Creates a plots by making use of a disk to temporarily store and read values.
                       before using this argument. You may also pass a value to --temp and --temp2
                       to get file system block-aligned values when using direct IO.
 
- --cache <n>        : Size of cache to reserve for IO. This is memory
-                      reserved for files that incurr frequent I/O.
+ --cache <n>        : Size of cache to reserve for I/O. This is memory
+                      reserved for files that incur frequent I/O.
                       You need about 96GiB for high-performance Phase 1 calculations.
 
  --f1-threads <n>   : Override the thread count for F1 generation.
 
- --fp-threads <n>   : Override the thread count for forwrd propagation.
+ --fp-threads <n>   : Override the thread count for forward propagation.
 
  --c-threads <n>    : Override the thread count for C table processing.
                       (Equivalent to Phase 4 in chiapos, but performed 
@@ -513,11 +513,11 @@ Creates a plots by making use of a disk to temporarily store and read values.
 If you don't specify any thread count overrides, the default thread count
 specified in the global options will be used.
 
-Phases 2 and 3 are typically more I/O bound that Phase 1 as these
+Phases 2 and 3 are typically more I/O bound than Phase 1 as these
 phases perform less computational work than Phase 1 and thus the CPU
 finishes the currently loaded workload quicker and will proceed to
 grab another buffer from disk with a shorter frequency. Because of this
-you would typically lower the thread count for this threads if you are
+you would typically lower the thread count for these phases if you are
 incurring I/O waits.
 
 [EXAMPLES]
