@@ -231,11 +231,8 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline Duration ReadWaitTime() const { return _readWaitTime; }
+    inline Duration IOWaitTime() const { return _ioWaitTime; }
     
-    //-----------------------------------------------------------
-    inline Duration WriteWaitTime() const { return _writeWaitTime; }
-
 // private:
     //-----------------------------------------------------------
     inline void FpTable()
@@ -249,7 +246,7 @@ public:
             if( bucket + 1 < _numBuckets )
                 LoadBucket( bucket + 1 );
 
-            _readFence.Wait( bucket + 1, _readWaitTime );
+            _readFence.Wait( bucket + 1, _ioWaitTime );
 
             FpBucket( bucket );
         }
@@ -326,7 +323,7 @@ public:
             // #NOTE: We don't unpack xs directly into the write buffer because
             //        map is used as meta during matching, which needs a prefix zone
             //        to perfrom cross-bucket matches.
-            uint32* xBuffer = _xWriter.GetNextBuffer( _writeWaitTime );
+            uint32* xBuffer = _xWriter.GetNextBuffer( _ioWaitTime );
 
             AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
                 
@@ -415,7 +412,7 @@ public:
 
                 // Wait for the buffer to be available first
                 if( bucket > 1 )
-                    _mapWriteFence.Wait( bucket - 2, _writeWaitTime );
+                    _mapWriteFence.Wait( bucket - 2, _ioWaitTime );
 
                 bitWriter.BeginWriteBuckets( bitCounts, writeBuffer );
 
@@ -536,7 +533,7 @@ public:
         uint64 bitBucketSizes = (uint64)entryCount * Info::PairBitSize;
         byte*  writeBuffer    = GetPairWriteBuffer( bucket );
 
-        _pairWriteFence.Wait( bucket, _writeWaitTime );
+        _pairWriteFence.Wait( bucket, _ioWaitTime );
         _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, writeBuffer );
 
         AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
@@ -645,7 +642,7 @@ public:
                 
                 // Wait for the buffer to be available first
                 if( bucket > 1 )
-                    _writeFence.Wait( bucket - 2, _writeWaitTime );
+                    _writeFence.Wait( bucket - 2, _ioWaitTime );
 
                 bitWriter.BeginWriteBuckets( totalBitCounts, writeBuffer );
 
@@ -747,7 +744,7 @@ public:
             if( bucket + 1 < _numBuckets )
                 LoadBucket( bucket + 1 );
 
-            _readFence.Wait( bucket + 1, _readWaitTime );
+            _readFence.Wait( bucket + 1, _ioWaitTime );
 
             const uint32 bucketLength  = (int64)_context.bucketCounts[(int)TableId::Table7][bucket];
             const byte*  packedEntries = GetReadBufferForBucket( bucket );
@@ -860,7 +857,7 @@ public:
                       byte*  c3Buffer     = GetWriteBuffer( bucket );
 
                 if( bucket > 1 )
-                    _writeFence.Wait( bucket - 2, _writeWaitTime );
+                    _writeFence.Wait( bucket - 2, _ioWaitTime );
 
                 // #NOTE: This function uses re-writes our f7 buffer, so ensure it is done after
                 //        that buffer is no longer needed.
@@ -911,7 +908,7 @@ public:
         _context.plotTableSizes[9] = c3TableSizeBytes;
 
         // Wait for all commands to finish
-        _readFence.Wait( 1, _readWaitTime );
+        _readFence.Wait( 1 );
     }
 
     //-----------------------------------------------------------
@@ -1187,8 +1184,7 @@ private:
     int64            _tableEntryCount = 0;  // Current table entry count
     uint64           _mapOffset       = 0;  // Offset for writing the map entries
 
-    Duration         _readWaitTime    = Duration::zero();
-    Duration         _writeWaitTime   = Duration::zero();
+    Duration         _ioWaitTime      = Duration::zero();
 
     // Working buffers, all of them have enough to hold  entries for a single bucket + cross bucket entries
     Entry*   _entries[2]  = { 0 };   // Unpacked entries   // #TODO: Create read buffers of unpacked size and then just use that as temp entries

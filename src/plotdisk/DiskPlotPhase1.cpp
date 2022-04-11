@@ -218,8 +218,7 @@ FP:
     }
     #endif
 
-    Log::Line( " Phase 1 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
-            TicksToSeconds( _cx.readWaitTime ), TicksToSeconds( _cx.writeWaitTime ), _cx.ioQueue->IOBufferWaitTime() );
+    Log::Line( " Phase 1 Total I/O wait time: %.2lf", TicksToSeconds( _cx.ioWaitTime ) + _cx.ioQueue->IOBufferWaitTime() );
 
     WriteCTables();
 }
@@ -248,7 +247,7 @@ void DiskPlotPhase1::GenF1()
     
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
-    Log::Line( "Table 1 IO wait time: Write: %.2lf.", _cx.ioQueue->IOBufferWaitTime() );
+    Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _cx.ioQueue->IOBufferWaitTime() );
 }
 
 //-----------------------------------------------------------
@@ -289,8 +288,7 @@ void DiskPlotPhase1::ForwardPropagate()
                 break;
         }
         Log::Line( "Completed table %u in %.2lf seconds with %.llu entries.", table+1, TimerEnd( timer ), _cx.entryCounts[(int)table] );
-        Log::Line( "Table IO wait time: Read: %.2lf s | Write: %.2lf.", 
-                    TicksToSeconds( _tableReadWaitTime ), TicksToSeconds( _tableWriteWaitTime ) );
+        Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( _tableIOWaitTime ) );
 
         std::swap( _fxIn, _fxOut );
     }
@@ -300,8 +298,7 @@ void DiskPlotPhase1::ForwardPropagate()
 template<TableId table>
 void DiskPlotPhase1::ForwardPropagateTable()
 {
-    _tableReadWaitTime  = Duration::zero();
-    _tableWriteWaitTime = Duration::zero();
+    _tableIOWaitTime = Duration::zero();
 
     switch( _cx.numBuckets )
     {
@@ -323,11 +320,8 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
     DiskFp<table, _numBuckets> fp( _cx, _fxIn, _fxOut );
     fp.Run();
 
-    _tableReadWaitTime  = fp.ReadWaitTime();
-    _tableWriteWaitTime = fp.WriteWaitTime();
-    _cx.readWaitTime   += _tableReadWaitTime;
-    _cx.writeWaitTime  += _tableWriteWaitTime;
-
+    _tableIOWaitTime = fp.IOWaitTime();
+    _cx.ioWaitTime   += _tableIOWaitTime;
 
     #if BB_DP_DBG_VALIDATE_FX
         #if !_DEBUG
@@ -383,5 +377,6 @@ void DiskPlotPhase1::WriteCTablesBuckets()
 
     const double elapsed = TimerEnd( timer );
     Log::Line( "Completed C processing tables in %.2lf seconds.", elapsed );
+    Log::Line( "C Tables I/O wait time: %.2lf.", TicksToSeconds( fp.IOWaitTime() ) );
 }
 

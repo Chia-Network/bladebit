@@ -81,8 +81,7 @@ private:
     Fence _stepFence;
     Fence _plotFence;
 
-    Duration _readWaitTime  = Duration::zero();
-    Duration _writeWaitTime = Duration::zero();
+    Duration _ioWaitTime  = Duration::zero();
     
     FileId _mapReadId  = FileId::LP_MAP_0;
     FileId _mapWriteId = FileId::LP_MAP_1;

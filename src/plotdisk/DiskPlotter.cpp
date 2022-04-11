@@ -150,7 +150,7 @@ void DiskPlotter::Plot( const PlotRequest& req )
         phase1.Run();
 
         const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 1 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+        Log::Line( "Finished Phase 1 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
     }
 
     {
@@ -161,7 +161,7 @@ void DiskPlotter::Plot( const PlotRequest& req )
         phase2.Run();
 
         const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+        Log::Line( "Finished Phase 2 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
     }
 
     {
@@ -172,8 +172,10 @@ void DiskPlotter::Plot( const PlotRequest& req )
         phase3.Run();
 
         const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 3 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+        Log::Line( "Finished Phase 3 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
     }
+    Log::Line("Total plot I/O wait time: %.2lf seconds.", TicksToSeconds( _cx.ioWaitTime ) );
+
 
     {
         // Now we need to update the table sizes on the file
@@ -216,7 +218,7 @@ void DiskPlotter::Plot( const PlotRequest& req )
     }
 
     double plotElapsed = TimerEnd( plotTimer );
-    Log::Line( "Finished plotting in %.2lf seconds ( %.2lf minutes ).", plotElapsed, plotElapsed / 60 );
+    Log::Line( "Finished plotting in %.2lf seconds ( %.1lf minutes ).", plotElapsed, plotElapsed / 60 );
 }
 
 //-----------------------------------------------------------

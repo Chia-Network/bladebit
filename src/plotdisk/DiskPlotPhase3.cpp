@@ -342,8 +342,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline Duration GetReadWaitTime() const { return _readWaitTime; }
-    inline Duration GetWriteWaitTime() const { return _writeWaitTime; }
+    inline Duration GetIOWaitTime() const { return _ioWaitTime; }
 
     //-----------------------------------------------------------
     uint64 Run( const uint64 inLMapBucketCounts[_numBuckets+1], uint64 outLPBucketCounts[_numBuckets+1] )
@@ -444,6 +443,7 @@ public:
 
             // Wait for and unpack our current bucket
             const uint64 bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
+            _ioWaitTime += rTableReader.IOWaitTime();
 
             uint32* lEntries;
 
@@ -736,7 +736,7 @@ private:
     byte* GetLPWriteBuffer( const uint32 bucket )
     {
         if( bucket > 1 )
-            _writeFence.Wait( bucket - 2, _writeWaitTime );
+            _writeFence.Wait( bucket - 2, _ioWaitTime );
 
         return _lpWriteBuffer[bucket & 1];
     }
@@ -748,8 +748,7 @@ private:
     FileId           _mapReadId;
     Fence&           _readFence;
     Fence&           _writeFence;
-    Duration         _writeWaitTime = Duration::zero();
-    Duration         _readWaitTime  = Duration::zero();
+    Duration         _ioWaitTime = Duration::zero();
 
     // Temporary buffer for storing the pruned pairs/linePoints and map
     uint64*          _rPrunedLinePoints = nullptr;
@@ -790,8 +789,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline Duration GetReadWaitTime() const { return _readWaitTime; }
-    inline Duration GetWriteWaitTime() const { return _writeWaitTime; }
+    inline Duration GetIOWaitTime() const { return _ioWaitTime; }
 
     //-----------------------------------------------------------
     void Run( const uint64 inLPBucketCounts[_numBuckets+1], uint64 outLMapBucketCounts[_numBuckets+1] )
@@ -818,7 +816,7 @@ public:
         uint64* indices       = allocator.CAlloc<uint64>( maxBucketEntries );
         uint64* tmpIndices    = allocator.CAlloc<uint64>( maxBucketEntries );
 
-        MapWriter<_numBuckets, _overflow> mapWriter( _ioQueue, _writeId, allocator, maxBucketEntries, _context.tmp2BlockSize, _writeFence, _writeWaitTime );
+        MapWriter<_numBuckets, _overflow> mapWriter( _ioQueue, _writeId, allocator, maxBucketEntries, _context.tmp2BlockSize, _writeFence, _ioWaitTime );
 
         const size_t parkSize = CalculateParkSize( lTable );
         _maxParkCount     = maxBucketEntries / kEntriesPerPark;
@@ -857,7 +855,7 @@ public:
             if( hasNextBucket )
                 LoadBucket( bucket + 1 );
 
-            _readFence.Wait( bucket + 1, _readWaitTime );
+            _readFence.Wait( bucket + 1, _ioWaitTime );
 
 
             uint64* unpackedLinePoints    = linePoints    + kEntriesPerPark;
@@ -910,7 +908,7 @@ public:
         // Wait for all writes to finish
         _ioQueue.SignalFence( _lpWriteFence, _numBuckets + 5 );
         _ioQueue.CommitCommands();
-        _lpWriteFence.Wait( _numBuckets + 5, _writeWaitTime );
+        _lpWriteFence.Wait( _numBuckets + 5 );
     }
 
 private:
@@ -1020,7 +1018,7 @@ private:
     byte* GetLPWriteBuffer( const uint32 bucket )
     {
         if( bucket > 1 )
-            _lpWriteFence.Wait( bucket - 2, _writeWaitTime );
+            _lpWriteFence.Wait( bucket - 2, _ioWaitTime );
 
         return _parkBuffers[bucket & 1];
     }
@@ -1032,8 +1030,7 @@ private:
     Fence&           _readFence;
     Fence&           _writeFence;
     Fence&           _lpWriteFence;
-    Duration         _writeWaitTime = Duration::zero();
-    Duration         _readWaitTime  = Duration::zero();
+    Duration         _ioWaitTime = Duration::zero();
     FileId           _readId;
     FileId           _writeId;
     uint64*          _lpLeftOverBuffer = nullptr;
@@ -1213,11 +1210,9 @@ void DiskPlotPhase3::RunBuckets()
         WritePark7<_numBuckets>( _lMapPrunedBucketCounts );
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished writing P7 parks in %.2lf seconds.", elapsed );
-        Log::Line( "P7 IO wait time: Read: %.2lf s | Write: %.2lf.", 
-                TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ) );
+        Log::Line( "P7 I/O wait time: %.2lf seconds", TicksToSeconds( _ioWaitTime ) );
 
-        _context.readWaitTime += _readWaitTime;
-        _context.writeWaitTime+= _writeWaitTime;
+        _context.ioWaitTime += _ioWaitTime;
     }
 }
 
@@ -1236,13 +1231,12 @@ void DiskPlotPhase3::ProcessTable()
         P3StepOne<rTable, _numBuckets> stepOne( _context, _mapReadId, _readFence, _writeFence );
         prunedEntryCount = stepOne.Run( _lMapPrunedBucketCounts, _lpPrunedBucketCounts );
 
-        _readWaitTime  = stepOne.GetReadWaitTime();
-        _writeWaitTime = stepOne.GetWriteWaitTime();
+        _ioWaitTime = stepOne.GetIOWaitTime();
     }
 
     _ioQueue.SignalFence( _stepFence );
     _ioQueue.CommitCommands();
-    _stepFence.Wait( 0, _writeWaitTime );   // #TODO: Wait on Step1 instead
+    _stepFence.Wait( 0, _ioWaitTime );   // #TODO: Wait on Step1 instead
 
     // Step 1: Loads line points & their source indices from buckets,
     //         sorts them on the line points and then writes the line points 
@@ -1255,23 +1249,20 @@ void DiskPlotPhase3::ProcessTable()
         P3StepTwo<rTable, _numBuckets> stepTwo( _context, _readFence, _writeFence, _plotFence, _mapReadId, _mapWriteId );
         stepTwo.Run( _lpPrunedBucketCounts, _lMapPrunedBucketCounts );
 
-        _readWaitTime  += stepTwo.GetReadWaitTime();
-        _writeWaitTime += stepTwo.GetWriteWaitTime();
+        _ioWaitTime += stepTwo.GetIOWaitTime();
     }
 
     Log::Line( "Table %u now has %llu / %llu ( %.2lf%% ) entries.", 
         rTable, prunedEntryCount, _context.entryCounts[(int)rTable], 
         prunedEntryCount / (double)_context.entryCounts[(int)rTable] * 100 );
 
-    Log::Line( "Table IO wait time: Read: %.2lf s | Write: %.2lf.", 
-                TicksToSeconds( _readWaitTime ), TicksToSeconds( _writeWaitTime ) );
+    Log::Line( "Table %u I/O wait time: %.2lf seconds.", rTable, TicksToSeconds( _ioWaitTime ) );
 
 #if _DEBUG
     SavePrunedBucketCount( rTable, _lMapPrunedBucketCounts, false );
 #endif
 
-    _context.readWaitTime += _readWaitTime;
-    _context.writeWaitTime+= _writeWaitTime;
+    _context.ioWaitTime += _ioWaitTime;
     _tablePrunedEntryCount[(int)rTable-1] = prunedEntryCount;
 }
 
@@ -1283,8 +1274,7 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
     DiskBufferQueue& ioQueue = *context.ioQueue;
     ThreadPool&      pool    = *context.threadPool;
 
-    Duration readTime  = Duration::zero();
-    Duration writeTime = Duration::zero();
+    Duration waitTime  = Duration::zero();
 
     _readFence .Reset();
     _writeFence.Reset();
@@ -1312,7 +1302,7 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
     auto GetParkBuffer = [&]( const uint32 bucket ) {
 
         if( bucket > 1 )
-            _writeFence.Wait( bucket - 2, writeTime );
+            _writeFence.Wait( bucket - 2, waitTime );
 
         return parkBuffers[bucket & 1];
     };
@@ -1361,7 +1351,7 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
         /// Read bucket
         const uint64 bucketLength = inMapBucketCounts[bucket];      ASSERT( bucketLength <= maxBucketEntries );
 
-        _readFence.Wait( bucket + 1, readTime );
+        _readFence.Wait( bucket + 1, waitTime );
         mapReader.ReadEntries( bucketLength, t6Indices + leftOverEntryCount );  // Load entries to the buffer starting 
                                                                                 // at the point after the left-over entries.
         const uint64 entriesToEncode = bucketLength + leftOverEntryCount;
@@ -1371,47 +1361,7 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
         const uint64 overflowEntries = entriesToEncode - parkCount * kEntriesPerPark;
 
         byte* parkBuffer = GetParkBuffer( bucket );
-#if _DEBUG
-//     bbmemcpy_t( p7Writer, t6Indices, bucketLength );
-//     p7Writer += bucketLength;
 
-//     {
-//         const uint64* entries = t6Indices;
-//         for( uint64 i = 0; i < entriesToEncode; i++ )
-//         {
-//             if( entries[i] != refP7Reader[i] )
-//             {
-//                 // Out-of-order? (Because of the sort on y can yield different indices)
-//                 if( entries[i+1] == refP7Reader[i] && refP7Reader[i+1] == entries[i] )
-//                 {
-//                     i++;
-//                     continue;
-//                 }
-
-//                 if( i + 3 <= entriesToEncode )
-//                 {
-//                     uint64 ref[3] = { refP7Reader[i],  refP7Reader[i+1], refP7Reader[i+2] };
-//                     uint64 ent[3] = { entries[i], entries[i+1], entries[i+2] };
-
-//                     std::sort( ref, ref+3 );
-//                     std::sort( ent, ent+3 );
-
-//                     if( memcmp( ref, ent, sizeof( ref ) ) == 0 )
-//                     {
-//                         i+=2;
-//                         continue;
-//                     }
-//                 }
-
-//                 ASSERT( 0 );
-//             }
-//         }
-
-//         refP7Reader += entriesToEncode;
-//     }
-    
-//     _parkIdx += parkCount;
-#endif
 
         AnonMTJob::Run( pool, context.p3ThreadCount, [=]( AnonMTJob* self ){
 
@@ -1429,56 +1379,6 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
                 parkWriteBuffer += parkSize;
             }
         });
-
-#if _DEBUG
-
-        // Validate parks
-        // i( 0 )
-        // {
-        //     uint64 entries[kEntriesPerPark];
-        //     const byte*   parkReader = parkBuffer;
-        //     const uint32* refParks   = refP7Reader - entriesToEncode;
-
-        //     for( uint64 p = 0; p < parkCount; p++ )
-        //     {
-        //         UnpackPark7( parkReader, entries );
-
-        //         for( uint64 i = 0; i < kEntriesPerPark; i++ )
-        //         {
-        //             if( entries[i] != refParks[i] )
-        //             {
-        //                 // Out-of-order? (Because of the sort on y can yield different indices)
-        //                 if( entries[i+1] == refParks[i] && 
-        //                     refParks[i+1] == entries[i] )
-        //                 {
-        //                     i++;
-        //                     continue;
-        //                 }
-
-        //                 if( i + 3 <= kEntriesPerPark )
-        //                 {
-        //                     uint64 ref[3] = { refParks[i],  refParks[i+1], refParks[i+2] };
-        //                     uint64 ent[3] = { entries[i], entries[i+1], entries[i+2] };
-
-        //                     std::sort( ref, ref+3 );
-        //                     std::sort( ent, ent+3 );
-
-        //                     if( memcmp( ref, ent, sizeof( ref ) ) == 0 )
-        //                     {
-        //                         i+=2;
-        //                         continue;
-        //                     }
-        //                 }
-
-        //                 ASSERT( 0 );
-        //             }
-        //         }
-
-        //         parkReader += parkSize;
-        //         refParks += kEntriesPerPark;
-        //     }
-        // }
-#endif
 
         const size_t sizeWritten = parkSize * parkCount;
         context.plotTableSizes[(int)TableId::Table7] += sizeWritten;
@@ -1513,24 +1413,14 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
         if( overflowEntries )
             memcpy( t6Indices, indexOverflowStart, sizeof( uint64 ) * overflowEntries );
     }
-#if _DEBUG
-    // RadixSort256::Sort<BB_DP_MAX_JOBS>( *context.threadPool, allP7Entries, allP7EntriesTmp, context.entryCounts[6] );
-
-    // for( uint64 i = 0; i < context.entryCounts[6]; i++ )
-    // {
-    //     ASSERT( allP7Entries[i] == i );
-    //     // if( allP7Entries[i] == 3149846143 ) BBDebugBreak();
-    // }
-#endif
 
     // Wait for all writes to finish
     ioQueue.SignalFence( _writeFence, _numBuckets + 2 );
     ioQueue.CommitCommands();
-    _writeFence.Wait( _numBuckets + 2, writeTime );
+    _writeFence.Wait( _numBuckets + 2 );
 
     // Save IO wait times
-    _writeWaitTime = writeTime;
-    _readWaitTime  = readTime;
+    _ioWaitTime = waitTime;
 }
 
 

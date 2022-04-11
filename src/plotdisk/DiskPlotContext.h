@@ -56,6 +56,5 @@ struct DiskPlotContext
     uint64       plotTablePointers[10];
     uint64       plotTableSizes   [10];
 
-    Duration readWaitTime;
-    Duration writeWaitTime;
+    Duration ioWaitTime;
 };

@@ -81,6 +81,8 @@ void DiskPlotPhase2::RunWithBuckets()
     DiskPlotContext& context = _context;
     DiskBufferQueue& queue   = *context.ioQueue;
 
+    Duration p2WaitTime = Duration::zero();
+
     StackAllocator allocator( context.heapBuffer, context.heapSize );
     
     Fence readFence;
@@ -134,7 +136,7 @@ void DiskPlotPhase2::RunWithBuckets()
         //
         // #TEST
         //
-        // #if 0
+        #if 0
         if( 0 )
         {
             // Debug::ValidatePairs<_numBuckets>( _context, TableId::Table7 );
@@ -364,7 +366,7 @@ void DiskPlotPhase2::RunWithBuckets()
                 memset( lMarkedBuffer, 0, 1ull << _K );
             }
         }
-        // #endif
+        #endif
 
         // Ensure the last table finished writing to the bitfield
         Duration writeWaitTime = Duration::zero();
@@ -383,8 +385,8 @@ void DiskPlotPhase2::RunWithBuckets()
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
-        Log::Line( " IO write wait time: %.2lf seconds.", TicksToSeconds( writeWaitTime ) );
-        _context.writeWaitTime += writeWaitTime;
+        Log::Line( "Table %d I/O wait time: %.2lf seconds.", table, TicksToSeconds( writeWaitTime + reader.IOWaitTime() ) );
+        p2WaitTime += writeWaitTime + reader.IOWaitTime();
 
         allocator.PopToMarker( stackMarker );
         ASSERT( allocator.Size() == stackMarker );
@@ -426,12 +428,12 @@ void DiskPlotPhase2::RunWithBuckets()
         // Log::Line( " Phase 2 IO write wait time: %.2lf seconds.", TicksToSeconds( writeWaitTime ) );
 
         // Wait for final write
-
         queue.SignalFence( bitFieldFence, 0xFFFFFFFF );
         queue.CommitCommands();
-        bitFieldFence.Wait( 0xFFFFFFFF, _context.writeWaitTime );
+        bitFieldFence.Wait( 0xFFFFFFFF );
 
-    // Log::Line( " Phase 2 Total IO Aggregate Wait Time | READ: %.4lf | WRITE: %.4lf | BUFFERS: %.4lf", 
+    Log::Line( " Phase 2 Total I/O wait time: %.2lf seconds.", TicksToSeconds( p2WaitTime ) );    
+    _context.ioWaitTime += p2WaitTime;
     //         TicksToSeconds( context.readWaitTime ), TicksToSeconds( context.writeWaitTime ), context.ioQueue->IOBufferWaitTime() );
 }
 
