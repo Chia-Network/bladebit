@@ -191,26 +191,6 @@ inline T ToggleFlag( T& flags, T flag, bool value )
 }
 
 
-template<typename T>
-struct Span
-{
-    T*     values;
-    size_t length;
-
-    inline Span(){}
-
-    inline Span( T* values, size_t length )
-        : values( values )
-        , length( length )
-    {}
-
-    inline T& operator[]( unsigned int index ) const { return this->values[index]; }
-    inline T& operator[]( size_t index ) const { return this->values[index]; }
-    inline T& operator[]( int index ) const { return this->values[index]; }
-};
-
-typedef Span<uint8_t> ByteSpan;
-
 template<size_t _size>
 struct NBytes
 {

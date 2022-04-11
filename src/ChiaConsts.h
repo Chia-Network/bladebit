@@ -102,8 +102,10 @@ inline void LoadLTargets()
 
 // This is the full size of the deltas section in a park. However, it will not be fully filled
 //-----------------------------------------------------------
-inline constexpr size_t CalculateMaxDeltasSize( TableId tableId )
+inline constexpr size_t CalculateMaxDeltasSize( const TableId tableId )
 {
+    ASSERT( tableId < TableId::Table7 );
+
     if( tableId == TableId::Table1 )
         return CDiv( (size_t)((kEntriesPerPark - 1) * kMaxAverageDeltaTable1), 8 );
     
@@ -145,7 +147,7 @@ constexpr inline static size_t CalculateC3Size()
 }
 
 //-----------------------------------------------------------
-inline static size_t CalculatePark7Size( uint k )
+inline constexpr static size_t CalculatePark7Size( const uint k )
 {
     return CDiv( (k + 1) * (uint64)kEntriesPerPark, 8 );
 }

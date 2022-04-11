@@ -10,18 +10,21 @@ public:
 
     //-----------------------------------------------------------
     inline BitField()
-        :_fields( nullptr )
+        : _fields( nullptr )
+        , _length( 0 )
     {}
 
     //-----------------------------------------------------------
-    inline BitField( uint64* buffer )
+    inline BitField( uint64* buffer, const uint64 length )
         : _fields( buffer )
-    {
-    }
+        , _length( length )
+    {}
 
     //-----------------------------------------------------------
     inline bool Get( uint64 index ) const
     {
+        ASSERT( index < _length );
+
         const uint64 fieldIdx = index >> 6;  // Divide by 64. Safe to do with power of 2. (shift right == log2(64))
         const uint64 field    = _fields[fieldIdx];
 
@@ -32,6 +35,8 @@ public:
     //-----------------------------------------------------------
     inline void Set( uint64 index )
     {
+        ASSERT( index < _length );
+
         uint64* fields = _fields;
 
         const uint64 fieldIdx = index >> 6;
@@ -45,6 +50,8 @@ public:
     //-----------------------------------------------------------
     inline void SetBit( uint64 index, const uint64 bit )
     {
+        ASSERT( index < _length );
+
         uint64* fields = _fields;
 
         const uint64 fieldIdx = index >> 6;
@@ -58,6 +65,8 @@ public:
     //-----------------------------------------------------------
     inline void Clear( uint64 index )
     {
+        ASSERT( index < _length );
+
         uint64* fields = _fields;
 
         const uint64 fieldIdx = index >> 6;
@@ -75,4 +84,5 @@ public:
 
 private:
     uint64* _fields;
+    uint64  _length;
 };

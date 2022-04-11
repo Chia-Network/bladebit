@@ -473,141 +473,141 @@ void Debug::ValidateLookupIndex( TableId table, ThreadPool& pool, DiskBufferQueu
 //-----------------------------------------------------------
 void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 bucketCounts[BB_DPP3_LP_BUCKET_COUNT] )
 {
-    Log::Line( "Validating Line points for table %u", table+1 );
+    // Log::Line( "Validating Line points for table %u", table+1 );
 
-    // Load the reference table
-    uint64  refLPCount    = 0;
-    uint64* refLinePoints = bbcvirtalloc<uint64>( 1ull << _K );
+    // // Load the reference table
+    // uint64  refLPCount    = 0;
+    // uint64* refLinePoints = bbcvirtalloc<uint64>( 1ull << _K );
 
-    byte* blockBuffer = nullptr;
+    // byte* blockBuffer = nullptr;
 
-    {
-        Log::Line( " Loading reference values..." );
-        char path[1024];
-        sprintf( path, "%slp.t%u.tmp", BB_DP_DBG_REF_DIR, table );
+    // {
+    //     Log::Line( " Loading reference values..." );
+    //     char path[1024];
+    //     sprintf( path, "%slp.t%u.tmp", BB_DP_DBG_REF_DIR, table );
 
-        FileStream file;
-        FatalIf( !file.Open( path, FileMode::Open, FileAccess::ReadWrite, FileFlags::NoBuffering | FileFlags::LargeFile  ),
-            "Failed to open reference LP table @ %s", path );
+    //     FileStream file;
+    //     FatalIf( !file.Open( path, FileMode::Open, FileAccess::ReadWrite, FileFlags::NoBuffering | FileFlags::LargeFile  ),
+    //         "Failed to open reference LP table @ %s", path );
         
-        blockBuffer = bbvirtalloc<byte>( file.BlockSize() );
+    //     blockBuffer = bbvirtalloc<byte>( file.BlockSize() );
 
-        // Read entry count
-        FatalIf( file.Read( blockBuffer, file.BlockSize() ) != (ssize_t)file.BlockSize(),
-            "Failed to read reference LP table entry count @ %s", path );
+    //     // Read entry count
+    //     FatalIf( file.Read( blockBuffer, file.BlockSize() ) != (ssize_t)file.BlockSize(),
+    //         "Failed to read reference LP table entry count @ %s", path );
         
-        refLPCount = *(uint64*)blockBuffer;
-        int err = 0;
-        FatalIf( !IOJob::ReadFromFile( file, (byte*)refLinePoints,
-            refLPCount * sizeof( uint64 ), blockBuffer, file.BlockSize(), err ),
-            "Failed to read LP table with error: %d : %s", err, path );
-    }
+    //     refLPCount = *(uint64*)blockBuffer;
+    //     int err = 0;
+    //     FatalIf( !IOJob::ReadFromFile( file, (byte*)refLinePoints,
+    //         refLPCount * sizeof( uint64 ), blockBuffer, file.BlockSize(), err ),
+    //         "Failed to read LP table with error: %d : %s", err, path );
+    // }
 
-    bool readBuckets = false;
-    #if BB_DBG_READ_LP_BUCKET_COUNTS
-    {
-        char path[1024];
-        sprintf( path, "%slp_t%u_bucket_counts.tmp", BB_DP_DBG_TEST_DIR, table+1 );
+    // bool readBuckets = false;
+    // #if BB_DBG_READ_LP_BUCKET_COUNTS
+    // {
+    //     char path[1024];
+    //     sprintf( path, "%slp_t%u_bucket_counts.tmp", BB_DP_DBG_TEST_DIR, table+1 );
 
-        FileStream file;
-        if( file.Exists( path ) )
-        {
-            FatalIf( !file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::None ),
-                "Failed to open file %s for reading.", path );
+    //     FileStream file;
+    //     if( file.Exists( path ) )
+    //     {
+    //         FatalIf( !file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::None ),
+    //             "Failed to open file %s for reading.", path );
 
-            const size_t readSize = sizeof( uint32 ) * BB_DPP3_LP_BUCKET_COUNT;
-            FatalIf( (ssize_t)readSize != file.Read( bucketCounts, readSize ),
-                "Failed to read bucket counts for LP table file %s with error: %d.", path, file.GetError() );
+    //         const size_t readSize = sizeof( uint32 ) * BB_DPP3_LP_BUCKET_COUNT;
+    //         FatalIf( (ssize_t)readSize != file.Read( bucketCounts, readSize ),
+    //             "Failed to read bucket counts for LP table file %s with error: %d.", path, file.GetError() );
 
-            readBuckets = true;
-        }
-    }
-    #endif
-    #if BB_DBG_WRITE_LP_BUCKET_COUNTS
-    if( !readBuckets )
-    {
-        // Write This table's LP bucket counts
-        Log::Line( " Writing table %d LP bucket counts...", table );
+    //         readBuckets = true;
+    //     }
+    // }
+    // #endif
+    // #if BB_DBG_WRITE_LP_BUCKET_COUNTS
+    // if( !readBuckets )
+    // {
+    //     // Write This table's LP bucket counts
+    //     Log::Line( " Writing table %d LP bucket counts...", table );
         
-        char path[1024];
-        sprintf( path, "%slp_t%u_bucket_counts.tmp", BB_DP_DBG_TEST_DIR, table+1 );
+    //     char path[1024];
+    //     sprintf( path, "%slp_t%u_bucket_counts.tmp", BB_DP_DBG_TEST_DIR, table+1 );
 
-        FileStream file;
-        FatalIf( !file.Open( path, FileMode::OpenOrCreate, FileAccess::Write, FileFlags::None ),
-            "Failed to open file %s for writing.", path );
+    //     FileStream file;
+    //     FatalIf( !file.Open( path, FileMode::OpenOrCreate, FileAccess::Write, FileFlags::None ),
+    //         "Failed to open file %s for writing.", path );
 
-        const size_t writeSize = sizeof( uint32 ) * BB_DPP3_LP_BUCKET_COUNT;
-        FatalIf( (ssize_t)writeSize != file.Write( bucketCounts, writeSize ),
-            "Failed to write bucket counts for LP table file %s with error: %d.", path, file.GetError() );
-    }
-    #endif
+    //     const size_t writeSize = sizeof( uint32 ) * BB_DPP3_LP_BUCKET_COUNT;
+    //     FatalIf( (ssize_t)writeSize != file.Write( bucketCounts, writeSize ),
+    //         "Failed to write bucket counts for LP table file %s with error: %d.", path, file.GetError() );
+    // }
+    // #endif
 
 
-    const FileId fileId = TableIdToLinePointFileId( table );
-    DiskBufferQueue& ioQueue = *context.ioQueue;
-    ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
-    ioQueue.CommitCommands();
+    // const FileId fileId = TableIdToLinePointFileId( table );
+    // DiskBufferQueue& ioQueue = *context.ioQueue;
+    // ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
+    // ioQueue.CommitCommands();
 
-    // Should be enough for an allocation size
-    uint64  lpBucketSize = ( ( 1ull << _K ) / BB_DP_BUCKET_COUNT ) * 2;
-    uint64* linePoints   = bbcvirtalloc<uint64>( lpBucketSize );
-    uint64* lpTemp       = bbcvirtalloc<uint64>( lpBucketSize );
+    // // Should be enough for an allocation size
+    // uint64  lpBucketSize = ( ( 1ull << _K ) / BB_DP_BUCKET_COUNT ) * 2;
+    // uint64* linePoints   = bbcvirtalloc<uint64>( lpBucketSize );
+    // uint64* lpTemp       = bbcvirtalloc<uint64>( lpBucketSize );
 
-    Fence readFence;
-    readFence.Reset( 0 );
+    // Fence readFence;
+    // readFence.Reset( 0 );
 
-    const uint64* refLP = refLinePoints;
-    uint64 totalCount = 0;
+    // const uint64* refLP = refLinePoints;
+    // uint64 totalCount = 0;
 
-    Log::Line( " Validating buckets..." );
-    for( uint32 bucket = 0; bucket < BB_DPP3_LP_BUCKET_COUNT; bucket++ )
-    {
-        uint64 entryCount = bucketCounts[bucket];
+    // Log::Line( " Validating buckets..." );
+    // for( uint32 bucket = 0; bucket < BB_DPP3_LP_BUCKET_COUNT; bucket++ )
+    // {
+    //     uint64 entryCount = bucketCounts[bucket];
 
-        Log::Write( " Bucket %2u... ", bucket ); Log::Flush();
+    //     Log::Write( " Bucket %2u... ", bucket ); Log::Flush();
 
-        ioQueue.ReadFile( fileId, bucket, linePoints, entryCount * sizeof( uint64 ) );
-        ioQueue.SignalFence( readFence );
-        ioQueue.CommitCommands();
+    //     ioQueue.ReadFile( fileId, bucket, linePoints, entryCount * sizeof( uint64 ) );
+    //     ioQueue.SignalFence( readFence );
+    //     ioQueue.CommitCommands();
 
-        readFence.Wait();
+    //     readFence.Wait();
 
-        // Sort the bucket
-        RadixSort256::Sort<BB_MAX_JOBS, uint64, 7>( *context.threadPool, linePoints, lpTemp, entryCount );
+    //     // Sort the bucket
+    //     RadixSort256::Sort<BB_MAX_JOBS, uint64, 7>( *context.threadPool, linePoints, lpTemp, entryCount );
 
-        // Cap the entry count if we're above the ref count
-        // (bladebit ram is dropping 1 entry for table 7 for some reason, have to check why.)
-        if( totalCount + entryCount > refLPCount )
-            entryCount -= ( ( totalCount + entryCount ) - refLPCount );
+    //     // Cap the entry count if we're above the ref count
+    //     // (bladebit ram is dropping 1 entry for table 7 for some reason, have to check why.)
+    //     if( totalCount + entryCount > refLPCount )
+    //         entryCount -= ( ( totalCount + entryCount ) - refLPCount );
 
-        ASSERT( totalCount + entryCount <= refLPCount );
-        ASSERT( entryCount <= lpBucketSize );
+    //     ASSERT( totalCount + entryCount <= refLPCount );
+    //     ASSERT( entryCount <= lpBucketSize );
 
-        // Compare values
-        uint64* lpReader = lpTemp;
-        for( int64 i = 0; i < (int64)entryCount; i++ )
-        {
-            const uint64 ref = refLP   [i];
-            const uint64 lp  = lpReader[i];
-            ASSERT( lp == ref );
-        }
+    //     // Compare values
+    //     uint64* lpReader = lpTemp;
+    //     for( int64 i = 0; i < (int64)entryCount; i++ )
+    //     {
+    //         const uint64 ref = refLP   [i];
+    //         const uint64 lp  = lpReader[i];
+    //         ASSERT( lp == ref );
+    //     }
 
-        refLP += entryCount;
-        totalCount += entryCount;
+    //     refLP += entryCount;
+    //     totalCount += entryCount;
 
-        Log::Line( "OK" );
-    }
+    //     Log::Line( "OK" );
+    // }
 
-    ASSERT( totalCount == refLPCount );
-    Log::Line( "Table %u validated successfully!", table+1 );
+    // ASSERT( totalCount == refLPCount );
+    // Log::Line( "Table %u validated successfully!", table+1 );
 
-    ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
-    ioQueue.CommitCommands();
+    // ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
+    // ioQueue.CommitCommands();
 
-    SysHost::VirtualFree( refLinePoints );
-    SysHost::VirtualFree( blockBuffer   );
-    SysHost::VirtualFree( linePoints    );
-    SysHost::VirtualFree( lpTemp        );
+    // SysHost::VirtualFree( refLinePoints );
+    // SysHost::VirtualFree( blockBuffer   );
+    // SysHost::VirtualFree( linePoints    );
+    // SysHost::VirtualFree( lpTemp        );
 }
 
 //-----------------------------------------------------------

@@ -11,10 +11,10 @@ struct FpCrossBucketInfo
     Meta4   savedMeta[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
     Pair    pair     [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
 
-    uint64* y           = nullptr;
-    Meta4*  meta        = nullptr;
-    uint64  matchCount  = 0;
-    uint64  matchOffset = 0;
+    uint64* y              = nullptr;
+    Meta4*  meta           = nullptr;
+    uint64  matchCount     = 0;
+    uint64  matchOffset[2] = { 0 }; // 0 = prev bucket, 1 = cur bucket
     uint32  bucket;
     uint32  maxBuckets;
 
@@ -130,7 +130,7 @@ struct FpGroupMatcher
             memcpy( _outPairs + copyOffset, _pairs[id], sizeof( Pair ) * _matchCounts[id] );
 
             // Save the last 2 groups for cross-bucket matching
-            if( self->IsLastThread() && !crossBucketInfo->IsLastBucket() )
+            if( self->IsLastThread()  )
                 SaveCrossBucketInfo( *crossBucketInfo, groupIndices + groupCount - 2, yEntries, meta );
         });
 
@@ -172,13 +172,13 @@ struct FpGroupMatcher
 
                 const uint64 groupLRangeStart = groupL * kBC;
                 const uint64 groupRRangeStart = groupR * kBC;
-                
+
                 ASSERT( groupREnd - groupRStart <= 350 );
                 ASSERT( groupLRangeStart == groupRRangeStart - kBC );
 
                 // Prepare a map of range kBC to store which indices from groupR are used
                 // For now just iterate our bGroup to find the pairs
-            
+
                 // #NOTE: memset(0) works faster on average than keeping a separate a clearing buffer
                 memset( rMapCounts, 0, sizeof( rMapCounts ) );
 
@@ -214,7 +214,7 @@ struct FpGroupMatcher
                             Pair& pair = pairs[pairCount++];
                             pair.left  = (uint32)iL;
                             pair.right = (uint32)iR;
-                            
+
                             ASSERT( pairCount <= maxPairs );
                             if( pairCount == maxPairs )
                                 return pairCount;
@@ -280,6 +280,12 @@ private:
     template<typename TMeta>
     inline void SaveCrossBucketInfo( FpCrossBucketInfo& info, const uint64 groupIndices[3], const uint64* y, const TMeta* meta )
     {
+        info.matchOffset[0] = info.matchOffset[1];
+        info.matchOffset[1] = groupIndices[0];
+
+        if( info.IsLastBucket() )
+            return;
+
         info.groupCount[0] = (uint32)( groupIndices[1] - groupIndices[0] );
         info.groupCount[1] = (uint32)( groupIndices[2] - groupIndices[1] );
 
@@ -293,4 +299,5 @@ private:
         ASSERT( info.savedY[info.groupCount[0]] / kBC == info.savedY[info.groupCount[0]+info.groupCount[1]-1] / kBC );
     }
 };
+
 

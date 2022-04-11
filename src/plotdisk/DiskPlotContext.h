@@ -38,7 +38,7 @@ struct DiskPlotContext
     const byte*  plotMemo;
     uint16       plotMemoSize;
 
-    uint32       bucketCounts[(uint)TableId::_Count][BB_DP_MAX_BUCKET_COUNT];
+    uint32       bucketCounts[(uint)TableId::_Count][BB_DP_MAX_BUCKET_COUNT+1];
     uint64       entryCounts [(uint)TableId::_Count];
 
     // Since back pointer table entries are not sorted along with y,
@@ -56,14 +56,5 @@ struct DiskPlotContext
     uint64       plotTablePointers[10];
     uint64       plotTableSizes   [10];
 
-    Duration readWaitTime;
-    Duration writeWaitTime;
+    Duration ioWaitTime;
 };
-
-struct Phase3Data
-{
-    uint64 maxTableLength;
-    size_t bitFieldSize;
-    uint32 bucketMaxSize;
-};
-

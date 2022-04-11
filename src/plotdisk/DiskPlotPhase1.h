@@ -25,14 +25,16 @@ private:
     void ForwardPropagateBuckets();
 
     // Write C tables
-    void SortAndCompressTable7();
+    void WriteCTables();
+
+    template<uint32 _numBuckets>
+    void WriteCTablesBuckets();
 
 private:
     DiskPlotContext& _cx;
     DiskBufferQueue* _diskQueue;
 
-    Duration         _tableReadWaitTime;
-    Duration         _tableWriteWaitTime;
+    Duration         _tableIOWaitTime;
 
     FileId           _fxIn  = FileId::FX0;
     FileId           _fxOut = FileId::FX1;

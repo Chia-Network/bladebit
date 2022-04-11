@@ -33,6 +33,7 @@
 ///
 /// Assorted utility functions
 /// 
+void Exit( int code );
 void FatalExit();
 void FatalErrorMsg( const char* message, ... );
 void _Fatal( const char* message, ... );
@@ -47,6 +48,7 @@ void _Fatal( const char* message, ... );
 
 #define FatalIf( cond, message, ... ) if( (cond) ) { Fatal( message, ## __VA_ARGS__ ); }
 
+#define ExitIf( cond, message, ... )  if( (cond) ) { Fatal( message, ## __VA_ARGS__ ); }
 
 //-----------------------------------------------------------
 template <typename T>
@@ -143,6 +145,14 @@ template<typename T>
 inline T* bbcalloc( size_t count )
 {
     return bbmalloc<T>( count * sizeof( T ) );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline Span<T> bbcalloc_span( size_t count )
+{
+    T* ptr = bbmalloc<T>( count * sizeof( T ) );
+    return Span<T>( ptr, count );
 }
 
 //-----------------------------------------------------------
@@ -262,6 +272,13 @@ inline T* bbcvirtallocboundednuma( size_t count )
     }
    
    return ptr;
+}
+
+//-----------------------------------------------------------
+template<typename T = void>
+inline Span<T> bbcvirtallocboundednuma_span( size_t count )
+{
+    return Span<T>( bbcvirtallocboundednuma<T>( count ), count );
 }
 
 //-----------------------------------------------------------

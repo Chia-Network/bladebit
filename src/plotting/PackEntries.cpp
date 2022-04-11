@@ -19,7 +19,6 @@ void EntryPacker::Run()
     }
 }
 
-
 //-----------------------------------------------------------
 void EntryPacker::Serialize( ThreadPool& pool, uint32 threadCount, 
         const uint64* input,

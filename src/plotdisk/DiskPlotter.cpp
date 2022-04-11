@@ -7,8 +7,8 @@
 
 #include "DiskFp.h"
 #include "DiskPlotPhase1.h"
-// #include "DiskPlotPhase2.h"
-// #include "DiskPlotPhase3.h"
+#include "DiskPlotPhase2.h"
+#include "DiskPlotPhase3.h"
 #include "SysHost.h"
 
 
@@ -36,6 +36,8 @@ DiskPlotter::DiskPlotter( const Config cfg )
     FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
         "Failed to obtain temp paths block size." );
 
+    FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
+
     const size_t heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
 
     _cx.tmpPath     = cfg.tmpPath;
@@ -55,7 +57,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     _cx.p2ThreadCount = cfg.p2ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p2ThreadCount, sysLogicalCoreCount );
     _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
 
-    Log::Line( "[Bladebit Disk PLotter]" );
+    Log::Line( "[Bladebit Disk Plotter]" );
     Log::Line( " Heap size      : %.2lf GiB ( %.2lf MiB )", (double)_cx.heapSize BtoGB, (double)_cx.heapSize BtoMB );
     Log::Line( " Cache size     : %.2lf GiB ( %.2lf MiB )", (double)_cx.cacheSize BtoGB, (double)_cx.cacheSize BtoMB );
     Log::Line( " Bucket count   : %u"       , _cx.numBuckets    );
@@ -140,11 +142,6 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
     _cx.ioQueue->OpenPlotFile( req.plotFileName, req.plotId, req.plotMemo, req.plotMemoSize );
 
-    // #TODO: I think we can get rid of this structure.
-    //        If not, place it on the context.
-    // Phase3Data p3Data;
-    // ZeroMem( &p3Data );
-
     {
         Log::Line( "Running Phase 1" );
         const auto timer = TimerBegin();
@@ -153,75 +150,75 @@ void DiskPlotter::Plot( const PlotRequest& req )
         phase1.Run();
 
         const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 1 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+        Log::Line( "Finished Phase 1 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
     }
 
-    // {
-    //     Log::Line( "Running Phase 2" );
-    //     const auto timer = TimerBegin();
+    {
+        Log::Line( "Running Phase 2" );
+        const auto timer = TimerBegin();
 
-    //     DiskPlotPhase2 phase2( _cx );
-    //     phase2.Run();
+        DiskPlotPhase2 phase2( _cx );
+        phase2.Run();
 
-    //     const double elapsed = TimerEnd( timer );
-    //     Log::Line( "Finished Phase 2 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 2 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
+    }
 
-    //     p3Data = phase2.GetPhase3Data();
-    // }
+    {
+        Log::Line( "Running Phase 3" );
+        const auto timer = TimerBegin();
 
-    // {
-    //     Log::Line( "Running Phase 3" );
-    //     const auto timer = TimerBegin();
+        DiskPlotPhase3 phase3( _cx );
+        phase3.Run();
 
-    //     DiskPlotPhase3 phase3( _cx, p3Data );
-    //     phase3.Run();
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 3 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
+    }
+    Log::Line("Total plot I/O wait time: %.2lf seconds.", TicksToSeconds( _cx.ioWaitTime ) );
 
-    //     const double elapsed = TimerEnd( timer );
-    //     Log::Line( "Finished Phase 3 in %.2lf seconds ( %.2lf minutes ).", elapsed, elapsed / 60 );
-    // }
 
-    // {
-    //     // Now we need to update the table sizes on the file
-    //     Log::Line( "Waiting for plot file to complete pending writes..." );
-    //     const auto timer = TimerBegin();
+    {
+        // Now we need to update the table sizes on the file
+        Log::Line( "Waiting for plot file to complete pending writes..." );
+        const auto timer = TimerBegin();
 
-    //     // Update the table pointers location
-    //     DiskBufferQueue& ioQueue = *_cx.ioQueue;
-    //     ASSERT( sizeof( _cx.plotTablePointers ) == sizeof( uint64 ) * 10 );
+        // Update the table pointers location
+        DiskBufferQueue& ioQueue = *_cx.ioQueue;
+        ASSERT( sizeof( _cx.plotTablePointers ) == sizeof( uint64 ) * 10 );
 
-    //     // Convert them to big endian
-    //     for( int i = 0; i < 10; i++ )
-    //         _cx.plotTablePointers[i] = Swap64( _cx.plotTablePointers[i] );
+        // Convert them to big endian
+        for( int i = 0; i < 10; i++ )
+            _cx.plotTablePointers[i] = Swap64( _cx.plotTablePointers[i] );
 
-    //     const int64 tablePtrsStart = (int64)ioQueue.PlotTablePointersAddress();
-    //     ioQueue.SeekFile( FileId::PLOT, 0, tablePtrsStart, SeekOrigin::Begin );
-    //     ioQueue.WriteFile( FileId::PLOT, 0, _cx.plotTablePointers, sizeof( _cx.plotTablePointers ) );
+        const int64 tablePtrsStart = (int64)ioQueue.PlotTablePointersAddress();
+        ioQueue.SeekFile( FileId::PLOT, 0, tablePtrsStart, SeekOrigin::Begin );
+        ioQueue.WriteFile( FileId::PLOT, 0, _cx.plotTablePointers, sizeof( _cx.plotTablePointers ) );
         
-    //     // Wait for all IO commands to finish
-    //     Fence fence;
-    //     ioQueue.SignalFence( fence );
-    //     ioQueue.CommitCommands();
-    //     fence.Wait();
+        // Wait for all IO commands to finish
+        Fence fence;
+        ioQueue.SignalFence( fence );
+        ioQueue.CommitCommands();
+        fence.Wait();
         
-    //     const double elapsed = TimerEnd( timer );
-    //     Log::Line( "Completed pending writes in %.2lf seconds.", elapsed );
-    //     Log::Line( "Finished writing plot %s.", req.plotFileName );
-    //     Log::Line( "Final plot table pointers: " );
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Completed pending writes in %.2lf seconds.", elapsed );
+        Log::Line( "Finished writing plot %s.", req.plotFileName );
+        Log::Line( "Final plot table pointers: " );
 
-    //     for( int i = 0; i < 10; i++ )
-    //     {
-    //         const uint64 addy = Swap64( _cx.plotTablePointers[i] );
+        for( int i = 0; i < 10; i++ )
+        {
+            const uint64 addy = Swap64( _cx.plotTablePointers[i] );
 
-    //         if( i < 7 )
-    //             Log::Line( " Table %d: %16lu ( 0x%016lx )", i+1, addy, addy );
-    //         else
-    //             Log::Line( " C %d    : %16lu ( 0x%016lx )", i-6, addy, addy );
-    //     }
-    //     Log::Line( "" );
-    // }
+            if( i < 7 )
+                Log::Line( " Table %d: %16lu ( 0x%016lx )", i+1, addy, addy );
+            else
+                Log::Line( " C %d    : %16lu ( 0x%016lx )", i-6, addy, addy );
+        }
+        Log::Line( "" );
+    }
 
     double plotElapsed = TimerEnd( plotTimer );
-    Log::Line( "Finished plotting in %.2lf seconds ( %.2lf minutes ).", plotElapsed, plotElapsed / 60 );
+    Log::Line( "Finished plotting in %.2lf seconds ( %.1lf minutes ).", plotElapsed, plotElapsed / 60 );
 }
 
 //-----------------------------------------------------------
@@ -475,7 +472,7 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
 
 static const char* USAGE = R"(diskplot [OPTIONS] <out_dir>
 
-Creates a plots by making use of a disk to temporarily store and read values.
+Creates plots by making use of a disk to temporarily store and read values.
 
 <out_dir> : The output directory where the plot will be copied to after completion.
 
@@ -495,13 +492,13 @@ Creates a plots by making use of a disk to temporarily store and read values.
                       before using this argument. You may also pass a value to --temp and --temp2
                       to get file system block-aligned values when using direct IO.
 
- --cache <n>        : Size of cache to reserve for IO. This is memory
-                      reserved for files that incurr frequent I/O.
+ --cache <n>        : Size of cache to reserve for I/O. This is memory
+                      reserved for files that incur frequent I/O.
                       You need about 96GiB for high-performance Phase 1 calculations.
 
  --f1-threads <n>   : Override the thread count for F1 generation.
 
- --fp-threads <n>   : Override the thread count for forwrd propagation.
+ --fp-threads <n>   : Override the thread count for forward propagation.
 
  --c-threads <n>    : Override the thread count for C table processing.
                       (Equivalent to Phase 4 in chiapos, but performed 
@@ -518,11 +515,11 @@ Creates a plots by making use of a disk to temporarily store and read values.
 If you don't specify any thread count overrides, the default thread count
 specified in the global options will be used.
 
-Phases 2 and 3 are typically more I/O bound that Phase 1 as these
+Phases 2 and 3 are typically more I/O bound than Phase 1 as these
 phases perform less computational work than Phase 1 and thus the CPU
 finishes the currently loaded workload quicker and will proceed to
 grab another buffer from disk with a shorter frequency. Because of this
-you would typically lower the thread count for this threads if you are
+you would typically lower the thread count for these phases if you are
 incurring I/O waits.
 
 [EXAMPLES]

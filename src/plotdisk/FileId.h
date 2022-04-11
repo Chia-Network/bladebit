@@ -36,32 +36,10 @@ enum class FileId
     MARKED_ENTRIES_6,
 
     // Line points
-    LP_2,
-    LP_3,
-    LP_4,
-    LP_5,
-    LP_6,
-    LP_7,
+    LP,
+    LP_MAP_0,
+    LP_MAP_1,
 
-    // Line point key (y sorted order key)
-    LP_KEY_2,
-    LP_KEY_3,
-    LP_KEY_4,
-    LP_KEY_5,
-    LP_KEY_6,
-    LP_KEY_7,
-
-    // Line point map
-    LP_MAP_2,
-    LP_MAP_3,
-    LP_MAP_4,
-    LP_MAP_5,
-    LP_MAP_6,
-    LP_MAP_7,
-
-    C1,
-    C2,
-    C3,
     PLOT
 
     ,_COUNT
@@ -141,71 +119,6 @@ inline FileId TableIdToMarkedEntriesFileId( const TableId table )
         case TableId::Table4: return FileId::MARKED_ENTRIES_4;
         case TableId::Table5: return FileId::MARKED_ENTRIES_5;
         case TableId::Table6: return FileId::MARKED_ENTRIES_6;
-
-        default:
-            ASSERT( 0 );
-            break;
-    }
-    
-    ASSERT( 0 );
-    return FileId::None;
-}
-
-
-//-----------------------------------------------------------
-inline FileId TableIdToLinePointFileId( const TableId table )
-{
-    switch( table )
-    {
-        case TableId::Table2: return FileId::LP_2;
-        case TableId::Table3: return FileId::LP_3;
-        case TableId::Table4: return FileId::LP_4;
-        case TableId::Table5: return FileId::LP_5;
-        case TableId::Table6: return FileId::LP_6;
-        case TableId::Table7: return FileId::LP_7;
-
-        default:
-            ASSERT( 0 );
-            break;
-    }
-    
-    ASSERT( 0 );
-    return FileId::None;
-}
-
-//-----------------------------------------------------------
-inline FileId TableIdToLinePointKeyFileId( const TableId table )
-{
-    switch( table )
-    {
-        case TableId::Table2: return FileId::LP_KEY_2;
-        case TableId::Table3: return FileId::LP_KEY_3;
-        case TableId::Table4: return FileId::LP_KEY_4;
-        case TableId::Table5: return FileId::LP_KEY_5;
-        case TableId::Table6: return FileId::LP_KEY_6;
-        case TableId::Table7: return FileId::LP_KEY_7;
-
-        default:
-            ASSERT( 0 );
-            break;
-    }
-    
-    ASSERT( 0 );
-    return FileId::None;
-}
-
-
-//-----------------------------------------------------------
-inline FileId TableIdToLinePointMapFileId( const TableId table )
-{
-    switch( table )
-    {
-        case TableId::Table2: return FileId::LP_MAP_2;
-        case TableId::Table3: return FileId::LP_MAP_3;
-        case TableId::Table4: return FileId::LP_MAP_4;
-        case TableId::Table5: return FileId::LP_MAP_5;
-        case TableId::Table6: return FileId::LP_MAP_6;
-        case TableId::Table7: return FileId::LP_MAP_7;
 
         default:
             ASSERT( 0 );

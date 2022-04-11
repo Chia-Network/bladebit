@@ -22,6 +22,11 @@ void MemTestPrintUsage();
 void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli );
 void PlotValidatorPrintUsage();
 
+// PlotComparer.cpp
+void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli );
+void PlotCompareMainPrintUsage();
+
+
 
 struct Plotter 
 {
@@ -249,6 +254,11 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             PlotValidatorMain( cfg, cli );
             exit( 0 );
         }
+        else if( cli.ArgConsume( "plotcmp" ) )
+        {
+            PlotCompareMain( cfg, cli );
+            exit( 0 );
+        }
         else if( cli.ArgConsume( "help" ) )
         {
             if( cli.HasArgs() )
@@ -261,6 +271,8 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
                     MemTestPrintUsage();
                 if( cli.ArgMatch( "validate" ) )
                     PlotValidatorPrintUsage();
+                if( cli.ArgMatch( "plotcmp" ) )
+                    PlotCompareMainPrintUsage();
                 else
                     Fatal( "Unknown command '%s'.", cli.Arg() );
 

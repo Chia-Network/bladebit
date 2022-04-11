@@ -153,8 +153,8 @@ struct DiskF1
                 {
                           uint64 y   = Swap32( yBlocks[i] );
                     const uint32 dst = --pfxSum[y >> bucketBitShift];
-                    // Store bit-compressed already
-                    const uint64 xi = ( x + (uint64)i );
+                    
+                    const uint64 xi = ( x + (uint64)i );    // Store bit-compressed already
 
                     y = ( ( y << kExtraBits ) | ( xi >> kMinusKExtraBits ) ) & yMask;
                     entries[dst] = ( xi << yBits ) | y;

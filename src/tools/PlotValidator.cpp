@@ -15,48 +15,119 @@
 #include <mutex>
 
 #define PROOF_X_COUNT       64
-#define MAX_K_SIZE          50
+#define MAX_K_SIZE          48
 #define MAX_META_MULTIPLIER 4
 #define MAX_Y_BIT_SIZE      ( MAX_K_SIZE + kExtraBits )
 #define MAX_META_BIT_SIZE   ( MAX_K_SIZE * MAX_META_MULTIPLIER )
 #define MAX_FX_BIT_SIZE     ( MAX_Y_BIT_SIZE + MAX_META_BIT_SIZE + MAX_META_BIT_SIZE )
 
+#define COLOR_NONE       "\033[0m"
+#define COLOR_RED        "\033[31m"
+#define COLOR_GREEN      "\033[32m"
+#define COLOR_RED_BOLD   "\033[1m\033[31m"
+#define COLOR_GREEN_BOLD "\033[1m\033[32m"
+
 typedef Bits<MAX_Y_BIT_SIZE>    YBits;
 typedef Bits<MAX_META_BIT_SIZE> MetaBits;
 typedef Bits<MAX_FX_BIT_SIZE>   FxBits;
 
+// #TODO: Add C1 & C2 table validation
 
-void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
+//-----------------------------------------------------------
+const char USAGE[] = R"(validate [OPTIONS] <plot_path>
+
+Validates all of a plot's values to ensure they all contain valid proofs.
+
+[NOTES]
+You can specify the thread count in the bladebit global option '-t'.
+
+[ARGUMENTS]
+<plot_path>   : Path to the plot file to be validated.
+
+[OPTIOINS]
+ -m, --in-ram : Loads the whole plot file into memory before validating.
+
+ -o, --offset : Percentage offset at which to start validating.
+                Ex (start at 50%): bladebit validate -o 50 /path/to/my/plot
+
+ -u, --unpack : Decompress the plot into memory before validating.
+                This decreases validation time substantially but
+                it requires around 128GiB of RAM for k=32.
+                This is only supported for plots with k=32 and below.
+
+ -h, --help   : Print this help message and exit.
+)";
+
+void PlotValidatorPrintUsage()
+{
+    Log::Line( USAGE );
+}
+
+
+
+struct UnpackedK32Plot
+{
+    // Table 1 == X's in line point form
+    // Table 6 is sorted on p7
+    IPlotFile*   plot = nullptr;
+    Span<Pair>   tables[6];
+    Span<uint32> f7;
+
+    //-----------------------------------------------------------
+    inline const Span<Pair> Table( const TableId table ) const
+    {
+        if( table >= TableId::Table7 )
+        {
+            ASSERT( 0 );
+            return Span<Pair>();
+        }
+
+        return tables[(int)table];
+    }
+    
+    static UnpackedK32Plot Load( IPlotFile** plotFile, ThreadPool& pool, uint32 threadCount );
+    bool FetchProof( const  uint64 index, uint64 fullProofXs[PROOF_X_COUNT] );
+};
+
+
+static void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
 
 template<bool Use64BitLpToSquare>
-bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] );
+static bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] );
 
-bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 );
-void ReorderProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT] );
-void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
+static bool ValidateFullProof( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 );
+static void ReorderProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT] );
+static void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
 
-uint64 BytesToUInt64( const byte bytes[8] );
-uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 bitCount );
+static uint64 BytesToUInt64( const byte bytes[8] );
+static uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 bitCount );
 
-bool FxMatch( uint64 yL, uint64 yR );
+static bool FxMatch( uint64 yL, uint64 yR );
 
-void FxGen( const TableId table, const uint32 k, 
-            const uint64 y, const MetaBits& metaL, const MetaBits& metaR,
-            uint64& outY, MetaBits& outMeta );
+static void FxGen( const TableId table, const uint32 k, 
+                   const uint64 y, const MetaBits& metaL, const MetaBits& metaR,
+                   uint64& outY, MetaBits& outMeta );
 
-void PlotValidatorPrintUsage();
-bool ValidatePlot( const ValidatePlotOptions& options );
+static bool ValidatePlot( const ValidatePlotOptions& options );
+
+static uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool );
+
+// Thread-safe log
+static std::mutex _logLock;
+static void TVLog( const uint64 id, const char* msg, va_list args );
+static void TLog( const uint64 id, const char* msg, ... );
 
 struct ValidateJob : MTJob<ValidateJob>
 {
-    IPlotFile*  plotFile;
-    uint64      failCount;
-    std::mutex* logLock;
-    float       startOffset;
+    IPlotFile*       plotFile;
+    UnpackedK32Plot* unpackedPlot;  // If set, this will be used instead
+    uint64           failCount;
+    float            startOffset;
 
     void Run() override;
     void Log( const char* msg, ... );
 };
+
 
 //-----------------------------------------------------------
 void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
@@ -66,6 +137,8 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
     while( cli.HasArgs() )
     {
         if( cli.ReadSwitch( opts.inRAM, "-m", "--in-ram" ) )
+            continue;
+        else if( cli.ReadSwitch( opts.unpacked, "-u", "--unpack" ) )
             continue;
         else if( cli.ReadValue( opts.startOffset, "-o", "--offset" ) )
             continue;
@@ -94,7 +167,6 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
     exit( 0 );
 }
 
-
 //-----------------------------------------------------------
 bool ValidatePlot( const ValidatePlotOptions& options )
 {
@@ -105,7 +177,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     IPlotFile*  plotFile  = nullptr;
     IPlotFile** plotFiles = new IPlotFile*[threadCount];
 
-    if( options.inRAM )
+    if( options.inRAM && !options.unpacked )
     {
         auto* memPlot = new MemoryPlot();
         plotFile = memPlot;
@@ -129,10 +201,12 @@ bool ValidatePlot( const ValidatePlotOptions& options )
         }
     }
 
-    FatalIf( !plotFile->IsOpen(), "Failed to open plot at path '%s'.", options.plotPath.c_str() );
+    ExitIf( !plotFile->IsOpen(), "Failed to open plot at path '%s'.", options.plotPath.c_str() );
+    ExitIf( options.unpacked && plotFile->K() != 32, "Unpacked plots are only supported for k=32 plots." );
 
     Log::Line( "Validating plot %s", options.plotPath.c_str() );
     Log::Line( "K       : %u", plotFile->K() );
+    Log::Line( "Unpacked: %s", options.unpacked? "true" : "false" );;
 
     const uint64 plotC3ParkCount = plotFile->TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
     Log::Line( "C3 Parks: %llu", plotC3ParkCount );
@@ -141,19 +215,42 @@ bool ValidatePlot( const ValidatePlotOptions& options )
 
     // Duplicate the plot file,     
     ThreadPool pool( threadCount );
+    
+    UnpackedK32Plot unpackedPlot;
+    if( options.unpacked )
+    {
+        unpackedPlot      = UnpackedK32Plot::Load( plotFiles, pool, threadCount );
+        unpackedPlot.plot = plotFile;
+
+        const auto timer = TimerBegin();
+        const uint64 failedCount = ValidateInMemory( unpackedPlot, pool );
+        const double elapsed = TimerEnd( timer );
+
+        const uint64 min = (uint64)(elapsed / 60);
+        const uint64 sec = (uint64)( elapsed - (double)(min * 60) );
+
+        Log::Line( "" );
+        Log::Line( "Finished validating plot in %.lf seconds ( %llu:%llu min ).", 
+            elapsed, min, sec );
+
+        Log::Line( "[ %s%s%s ] Valid Proofs: %llu / %llu", 
+            failedCount == 0 ? COLOR_GREEN_BOLD : COLOR_RED_BOLD,
+            failedCount ? "FAILED" : "SUCCESS", COLOR_NONE,
+            unpackedPlot.f7.Length() - failedCount, unpackedPlot.f7.Length() );
+
+        exit( failedCount == 0 ? 0 : 1 );
+    }
 
     MTJobRunner<ValidateJob> jobs( pool );
-
-    std::mutex logLock;
     
     for( uint32 i = 0; i < threadCount; i++ )
     {
         auto& job = jobs[i];
 
-        job.logLock     = &logLock;
-        job.plotFile    = plotFiles[i];
-        job.startOffset = options.startOffset;
-        job.failCount   = 0;
+        job.plotFile     = plotFiles[i];
+        job.unpackedPlot = options.unpacked ? &unpackedPlot : nullptr;
+        job.startOffset  = options.startOffset;
+        job.failCount    = 0;
     }
 
     jobs.Run( threadCount );
@@ -170,6 +267,75 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     return proofFailCount == 0;
 }
 
+//-----------------------------------------------------------
+uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool )
+{
+    Log::Line( "Validating plot in-memory" );
+    Log::Line( "F7 entry count: %llu", plot.f7.Length() );
+    Log::Line( "" );
+
+    std::atomic<uint64> totalFailures = 0;
+
+    AnonMTJob::Run( pool, [&]( AnonMTJob* self ) {
+
+        auto Log = [=]( const char* msg, ... ) {
+            va_list args;
+            va_start( args, msg );
+            TVLog( self->_jobId, msg, args );
+            va_end( args );
+        };
+
+        uint64 count, offset, end;
+        GetThreadOffsets( self, (uint64)plot.f7.Length(), count, offset, end );
+
+        Log( "Validating proofs %10llu...%-10llu", offset, end );
+        self->SyncThreads();
+
+        const uint64 reportInterval = kCheckpoint1Interval * 20; // Report every 20 parks
+
+        uint64 fullProofXs[PROOF_X_COUNT];
+        uint64 failedCount = 0;
+
+        for( uint64 i = offset; i < end; i++ )
+        {
+            if( plot.FetchProof( i, fullProofXs ) )
+            {
+                uint64 outF7 = 0;
+                if( ValidateFullProof( plot.plot->K(), plot.plot->PlotId(), fullProofXs, outF7 ) )
+                {
+                    const uint32 expectedF7 = plot.f7[i];
+
+                    if( expectedF7 != outF7 )
+                        failedCount++;
+                }
+                else
+                    failedCount++;
+            }
+            else
+                failedCount++;
+
+            const uint64 proofsChecked = i - offset;
+            if( proofsChecked > 0 && proofsChecked % reportInterval == 0 || i + 1 == end )
+            {
+                Log( "Proofs validated: %10llu / %-10llu ( %.2lf %% ) [ %sFailed: %llu%s ]",
+                    proofsChecked, count, 
+                    (double)proofsChecked / count * 100.0,
+                    failedCount > 0 ? COLOR_RED_BOLD : COLOR_GREEN_BOLD, 
+                    failedCount,
+                    COLOR_NONE );
+            }
+        }
+
+        uint64 f = totalFailures.load( std::memory_order_acquire );
+
+        while( !totalFailures.compare_exchange_weak( 
+            f, f + failedCount,
+            std::memory_order_release, 
+            std::memory_order_relaxed ) );
+    });
+
+    return totalFailures;
+}
 
 
 //-----------------------------------------------------------
@@ -177,13 +343,7 @@ void ValidateJob::Log( const char* msg, ... )
 {
     va_list args;
     va_start( args, msg );
-    
-    logLock->lock();
-    fprintf( stdout, "[%3u] ", JobId() );
-    vfprintf( stdout, msg, args );
-    putc( '\n', stdout );
-    logLock->unlock();
-
+    TVLog( JobId(), msg, args );
     va_end( args );
 }
 
@@ -271,7 +431,9 @@ void ValidateJob::Run()
             bool success = true;
 
             if( k <= 32 )
+            {
                 success = FetchProof<true>( plot, t6Index, fullProofXs );
+            }
             else
                 success = FetchProof<false>( plot, t6Index, fullProofXs );
 
@@ -282,7 +444,7 @@ void ValidateJob::Run()
                 // Now we can validate the proof
                 uint64 outF7;
 
-                if( ValidateFullProof( plot, fullProofXs, outF7 ) )
+                if( ValidateFullProof( k, plot.PlotFile().PlotId(), fullProofXs, outF7 ) )
                     success = f7 == outF7;
                 else
                     success = false;
@@ -311,6 +473,248 @@ void ValidateJob::Run()
     this->failCount = proofFailCount;
 }
 
+
+//-----------------------------------------------------------
+UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, uint32 threadCount )
+{
+    ASSERT( plotFile );
+    const uint32 k = plotFile[0]->K();
+    ExitIf( k != 32, "Only k=32 plots are supported for unpacked validation." );
+
+    threadCount = threadCount == 0 ? pool.ThreadCount() : threadCount;
+
+    UnpackedK32Plot plot;
+
+    PlotReader* readers = bbcalloc<PlotReader>( threadCount );
+    for( uint32 i = 0; i < threadCount; i++ )
+        new ( (void*)&readers[i] ) PlotReader( *plotFile[i] );
+
+
+    PlotReader& plotReader = readers[0];
+
+    uint64 f7Count = plotReader.GetMaxF7EntryCount(); ExitIf( f7Count < 1, "No F7s found." );
+
+    // Load F7s
+    {
+        Log::Line( "Unpacking f7 values..." );
+        uint32* f7 = bbcvirtallocboundednuma<uint32>( f7Count );
+
+        uint64 missingF7 = 0;
+
+        AnonMTJob::Run( pool, threadCount, [&]( AnonMTJob* self ) {
+
+            PlotReader& reader = readers[self->_jobId];
+
+            const uint64 plotParkCount = reader.GetC3ParkCount();
+
+            uint64 parkCount, parkOffset, parkEnd;
+            GetThreadOffsets( self, plotParkCount, parkCount, parkOffset, parkEnd );
+
+            uint64 f7Buffer[kCheckpoint1Interval];
+            uint32* f7Writer = f7 + parkOffset * kCheckpoint1Interval;
+
+            for( uint64 i = parkOffset; i < parkEnd; i++ )
+            {
+                const int64 entryCount = reader.ReadC3Park( i, f7Buffer );
+
+                ExitIf( entryCount == 0, "Empty C3 park @ %llu.", i );
+
+                for( int64 e = 0; e < entryCount; e++ )
+                    f7Writer[e] = (uint32)f7Buffer[e];
+
+                f7Writer += entryCount;
+
+                if( entryCount < kCheckpoint1Interval )
+                {
+                    if( self->IsLastThread() && i + 1 == parkEnd )
+                    {
+                        missingF7 = kCheckpoint1Interval - entryCount;
+                        break;
+                    }
+                    else
+                        FatalErrorMsg( "C3 park %llu is not full and it is not the last park.", i );
+                }
+            }
+        });
+
+        f7Count        -= missingF7;
+        plot.f7.length = f7Count;
+        plot.f7.values = f7;
+    }
+    
+    // Read Park 7
+    Log::Line( "Reding park 7..." );
+    uint64* p7Indices = nullptr;
+    {
+        const uint64 park7Count = CDiv( f7Count, kEntriesPerPark );
+
+        #if _DEBUG
+            const size_t p7Size             = plotReader.PlotFile().TableSize( PlotTable::Table7 );
+            const size_t parkSize           = CalculatePark7Size( plotReader.PlotFile().K() );
+            const size_t potentialParkCount = p7Size / parkSize;
+            ASSERT( potentialParkCount >= park7Count );
+        #endif
+     
+        p7Indices = bbcvirtallocboundednuma<uint64>( park7Count * kEntriesPerPark );
+
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+            
+            PlotReader& reader = readers[self->_jobId];
+
+            uint64 parkCount, parkOffset, parkEnd;
+            GetThreadOffsets( self, park7Count, parkCount, parkOffset, parkEnd );
+
+            uint64* p7Writer = p7Indices + parkOffset * kEntriesPerPark;
+
+            for( uint64 i = parkOffset; i < parkEnd; i++ )
+            {
+                ExitIf( !reader.ReadP7Entries( i, p7Writer ), "Failed to read park 7 %llu.", i );
+                p7Writer += kEntriesPerPark;
+            }
+        });
+    }
+
+    
+    auto LoadBackPtrTable = [&]( const TableId table ) {
+
+        Log::Line( "Loading table %u", table+1 );
+    
+        const uint64 plotParkCount = plotReader.GetTableParkCount( (PlotTable)table );
+
+        Span<Pair> backPointers = bbcvirtallocboundednuma_span<Pair>( plotParkCount * kEntriesPerPark );
+        uint64     missingParks   = 0;
+        uint64     missingEntries = 0;
+
+
+        AnonMTJob::Run( pool, threadCount, [&]( AnonMTJob* self ) {
+        
+            PlotReader& reader = readers[self->_jobId];
+            
+            uint64 parkCount, parkOffset, parkEnd;
+            GetThreadOffsets( self, plotParkCount, parkCount, parkOffset, parkEnd );
+            
+            uint64 parkEntryCount;
+            uint128 linePoints[kEntriesPerPark];
+
+            Span<Pair> tableWriter = backPointers.Slice( parkOffset * kEntriesPerPark, parkCount * kEntriesPerPark );
+
+            for( uint64 i = parkOffset; i < parkEnd; i++ )
+            {
+                if( !reader.ReadLPPark( table, i, linePoints, parkEntryCount ) )
+                {
+                    // If its the last thread loading the park, there may be empty space
+                    // after the actual parks end, so these are allowed, but we stop processing parks after this.
+                    if( self->IsLastThread() )
+                    {
+                        missingParks = parkEnd - i;
+                        break;
+                    }
+                    else
+                        FatalErrorMsg( "Failed to read Table %u park %llu", table+1, i );
+                }
+
+                // Since we only support in-ram validation for k <= 32, we can do 64-bit LP reading
+                for( uint64 e = 0; e < parkEntryCount; e++ )
+                {
+                    const BackPtr bp = LinePointToSquare64( (uint64)linePoints[e] );
+                    tableWriter[e] = { .left = (uint32)bp.x, .right = (uint32)bp.y };
+                }
+
+                if( parkEntryCount < kEntriesPerPark )
+                {
+                    // We only allow incomplete parks at the end, so stop processing parks as soon as we encounter one
+                    if( self->IsLastThread() && i + 1 == parkEnd )
+                    {
+                        missingEntries = kEntriesPerPark - parkEntryCount;
+                        break;
+                    }
+                    else
+                        FatalErrorMsg( "Encountered a non-full park for table %u at index %llu. These are unsupported", table+1, i );
+                }
+
+                tableWriter = tableWriter.Slice( kEntriesPerPark );
+            }
+        });
+            
+        const uint64 tableEntryCount = ( plotParkCount * kEntriesPerPark ) - ( missingParks * kEntriesPerPark + missingEntries ); 
+        return backPointers.Slice( 0, tableEntryCount );
+    };
+    
+    /// Load T6 first so we can sort them on P7
+    Log::Line( "Loading back pointer tables..." );
+    auto t6 = LoadBackPtrTable( TableId::Table6 );
+    ASSERT( t6.Length() == f7Count );
+    {
+        // Span<Pair> sortedT6 = bbcvirtallocboundednuma_span<Pair>( t6.Length() );
+
+        AnonMTJob::Run( pool, threadCount, [=]( AnonMTJob* self ) {
+                    
+            uint64 count, offset, end;
+            GetThreadOffsets( self, f7Count, count, offset, end );
+
+            static_assert( sizeof( uint64 ) == sizeof( Pair ) );
+            const Span<uint64> reader( p7Indices + offset, count );
+                  Span<Pair>   writer( (Pair*)p7Indices + offset, count );
+
+            for( uint64 i = 0; i < count; i++ )
+                writer[i] = t6[reader[i]];
+        });
+        
+        plot.tables[(int)TableId::Table6] = Span<Pair>( (Pair*)p7Indices, f7Count );
+        bbvirtfreebounded( t6.values );
+    }
+
+    // Read the rest of the entries
+    plot.tables[(int)TableId::Table5] = LoadBackPtrTable( TableId::Table5 );
+    plot.tables[(int)TableId::Table4] = LoadBackPtrTable( TableId::Table4 );
+    plot.tables[(int)TableId::Table3] = LoadBackPtrTable( TableId::Table3 );
+    plot.tables[(int)TableId::Table2] = LoadBackPtrTable( TableId::Table2 );
+    plot.tables[(int)TableId::Table1] = LoadBackPtrTable( TableId::Table1 );
+    
+    Log::Line( "Decompressed plot into memory." );
+    return plot;
+}
+
+//-----------------------------------------------------------
+bool UnpackedK32Plot::FetchProof( const uint64 index, uint64 fullProofXs[PROOF_X_COUNT] )
+{
+    if( index >= this->f7.Length() )
+        return false;
+
+    uint64 lpIndices[2][PROOF_X_COUNT];
+
+    uint64* lpIdxSrc = lpIndices[0];
+    uint64* lpIdxDst = lpIndices[1];
+
+    *lpIdxSrc = index;
+
+    uint32 lookupCount = 1;
+    for( TableId table = TableId::Table6; table >= TableId::Table1; table-- )
+    {
+        ASSERT( lookupCount <= 32 );
+
+        const Span<Pair> plotTable = this->Table( table );
+
+        for( uint32 i = 0, dst = 0; i < lookupCount; i++, dst += 2 )
+        {
+            const uint64 idx = lpIdxSrc[i];
+
+            if( idx >= plotTable.Length() )
+                return false;
+
+            const Pair ptr = plotTable[idx];
+            lpIdxDst[dst+0] = ptr.right;
+            lpIdxDst[dst+1] = ptr.left;
+        }
+
+        lookupCount <<= 1;
+        std::swap( lpIdxSrc, lpIdxDst );
+    }
+
+    // Full proof x's will be at the src ptr
+    memcpy( fullProofXs, lpIdxSrc, sizeof( uint64 ) * PROOF_X_COUNT );
+    return true;
+}
 
 //-----------------------------------------------------------
 template<bool Use64BitLpToSquare>
@@ -362,10 +766,8 @@ bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_
 }
 
 //-----------------------------------------------------------
-bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 )
+bool ValidateFullProof( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 )
 {
-    const uint32 k = plot.PlotFile().K();
-
     uint64   fx  [PROOF_X_COUNT];
     MetaBits meta[PROOF_X_COUNT];
 
@@ -375,7 +777,7 @@ bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uin
         
         // Prepare ChaCha key
         byte key[32] = { 1 };
-        memcpy( key + 1, plot.PlotFile().PlotId(), 31 );
+        memcpy( key + 1, plotId, 31 );
 
         chacha8_ctx chacha;
         chacha8_keysetup( &chacha, key, 256, NULL );
@@ -393,11 +795,11 @@ bool ValidateFullProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT], uin
             // Get the starting and end locations of y in bits relative to our block
             const uint64 bitStart = x * k - blockIdx * kF1BlockSizeBits;
 
-            BitReader hashBits( (uint64*)blocks, sizeof( blocks ) * 8 );
+            CPBitReader hashBits( blocks, sizeof( blocks ) * 8 );
             hashBits.Seek( bitStart );
 
             // uint64 y = SliceUInt64FromBits( blocks, bitStart, k ); // #TODO: Figure out what's wrong with this method.
-            uint64 y = hashBits.ReadBits64( k );
+            uint64 y = hashBits.Read64( k );
             y = ( y << kExtraBits ) | ( x >> xShift );
 
             fx  [i] = y;
@@ -521,11 +923,11 @@ void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs
         // Get the starting and end locations of y in bits relative to our block
         const uint64 bitStart = x * k - blockIdx * kF1BlockSizeBits;
 
-        BitReader hashBits( (uint64*)blocks, sizeof( blocks ) * 8 );
+        CPBitReader hashBits( blocks, sizeof( blocks ) * 8 );
         hashBits.Seek( bitStart );
 
         // uint64 y = SliceUInt64FromBits( blocks, bitStart, k ); // #TODO: Figure out what's wrong with this method.
-        uint64 y = hashBits.ReadBits64( k );
+        uint64 y = hashBits.Read64( k );
         y = ( y << kExtraBits ) | ( x >> xShift );
 
         fx[i] = y;
@@ -660,27 +1062,24 @@ inline uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 b
     return field;
 }
 
+
 //-----------------------------------------------------------
-const char USAGE[] = R"(validate [OPTIONS] <plot_path>
-
-Validates all of a plot's values to ensure they all contain valid proofs.
-
-[NOTES]
-You can specify the thread count in the bladebit global option '-t'.
-
-[ARGUMENTS]
-<plot_path>   : Path to the plot file to be validated.
-
-[OPTIOINS]
- -m, --in-ram : Loads the whole plot file into memory before validating.
-
- -o, --offset : Percentage offset at which to start validating.
-                Ex (start at 50%): bladebit validate -o 50 /path/to/my/plot
-
- -h, --help   : Print this help message and exit.
-)";
-
-void PlotValidatorPrintUsage()
+void TVLog( const uint64 id, const char* msg, va_list args )
 {
-    Log::Line( USAGE );
+    _logLock.lock();
+    fprintf( stdout, "[%3u] ", id );
+    vfprintf( stdout, msg, args );
+    putc( '\n', stdout );
+    _logLock.unlock();
 }
+
+//-----------------------------------------------------------
+void TLog( const uint64 id, const char* msg, ... )
+{
+    va_list args;
+    va_start( args, msg );
+    TVLog( id, msg, args );
+    va_end( args );
+}
+
+
