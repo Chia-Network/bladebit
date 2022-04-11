@@ -716,7 +716,7 @@ public:
         const uint64 tableLength    = _context.entryCounts[(int)TableId::Table7];
         const uint32 c1TotalEntries = (uint32)CDiv( tableLength, (int)c1Interval ) + 1; // +1 because chiapos adds an extra '0' entry at the end
         const uint32 c2TotalEntries = (uint32)CDiv( tableLength, (int)c2Interval ) + 1; // +1 because we add a short-circuit entry to prevent C2 lookup overflows
-                                                                                        // #TODO: Remove the extra c2 entry when we support >k^32 entries
+                                                                                        // #TODO: Remove the extra c2 entry when we support >k^32 entries?
 
         const size_t c1TableSizeBytes = c1TotalEntries * sizeof( uint32 );
         const size_t c2TableSizeBytes = c2TotalEntries * sizeof( uint32 );
@@ -741,7 +741,6 @@ public:
         uint32* c1Writer = c1Buffer;
         uint32* c2Writer = c2Buffer;
 
-        // #TODO: We have to allow extra entries here so <= _numBuckets
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
             // Load next bucket in the background
@@ -826,16 +825,16 @@ public:
                 }
                 
                 
+            #if _DEBUG
                 // #TODO: TEST: Remove this
                 // Dump f7's that have the value of 0xFFFFFFFF for now,
                 // this is just for compatibility with RAM bladebit
                 // for testing plots against it.
-            #if _DEBUG
-                if( isLastBucket )
-                {
-                    while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
-                        c3BucketLength--;
-                }
+                // if( isLastBucket )
+                // {
+                //     while( c3F7[c3BucketLength-1] == 0xFFFFFFFF )
+                //         c3BucketLength--;
+                // }
             #endif
 
                 // See TableWriter::GetC3ParkCount for details
