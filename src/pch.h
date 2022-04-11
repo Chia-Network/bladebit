@@ -28,5 +28,6 @@ bool AssertLog( int line, const char* file, const char* func );
 #include "Globals.h"
 #include "Types.h"
 #include "Config.h"
+#include "util/Span.h"
 
 #endif // __cplusplus

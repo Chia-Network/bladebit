@@ -167,7 +167,13 @@ public:
     ~PlotReader();
 
     uint64 GetC3ParkCount() const;
+
+    // Get the maximum potential F7 count.
+    // This may be more than the actual number of F7s that we have,
+    // since the last park is likely not full.
     uint64 GetMaxF7EntryCount() const;
+
+    size_t GetTableParkCount( const PlotTable table ) const;
 
     // Read a whole C3 park into f7Buffer.
     // f7Buffer must hold at least as many as the amount of entries
@@ -189,6 +195,7 @@ public:
     bool FetchProofFromP7Entry( uint64 p7Entry, uint64 proof[32] );
 
     inline IPlotFile& PlotFile() const { return _plot; }
+
 private:
 
     bool ReadLPParkComponents( TableId table, uint64 parkIndex, 

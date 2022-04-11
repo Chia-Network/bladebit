@@ -149,6 +149,14 @@ inline T* bbcalloc( size_t count )
 
 //-----------------------------------------------------------
 template<typename T>
+inline Span<T> bbcalloc_span( size_t count )
+{
+    T* ptr = bbmalloc<T>( count * sizeof( T ) );
+    return Span<T>( ptr, count );
+}
+
+//-----------------------------------------------------------
+template<typename T>
 inline T* bbcrealloc( T* ptr, size_t newCount )
 {
     return bbrealloc( ptr, newCount * sizeof( T ) );
@@ -264,6 +272,13 @@ inline T* bbcvirtallocboundednuma( size_t count )
     }
    
    return ptr;
+}
+
+//-----------------------------------------------------------
+template<typename T = void>
+inline Span<T> bbcvirtallocboundednuma_span( size_t count )
+{
+    return Span<T>( bbcvirtallocboundednuma<T>( count ), count );
 }
 
 //-----------------------------------------------------------

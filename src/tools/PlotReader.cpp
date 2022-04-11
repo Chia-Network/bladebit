@@ -35,18 +35,50 @@ uint64 PlotReader::GetC3ParkCount() const
     // However, to make sure this is the case, we'll have to 
     // read-in all C1 entries and ensure we hit an empty one,
     // to ensure we don't run into dead/alignment-space
-    const size_t c1Size    = _plot.TableSize( PlotTable::C1 );
-    const size_t kByteSize = CDiv( _plot.K(), 8 );
+    const size_t c1TableSize = _plot.TableSize( PlotTable::C1 );
+    const size_t f7Size      = CDiv( _plot.K(), 8 );
+    const uint64 c3ParkCount = std::max( c1TableSize / f7Size, (size_t)1 ) - 1;
 
-    const uint64 plotC3ParkCount = std::max( c1Size / kByteSize, (size_t)1 ) - 1;
-    return plotC3ParkCount;
+    // Or just do this: 
+    //  Same thing, but we use it
+    //  because we want to validate the plot for farming, 
+    //  and farming goes to C1 tables before it goes to C3
+    // const size_t c3ParkSize  = CalculateC3Size();
+    // const size_t c3TableSize = _plot.TableSize( PlotTable::C3 );
+    // const size_t c3ParkCount = c3TableSize / c3ParkSize;
 
+    return c3ParkCount;
 }
 
 //-----------------------------------------------------------
 uint64 PlotReader::GetMaxF7EntryCount() const
 {
-    return GetC3ParkCount() * kCheckpoint1Interval;
+    const size_t c3ParkCount = GetC3ParkCount();
+    return c3ParkCount * kCheckpoint1Interval;
+}
+
+//-----------------------------------------------------------
+size_t PlotReader::GetTableParkCount( const PlotTable table ) const
+{
+    switch( table )
+    {
+        case PlotTable::C3:
+            return GetC3ParkCount();
+    
+        case PlotTable::Table7:
+            return CDiv( GetMaxF7EntryCount(), kEntriesPerPark );
+
+        case PlotTable::Table1:
+        case PlotTable::Table2:
+        case PlotTable::Table3:
+        case PlotTable::Table4:
+        case PlotTable::Table5:
+        case PlotTable::Table6:
+            return _plot.TableSize( table ) / CalculateParkSize( (TableId)table );
+
+        default:
+            return 0;
+    }
 }
 
 //-----------------------------------------------------------
