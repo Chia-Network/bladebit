@@ -355,14 +355,13 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli )
     // Test P7, dump it
     // DumpP7( refPlot, "/mnt/p5510a/reference/p7.tmp" );
 
-    TestTable( refPlot, tgtPlot, TableId::Table7 );
-
-
+    // TestTable( refPlot, tgtPlot, TableId::Table7 );
     // TestTable( refPlot, tgtPlot, TableId::Table3 );
-    for( TableId table = TableId::Table1; table <= TableId::Table7; table++ )
-        TestTable( refPlot, tgtPlot, table );
 
     TestC3Table( refPlot, tgtPlot );
+
+    for( TableId table = TableId::Table1; table <= TableId::Table7; table++ )
+        TestTable( refPlot, tgtPlot, table );
 }
 
 //-----------------------------------------------------------
@@ -412,11 +411,22 @@ void TestC3Table( PlotInfo& ref, PlotInfo& tgt )
     const uint c1Length = std::min( refC1.length, tgtC1.length );
     {
         Log::Line( "Validating C1 table... " );
+        uint64 failCount = 0;
         for( uint i = 0; i < c1Length; i++ )
         {
-            ExitIf( refC1[i] != tgtC1[i], "C1 table mismatch @ index %u. Ref: %u Tgt: %u", i, refC1[i], tgtC1[i] );
+            if( refC1[i] != tgtC1[i] )
+            {
+                if( failCount == 0 )
+                    Log::Line( "C1 table mismatch @ index %u. Ref: %u Tgt: %u", i, refC1[i], tgtC1[i] );
+
+                failCount++;
+            }
         }
-        Log::Line( "Success!" );
+
+        if( failCount == 0 )
+            Log::Line( "Success!" );
+        else
+            Log::Line( "C1 table mismatch: %llu entries failed.", failCount );
     }
 
     // Check C2
@@ -426,11 +436,23 @@ void TestC3Table( PlotInfo& ref, PlotInfo& tgt )
     const uint c2Length = std::min( refC2.length, tgtC2.length );
     {
         Log::Line( "Validating C2 table... " );
+
+        uint64 failCount = 0;
         for( uint i = 0; i < c2Length; i++ )
         {
-            FatalIf( refC2[i] != tgtC2[i], "C2 table mismatch @ index %u. Ref: %u Tgt: %u", i, refC1[i], tgtC1[i] );
+            if( refC2[i] != tgtC2[i] )
+            {
+                if( failCount == 0 )
+                    Log::Line( "C2 table mismatch @ index %u. Ref: %u Tgt: %u", i, refC2[i], tgtC2[i] );
+
+                failCount++;
+            }
         }
-        Log::Line( "Success!" );
+
+        if( failCount == 0 )
+            Log::Line( "Success!" );
+        else
+            Log::Line( "C2 table mismatch: %llu entries failed.", failCount );
     }
 
     const uint64 f7Count = c1Length * (uint64)kCheckpoint1Interval;

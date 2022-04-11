@@ -369,10 +369,10 @@ void DiskPlotPhase2::RunWithBuckets()
         #endif
 
         // Ensure the last table finished writing to the bitfield
-        Duration writeWaitTime = Duration::zero();
+        _ioTableWaitTime = Duration::zero();
 
         if( table < TableId::Table7 )
-            bitFieldFence.Wait( writeWaitTime );
+            bitFieldFence.Wait( _ioTableWaitTime );
 
         // Submit l marking table for writing
         queue.WriteFile( lTableFileId, 0, lMarkingTable, _markingTableSize );
@@ -385,8 +385,8 @@ void DiskPlotPhase2::RunWithBuckets()
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished marking table %d in %.2lf seconds.", table, elapsed );
-        Log::Line( "Table %d I/O wait time: %.2lf seconds.", table, TicksToSeconds( writeWaitTime + reader.IOWaitTime() ) );
-        p2WaitTime += writeWaitTime + reader.IOWaitTime();
+        Log::Line( "Table %d I/O wait time: %.2lf seconds.", table, TicksToSeconds( _ioTableWaitTime ) );
+        p2WaitTime += _ioTableWaitTime;
 
         allocator.PopToMarker( stackMarker );
         ASSERT( allocator.Size() == stackMarker );
@@ -469,7 +469,7 @@ void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader,
     for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
     {
         reader.LoadNextBucket();
-        reader.UnpackBucket( bucket, pairs, map );
+        reader.UnpackBucket( bucket, pairs, map, _ioTableWaitTime );
 
         AnonMTJob::Run( *_context.threadPool, _context.p2ThreadCount, [=]( AnonMTJob* self ) { 
             

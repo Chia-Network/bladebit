@@ -442,8 +442,7 @@ public:
                 LoadBucket( bucket + 1 );
 
             // Wait for and unpack our current bucket
-            const uint64 bucketLength = rTableReader.UnpackBucket( bucket, pairs, map );   // This will wait on the read fence
-            _ioWaitTime += rTableReader.IOWaitTime();
+            const uint64 bucketLength = rTableReader.UnpackBucket( bucket, pairs, map, _ioWaitTime );   // This will wait on the read fence
 
             uint32* lEntries;
 

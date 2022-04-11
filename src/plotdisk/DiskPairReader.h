@@ -307,7 +307,7 @@ struct DiskPairAndMapReader
     }
 
     //-----------------------------------------------------------
-    uint64 UnpackBucket( const uint32 bucket, Pair* outPairs, uint64* outMap )
+    uint64 UnpackBucket( const uint32 bucket, Pair* outPairs, uint64* outMap, Duration& ioWait )
     {
         DiskBufferQueue& ioQueue = *_context.ioQueue;
 
@@ -315,7 +315,7 @@ struct DiskPairAndMapReader
         const size_t blockSize    = ioQueue.BlockSize( FileId::T1 );
         const size_t blockBitSize = blockSize * 8;
 
-        _fence.Wait( bucket + 1, _ioWaitTime );
+        _fence.Wait( bucket + 1, ioWait );
 
         const byte* pairBuffer = (byte*)_pairBuffers[loadIdx];
 
@@ -364,9 +364,6 @@ struct DiskPairAndMapReader
         return (uint64)bucketLength;
     }
 
-    //-----------------------------------------------------------
-    inline Duration IOWaitTime() const { return _ioWaitTime; }
-
 private:
     DiskPlotContext& _context;
     Fence&           _fence;
@@ -377,7 +374,6 @@ private:
     uint32           _pairOverflowBits  [_numBuckets];
     uint64           _pairBucketLoadSize[_numBuckets];
 
-    Duration         _ioWaitTime    = Duration::zero();
     uint64           _entriesLoaded = 0;
     uint32           _bucketsLoaded = 0;
     uint32           _threadCount;
