@@ -61,6 +61,15 @@ constexpr inline T bblog2( T x )
 }
 
 
+//-----------------------------------------------------------
+constexpr inline int64 bbconst_ceil( const double x )
+{
+    return (static_cast<double>( static_cast<int64>(x) ) == x) ?
+        static_cast<int64>( x ) :
+        static_cast<int64>( x ) + (x > 0.0 ? 1 : 0);
+}
+
+
 // Divide a by b and apply ceiling if needed.
 //-----------------------------------------------------------
 template <typename T>

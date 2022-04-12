@@ -24,18 +24,15 @@
 
     #include <pthread.h>
     #include <semaphore.h>
-    #include <errno.h>
+    #include <alloca.h>
+    #include <signal.h>
     #include <unistd.h>
     #include <sys/mman.h>
     #include <time.h>
-    #include <alloca.h>
-    #include <signal.h>
 
     #if __linux__
         #include <sys/sysinfo.h>
     #elif __APPLE__
-        #include <mach/mach.h>
-        #include <fcntl.h>
     #endif
 
     #define BBDebugBreak() raise( SIGTRAP )

@@ -540,14 +540,14 @@ public:
     //-----------------------------------------------------------
     inline Bits()
     {
-        if constexpr ( BitSize )
+        if constexpr ( BitSize > 0 )
             _fields[0] = 0;
     }
 
     //-----------------------------------------------------------
     inline Bits( uint64 value, uint32 sizeBits )
     {
-        static_assert( BitSize, "Attempting to write to a zero-sized Bits." );
+        static_assert( BitSize > 0, "Attempting to write to a zero-sized Bits." );
         
         _fields[0] = 0;
         Write( value, sizeBits );

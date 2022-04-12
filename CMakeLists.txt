@@ -32,7 +32,7 @@ include(FetchContent)
 FetchContent_Declare(
   bls
   GIT_REPOSITORY https://github.com/Chia-Network/bls-signatures.git
-  GIT_TAG        1.0.6
+  GIT_TAG        1.0.10
 )
 
 set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")
