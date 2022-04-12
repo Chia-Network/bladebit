@@ -174,18 +174,18 @@
                 /// Validate
                 "-t", "32",
                 // "-t", "1",
-                "validate",
+                // "validate",
                 // "-m",
-                "-u",
+                // "-u",
                 // "-o", "99.7",
-                "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-03-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot.tmp",
+                // "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-03-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot.tmp",
 
                 // "/mnt/p5510a/disk_tmp/plot.dat"
 
                 /// Compare
-                // "plotcmp",
-                // "/mnt/p5510a/disk_tmp/plot-k32-2022-04-11-15-18-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
-                // "/mnt/p5510a/disk_tmp/plot-k32-2022-04-11-15-05-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                "plotcmp",
+                "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-53-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+                "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-03-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
             ]
         },
 
