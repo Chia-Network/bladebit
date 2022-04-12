@@ -70,10 +70,11 @@ public:
 
             uint32 shift = 0;
 
-            const uint32 lastByteMask = 0xFF >> remainderBits;
-                  uint32 masks[8]     = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+            const uint32 lastByteRemainderBits = remainderBits & 7;    // & 7 == % 8
+            const uint32 lastByteMask          = 0xFF >> lastByteRemainderBits;
+                  uint32 masks[8]              = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
             
-            masks[MaxIter-1] = lastByteMask;
+            masks[iterations-1] = lastByteMask;
 
             for( int32 iter = 0; iter < iterations ; iter++, shift += shiftBase )
             {

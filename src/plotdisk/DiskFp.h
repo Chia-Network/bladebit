@@ -713,7 +713,7 @@ public:
         const uint64 tableLength    = _context.entryCounts[(int)TableId::Table7];
         const uint32 c1TotalEntries = (uint32)CDiv( tableLength, (int)c1Interval ) + 1; // +1 because chiapos adds an extra '0' entry at the end
         const uint32 c2TotalEntries = (uint32)CDiv( tableLength, (int)c2Interval ) + 1; // +1 because we add a short-circuit entry to prevent C2 lookup overflows
-                                                                                        // #TODO: Remove the extra c2 entry when we support >k^32 entries?
+                                                                                        // #TODO: Remove the extra c2 entry?
 
         const size_t c1TableSizeBytes = c1TotalEntries * sizeof( uint32 );
         const size_t c2TableSizeBytes = c2TotalEntries * sizeof( uint32 );
@@ -752,8 +752,15 @@ public:
             uint32* f7 = ((uint32*)_y[0]) + kCheckpoint1Interval;
 
             using T7Entry = FpEntry<TableId::Table7>;
+            static_assert( sizeof( T7Entry ) == sizeof( uint64 ) );
 
             ExpandEntries<T7Entry, true>( packedEntries, 0, (T7Entry*)_entries[0], (int64)bucketLength );
+            // #if _DEBUG
+            // {
+            //     UnpackEntries<T7Entry, uint32, true>( bucket, (T7Entry*)_entries[0], (int64)bucketLength, f7, _map[0], nullptr );
+            //     RadixSort256::Sort<BB_DP_MAX_JOBS>( *_context.threadPool, f7, (uint32*)_map[0], bucketLength );
+            // }
+            // #endif
             SortEntries<T7Entry, Info::YBitSize>( (T7Entry*)_entries[0], (T7Entry*)_entries[1], (int64)bucketLength );
 
             // Any bucket count above 128 will only require 3 iterations w/ k=32, so 
@@ -881,7 +888,7 @@ public:
         // write C1 and C2 buffers to file, then seek back to the end of the C3 table
 
         c1Buffer[c1TotalEntries-1] = 0;          // Chiapos adds a trailing 0
-        c2Buffer[c2TotalEntries-1] = 0xFFFFFFFF; // C2 overflow protection
+        c2Buffer[c2TotalEntries-1] = 0xFFFFFFFF; // C2 overflow protection      // #TODO: Remove?
 
         _readFence.Reset( 0 );
 
@@ -1027,8 +1034,11 @@ public:
         T* input  = entries;
         T* output = tmpEntries;
 
-        const uint32 lastByteMask   = 0xFF >> remainderBits;
-              uint32 masks[MaxIter] = { 0xFF, 0xFF, 0xFF, lastByteMask };
+        const uint32 lastByteRemainderBits = remainderBits & 7;    // & 7 == % 8
+        const uint32 lastByteMask          = 0xFF >> lastByteRemainderBits;
+              uint32 masks[MaxIter]        = { 0xFF, 0xFF, 0xFF, 0xFF };
+
+        masks[iterations-1] = lastByteMask;
 
         for( int32 iter = 0; iter < iterations ; iter++, shift += shiftBase )
         {

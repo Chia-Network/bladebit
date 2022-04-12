@@ -113,7 +113,7 @@ void DiskPlotPhase1::Run()
         #endif
 
         #if BB_DP_DBG_SKIP_TO_C_TABLES
-            WriteCTables();
+            goto CTables;
         #endif
 
         return;
@@ -220,6 +220,8 @@ FP:
 
     Log::Line( " Phase 1 Total I/O wait time: %.2lf", TicksToSeconds( _cx.ioWaitTime ) + _cx.ioQueue->IOBufferWaitTime() );
 
+
+CTables:
     WriteCTables();
 }
 
