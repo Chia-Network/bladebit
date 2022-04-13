@@ -92,6 +92,13 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
         Log::Line( "Warning: vm_behavior_set() failed with error: %d .", (int32)r );
     }
 
+    // Try wiring it
+    r = vm_wire( mach_host_self(), task, ptr, allocSize, VM_PROT_READ | VM_PROT_WRITE );
+    if( r != 0 )
+    {
+        Log::Line( "Warning: vm_wire() failed with error: %d .", (int32)r );
+    }
+
     // Store page size
     // #TODO: Have the user specify an alignment instead so we don't have to store at page size boundaries.
     (*(size_t*)ptr) = allocSize;
