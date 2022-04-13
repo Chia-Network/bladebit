@@ -32,14 +32,18 @@
 
     #if __linux__
         #include <sys/sysinfo.h>
+
+        typedef pthread_t ThreadId;
+        typedef sem_t     SemaphoreId;
     #elif __APPLE__
+        #include <dispatch/dispatch.h>
+
+        typedef pthread_t ThreadId;
+        typedef dispatch_semaphore_t SemaphoreId;
     #endif
 
     #define BBDebugBreak() raise( SIGTRAP )
-    
 
-    typedef pthread_t ThreadId;
-    typedef sem_t     SemaphoreId;
 
 #else
     #error Unsupported platform

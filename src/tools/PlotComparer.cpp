@@ -345,12 +345,12 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli )
         tgtPlot.DumpHeader();
     }
 
-    ExitIf( refPlot.K() != 32, "Plot A is k%u. Only k32 plots are currently supported.", refPlot.K() );
-    ExitIf( tgtPlot.K() != 32, "Plot B is k%u. Only k32 plots are currently supported.", tgtPlot.K() );
+    FatalIf( refPlot.K() != 32, "Plot A is k%u. Only k32 plots are currently supported.", refPlot.K() );
+    FatalIf( tgtPlot.K() != 32, "Plot B is k%u. Only k32 plots are currently supported.", tgtPlot.K() );
 
-    ExitIf( !MemCmp( refPlot.PlotId(), tgtPlot.PlotId(), BB_PLOT_ID_LEN ), "Plot id mismatch." );
-    ExitIf( !MemCmp( refPlot.PlotMemo(), tgtPlot.PlotMemo(), std::min( refPlot.PlotMemoSize(), tgtPlot.PlotMemoSize() ) ), "Plot memo mismatch." );
-    ExitIf( refPlot.K() != tgtPlot.K(), "K value mismatch." );
+    FatalIf( !MemCmp( refPlot.PlotId(), tgtPlot.PlotId(), BB_PLOT_ID_LEN ), "Plot id mismatch." );
+    FatalIf( !MemCmp( refPlot.PlotMemo(), tgtPlot.PlotMemo(), std::min( refPlot.PlotMemoSize(), tgtPlot.PlotMemoSize() ) ), "Plot memo mismatch." );
+    FatalIf( refPlot.K() != tgtPlot.K(), "K value mismatch." );
 
     // Test P7, dump it
     // DumpP7( refPlot, "/mnt/p5510a/reference/p7.tmp" );
@@ -700,7 +700,7 @@ void UnpackPark7( const byte* srcBits, uint64* dstEntries )
 void DumpP7( PlotInfo& plot, const char* path )
 {
     FileStream file;
-    ExitIf( !file.Open( path, FileMode::Create, FileAccess::Write, FileFlags::LargeFile | FileFlags::NoBuffering ),
+    FatalIf( !file.Open( path, FileMode::Create, FileAccess::Write, FileFlags::LargeFile | FileFlags::NoBuffering ),
         "Failed to open file at '%s' with error: %d.", path, file.GetError() );
 
     const size_t parkSize = CalculatePark7Size( plot.K() );
@@ -733,7 +733,7 @@ void DumpP7( PlotInfo& plot, const char* path )
     uint64* block = bbvirtalloc<uint64>( blockSize );   
     
     int err;
-    ExitIf( !IOJob::WriteToFile( file, entries, numEntries * sizeof( uint64 ), block, blockSize, err ),
+    FatalIf( !IOJob::WriteToFile( file, entries, numEntries * sizeof( uint64 ), block, blockSize, err ),
         "Entry write failed with error: %d.", err );
 
     Log::Line( "All done." );

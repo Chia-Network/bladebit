@@ -10,7 +10,6 @@ void Exit( int code )
 //-----------------------------------------------------------
 void FatalExit()
 {
-    SysHost::DumpStackTrace();
     Exit( 1 );
 }
 
@@ -35,31 +34,37 @@ void FatalErrorMsg( const char* message, ... )
 }
 
 //-----------------------------------------------------------
-void VFatal( const char* message, va_list args )
+void PanicExit()
 {
-    VFatalErrorMsg( message, args );
-    FatalExit();
+    SysHost::DumpStackTrace();
+    Exit( 1 );
 }
 
 //-----------------------------------------------------------
-void _Fatal( const char* message, ... )
+void VPanicErrorMsg( const char* message, va_list args  )
+{
+    Log::Flush();
+    Log::FlushError();
+
+    Log::Error( "\n*** Panic!!! *** Fatal Error:  " );
+    Log::Error( message, args );
+    Log::FlushError();
+}
+
+//-----------------------------------------------------------
+void PanicErrorMsg( const char* message, ... )
 {
     va_list args;
     va_start( args, message );
-    VFatal( message, args );
+    VPanicErrorMsg( message, args );
     va_end( args );
 }
 
 //-----------------------------------------------------------
-void _FatalIf( bool condition, const char* message, ... )
+void VFatal( const char* message, va_list args )
 {
-    if( condition )
-    {
-        va_list args;
-        va_start( args, message );
-        VFatal( message, args );
-        va_end( args );
-    }
+    VFatalErrorMsg( message, args );
+    FatalExit();
 }
 
 //-----------------------------------------------------------

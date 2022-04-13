@@ -201,8 +201,8 @@ bool ValidatePlot( const ValidatePlotOptions& options )
         }
     }
 
-    ExitIf( !plotFile->IsOpen(), "Failed to open plot at path '%s'.", options.plotPath.c_str() );
-    ExitIf( options.unpacked && plotFile->K() != 32, "Unpacked plots are only supported for k=32 plots." );
+    FatalIf( !plotFile->IsOpen(), "Failed to open plot at path '%s'.", options.plotPath.c_str() );
+    FatalIf( options.unpacked && plotFile->K() != 32, "Unpacked plots are only supported for k=32 plots." );
 
     Log::Line( "Validating plot %s", options.plotPath.c_str() );
     Log::Line( "K       : %u", plotFile->K() );
@@ -479,7 +479,7 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
 {
     ASSERT( plotFile );
     const uint32 k = plotFile[0]->K();
-    ExitIf( k != 32, "Only k=32 plots are supported for unpacked validation." );
+    FatalIf( k != 32, "Only k=32 plots are supported for unpacked validation." );
 
     threadCount = threadCount == 0 ? pool.ThreadCount() : threadCount;
 
@@ -492,7 +492,7 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
 
     PlotReader& plotReader = readers[0];
 
-    uint64 f7Count = plotReader.GetMaxF7EntryCount(); ExitIf( f7Count < 1, "No F7s found." );
+    uint64 f7Count = plotReader.GetMaxF7EntryCount(); FatalIf( f7Count < 1, "No F7s found." );
 
     // Load F7s
     {
@@ -517,7 +517,7 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
             {
                 const int64 entryCount = reader.ReadC3Park( i, f7Buffer );
 
-                ExitIf( entryCount == 0, "Empty C3 park @ %llu.", i );
+                FatalIf( entryCount == 0, "Empty C3 park @ %llu.", i );
 
                 for( int64 e = 0; e < entryCount; e++ )
                     f7Writer[e] = (uint32)f7Buffer[e];
@@ -568,7 +568,7 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
 
             for( uint64 i = parkOffset; i < parkEnd; i++ )
             {
-                ExitIf( !reader.ReadP7Entries( i, p7Writer ), "Failed to read park 7 %llu.", i );
+                FatalIf( !reader.ReadP7Entries( i, p7Writer ), "Failed to read park 7 %llu.", i );
                 p7Writer += kEntriesPerPark;
             }
         });
