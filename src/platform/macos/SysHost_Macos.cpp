@@ -5,13 +5,17 @@
 #include <errno.h>
 #include <mach/mach.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sodium.h>
 
 //-----------------------------------------------------------
 size_t SysHost::GetPageSize()
 {
-    // #TODO: Use host_page_size
-    return (size_t)getpagesize();
+    vm_size_t pageSize = 0;
+    kern_return_t r = host_page_size( mach_host_self(), & pageSize );
+    PanicIf( r != 0, "host_page_size failed with error: %d.", (int32)r );
+
+    return (size_t)pageSize;
 }
 
 //-----------------------------------------------------------
@@ -65,46 +69,73 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
 {
     // #TODO: Use vm_allocate
     // #TODO: Consider initialize
-    
-    const size_t pageSize = (size_t)getpagesize();
 
-    // Align size to page boundary
-    size = RoundUpToNextBoundary( size, (int)pageSize );
+    const size_t      pageSize = GetPageSize();
+    const mach_port_t task     = mach_task_self();
 
-    void* ptr = mmap( NULL, size, 
-        PROT_READ | PROT_WRITE, 
-        MAP_ANONYMOUS | MAP_PRIVATE,
-        -1, 0
-    );
+    const vm_size_t allocSize = (vm_size_t)RoundUpToNextBoundary( size, (int)pageSize ) + pageSize;
+    vm_address_t ptr = 0;
+    kern_return_t r = vm_allocate( task,&ptr,allocSize, TRUE );
 
-    if( ptr == MAP_FAILED )
+    if( r != 0 )
     {
-        #if _DEBUG
-            const int err = errno;
-            Log::Line( "Error: mmap() returned %d (0x%x).", err, err );
-            ASSERT( 0 );
-        #endif
-    
+        Log::Line( "Warning: vm_allocate() failed with error: %d .", (int32)r );
         return nullptr;
     }
-    else if( initialize )
+    ASSERT( ptr );
+
+    // #TODO: Use a hinting system for this.
+    // Hit the memory to be accessed sequentially
+    r = vm_behavior_set( task, ptr, allocSize, VM_BEHAVIOR_SEQUENTIAL );
+    if( r != 0 )
     {
-        // Initialize memory 
-        // (since physical pages are not allocated until the actual pages are accessed)
-
-        byte* page = (byte*)ptr;
-
-        const size_t pageCount = size / pageSize;
-        const byte*  endPage   = page + pageCount * pageSize;
-
-        do
-        {
-            *page = 0;
-            page += pageSize;
-        } while( page < endPage );
+        Log::Line( "Warning: vm_behavior_set() failed with error: %d .", (int32)r );
     }
 
-    return ptr;
+    // Store page size
+    // #TODO: Have the user specify an alignment instead so we don't have to store at page size boundaries.
+    (*(size_t*)ptr) = allocSize;
+
+    return (void*)(uintptr_t)(ptr + sizeof( size_t ) );
+//    const size_t pageSize = (size_t)getpagesize();
+//
+//    // Align size to page boundary
+//    size = RoundUpToNextBoundary( size, (int)pageSize );
+//
+//    void* ptr = mmap( NULL, size,
+//        PROT_READ | PROT_WRITE,
+//        MAP_ANONYMOUS | MAP_PRIVATE,
+//        -1, 0
+//    );
+//
+//    if( ptr == MAP_FAILED )
+//    {
+//        #if _DEBUG
+//            const int err = errno;
+//            Log::Line( "Error: mmap() returned %d (0x%x).", err, err );
+//            ASSERT( 0 );
+//        #endif
+//
+//        return nullptr;
+//    }
+//    else if( initialize )
+//    {
+//        // Initialize memory
+//        // (since physical pages are not allocated until the actual pages are accessed)
+//
+//        byte* page = (byte*)ptr;
+//
+//        const size_t pageCount = size / pageSize;
+//        const byte*  endPage   = page + pageCount * pageSize;
+//
+//        do
+//        {
+//            *page = 0;
+//            page += pageSize;
+//        } while( page < endPage );
+//    }
+//
+//    return ptr;
 }
 
 //-----------------------------------------------------------
@@ -114,40 +145,64 @@ void SysHost::VirtualFree( void* ptr )
     if( !ptr )
         return;
 
-    // #TODO: Have user specify size instead.
+    // #TODO: Have user specify size instead, so we can store the size not at page alignment.
     const size_t pageSize = GetPageSize();
 
     byte* realPtr    = ((byte*)ptr) - pageSize;
     const size_t size = *((size_t*)realPtr);
 
-    munmap( realPtr, size );
+//    munmap( realPtr, size );
+    kern_return_t r = vm_deallocate( mach_task_self(), (vm_address_t)realPtr, (vm_size_t)size );
+    if( r != 0 )
+        Log::Line("Warning: vm_deallocate() failed with error %d.", (int32)r );
 }
 
 //-----------------------------------------------------------
 bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
 {
-    // #TODO: Implement me 
+    ASSERT( ptr );
+
+    int prot = PROT_NONE;
+
+    // if( IsFlagSet( flags, VProtect::NoAccess ) )
+    // {
+    //     prot = PROT_NONE;
+    // }
+    // else
+    // {
+    if( IsFlagSet( flags, VProtect::Read ) )
+        prot |= PROT_READ;
+    if( IsFlagSet( flags, VProtect::Write ) )
+        prot |= PROT_WRITE;
+    // }
+
+    int r = mprotect( ptr, size, prot );
+    ASSERT( !r );
+
+    return r == 0;
 }
 
 //-----------------------------------------------------------
 bool SysHost::SetCurrentThreadAffinityCpuId( uint32 cpuId )
 {
-    ASSERT( cpuId < 32 );
-
-    thread_port_t thread = mach_thread_self();
-
-    // It seems macOS does not support 64 bit affinity masks
-    thread_affinity_policy_data_t policy = { (integer_t)(1 << cpuId) };
-
-    kern_return_t r =  thread_policy_set( thread, THREAD_AFFINITY_POLICY, 
-                                          (thread_policy_t)&policy,
-                                           THREAD_AFFINITY_POLICY_COUNT );
-
-    if( r != KERN_SUCCESS )
-    {
-        Log::Error( "thread_policy_set failed on cpu id %u", cpuId );
-        return false;
-    }
+    //  #NOTE: Thread affinity it not supported on macOS.
+    //          These will always return "not implemented".
+//    ASSERT( cpuId < 32 );
+//
+//    thread_port_t thread = mach_thread_self();
+//
+//    // It seems macOS does not support 64 bit affinity masks
+//    thread_affinity_policy_data_t policy = { (integer_t)(1 << cpuId) };
+//
+//    kern_return_t r =  thread_policy_set( thread, THREAD_AFFINITY_POLICY,
+//                                          (thread_policy_t)&policy,
+//                                           THREAD_AFFINITY_POLICY_COUNT );
+//
+//    if( r != KERN_SUCCESS )
+//    {
+//        Log::Error( "thread_policy_set failed on cpu id %lld with error: %d.", cpuId, (int64)r );
+//        return false;
+//    }
 
     return true;
 }

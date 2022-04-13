@@ -51,6 +51,10 @@
             "console"       : "internalConsole",
 
             "program": "${workspaceFolder}/build/bladebit",
+            
+            "osx": {
+                "MIMode": "lldb"
+            },
 
             "windows": {
                 "type"   : "cppvsdbg",
@@ -106,18 +110,34 @@
             "preLaunchTask" : "build_debug",
             "console"       : "internalConsole",
             "program"       : "${workspaceFolder}/build/bladebit",
+
+            "windows": {
+                "type"   : "cppvsdbg",
+                "program": "${workspaceFolder}/build/debug/bladebit.exe"
+            },
+            
+            "osx": {
+                "program"       : "${workspaceFolder}/build/bladebit",
+                "MIMode": "lldb"
+            },
             
             "environment": [],
             
             "args": [
-                // "-t", "8",
+                
                 // "-t", "32",
-                "iotest", 
+                // "iotest", 
                 // "memtest",
                 // "-s", "64MB"
-                "-s", "32G",
+                // "-s", "32G",
                 // "-m", "32G",
-                "/mnt/p5510a/disk_tmp"
+                // "/mnt/p5510a/disk_tmp"
+                
+                /// macOS
+                "-t", "8",
+                "memtest",
+                "-s", "6G",
+                ".sandbox"
             ]
         },
 
