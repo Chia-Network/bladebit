@@ -67,8 +67,7 @@ uint SysHost::GetLogicalCPUCount()
 //-----------------------------------------------------------
 void* SysHost::VirtualAlloc( size_t size, bool initialize )
 {
-    // #TODO: Use vm_allocate
-    // #TODO: Consider initialize
+    // #TODO: Remove initialize
 
     const size_t      pageSize = GetPageSize();
     const mach_port_t task     = mach_task_self();
