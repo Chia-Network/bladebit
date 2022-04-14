@@ -350,10 +350,11 @@ struct DiskPairAndMapReader
 
             for( int64 i = offset; i < end; i++ )
             {
-                const uint32 left  = (uint32)reader.ReadBits64( lBits );
-                const uint32 right = left +  (uint32)reader.ReadBits64( rBits );
+                Pair pair;
+                pair.left  = (uint32)reader.ReadBits64( lBits );
+                pair.right = pair.left +  (uint32)reader.ReadBits64( rBits );
 
-                outPairs[i] = { .left = left, .right = right };
+                outPairs[i] = pair;
             }
         });
 

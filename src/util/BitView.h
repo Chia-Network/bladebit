@@ -91,7 +91,7 @@ public:
         ASSERT( position + bitCount <= sizeBits && position + bitCount > position );
 
         const uint64 fieldIndex    = _position >> 6; // _position / 64
-        const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - _position;
+        const uint32 bitsAvailable = (uint32)( ( (fieldIndex + 1) * 64 ) - _position );
         const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
 
         uint128 value = Swap64( fields[fieldIndex] ) >> shift;
@@ -127,8 +127,8 @@ private:
     template<bool CheckAlignment>
     static inline uint64 _Read64( const uint32 bitCount, const byte* fields, const uint64 position, const size_t sizeBits )
     {
-        const uint64 fieldIndex    = position >> 6;                 // position / 64
-        const uint32 fieldBitIdx   = position - fieldIndex * 64;    // Value start bit position from the left (MSb) in the field itself
+        const uint64 fieldIndex    = position >> 6;                          // position / 64
+        const uint32 fieldBitIdx   = (uint32)( position - fieldIndex * 64 ); // Value start bit position from the left (MSb) in the field itself
         const uint32 bitsAvailable = 64 - fieldBitIdx;
 
         uint32 shift = 64 - std::min( fieldBitIdx + bitCount, 64u );
@@ -266,7 +266,7 @@ public:
         ASSERT( _position + bitCount <= _sizeBits );
 
         const uint64 fieldIndex    = _position >> 6; // _position / 64
-        const uint32 bitsAvailable = ( ( fieldIndex + 1 ) * 64 ) - _position;
+        const uint32 bitsAvailable = (uint32)( ( (fieldIndex + 1) * 64 ) - _position );
         const uint32 shift         = std::max( bitCount, bitsAvailable ) - bitCount;
 
         uint128 value = _fields[fieldIndex] >> shift;
@@ -303,7 +303,7 @@ public:
         ASSERT( bitCount <= 64 );
 
         const uint64 fieldIndex    = position >> 6; // position / 64
-        const uint32 fieldBits     = position - fieldIndex * 64;        // Bit offset in the field itself
+        const uint32 fieldBits     = (uint32)( position - fieldIndex * 64 ); // Bit offset in the field itself
         const uint32 bitsAvailable = 64 - fieldBits;
 
         uint64 value = fields[fieldIndex] >> fieldBits;
@@ -326,7 +326,7 @@ public:
         ASSERT( bitCount <= 64 );
 
         const uint64 fieldIndex    = position >> 6; // position / 64
-        const uint32 fieldBits     = position - fieldIndex * 64;        // Bit offset in the field itself
+        const uint32 fieldBits     = (uint32)( position - fieldIndex * 64 );  // Bit offset in the field itself
         const uint32 bitsAvailable = 64 - fieldBits;
 
         uint64 value = Swap64( fields[fieldIndex] ) >> fieldBits;
@@ -506,7 +506,7 @@ public:
         ASSERT( dstOffset + bitCount > dstOffset );
 
         const uint64 fieldIndex = dstOffset >> 6;
-        const uint32 bitsFree   = ( ( fieldIndex + 1 ) * 64 ) - dstOffset;
+        const uint32 bitsFree   = (uint32)( ( ( fieldIndex + 1 ) * 64 ) - dstOffset );
 
         // Determine how many bits to write to this current field
         const uint32 bitWrite  = std::min( bitCount, bitsFree );// & 63; // Mod 64
@@ -554,7 +554,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline Bits( const byte* bytesBE, uint32 sizeBits, uint32 bitOffset )
+    inline Bits( const byte* bytesBE, uint32 sizeBits, uint64 bitOffset )
     {
         ASSERT( sizeBits <= BitSize );
 
@@ -577,7 +577,7 @@ public:
             memcpy( &field, bytesBE, sizeof( uint64 ) );
             field = Swap64( field );
 
-            const uint32 firstFieldAvail = 64 - bitOffset;
+            const uint32 firstFieldAvail = (uint32)( 64 - bitOffset );
             const uint32 firstFieldBits  = std::min( firstFieldAvail, sizeBits );
             const uint64 mask            = ( 0xFFFFFFFFFFFFFFFFull >> ( 64 - firstFieldBits ) );
 

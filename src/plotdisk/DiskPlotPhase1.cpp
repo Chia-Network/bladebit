@@ -47,10 +47,9 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
         if( _cx.cache )
             opts |= FileSetOptions::Cachable;
 
-        FileSetInitData fdata = {
-            .cache     = _cx.cache,
-            .cacheSize = cacheSize
-        };
+        FileSetInitData fdata;
+        fdata.cache     = _cx.cache;
+        fdata.cacheSize = cacheSize;
 
         _diskQueue->InitFileSet( FileId::FX0, "fx_0", _cx.numBuckets, opts, &fdata );
         
@@ -171,7 +170,10 @@ void DiskPlotPhase1::Run()
     }
     #endif
 
-FP:
+#if _DEBUG && BB_DP_P1_SKIP_TO_TABLE
+    FP:
+#endif
+
     ForwardPropagate();
 
     // Check all table counts
@@ -220,8 +222,10 @@ FP:
 
     Log::Line( " Phase 1 Total I/O wait time: %.2lf", TicksToSeconds( _cx.ioWaitTime ) + _cx.ioQueue->IOBufferWaitTime() );
 
+#if BB_DP_DBG_SKIP_TO_C_TABLES
+    CTables:
+#endif
 
-CTables:
     WriteCTables();
 
     #if !BB_DP_P1_KEEP_FILES

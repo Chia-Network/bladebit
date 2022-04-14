@@ -226,10 +226,10 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
         if( _plot.Read( lpSizeBytes, baseLPBytes ) != (ssize_t)lpSizeBytes )
             return false;
 
-        const size_t lpSizeBits = LinePointSizeBits( k );
+        const size_t lpSizeBits = (uint32)LinePointSizeBits( k );
 
         CPBitReader lpReader( (byte*)baseLPBytes, RoundUpToNextBoundary( lpSizeBits, 64 ) );
-        baseLinePoint = lpReader.Read128Aligned( lpSizeBits );
+        baseLinePoint = lpReader.Read128Aligned( (uint32)lpSizeBits );
     }
 
     // Read stubs

@@ -72,7 +72,7 @@ void EntryPacker::DoJob( ThreadPool& pool, uint32 threadCount,
 
 
 //-----------------------------------------------------------
-void EntryPacker::SerializeEntries( const uint64* entries, uint64* bits, const int64 entryCount, const uint64 entryOffset, const size_t bitsPerEntry )
+void EntryPacker::SerializeEntries( const uint64* entries, uint64* bits, const int64 entryCount, const uint64 entryOffset, const uint32 bitsPerEntry )
 {
     const uint64 bitOffset = entryOffset * bitsPerEntry;
     entries += entryOffset;
@@ -84,7 +84,7 @@ void EntryPacker::SerializeEntries( const uint64* entries, uint64* bits, const i
 }
 
 //-----------------------------------------------------------
-void EntryPacker::DerializeEntries( const uint64* bits,    uint64* entries, const int64 entryCount, const uint64 entryOffset, const size_t bitsPerEntry )
+void EntryPacker::DerializeEntries( const uint64* bits, uint64* entries, const int64 entryCount, const uint64 entryOffset, const uint32 bitsPerEntry )
 {
     const uint64 bitOffset      = entryOffset * bitsPerEntry;
     // const uint64 fieldOffset    = bitOffset / 64;

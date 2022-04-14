@@ -4,8 +4,14 @@
     
     #define NOMINMAX 1
     #define WIN32_LEAN_AND_MEAN 1
-    #include <Windows.h>
+    // #NOTE: Not including globally anymore as we're getting some naming conflicts
+    //#include <Windows.h>
+
     #include <malloc.h>
+
+    // Must match Windows.h definitions.
+    typedef void* HANDLE;
+    #define INVALID_WIN32_HANDLE ((HANDLE)(intptr_t)-1) // Same as INVALID_HANDLE_VALUE
     typedef HANDLE ThreadId;
     typedef HANDLE SemaphoreId;
 

@@ -1,6 +1,10 @@
 #include "Semaphore.h"
 #include "util/Util.h"
 
+#if PLATFORM_IS_WINDOWS
+    #include <Windows.h>
+#endif
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 

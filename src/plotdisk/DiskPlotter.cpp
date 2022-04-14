@@ -229,23 +229,23 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
 {
     while( cli.HasArgs() )
     {
-        if( cli.ReadValue( cfg.numBuckets,  "-b", "--buckets" ) ) 
+        if( cli.ReadU32( cfg.numBuckets,  "-b", "--buckets" ) ) 
             continue;
-        if( cli.ReadValue( cfg.tmpPath, "-t1", "--temp1" ) )
+        if( cli.ReadStr( cfg.tmpPath, "-t1", "--temp1" ) )
             continue;
-        if( cli.ReadValue( cfg.tmpPath2, "-t2", "--temp2" ) )
+        if( cli.ReadStr( cfg.tmpPath2, "-t2", "--temp2" ) )
             continue;
-        if( cli.ReadValue( cfg.cacheSize, "--cache" ) )
+        if( cli.ReadSize( cfg.cacheSize, "--cache" ) )
             continue;
-        if( cli.ReadValue( cfg.f1ThreadCount, "--f1-threads" ) )
+        if( cli.ReadU32( cfg.f1ThreadCount, "--f1-threads" ) )
             continue;
-        if( cli.ReadValue( cfg.fpThreadCount, "--fp-threads" ) )
+        if( cli.ReadU32( cfg.fpThreadCount, "--fp-threads" ) )
             continue;
-        if( cli.ReadValue( cfg.cThreadCount, "--c-threads" ) )
+        if( cli.ReadU32( cfg.cThreadCount, "--c-threads" ) )
             continue;
-        if( cli.ReadValue( cfg.p2ThreadCount, "--p2-threads" ) )
+        if( cli.ReadU32( cfg.p2ThreadCount, "--p2-threads" ) )
             continue;
-        if( cli.ReadValue( cfg.p3ThreadCount, "--p3-threads" ) )
+        if( cli.ReadU32( cfg.p3ThreadCount, "--p3-threads" ) )
             continue;
         if( cli.ArgConsume( "-s", "--sizes" ) )
         {
@@ -426,6 +426,8 @@ size_t DiskPlotter::GetRequiredSizeForBuckets( const uint32 numBuckets, const si
         Fatal( "Invalid bucket size: %u.", numBuckets );
         break;
     }
+
+    return 0;
 }
 
 

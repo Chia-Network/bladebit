@@ -25,15 +25,15 @@ void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
 
     while( cli.HasArgs() )
     {
-        if( cli.ReadValue( writeSize, "-s", "--size" ) )
+        if( cli.ReadSize( writeSize, "-s", "--size" ) )
         {
             FatalIf( writeSize < 1, "Write size must be > 0." );
         }
         else if( cli.ReadSwitch( noDirectIO, "-d", "--no-direct-io" ) )
             continue;
-        else if( cli.ReadValue( memReserve, "-m", "--memory" ) )
+        else if( cli.ReadSize( memReserve, "-m", "--memory" ) )
             continue;
-        else if( cli.ReadValue( passCount, "-p", "--passes" ) )
+        else if( cli.ReadU32( passCount, "-p", "--passes" ) )
         {
             if( passCount < 1 ) passCount = 1;
             continue;

@@ -87,7 +87,7 @@ private:
         #if PLATFORM_IS_UNIX
             return _fd != -1;
         #else
-            return _fd != INVALID_HANDLE_VALUE;
+            return _fd != INVALID_WIN32_HANDLE;
         #endif
     }
 
@@ -101,6 +101,6 @@ private:
     #if PLATFORM_IS_UNIX
         int    _fd            = -1;
     #elif PLATFORM_IS_WINDOWS
-        HANDLE _fd            = INVALID_HANDLE_VALUE;
+        HANDLE _fd            = INVALID_WIN32_HANDLE;
     #endif
 };

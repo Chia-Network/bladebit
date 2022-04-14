@@ -23,11 +23,13 @@ struct Span
         return this->values[index]; 
     }
 
+#ifndef _WIN32
     inline T& operator[]( uint64 index ) const
     { 
         ASSERT( index < length );
         return this->values[index]; 
     }
+#endif
 
     inline T& operator[]( size_t index ) const
     { 
@@ -56,7 +58,10 @@ struct Span
         return Slice( index, length - index );
     }
 
+#ifndef _WIN32
     inline Span<T> Slice( const uint64 index ) const { return Slice( (size_t)index ); }
+#endif
+
     inline Span<T> Slice( const uint32 index ) const { return Slice( (size_t)index ); }
     inline Span<T> Slice( const int64 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
     inline Span<T> Slice( const int32 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }

@@ -410,7 +410,7 @@ void TestC3Table( PlotInfo& ref, PlotInfo& tgt )
     Span<uint> tgtC1 = ReadC1Table( tgt );
 
     // Compare C1
-    const uint c1Length = std::min( refC1.length, tgtC1.length );
+    const uint64 c1Length = (uint64)std::min( refC1.length, tgtC1.length );
     {
         Log::Line( "Validating C1 table... " );
         uint64 failCount = 0;
@@ -435,7 +435,7 @@ void TestC3Table( PlotInfo& ref, PlotInfo& tgt )
     Span<uint> refC2 = ReadC2Table( ref );
     Span<uint> tgtC2 = ReadC2Table( tgt );
 
-    const uint c2Length = std::min( refC2.length, tgtC2.length );
+    const uint64 c2Length = (uint64)std::min( refC2.length, tgtC2.length );
     {
         Log::Line( "Validating C2 table... " );
 

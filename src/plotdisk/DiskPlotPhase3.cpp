@@ -1090,10 +1090,9 @@ void DiskPlotPhase3::Run()
     if( _context.cache )
         opts |= FileSetOptions::Cachable;
 
-    FileSetInitData fdata = {
-        .cache     = cache,
-        .cacheSize = lpCacheSize
-    };
+    FileSetInitData fdata;
+    fdata.cache     = cache;
+    fdata.cacheSize = lpCacheSize;
 
     ioQueue.InitFileSet( FileId::LP, "lp", _context.numBuckets, opts, &fdata );   // LP+origin idx buckets
     

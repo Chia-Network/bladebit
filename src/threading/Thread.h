@@ -1,6 +1,7 @@
 #pragma once
 #include "Platform.h"
 
+
 typedef void (*ThreadRunner)( void* data );
 
 enum class ThreadPriority
@@ -38,7 +39,7 @@ private:
     #if PLATFORM_IS_UNIX
         static void* ThreadStarterUnix( Thread* thread );
     #elif PLATFORM_IS_WINDOWS
-        static DWORD ThreadStarterWin( LPVOID );
+        static unsigned long ThreadStarterWin( intptr_t );
     #else
         #error Unimplemented
     #endif

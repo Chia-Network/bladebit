@@ -3,9 +3,12 @@
 #include "util/Util.h"
 #include "util//Log.h"
 
+#include <Windows.h>
 #include <processthreadsapi.h>
 #include <systemtopologyapi.h>
 #include <psapi.h>
+
+static_assert( INVALID_HANDLE_VALUE == INVALID_WIN32_HANDLE );
 
 /*
 * Based on source from libSodium: ref: https://github.com/jedisct1/libsodium/blob/master/src/libsodium/randombytes/sysrandom/randombytes_sysrandom.c

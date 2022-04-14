@@ -299,7 +299,9 @@ public:
         if( bucket > 0 )
         {
             ProcessCrossBucketEntries( bucket - 1, pairs - crossMatchCount, outY, outMeta );
-            _context.ptrTableBucketCounts[(int)table][bucket-1] += crossMatchCount;
+            ASSERT( crossMatchCount <= std::numeric_limits<uint32>::max() );
+
+            _context.ptrTableBucketCounts[(int)table][bucket-1] += (uint32)crossMatchCount;
         }
         
         WritePairsToDisk( bucket, writeEntrtyCount, pairs - crossMatchCount );
@@ -309,7 +311,7 @@ public:
         WriteEntriesToDisk( bucket, writeEntrtyCount, outY, outMeta, (EntryOut*)_entries[0] );
 
         // Save bucket length before y-sort since the pairs remain unsorted
-        _context.ptrTableBucketCounts[(int)table][bucket] += (uint64)outEntryCount;
+        _context.ptrTableBucketCounts[(int)table][bucket] += (uint32)outEntryCount;
 
         _tableEntryCount += writeEntrtyCount;
         _mapOffset       += (uint64)inEntryCount;
