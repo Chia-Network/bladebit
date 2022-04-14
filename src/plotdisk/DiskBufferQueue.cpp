@@ -10,14 +10,23 @@
 
 #define NULL_BUFFER -1
 
+#ifdef _WIN32
+    #define PATH_SEPA_STR "\\"
+    #define CheckPathSeparator( x ) ((x) == '\\' || (x) == '/')
+#else
+    #define PATH_SEPA_STR "/"
+    #define CheckPathSeparator( x ) ((x) == '/')
+#endif
 
 //-----------------------------------------------------------
 DiskBufferQueue::DiskBufferQueue( 
-    const char* workDir, byte* workBuffer, 
+    const char* workDir1, const char* workDir2, const char* plotDir, byte* workBuffer, 
     size_t workBufferSize, uint ioThreadCount,
     int32 threadBindId
 )
-    : _workDir       ( workDir     )
+    : _workDir1      ( workDir1 )
+    , _workDir2      ( workDir2 )
+    , _plotDir       ( plotDir  )
     , _workHeap      ( workBufferSize, workBuffer )
     // , _threadPool    ( ioThreadCount, ThreadPool::Mode::Fixed, true )
     , _dispatchThread()
@@ -26,23 +35,31 @@ DiskBufferQueue::DiskBufferQueue(
     , _deleteQueue   ( 128 )
     , _threadBindId  ( threadBindId )
 {
-    ASSERT( workDir );
+    ASSERT( workDir1 );
+    ASSERT( plotDir  );
+    
+    if( !workDir2 )
+        workDir2 = workDir1;
 
-    // Initialize Files
-    const size_t workDirLen = _workDir.length();
+    // Initialize path buffers
+    FatalIf( _workDir1.length() < 1, "Working directory path 1 is empty." );
+    FatalIf( _workDir2.length() < 1, "Working directory path 2 is empty." );
+    FatalIf( _plotDir.length()  < 1, "Plot tmp directory is empty." );
+
+    // Add a trailing slash if we don't have one
+    if( !CheckPathSeparator( _workDir1.back() ) )
+        _workDir1 += PATH_SEPA_STR;
+    if( !CheckPathSeparator( _workDir2.back() ) )
+        _workDir2 += PATH_SEPA_STR;
+    if( !CheckPathSeparator( _plotDir.back() ) )
+        _plotDir += PATH_SEPA_STR;
+
+    const size_t workDirLen = std::max( _workDir1.length(), _workDir2.length() );
 
     const size_t PLOT_FILE_LEN = sizeof( "/plot-k32-2021-08-05-18-55-77a011fc20f0003c3adcc739b615041ae56351a22b690fd854ccb6726e5f43b7.plot.tmp" );
 
-    _filePathBuffer = bbmalloc<char>( workDirLen + PLOT_FILE_LEN );  // Should be enough for all our file names
-
-    memcpy( _filePathBuffer, workDir, workDirLen + 1 );
-
-    if( _filePathBuffer[workDirLen-1] != '/' && _filePathBuffer[workDirLen-1] != '\\' )
-    {
-        _filePathBuffer[workDirLen]   = '/';
-        _filePathBuffer[workDirLen+1] = '\0';
-        _workDir += "/";
-    }
+    _filePathBuffer    = bbmalloc<char>( workDirLen + PLOT_FILE_LEN );  // Should be enough for all our file names
+    _delFilePathBuffer = bbmalloc<char>( workDirLen + PLOT_FILE_LEN );
 
     // Initialize file deleter thread
     _deleterThread.Run( DeleterThreadMain, this );
@@ -61,7 +78,9 @@ DiskBufferQueue::~DiskBufferQueue()
     // #TODO: Wait for command thread
 
     // #TODO: Delete our file sets
-    free( _filePathBuffer );
+
+    free( _filePathBuffer    );
+    free( _delFilePathBuffer );
 }
 
 //-----------------------------------------------------------
@@ -86,10 +105,15 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 //-----------------------------------------------------------
 bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketCount, const FileSetOptions options, const FileSetInitData* optsData )
 {
-    char*        pathBuffer    = _filePathBuffer;
-    const size_t workDirLength = _workDir.length();
+    const bool isPlotFile = fileId == FileId::PLOT;
+    const bool useTmp2    = IsFlagSet( options, FileSetOptions::UseTemp2 );
 
-    char* baseName = pathBuffer + workDirLength;
+    const std::string& wokrDir = isPlotFile ? _plotDir :
+                                     useTmp2 ? _workDir2 : _workDir1;
+    memcpy( _filePathBuffer, wokrDir.c_str(), wokrDir.length() );
+
+    const char* pathBuffer = _filePathBuffer;
+          char* baseName   = _filePathBuffer + wokrDir.length();
 
     FileFlags flags = FileFlags::LargeFile;
     if( IsFlagSet( options, FileSetOptions::DirectIO ) )
@@ -104,11 +128,15 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     fileSet.blockBuffer  = nullptr;
     fileSet.options      = options;
 
-    const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable );
+    const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable ) && optsData->cacheSize > 0;
     ASSERT( !isCachable || optsData );
 
     const size_t cacheSize = isCachable ? optsData->cacheSize / bucketCount : 0;
     byte* cache = isCachable ? (byte*)optsData->cache : nullptr;
+
+    // Ensure we don't flag it as a HybridStream if the cache happened to be 0
+    if( !isCachable )
+        UnSetFlag( fileSet.options, FileSetOptions::Cachable );
 
     // #TODO: Try using a single file and opening multiple handles to that file as buckets...
     for( uint i = 0; i < bucketCount; i++ )
@@ -124,15 +152,20 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 
         const FileMode fileMode =
         #if _DEBUG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE )
-            fileId != FileId::PLOT ? FileMode::OpenOrCreate : FileMode::Create;
+            !isPlotFile ? FileMode::OpenOrCreate : FileMode::Create;
         #else
             FileMode::Create;
         #endif
 
-        if( fileId != FileId::PLOT )
+        if( !isPlotFile )
             sprintf( baseName, "%s_%u.tmp", name, i );
         else
+        {
             sprintf( baseName, "%s", name );
+
+            _plotFullName = pathBuffer;
+            _plotFullName.erase( _plotFullName.length() - 4 );
+        }
 
         bool opened;
 
@@ -149,7 +182,7 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
         if( !opened )
         {
             // Allow plot file to fail opening
-            if( fileId == FileId::PLOT )
+            if( isPlotFile )
             {
                 Log::Line( "Failed to open plot file %s with error: %d.", pathBuffer, file->GetError() );
                 return false;
@@ -177,10 +210,13 @@ void DiskBufferQueue::SetTransform( FileId fileId, IIOTransform& transform )
 //-----------------------------------------------------------
 void DiskBufferQueue::OpenPlotFile( const char* fileName, const byte* plotId, const byte* plotMemo, uint16 plotMemoSize )
 {
+    // #TODO: fileName should not have .tmp here. 
+    //        Change that and then change InitFile to add the .tmp like the rest of the files.
     ASSERT( fileName     );
     ASSERT( plotId       );
     ASSERT( plotMemo     );
     ASSERT( plotMemoSize );
+    ASSERT( _plotFullName.length() == 0 );
 
     // #TODO: Retry multiple-times.
     const bool didOpen = InitFileSet( FileId::PLOT, fileName, 1 );
@@ -239,6 +275,47 @@ void DiskBufferQueue::OpenPlotFile( const char* fileName, const byte* plotId, co
         WriteFile( FileId::PLOT, 0, header, (size_t)headerSize );
         CommitCommands();
     }
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::FinishPlot( Fence& fence )
+{
+    SignalFence( fence );
+    CommitCommands();
+
+    char* plotPath = _filePathBuffer;
+    char* baseName = plotPath + _plotDir.length();
+
+    const char* plotTmpName = _files[(int)FileId::PLOT].name;
+
+    memcpy( plotPath, _plotDir.c_str(), _plotDir.length() );
+    memcpy( baseName, plotTmpName, strlen( plotTmpName ) + 1 );
+
+    fence.Wait();
+    CloseFileNow( FileId::PLOT, 0 );
+
+    const uint32 RETRY_COUNT  = 10;
+    const long   MS_WAIT_TIME = 1000;
+
+    for( uint32 i = 0; i < RETRY_COUNT; i++ )
+    {
+        int r = rename( plotPath, _plotFullName.c_str() );
+        if( !r )
+            break;
+        
+        Log::Line( "Error: Could not rename plot file with error: %d.", (int32)errno );
+
+        if( i+1 == RETRY_COUNT)
+        {
+            Log::Line( "Error:: Failed to to rename plot file after %u retries. Please rename manually." );
+            break;
+        }
+
+        Log::Line( "Retrying in %.2lf seconds...", MS_WAIT_TIME / 1000.0 );
+        Thread::Sleep( MS_WAIT_TIME );
+    }
+
+    _plotFullName = "";
 }
 
 //-----------------------------------------------------------
@@ -342,6 +419,14 @@ void DiskBufferQueue::DeleteBucket( FileId id )
     //        we don't care about is executing.
     Command* cmd = GetCommandObject( Command::DeleteBucket );
     cmd->deleteFile.fileId = id;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::TruncateBucket( FileId id, const ssize_t position )
+{
+    Command* cmd = GetCommandObject( Command::TruncateBucket );
+    cmd->truncateBucket.fileId   = id;
+    cmd->truncateBucket.position = position;
 }
 
 //-----------------------------------------------------------
@@ -520,14 +605,21 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd DeleteFile" );
             #endif
-             CmdDeleteFile( cmd );  // Dispatch to deleter thread
+            CmdDeleteFile( cmd );  // Dispatch to deleter thread
         break;
 
         case Command::DeleteBucket:
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd DeleteBucket" );
             #endif
-             CmdDeleteBucket( cmd ); // Dispatch to deleter thread
+            CmdDeleteBucket( cmd ); // Dispatch to deleter thread
+        break;
+
+        case Command::TruncateBucket:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd TruncateBucket" );
+            #endif
+            CmdTruncateBucket( cmd );
         break;
 
 
@@ -738,23 +830,45 @@ inline void DiskBufferQueue::ReadFromFile( IStream& file, size_t size, byte* buf
 //----------------------------------------------------------
 void DiskBufferQueue::CmdDeleteFile( const Command& cmd )
 {
-    FileDeleteCommand delCmd;
-    delCmd.fileId = cmd.deleteFile.fileId;
-    delCmd.bucket = (int64)cmd.deleteFile.bucket;
-    while( !_deleteQueue.Enqueue( delCmd ) );
+    DeleteFileNow( cmd.deleteFile.fileId, cmd.deleteFile.bucket );
 
-    _deleteSignal.Signal();
+    // FileDeleteCommand delCmd;
+    // delCmd.fileId = cmd.deleteFile.fileId;
+    // delCmd.bucket = (int64)cmd.deleteFile.bucket;
+    // while( !_deleteQueue.Enqueue( delCmd ) );
+
+    // _deleteSignal.Signal();
 }
 
 //----------------------------------------------------------
 void DiskBufferQueue::CmdDeleteBucket( const Command& cmd )
 {
-    FileDeleteCommand delCmd;
-    delCmd.fileId = cmd.deleteFile.fileId;
-    delCmd.bucket = -1;
-    while( !_deleteQueue.Enqueue( delCmd ) );
+    DeleteBucketNow( cmd.deleteFile.fileId );
+
+    // FileDeleteCommand delCmd;
+    // delCmd.fileId = cmd.deleteFile.fileId;
+    // delCmd.bucket = -1;
+    // while( !_deleteQueue.Enqueue( delCmd ) );
     
-    _deleteSignal.Signal();
+    // _deleteSignal.Signal();
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::CmdTruncateBucket( const Command& cmd )
+{
+    const auto& tcmd = cmd.truncateBucket;
+
+    FileSet& files = _files[(int)tcmd.fileId];
+
+    for( size_t i = 0; i < files.files.Length(); i++ )
+    {
+        const bool r = files.files[i]->Truncate( tcmd.position );
+        if( !r )
+        {
+            ASSERT( 0 );
+            Log::Line( "Warning: Failed to truncate file %s:%llu", files.name, (uint64)i );
+        }
+    }
 }
 
 //-----------------------------------------------------------
@@ -791,6 +905,9 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
 
         case DiskBufferQueue::Command::DeleteBucket:
             return "DeleteBucket";
+
+        case DiskBufferQueue::Command::TruncateBucket:
+            return "TruncateBucket";
 
         default:
             ASSERT( 0 );
@@ -845,29 +962,44 @@ void DiskBufferQueue::DeleterMain()
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::DeleteFileNow( const FileId fileId, uint32 bucket )
+inline void DiskBufferQueue::CloseFileNow( const FileId fileId, const uint32 bucket )
 {
-    FileSet&    fileSet = _files[(int)fileId];
+    FileSet& fileSet = _files[(int)fileId];
 
-    const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
+    const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::Cachable );
     if( isHybridFile )
     {
-        auto* file = static_cast<HybridStream*>( fileSet.files[0] );
+        auto* file = static_cast<HybridStream*>( fileSet.files[bucket] );
         file->Close();
     }
     else
     {
-        auto* file = static_cast<FileStream*>( fileSet.files[0] );
+        auto* file = static_cast<FileStream*>( fileSet.files[bucket] );
         file->Close();
     }
+}
 
-    char* basePath = _filePathBuffer + _workDir.length();
-    sprintf( basePath, "%s_%u.tmp", fileSet.name, bucket );
+//-----------------------------------------------------------
+void DiskBufferQueue::DeleteFileNow( const FileId fileId, const uint32 bucket )
+{
+    FileSet& fileSet = _files[(int)fileId];
+
+    CloseFileNow( fileId, bucket );
+
+    const bool useTmp2 = IsFlagSet( fileSet.options, FileSetOptions::UseTemp2 );
+
+    const std::string& wokrDir  = useTmp2 ? _workDir2 : _workDir1;
+                 char* filePath = _delFilePathBuffer;
+
+    memcpy( filePath, wokrDir.c_str(), wokrDir.length() );
+    char* baseName = filePath + wokrDir.length();
     
-    const int r = remove( _filePathBuffer );
+    sprintf( baseName, "%s_%u.tmp", fileSet.name, bucket );
+    
+    const int r = remove( filePath );
 
     if( r )
-        Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", _filePathBuffer, r, r );
+        Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", filePath, r, r );
 }
 
 //-----------------------------------------------------------
@@ -875,29 +1007,26 @@ void DiskBufferQueue::DeleteBucketNow( const FileId fileId )
 {
     FileSet& fileSet = _files[(int)fileId];
 
-    char* basePath = _filePathBuffer + _workDir.length();
+    const bool useTmp2 = IsFlagSet( fileSet.options, FileSetOptions::UseTemp2 );
 
-    const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
+    const std::string& wokrDir  = useTmp2 ? _workDir2 : _workDir1;
+                 char* filePath = _delFilePathBuffer;
+
+    memcpy( filePath, wokrDir.c_str(), wokrDir.length() );
+    char* baseName = filePath + wokrDir.length();
+
+    const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::Cachable );
 
     for( size_t i = 0; i < fileSet.files.length; i++ )
     {
-        if( isHybridFile )
-        {
-            auto* file = static_cast<HybridStream*>( fileSet.files[i] );
-            file->Close();
-        }
-        else
-        {
-            auto* file = static_cast<FileStream*>( fileSet.files[i] );
-            file->Close();
-        }
+        CloseFileNow( fileId, (uint32)i );
 
-        sprintf( basePath, "%s_%u.tmp", fileSet.name, (uint)i );
+        sprintf( baseName, "%s_%u.tmp", fileSet.name, (uint)i );
     
-        const int r = remove( _filePathBuffer );
+        const int r = remove( filePath );
 
         if( r )
-            Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", _filePathBuffer, r, r );
+            Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", filePath, r, r );
     }
 }
 

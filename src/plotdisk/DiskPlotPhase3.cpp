@@ -1085,7 +1085,7 @@ void DiskPlotPhase3::Run()
 
     byte* cache = _context.cache;
 
-    FileSetOptions opts = FileSetOptions::DirectIO;
+    FileSetOptions opts = FileSetOptions::DirectIO | FileSetOptions::UseTemp2;
 
     if( _context.cache )
         opts |= FileSetOptions::Cachable;
@@ -1115,6 +1115,16 @@ void DiskPlotPhase3::Run()
             ASSERT( 0 );
             break;
     }
+
+    // Delete remaining temporary files
+    #if !BB_DP_P3_KEEP_FILES
+        ioQueue.DeleteBucket( FileId::LP );
+        ioQueue.DeleteBucket( FileId::LP_MAP_0 );
+        ioQueue.DeleteBucket( FileId::LP_MAP_1 );
+        ioQueue.SignalFence( _stepFence, 0xFFFFFFFF );
+        ioQueue.CommitCommands();
+        _stepFence.Wait( 0xFFFFFFFF );
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -1235,8 +1245,24 @@ void DiskPlotPhase3::ProcessTable()
     }
 
     _ioQueue.SignalFence( _stepFence );
+
+    // OK to delete input files now
+    #if !BB_DP_P3_KEEP_FILES
+        if( rTable == TableId::Table2 )
+            _ioQueue.DeleteFile( FileId::T1, 0 );
+    
+        _ioQueue.DeleteFile( FileId::T1 + (FileId)rTable, 0 );
+        _ioQueue.DeleteBucket( FileId::MAP2 + (FileId)rTable-1 );
+
+        if( rTable < TableId::Table7 )
+            _ioQueue.DeleteFile( FileId::MARKED_ENTRIES_2 + (FileId)rTable-1, 0 );
+    #endif
+
     _ioQueue.CommitCommands();
-    _stepFence.Wait( 0, _ioWaitTime );   // #TODO: Wait on Step1 instead
+
+
+    // Wait for all step 1 writes to complete
+    _stepFence.Wait( 0, _ioWaitTime );   // #TODO: Wait on Step1 instead?
 
     // Step 1: Loads line points & their source indices from buckets,
     //         sorts them on the line points and then writes the line points 

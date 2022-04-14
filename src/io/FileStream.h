@@ -60,6 +60,8 @@ public:
 
     ssize_t Size() override;
 
+    bool Truncate( const ssize_t length ) override;
+
     void Close();
 
     bool IsOpen() const;

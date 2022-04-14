@@ -58,6 +58,12 @@
 // #define BB_DP_P1_SKIP_TO_TABLE 1
 // #define BB_DP_P1_START_TABLE TableId::Table7
 
+// Tmp file deletion (useful to keep around when developing)
+#if _DEBUG
+    // #define BB_DP_P1_KEEP_FILES 1
+    // #define BB_DP_P3_KEEP_FILES 1
+#endif
+
 
 #if _DEBUG
     // Skip Phase 3 to the specific table (must have the files on disk ready)

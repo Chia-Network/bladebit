@@ -131,6 +131,26 @@ ssize_t FileStream::Size()
 }
 
 //-----------------------------------------------------------
+bool FileStream::Truncate( const ssize_t length )
+{
+    ASSERT( length >= 0 );
+    static_assert( sizeof( off_t ) == sizeof( length ) );
+
+    const int r = ftruncate( _fd, (off_t)length );
+
+    if( r != 0 )
+    {
+        _error = errno;
+        return false;
+    }
+
+    if( _position > (size_t)length )
+        _position = (size_t)length;
+
+    return true;
+}
+
+//-----------------------------------------------------------
 ssize_t FileStream::Read( void* buffer, size_t size )
 {
     ASSERT( buffer );

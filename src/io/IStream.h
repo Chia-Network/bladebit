@@ -26,6 +26,8 @@ public:
 
     virtual ssize_t Size() = 0;
 
+    virtual bool Truncate( const ssize_t length ) = 0;
+
     virtual int GetError() = 0;
 
 };

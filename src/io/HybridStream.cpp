@@ -104,7 +104,7 @@ ssize_t HybridStream::Write( const void* buffer, size_t size )
     // #TODO: Check if read-only
 
     // Bring down to our max write size
-    const size_t maxWrite = (size_t)(std::numeric_limits<ssize_t>::max() - Size() );
+    const size_t maxWrite = (size_t)(std::numeric_limits<ssize_t>::max() - _position );
     size = std::min( size, maxWrite );
 
     // See if we can write to our memory region
@@ -263,7 +263,34 @@ size_t HybridStream::BlockSize() const
 //-----------------------------------------------------------
 ssize_t HybridStream::Size()
 {
+    // #TODO: Should track maximum written position, not based on the _memSize
     return _memSize + _file.Size();
+}
+
+//-----------------------------------------------------------
+bool HybridStream::Truncate( const ssize_t length )
+{
+    if( length < 0 )
+    {
+        ASSERT( 0 );
+        return false;
+    }
+
+    if( (size_t)length >= _memSize )
+    {
+        // Need to truncate the backing file
+        const ssize_t fileLength = length - (ssize_t)_memSize;
+        if( !_file.Truncate( fileLength ) )
+        {
+            _error = _file.GetError();
+            return false;
+        }
+    }
+
+    if( _position > (size_t)length )
+        Seek( (int64)length, SeekOrigin::Begin );
+
+    return true;
 }
 
 //-----------------------------------------------------------

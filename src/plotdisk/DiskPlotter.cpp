@@ -101,7 +101,7 @@ DiskPlotter::DiskPlotter( const Config cfg )
     // Initialize our Thread Pool and IO Queue
     const int32 ioThreadId = -1;    // Force unbounded IO thread for now. We should bind it to the last used thread, of the max threads used...
     _cx.threadPool = new ThreadPool( sysLogicalCoreCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
-    _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.heapBuffer, _cx.heapSize, _cx.ioThreadCount, ioThreadId );
+    _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.tmpPath2, gCfg.outputFolder, _cx.heapBuffer, _cx.heapSize, _cx.ioThreadCount, ioThreadId );
 
     // if( cfg.globalCfg->warmStart )
     // #TODO: IMPORTANT: Remove this after testing
@@ -215,10 +215,13 @@ void DiskPlotter::Plot( const PlotRequest& req )
                 Log::Line( " C %d    : %16lu ( 0x%016lx )", i-6, addy, addy );
         }
         Log::Line( "" );
-    }
 
-    double plotElapsed = TimerEnd( plotTimer );
-    Log::Line( "Finished plotting in %.2lf seconds ( %.1lf minutes ).", plotElapsed, plotElapsed / 60 );
+        double plotElapsed = TimerEnd( plotTimer );
+        Log::Line( "Finished plotting in %.2lf seconds ( %.1lf minutes ).", plotElapsed, plotElapsed / 60 );
+
+        // Rename plot file
+        ioQueue.FinishPlot( fence );
+    }
 }
 
 //-----------------------------------------------------------
@@ -228,7 +231,7 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
     {
         if( cli.ReadValue( cfg.numBuckets,  "-b", "--buckets" ) ) 
             continue;
-        if( cli.ReadValue( cfg.tmpPath, "-t", "--temp" ) )
+        if( cli.ReadValue( cfg.tmpPath, "-t1", "--temp1" ) )
             continue;
         if( cli.ReadValue( cfg.tmpPath2, "-t2", "--temp2" ) )
             continue;
@@ -271,8 +274,14 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
         {
             Fatal( "Unexpected argument '%s'.", cli.Arg() );
         }
-        else
+        else 
+        {
+            cfg.globalCfg->outputFolder = cli.ArgConsume();
+
+            FatalIf( strlen( cfg.globalCfg->outputFolder ) == 0, "Invalid plot output directory." );
+            FatalIf( cli.HasArgs(), "Unexpected argument '%s'.", cli.Arg() );
             break;
+        }
     }
 
     ///
@@ -480,7 +489,7 @@ Creates plots by making use of a disk to temporarily store and read values.
  -b, --buckets <n>  : The number of buckets to use. The default is 256.
                       You may specify one of: 128, 256, 512, 1024.
 
- -t, --temp <dir>   : The temporary directory to use when plotting.
+ -t1, --temp1 <dir> : The temporary directory to use when plotting.
                       *REQUIRED*
 
  -t2, --temp2 <dir> : Specify a secondary temporary directory, which will be used for data
