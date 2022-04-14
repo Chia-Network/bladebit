@@ -131,6 +131,26 @@ ssize_t FileStream::Size()
 }
 
 //-----------------------------------------------------------
+bool FileStream::Truncate( const ssize_t length )
+{
+    ASSERT( length >= 0 );
+    static_assert( sizeof( off_t ) == sizeof( length ) );
+
+    const int r = ftruncate( _fd, (off_t)length );
+
+    if( r != 0 )
+    {
+        _error = errno;
+        return false;
+    }
+
+    if( _position > (size_t)length )
+        _position = (size_t)length;
+
+    return true;
+}
+
+//-----------------------------------------------------------
 ssize_t FileStream::Read( void* buffer, size_t size )
 {
     ASSERT( buffer );
@@ -194,6 +214,12 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
         return 0;
 
     // Note that this can return less than size if size > SSIZE_MAX
+    // On macOS, this seems to fail with EINVAL if we write anything above 2GiB.
+    // Although Apple's docs does not list this as an error condition for write(),
+    // it seems we can infer that the maximum value is signed 32-bit max,
+    // form the notes given on writev() here: https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/write.2.html
+    // On Linux, the maximum is 0x7ffff000 anyway, so let's just cap to that: https://man7.org/linux/man-pages/man2/write.2.html
+    size = std::min( size, (size_t)0x7ffff000 );
     ssize_t written = write( _fd, buffer, size );
     
     if( written >= 0 )

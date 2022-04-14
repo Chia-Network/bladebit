@@ -42,7 +42,7 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
     {
         const size_t cacheSize = _cx.cacheSize / 2;
 
-        FileSetOptions opts = FileSetOptions::DirectIO;
+        FileSetOptions opts = FileSetOptions::DirectIO | FileSetOptions::UseTemp2;
 
         if( _cx.cache )
             opts |= FileSetOptions::Cachable;
@@ -223,6 +223,11 @@ FP:
 
 CTables:
     WriteCTables();
+
+    #if !BB_DP_P1_KEEP_FILES
+        _cx.ioQueue->DeleteBucket( _fxIn );
+        _cx.ioQueue->CommitCommands();
+    #endif
 }
 
 ///
@@ -293,6 +298,15 @@ void DiskPlotPhase1::ForwardPropagate()
         Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( _tableIOWaitTime ) );
 
         std::swap( _fxIn, _fxOut );
+        
+        // No longer need fxout. Delete it
+        if( table == TableId::Table7 )
+        {
+            #if !BB_DP_P1_KEEP_FILES
+            _cx.ioQueue->DeleteBucket( _fxOut );
+            _cx.ioQueue->CommitCommands();
+            #endif
+        }
     }
 }
 
@@ -301,6 +315,14 @@ template<TableId table>
 void DiskPlotPhase1::ForwardPropagateTable()
 {
     _tableIOWaitTime = Duration::zero();
+
+    // Above table 6 the metadata is < x4, let's truncate the output file
+    // so that we can recover some space from the x4 metadata from the previous tables
+    if( table >= TableId::Table6 )
+    {
+        _cx.ioQueue->TruncateBucket( _fxOut, 0 );
+        _cx.ioQueue->CommitCommands();
+    }
 
     switch( _cx.numBuckets )
     {
@@ -374,7 +396,7 @@ void DiskPlotPhase1::WriteCTablesBuckets()
 
     const auto timer = TimerBegin();
 
-    DiskFp<TableId::Table7, _numBuckets> fp( _cx, _fxIn, _fxOut );
+    DiskFp<TableId::Table7, _numBuckets, true> fp( _cx, _fxIn, _fxOut );
     fp.RunF7();
 
     const double elapsed = TimerEnd( timer );

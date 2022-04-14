@@ -6,6 +6,7 @@
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
+#include <errno.h>
 #include <numa.h>
 #include <numaif.h>
 #include <stdio.h>

@@ -23,6 +23,8 @@ public:
     size_t BlockSize() const override;
 
     ssize_t Size() override;
+    
+    bool Truncate( const ssize_t length ) override;
 
     int GetError() override;
 

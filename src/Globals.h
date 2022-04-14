@@ -94,35 +94,6 @@ inline FlagType operator ~ ( FlagType lhs )                                     
 }
 
 #define ImplementArithmeticOps( EnumType ) \
-/* Prefix ++*/                                                      \
-constexpr inline EnumType& operator++( EnumType& self )             \
-{                                                                   \
-    using BaseT = typename std::underlying_type<EnumType>::type;    \
-    (*reinterpret_cast<BaseT*>( &self ))++; return self;            \
-}                                                                   \
-/* Postfix ++*/                                                     \
-constexpr inline EnumType operator++( EnumType& self, int )         \
-{                                                                   \
-    using BaseT = typename std::underlying_type<EnumType>::type;    \
-    EnumType tmp = self;                                            \
-    ( *reinterpret_cast<BaseT*>( &self ) )++;                       \
-    return tmp;                                                     \
-}                                                                   \
-/* Prefix --*/                                                      \
-constexpr inline EnumType& operator--( EnumType& self )             \
-{                                                                   \
-    using BaseT = typename std::underlying_type<EnumType>::type;    \
-    (*reinterpret_cast<BaseT*>( &self ))--; return self;            \
-}                                                                   \
-/* Postfix --*/                                                     \
-constexpr inline EnumType operator--( EnumType& self, int )         \
-{                                                                   \
-    using BaseT = typename std::underlying_type<EnumType>::type;    \
-    EnumType tmp = self;                                            \
-    ( *reinterpret_cast<BaseT*>( &self ) )--;                       \
-    return tmp;                                                     \
-}                                                                   \
-                                                                    \
 constexpr inline EnumType operator+( EnumType lhs, EnumType rhs )   \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
@@ -145,7 +116,33 @@ constexpr inline EnumType operator-( EnumType lhs, int rhs )        \
 {                                                                   \
     using BaseT = typename std::underlying_type<EnumType>::type;    \
     return static_cast<EnumType>( static_cast<BaseT>( lhs ) - rhs );\
-}
+}                                                                   \
+/* Prefix ++*/                                                      \
+constexpr inline EnumType& operator++( EnumType& self )             \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    self = self + static_cast<EnumType>( 1 );                       \
+    return self;                                                    \
+}                                                                   \
+/* Postfix ++*/                                                     \
+constexpr inline EnumType operator++( EnumType& self, int )         \
+{                                                                   \
+    return ++self;                                                  \
+}                                                                   \
+/* Prefix --*/                                                      \
+constexpr inline EnumType& operator--( EnumType& self )             \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    self = self - static_cast<EnumType>( 1 );                       \
+    return self;                                                    \
+}                                                                   \
+/* Postfix --*/                                                     \
+constexpr inline EnumType operator--( EnumType& self, int )         \
+{                                                                   \
+    return --self;                                                  \
+}                                                                   \
+                                                                    \
+
 
 template< typename T>
 inline bool IsFlagSet( T flags, T flag )

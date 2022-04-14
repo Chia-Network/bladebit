@@ -252,7 +252,7 @@ struct DiskPairAndMapReader
         DiskBufferQueue& ioQueue = *_context.ioQueue;
 
         const uint64 maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
-        const size_t blockSize        = ioQueue.BlockSize( FileId::T1 );
+        const size_t blockSize        = ioQueue.BlockSize( FileId::T1 + (FileId)table );
 
         const size_t bufferSize       = blockSize + CDivT( (size_t)maxBucketEntries * _pairBits, blockSize * 8 ) * blockSize;
 
@@ -288,7 +288,7 @@ struct DiskPairAndMapReader
         DiskBufferQueue& ioQueue = *_context.ioQueue;
         
         const FileId fileId    = FileId::T1 + (FileId)_table;
-        const size_t blockSize = ioQueue.BlockSize( FileId::T1 );
+        const size_t blockSize = ioQueue.BlockSize( FileId::T1 + (FileId)_table);
 
         const uint32 bucket    = _bucketsLoaded++;
         const uint32 loadIdx   = bucket & 1; // bucket & 1 == bucket % 2
@@ -312,7 +312,7 @@ struct DiskPairAndMapReader
         DiskBufferQueue& ioQueue = *_context.ioQueue;
 
         const uint32 loadIdx      = bucket & 1; // Same as % 2
-        const size_t blockSize    = ioQueue.BlockSize( FileId::T1 );
+        const size_t blockSize    = ioQueue.BlockSize( FileId::T1 + (FileId)_table );
         const size_t blockBitSize = blockSize * 8;
 
         _fence.Wait( bucket + 1, ioWait );

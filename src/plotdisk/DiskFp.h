@@ -21,7 +21,7 @@ struct FpMapType { using Type = uint64; };
 template<>
 struct FpMapType<TableId::Table2> { using Type = uint32; };
 
-template<TableId table, uint32 _numBuckets>
+template<TableId table, uint32 _numBuckets, bool IsT7Out = false>
 class DiskFp
 {
 public:
@@ -203,10 +203,15 @@ public:
 
         if( !dryRun )
         {
-            const FileId mapWriterId = table == TableId::Table2 ? FileId::T1 : FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
-// #TODO: These need to have buffers rounded-up to block size per bucket I think
-            _fxBitWriter   = BitBucketWriter<_numBuckets>( _ioQueue, _outFxId, (byte*)fxBlocks );
-            _pairBitWriter = BitBucketWriter<1>          ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
+            const FileId mapWriterId = IsT7Out ? FileId::MAP7 :
+                                       table == TableId::Table2 ? FileId::T1 : FileId::MAP2 + (FileId)table-2; // Writes previous buffer's key as a map
+
+            if( !IsT7Out )
+            {
+                // #TODO: These need to have buffers rounded-up to block size per bucket I think
+                _fxBitWriter   = BitBucketWriter<_numBuckets>( _ioQueue, _outFxId, (byte*)fxBlocks );
+                _pairBitWriter = BitBucketWriter<1>          ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
+            }
 
             if( table > TableId::Table2 )
                 _mapBitWriter = BitBucketWriter<MapBucketCount>( _ioQueue, mapWriterId, (byte*)mapBlocks );
@@ -217,8 +222,8 @@ public:
     inline static size_t GetRequiredHeapSize( const size_t fxBlockSize, const size_t pairBlockSize )
     {
         DiskPlotContext cx = { 0 };
-        DiskFp<TableId::Table2, _numBuckets> fp2( cx, FileId::None, FileId::None );
-        DiskFp<TableId::Table4, _numBuckets> fp4( cx, FileId::None, FileId::None );
+        DiskFp<TableId::Table2, _numBuckets, false> fp2( cx, FileId::None, FileId::None );
+        DiskFp<TableId::Table4, _numBuckets, false> fp4( cx, FileId::None, FileId::None );
 
         //  #TODO: Revert checking both, use whichever is bigger after testing explicitly
         DummyAllocator alloc2;
@@ -694,9 +699,6 @@ public:
     //-----------------------------------------------------------
     void WriteCTables()
     {
-        _ioQueue.SeekBucket( _inFxId , 0, SeekOrigin::Begin );
-        _ioQueue.CommitCommands();
-
         _readFence .Reset( 0 );
         _writeFence.Reset( 0 );
 
@@ -754,7 +756,7 @@ public:
             using T7Entry = FpEntry<TableId::Table7>;
             static_assert( sizeof( T7Entry ) == sizeof( uint64 ) );
 
-            ExpandEntries<T7Entry, true>( packedEntries, 0, (T7Entry*)_entries[0], (int64)bucketLength );
+            ExpandEntries<T7Entry>( packedEntries, 0, (T7Entry*)_entries[0], (int64)bucketLength );
             // #if _DEBUG
             // {
             //     UnpackEntries<T7Entry, uint32, true>( bucket, (T7Entry*)_entries[0], (int64)bucketLength, f7, _map[0], nullptr );
@@ -767,7 +769,7 @@ public:
             // the sorted entries will be at the _entries[1] buffer in that case
             auto* sortedEntries = (T7Entry*)( _numBuckets > 128 ? _entries[1] : _entries[0] );
 
-            UnpackEntries<T7Entry, uint32, true>( bucket, sortedEntries, (int64)bucketLength, f7, _map[0], nullptr );
+            UnpackEntries<T7Entry, uint32>( bucket, sortedEntries, (int64)bucketLength, f7, _map[0], nullptr );
             WriteMap( bucket, (int64)bucketLength, _map[0], (uint64*)_meta[0] );
 
             _mapOffset += (uint64)bucketLength;
@@ -932,6 +934,7 @@ public:
 
         const EntryOut* entry = entries;
         const EntryOut* end   = entry + entryCount;
+
         while( entry < end )
         {
             writer.Write( entry->ykey, ykeyBits );
@@ -956,7 +959,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    template<typename TEntry, typename TY, bool IsT7Out = false>
+    template<typename TEntry, typename TY>
     inline void UnpackEntries( const uint32 bucket, const TEntry* packedEntries, const int64 entryCount, TY* outY, uint64* outMap, TMetaIn* outMeta )
     {
         using TMap = typename FpMapType<table>::Type;
@@ -1075,12 +1078,12 @@ public:
     //-----------------------------------------------------------
     // Convert entries from packed bits into 64-bit aligned entries
     //-----------------------------------------------------------
-    template<typename TEntry, bool Table7Out = false>
+    template<typename TEntry>
     inline void ExpandEntries( const void* packedEntries, const uint64 inputBitOffset, TEntry* expendedEntries, const int64 entryCount )
     {
         AnonMTJob::Run( _pool, _threadCount, [=]( AnonMTJob* self ) {
             
-            constexpr uint32 packedEntrySize = Table7Out ? Info::YBitSize + Info::MapBitSize : InInfo::EntrySizePackedBits;
+            constexpr uint32 packedEntrySize = IsT7Out ? Info::YBitSize + Info::MapBitSize : InInfo::EntrySizePackedBits;
 
             int64 count, offset, end;
             GetThreadOffsets( self, entryCount, count, offset, end );
@@ -1088,19 +1091,19 @@ public:
             const uint64 inputBitOffset = packedEntrySize * (uint64)offset;
             const size_t bitCapacity    = CDiv( packedEntrySize * (uint64)entryCount, 64 ) * 64;
 
-            DiskFp<table,_numBuckets>::ExpandEntries<TEntry, Table7Out>( packedEntries, inputBitOffset, bitCapacity, expendedEntries + offset, count );
+            DiskFp<table,_numBuckets,IsT7Out>::ExpandEntries<TEntry>( packedEntries, inputBitOffset, bitCapacity, expendedEntries + offset, count );
         });
     }
 
     //-----------------------------------------------------------
-    template<typename TEntry, bool Table7Out = false>
+    template<typename TEntry>
     inline static void ExpandEntries( const void* packedEntries, const uint64 inputBitOffset, const size_t bitCapacity,
                                       TEntry* expendedEntries, const int64 entryCount )
     {
-        constexpr uint32 yBits           = Table7Out ? Info::YBitSize : InInfo::YBitSize;
+        constexpr uint32 yBits           = IsT7Out? Info::YBitSize : InInfo::YBitSize;
         constexpr uint32 mapBits         = table == TableId::Table2 ? _k : InInfo::MapBitSize;
-        constexpr uint32 metaMultipler   = Table7Out ? 0 : InInfo::MetaMultiplier;
-        constexpr uint32 packedEntrySize = Table7Out ? yBits + mapBits : InInfo::EntrySizePackedBits;
+        constexpr uint32 metaMultipler   = IsT7Out ? 0 : InInfo::MetaMultiplier;
+        constexpr uint32 packedEntrySize = IsT7Out ? yBits + mapBits : InInfo::EntrySizePackedBits;
         
         BitReader reader( (uint64*)packedEntries, bitCapacity, inputBitOffset );
 
@@ -1109,7 +1112,7 @@ public:
         
         for( ; out < end; out++ )
         {
-            if constexpr ( table == TableId::Table2 || Table7Out )
+            if constexpr ( table == TableId::Table2 || IsT7Out )
             {
                 out->ykey = reader.ReadBits64( packedEntrySize );
             }
@@ -1143,8 +1146,11 @@ public:
     //-----------------------------------------------------------
     inline void LoadBucket( const uint32 bucket )
     {
-        const uint64 inBucketLength  = _context.bucketCounts[(int)table-1][bucket];
-        const size_t bucketSizeBytes = CDiv( InInfo::EntrySizePackedBits * (uint64)inBucketLength, 64 ) * 64 / 8;
+        const size_t entrySizeBits = IsT7Out ? Info::EntrySizePackedBits : InInfo::EntrySizePackedBits;
+        const int32  loadTable     = IsT7Out ? (int)table : (int)table-1;
+
+        const uint64 inBucketLength  = _context.bucketCounts[loadTable][bucket];
+        const size_t bucketSizeBytes = CDiv( entrySizeBits * (uint64)inBucketLength, 64 ) * 64 / 8;
 
         byte* readBuffer = GetReadBufferForBucket( bucket );
         ASSERT( (size_t)readBuffer / _ioQueue.BlockSize( _inFxId ) * _ioQueue.BlockSize( _inFxId ) == (size_t)readBuffer );

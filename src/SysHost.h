@@ -81,7 +81,7 @@ public:
 
     /// Get the node a memory page belongs to.
     /// Returns a negative value upon failure.
-    /// NOTE: Pages must first be faulted on linuz.
+    /// NOTE: Pages must first be faulted on linux.
     static int NumaGetNodeFromPage( void* ptr );
 
 };

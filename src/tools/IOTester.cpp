@@ -166,6 +166,7 @@ void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
     // Allocate data
     Log::Line( "Allocating buffer..." );
     byte* buffer = bbvirtalloc<byte>( totalWriteSize );
+    ASSERT( (uintptr_t)buffer / (uintptr_t)fsBlockSize * (uintptr_t)fsBlockSize == (uintptr_t)buffer );
     
     byte** blocks = new byte*[threadCount];
     for( uint32 i = 0; i < threadCount; i++ )

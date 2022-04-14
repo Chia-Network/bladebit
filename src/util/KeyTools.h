@@ -6,7 +6,7 @@
 #pragma warning( push )
 
 extern "C" {
-#include "bech32/segwit_addr.h"
+    #include "bech32/segwit_addr.h"
 }
 
 #pragma GCC diagnostic ignored "-Wsign-compare"

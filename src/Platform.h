@@ -24,25 +24,26 @@
 
     #include <pthread.h>
     #include <semaphore.h>
-    #include <errno.h>
+    #include <alloca.h>
+    #include <signal.h>
     #include <unistd.h>
     #include <sys/mman.h>
     #include <time.h>
-    #include <alloca.h>
-    #include <signal.h>
 
     #if __linux__
         #include <sys/sysinfo.h>
+
+        typedef pthread_t ThreadId;
+        typedef sem_t     SemaphoreId;
     #elif __APPLE__
-        #include <mach/mach.h>
-        #include <fcntl.h>
+        #include <dispatch/dispatch.h>
+
+        typedef pthread_t ThreadId;
+        typedef dispatch_semaphore_t SemaphoreId;
     #endif
 
     #define BBDebugBreak() raise( SIGTRAP )
-    
 
-    typedef pthread_t ThreadId;
-    typedef sem_t     SemaphoreId;
 
 #else
     #error Unsupported platform

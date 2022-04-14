@@ -16,6 +16,7 @@ enum FileSetOptions
     None       = 0,
     DirectIO   = 1 << 0,    // Use direct IO/unbuffered file IO
     Cachable   = 1 << 1,    // Use a in-memory cache for the file
+    UseTemp2   = 1 << 2,    // Use the high-frequency temp directory
 };
 ImplementFlagOps( FileSetOptions );
 
@@ -72,6 +73,7 @@ class DiskBufferQueue
             ReleaseBuffer,
             SignalFence,
             WaitForFence,
+            TruncateBucket,
         };
 
         CommandType type;
@@ -118,6 +120,12 @@ class DiskBufferQueue
                 FileId fileId;
                 uint   bucket;
             } deleteFile;
+
+            struct
+            {
+                FileId  fileId;
+                ssize_t position;
+            } truncateBucket;
         };
     };
 
@@ -128,8 +136,8 @@ class DiskBufferQueue
     };
 
 public:
-    DiskBufferQueue( const char* workDir, byte* workBuffer, 
-                     size_t workBufferSize, uint ioThreadCount,
+    DiskBufferQueue( const char* workDir1, const char* workDir2, const char* plotDir,
+                     byte* workBuffer, size_t workBufferSize, uint ioThreadCount,
                      int32 threadBindId = -1 );
 
     ~DiskBufferQueue();
@@ -141,6 +149,8 @@ public:
     void SetTransform( FileId fileId, IIOTransform& transform );
 
     void OpenPlotFile( const char* fileName, const byte* plotId, const byte* plotMemo, uint16 plotMemoSize );
+
+    void FinishPlot( Fence& fence );
 
     void ResetHeap( const size_t heapSize, void* heapBuffer );
 
@@ -157,6 +167,8 @@ public:
     void DeleteFile( FileId id, uint bucket );
 
     void DeleteBucket( FileId id );
+
+    void TruncateBucket( FileId id, const ssize_t position );
 
     void CommitCommands();
 
@@ -231,21 +243,29 @@ private:
     void CmdDeleteFile( const Command& cmd );
     void CmdDeleteBucket( const Command& cmd );
 
-    void DeleteFileNow( const FileId fileId, uint32 bucket );
+    void CmdTruncateBucket( const Command& cmd );
+
+    void CloseFileNow( const FileId fileId, const uint32 bucket );
+    void DeleteFileNow( const FileId fileId, const uint32 bucket );
     void DeleteBucketNow( const FileId fileId );
+
 
     static const char* DbgGetCommandName( Command::CommandType type );
 
 
 private:
-    std::string      _workDir;              // Temporary directory in which we will store our temporary files
-    WorkHeap         _workHeap;             // Reserved memory for performing plot work and I/O
+    std::string      _workDir1;     // Temporary 1 directory in which we will store our long-lived temporary files
+    std::string      _workDir2;     // Temporary 2 directory in which we will store our short-live, high-req I/O temporary files
+    std::string      _plotDir;      // Temporary plot directory
+    std::string      _plotFullName; // Full path of the plot file without '.tmp'
+
+    WorkHeap         _workHeap;     // Reserved memory for performing plot work and I/O // #TODO: Remove this
     
     // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];
-    size_t           _blockSize      = 0;
+    size_t           _blockSize          = 0;
     
-    char*            _filePathBuffer = nullptr; // For deleting files
+    char*            _filePathBuffer     = nullptr;         // For creating file sets
 
     size_t           _plotHeaderSize     = 0;
     byte*            _plotHeaderbuffer   = nullptr;
@@ -267,7 +287,8 @@ private:
     Thread            _deleterThread;                   // For deleting files.
     AutoResetSignal   _deleteSignal;                    // We do this in a separate thread as to not
     GrowableSPCQueue<FileDeleteCommand> _deleteQueue;   // block other commands when the kernel is clearing cached IO buffers for the files.
-    bool              _deleterExit = false;
+    char*             _delFilePathBuffer = nullptr;     // For deleting file sets
+    bool              _deleterExit       = false;
     int32             _threadBindId;
     
 };

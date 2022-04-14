@@ -7,16 +7,16 @@ AutoResetSignal::AutoResetSignal()
 {
 #if PLATFORM_IS_WINDOWS
     _object = CreateEvent( NULL, FALSE, FALSE, NULL );
-    FatalIf( !_object, "AutoResetSignal::AutoResetSignal() CreateEvent() failed." );
+    PanicIf( !_object, "AutoResetSignal::AutoResetSignal() CreateEvent() failed." );
 #else
     ZeroMem( &_object );
 
     int r;
     r = pthread_mutex_init( &_object.mutex, 0 );
-    FatalIf( r, "AutoResetSignal::AutoResetSignal() pthread_mutex_init failed with error %d.", r );
+    PanicIf( r, "AutoResetSignal::AutoResetSignal() pthread_mutex_init failed with error %d.", r );
 
     r = pthread_cond_init(  &_object.cond , 0 );
-    FatalIf( r, "AutoResetSignal::AutoResetSignal() pthread_cond_init failed with error %d.", r );
+    PanicIf( r, "AutoResetSignal::AutoResetSignal() pthread_cond_init failed with error %d.", r );
 #endif
 }
 
@@ -50,12 +50,12 @@ void AutoResetSignal::Reset()
     int r;
 
     r = pthread_mutex_lock( &_object.mutex );
-    FatalIf( r, "AutoResetSignal::Signal pthread_mutex_lock() failed with error %d.", r );
+    PanicIf( r, "AutoResetSignal::Signal pthread_mutex_lock() failed with error %d.", r );
 
     _object.signaled = false;
 
     r = pthread_mutex_unlock( &_object.mutex );
-    FatalIf( r, "AutoResetSignal::Signal pthread_mutex_unlock() failed with error %d.", r );
+    PanicIf( r, "AutoResetSignal::Signal pthread_mutex_unlock() failed with error %d.", r );
 #endif
 }
 
@@ -71,15 +71,15 @@ void AutoResetSignal::Signal()
     int r;
 
     r = pthread_mutex_lock( &_object.mutex );
-    FatalIf( r, "AutoResetSignal::Signal pthread_mutex_lock() failed with error %d.", r );
+    PanicIf( r, "AutoResetSignal::Signal pthread_mutex_lock() failed with error %d.", r );
 
     _object.signaled = true;
 
     r = pthread_cond_signal( &_object.cond  );
-    FatalIf( r, "AutoResetSignal::Signal pthread_cond_signal() failed with error %d.", r );
+    PanicIf( r, "AutoResetSignal::Signal pthread_cond_signal() failed with error %d.", r );
 
     r = pthread_mutex_unlock( &_object.mutex );
-    FatalIf( r, "AutoResetSignal::Signal pthread_mutex_unlock() failed with error %d.", r );
+    PanicIf( r, "AutoResetSignal::Signal pthread_mutex_unlock() failed with error %d.", r );
 #endif
 }
 
@@ -115,7 +115,7 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
     if( timeoutMS == WaitInfinite )
     {
         r = pthread_mutex_lock( &_object.mutex );
-        FatalIf( r, "AutoResetSignal::Wait pthread_mutex_lock() failed with error %d.", r );
+        PanicIf( r, "AutoResetSignal::Wait pthread_mutex_lock() failed with error %d.", r );
 
         while( !_object.signaled )
             rc = pthread_cond_wait( &_object.cond, &_object.mutex );
@@ -123,14 +123,14 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
         _object.signaled = false;
 
         r = pthread_mutex_unlock( &_object.mutex );
-        FatalIf( r, "AutoResetSignal::Wait pthread_mutex_unlock() failed with error %d.", r );
+        PanicIf( r, "AutoResetSignal::Wait pthread_mutex_unlock() failed with error %d.", r );
     }
     else
     {
         struct timespec t;
 
         r = pthread_mutex_lock( &_object.mutex );
-        FatalIf( r, "AutoResetSignal::Wait pthread_mutex_lock() failed with error %d.", r );
+        PanicIf( r, "AutoResetSignal::Wait pthread_mutex_lock() failed with error %d.", r );
 
         clock_gettime( CLOCK_REALTIME, &t );
         timeoutMS += ( t.tv_sec * 1000 ) + ( t.tv_nsec / 1000000 );
@@ -144,7 +144,7 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
         _object.signaled = false;
 
         r = pthread_mutex_unlock( &_object.mutex );
-        FatalIf( r, "AutoResetSignal::Wait pthread_mutex_unlock() failed with error %d.", r );
+        PanicIf( r, "AutoResetSignal::Wait pthread_mutex_unlock() failed with error %d.", r );
     }
 
     switch( rc )
