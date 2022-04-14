@@ -503,7 +503,8 @@ Creates plots by making use of a disk to temporarily store and read values.
 
  --cache <n>        : Size of cache to reserve for I/O. This is memory
                       reserved for files that incur frequent I/O.
-                      You need about 96GiB for high-performance Phase 1 calculations.
+                      You need about 192GiB(+|-) for high-frequency I/O Phase 1 calculations
+                      to be completely in-memory.
 
  --f1-threads <n>   : Override the thread count for F1 generation.
 
@@ -532,10 +533,10 @@ you would typically lower the thread count for these phases if you are
 incurring I/O waits.
 
 [EXAMPLES]
-bladebit -t 24 -f ... -c ... diskplot --b 128 --cache 32G -t /my/temporary/plot/dir
+bladebit -t 24 -f ... -c ... diskplot --b 128 --cache 32G -t1 /my/temporary/plot/dir
  --f1-threads 3 --fp-threads 16 --c-threads 8 --p2-threads 12 --p3-threads 8 /my/output/dir
 
-bladebit -t 8 -f ... -c ... diskplot -t /my/temporary/plot/dir -t2 /my/other/tmp/dir /my/output/dir
+bladebit -t 8 -f ... -c ... diskplot -t2 /my/temporary/plot/dir -t2 /my/other/tmp/dir /my/output/dir
 )";
 
 //-----------------------------------------------------------
