@@ -102,7 +102,7 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
     // #TODO: Have the user specify an alignment instead so we don't have to store at page size boundaries.
     (*(size_t*)ptr) = allocSize;
 
-    return (void*)(uintptr_t)(ptr + sizeof( size_t ) );
+    return (void*)(uintptr_t)(ptr + pageSize);
 //    const size_t pageSize = (size_t)getpagesize();
 //
 //    // Align size to page boundary
@@ -167,8 +167,9 @@ void SysHost::VirtualFree( void* ptr )
 bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
 {
     ASSERT( ptr );
+    ASSERT( size );
 
-    int prot = PROT_NONE;
+    vm_prot_t prot = VM_PROT_NONE;
 
     // if( IsFlagSet( flags, VProtect::NoAccess ) )
     // {
@@ -177,12 +178,12 @@ bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
     // else
     // {
     if( IsFlagSet( flags, VProtect::Read ) )
-        prot |= PROT_READ;
+        prot |= VM_PROT_READ;
     if( IsFlagSet( flags, VProtect::Write ) )
-        prot |= PROT_WRITE;
+        prot |= VM_PROT_WRITE;
     // }
 
-    int r = mprotect( ptr, size, prot );
+    const kern_return_t r = vm_protect( mach_task_self(), (vm_address_t)ptr, (vm_size_t)size, false, prot );
     ASSERT( !r );
 
     return r == 0;

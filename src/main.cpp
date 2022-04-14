@@ -3,7 +3,7 @@
 #include "plotdisk/DiskPlotter.h"
 #include "Version.h"
 
-#if PLATFORM_IS_LINUX
+#if PLATFORM_IS_UNIX
     #include <sys/resource.h>
 #endif
 
@@ -213,7 +213,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
         else if( cli.ArgConsume( "diskplot" ) )
         {
             // Increase the file size limit on linux
-            #if PLATFORM_IS_LINUX
+            #if PLATFORM_IS_UNIX
                 struct rlimit limit;
                 getrlimit( RLIMIT_NOFILE, &limit );
 
