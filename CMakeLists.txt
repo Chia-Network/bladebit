@@ -131,9 +131,9 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         ${release_link_opts})
 
     set(debug_link_opts
-        /DEBUG:FASTLINK
+#        /DEBUG:FASTLINK
         /OPT:NOREF,NOICF,NOLBR
-        /INCREMENTAL
+#        /INCREMENTAL
         ${debug_link_opts})
 
     # Dependency config

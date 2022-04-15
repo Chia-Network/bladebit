@@ -245,6 +245,12 @@ void SysHost::InstallCrashHandler()
 }
 
 //-----------------------------------------------------------
+void SysHost::DumpStackTrace()
+{
+    // #TODO: Implement me
+}
+
+//-----------------------------------------------------------
 void SysHost::Random( byte* buffer, size_t size )
 {
     if( !RtlGenRandom( (PVOID)buffer, (ULONG)size ) )

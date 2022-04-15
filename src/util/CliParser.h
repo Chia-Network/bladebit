@@ -289,7 +289,9 @@ public:
             else if( StriCmp( "KB", suffix ) == 0 || StriCmp( "K", suffix ) == 0 )
                 multiplier = 1ull KB;
             else
-            Fatal( "Invalid suffix '%s' for argument '%s'", suffix, arg );
+            {
+                Fatal( "Invalid suffix '%s' for argument '%s'", suffix, arg );
+            }
         }
 
         size_t parsedSize = 0;

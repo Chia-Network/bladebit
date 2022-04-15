@@ -41,7 +41,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     if( access == FileAccess::None )
         access = FileAccess::Read;
 
-    const DWORD dwShareMode           = 0;
+    const DWORD dwShareMode           = FILE_SHARE_READ | FILE_SHARE_WRITE;  // #TODO: Specify this as flags, for now we need full share for MT I/O
     const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS :
                                         mode == FileMode::Open   ? OPEN_EXISTING : OPEN_ALWAYS;
 
@@ -263,6 +263,39 @@ bool FileStream::IsOpen() const
 }
 
 //-----------------------------------------------------------
+ssize_t FileStream::Size()
+{
+    LARGE_INTEGER size;
+    const BOOL r = ::GetFileSizeEx( _fd, &size );
+
+    if( !r )
+    {
+        _error = ::GetLastError();
+        Log::Line( "Error: GetFileSizeEx() failed with error: %d", _error );
+        return 0;
+    }
+
+    return (ssize_t)size.QuadPart;
+}
+
+//-----------------------------------------------------------
+bool FileStream::Truncate( const ssize_t length )
+{
+    if( !Seek( (int64)length, SeekOrigin::Begin ) )
+        return false;
+
+    const BOOL r = ::SetEndOfFile( _fd );
+    if( !r )
+    {
+        _error = ::GetLastError();
+        Log::Line( "Error: SetEndOfFile() failed with error: %d", _error );
+        return false;
+    }
+
+    return true;
+}
+
+//-----------------------------------------------------------
 bool FileStream::Exists( const char* path )
 {
     ASSERT( path );
@@ -416,3 +449,5 @@ bool GetFileClusterSize( HANDLE hFile, size_t& outClusterSize )
 
     //return (bool)r;
 }
+
+

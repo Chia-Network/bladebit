@@ -23,7 +23,9 @@ Semaphore::Semaphore( int initialCount )
     #elif PLATFORM_IS_WINDOWS
         _id = CreateSemaphore( NULL,(LONG)initialCount, std::numeric_limits<LONG>::max(), NULL );
         if( _id == NULL )
+        {
             Panic( "CreateSemaphore() failed with error: %d.", (int32)::GetLastError() );
+        }
     #elif PLATFORM_IS_APPLE
         _id = dispatch_semaphore_create( (intptr_t)initialCount );
         PanicIf( !_id, "dispatch_semaphore_create failed." );

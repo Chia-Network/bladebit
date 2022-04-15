@@ -1,5 +1,9 @@
 #include "Log.h"
 
+#if _DEBUG && defined( _WIN32 )
+    #include <Windows.h>
+    #include <debugapi.h>
+#endif
 
 FILE* Log::_outStream = nullptr;
 FILE* Log::_errStream = nullptr;
@@ -71,6 +75,10 @@ void Log::Line( const char* msg, ... )
 void Log::Write( const char* msg, va_list args )
 {
     vfprintf( GetOutStream(), msg, args );
+
+#if _DEBUG && defined( _WIN32 )
+    //::OutputDebugStringA( (LPCSTR)msg );
+#endif
 }
 
 //-----------------------------------------------------------
@@ -114,6 +122,10 @@ void Log::Error( const char* msg, va_list args )
 void Log::WriteError( const char* msg, va_list args )
 {
     vfprintf( GetErrStream(), msg, args );
+    
+#if _DEBUG && defined( _WIN32 )
+    //::OutputDebugStringA( (LPCSTR)msg );
+#endif
 }
 
 //-----------------------------------------------------------
