@@ -58,7 +58,7 @@ public:
         size_t allocSize = 0;
 
         for( uint32 i = 0; i < _numBuckets; i++ )
-            allocSize += CDivT( bucketBitSizes[i] + _remainderBitCount[i], fsBlockSizeBits ) * fsBlockSizeBits / 8;
+            allocSize += CDivT( (size_t)bucketBitSizes[i] + _remainderBitCount[i], fsBlockSizeBits ) * fsBlockSizeBits / 8;
 
         byte* bucketBuffers = _queue->GetBuffer( allocSize, fsBlockSize, true );
 

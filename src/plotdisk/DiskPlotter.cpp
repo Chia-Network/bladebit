@@ -460,7 +460,7 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
 
     char* randFileName = bbmalloc<char>( pathLen + 32 );
     
-    int r = snprintf( randFileName, pathLen + 32, "%s.%llx.blk", tmpPath, randNum );
+    int r = snprintf( randFileName, pathLen + 32, "%s.%llx.blk", tmpPath, (llu)randNum );
     FatalIf( r < 1, "Unexpected error validating temp directory." );
 
     FileStream tmpFile;

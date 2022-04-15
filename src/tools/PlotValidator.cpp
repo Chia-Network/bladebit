@@ -14,6 +14,9 @@
 #include "plotting/GlobalPlotConfig.h"
 #include <mutex>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
 #define PROOF_X_COUNT       64
 #define MAX_K_SIZE          48
 #define MAX_META_MULTIPLIER 4
@@ -115,7 +118,7 @@ static uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool );
 // Thread-safe log
 static std::mutex _logLock;
 static void TVLog( const uint32 id, const char* msg, va_list args );
-static void TLog( const uint32 id, const char* msg, ... );
+// static void TLog( const uint32 id, const char* msg, ... );
 
 struct ValidateJob : MTJob<ValidateJob>
 {
@@ -315,7 +318,7 @@ uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool )
                 failedCount++;
 
             const uint64 proofsChecked = i - offset;
-            if( proofsChecked > 0 && proofsChecked % reportInterval == 0 || i + 1 == end )
+            if( ( proofsChecked > 0 && proofsChecked % reportInterval == 0 ) || i + 1 == end )
             {
                 Log( "Proofs validated: %10llu / %-10llu ( %.2lf %% ) [ %sFailed: %llu%s ]",
                     proofsChecked, count, 
@@ -1077,12 +1080,13 @@ void TVLog( const uint32 id, const char* msg, va_list args )
 }
 
 //-----------------------------------------------------------
-void TLog( const uint32 id, const char* msg, ... )
-{
-    va_list args;
-    va_start( args, msg );
-    TVLog( id, msg, args );
-    va_end( args );
-}
+// void TLog( const uint32 id, const char* msg, ... )
+// {
+//     va_list args;
+//     va_start( args, msg );
+//     TVLog( id, msg, args );
+//     va_end( args );
+// }
 
+#pragma GCC diagnostic pop
 

@@ -966,6 +966,7 @@ inline void DiskBufferQueue::CloseFileNow( const FileId fileId, const uint32 buc
 {
     FileSet& fileSet = _files[(int)fileId];
 
+    // NOTE: Why are we doing it this way?? Just add Close() to IStream.
     const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::Cachable );
     if( isHybridFile )
     {
@@ -1014,8 +1015,6 @@ void DiskBufferQueue::DeleteBucketNow( const FileId fileId )
 
     memcpy( filePath, wokrDir.c_str(), wokrDir.length() );
     char* baseName = filePath + wokrDir.length();
-
-    const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::Cachable );
 
     for( size_t i = 0; i < fileSet.files.length; i++ )
     {

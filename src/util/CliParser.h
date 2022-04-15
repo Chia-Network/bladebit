@@ -98,7 +98,7 @@ public:
         NextArg();
 
         uint64 value;
-        int r = sscanf( strValue, "%llu", &value );
+        int r = sscanf( strValue, "%llu",(llu*)&value );
         FatalIf( r != 1, "Expected an uint64 value at parameter %d.", _i );
         
         return value;
@@ -112,7 +112,7 @@ public:
             return false;
 
         const char* arg = _argv[_i-2];
-        int r = sscanf( strValue, "%llu", &value );
+        int r = sscanf( strValue, "%llu", (llu*)&value );
         FatalIf( r != 1, "Invalid uint64 value for argument '%s'.", arg );
 
         return true;
@@ -306,7 +306,7 @@ public:
         memcpy( digits, sizeText, digitsLength );
         digits[digitsLength] = 0;
 
-        FatalIf( sscanf( digits, "%llu", &parsedSize ) != 1,
+        FatalIf( sscanf( digits, "%llu", (llu*)&parsedSize ) != 1,
                  "Invalid parameters value for argument '%s'.", arg );
 
         size = parsedSize * multiplier;

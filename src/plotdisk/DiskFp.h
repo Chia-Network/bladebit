@@ -15,6 +15,10 @@
     #include "DiskPlotDebug.h"
 #endif
 
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+
 template<TableId table>
 struct FpMapType { using Type = uint64; };
 
@@ -321,8 +325,6 @@ public:
     //-----------------------------------------------------------
     void WriteMap( const uint32 bucket, const int64 entryCount, const uint64* map, uint64* outMap )
     {
-        using TMap = typename FpMapType<table>::Type;
-
         ASSERT( entryCount < (1ll << _k) );
         
         if constexpr ( table == TableId::Table2 )
@@ -364,7 +366,6 @@ public:
             const uint32 bitSize      = Info::MapBitSize + _k - bucketBits;
             const uint32 encodeShift  = Info::MapBitSize;
             const uint32 numBuckets   = _numBuckets + 1;
-            const uint32 threadCount  = self->JobCount();
 
 
             int64 count, offset, end;
@@ -1228,3 +1229,7 @@ private:
 
     FpCrossBucketInfo _crossBucketInfo;
 };
+
+
+#pragma GCC diagnostic pop
+

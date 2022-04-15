@@ -120,7 +120,6 @@ constexpr inline EnumType operator-( EnumType lhs, int rhs )        \
 /* Prefix ++*/                                                      \
 constexpr inline EnumType& operator++( EnumType& self )             \
 {                                                                   \
-    using BaseT = typename std::underlying_type<EnumType>::type;    \
     self = self + static_cast<EnumType>( 1 );                       \
     return self;                                                    \
 }                                                                   \
@@ -132,7 +131,6 @@ constexpr inline EnumType operator++( EnumType& self, int )         \
 /* Prefix --*/                                                      \
 constexpr inline EnumType& operator--( EnumType& self )             \
 {                                                                   \
-    using BaseT = typename std::underlying_type<EnumType>::type;    \
     self = self - static_cast<EnumType>( 1 );                       \
     return self;                                                    \
 }                                                                   \

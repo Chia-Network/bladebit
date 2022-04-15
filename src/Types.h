@@ -4,8 +4,10 @@ typedef uint8_t                 byte;
 typedef uint8_t                 uint8;
 typedef uint16_t                uint16;
 typedef uint32_t                uint32;
-//typedef unsigned long long int  uint64;
-typedef uint64_t uint64;
+typedef uint64_t                uint64;
+
+// Prevent compiler whining about %llu when uint64:
+typedef long long unsigned int  llu;
 
 #if !uint
     typedef uint32          uint;
