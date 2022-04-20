@@ -76,7 +76,7 @@
 
                 "--show-memo",
                 "diskplot",
-                "-t1", "/mnt/p5510a/disk_tmp",
+                "-t1", "~/plot-tmp",
                 "--f1-threads", "22",
                 "--fp-threads", "60",
                 // "--fp-threads", "50",
@@ -94,7 +94,7 @@
                 "--c-threads", "24",
                 "--p2-threads", "20",
                 "--p3-threads", "42",
-                "/mnt/p5510a/disk_tmp"
+                "~/plot-tmp"
             ],
             // ,"stopAtEntry": true
             

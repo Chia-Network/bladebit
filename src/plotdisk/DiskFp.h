@@ -175,13 +175,16 @@ public:
         _pair[0] = alloc.CAlloc<Pair> ( maxEntriesX );
         
         // IO buffers
-        const size_t pairBits    = _k + 1 - bucketBits + 9;
-        const size_t mapBits     = _k + 1 - bucketBits + _k + 1;
+        const size_t pairBits      = _k + 1 - bucketBits + 9;
+        const size_t mapBits       = _k + 1 - bucketBits + _k + 1;
 
         const size_t fxWriteSize   = (size_t)_numBuckets * perBucketEntriesSize;
         const size_t pairWriteSize = CDiv( ( maxEntriesX ) * pairBits, 8 );
         const size_t mapWriteSize  = CDiv( ( maxEntriesX ) * mapBits , 8 );
 
+        // #TODO: These need to have buffers rounded-up to block size per bucket I think...
+        //         So we need to have this divided into bucket slices, then each sice rounded-up
+        //         to the block size, finally, the sum of that is the allocation size.
         _fxRead [0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
         _fxRead [1]   = alloc.Alloc( fxWriteSize, fxBlockSize );
         _fxWrite[0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
@@ -212,7 +215,6 @@ public:
 
             if( !IsT7Out )
             {
-                // #TODO: These need to have buffers rounded-up to block size per bucket I think
                 _fxBitWriter   = BitBucketWriter<_numBuckets>( _ioQueue, _outFxId, (byte*)fxBlocks );
                 _pairBitWriter = BitBucketWriter<1>          ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
             }

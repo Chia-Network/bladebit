@@ -644,7 +644,7 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     Log::Debug( "  >>> Write 0x%p", buffers );
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
-    const size_t blockSize = _blockSize;
+    // const size_t blockSize = _blockSize;
     const byte*  buffer    = buffers;
 
     // if( fileSet.transform )

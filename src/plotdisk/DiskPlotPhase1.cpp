@@ -61,10 +61,9 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 //-----------------------------------------------------------
 void DiskPlotPhase1::Run()
 {
-    DiskPlotContext& cx = _cx;
-
     #if _DEBUG && ( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE )
     {
+        DiskPlotContext& cx = _cx;
         FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 
         if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
