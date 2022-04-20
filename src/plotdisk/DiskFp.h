@@ -151,15 +151,10 @@ public:
     {
         using info = DiskPlotInfo<TableId::Table4, _numBuckets>;
         
-        const uint32 bucketBits    = bblog2( _numBuckets );
-        const size_t maxEntries    = info::MaxBucketEntries;
-        const size_t maxEntriesX   = maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
-        const size_t entrySizeBits = info::EntrySizePackedBits;
-        
-        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
-        const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize ) + 
-                                            RoundUpToNextBoundaryT( CDiv( entrySizeBits * BB_DP_CROSS_BUCKET_MAX_ENTRIES, 8 ), fxBlockSize );
-
+        const size_t maxEntries      = info::MaxBucketEntries;
+        const size_t maxSliceEntries = info::MaxBucketSliceEntries;
+        const size_t maxEntriesX     = maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
+       
         // Working buffers
         _entries[0] = alloc.CAlloc<Entry>( maxEntries );
         _entries[1] = alloc.CAlloc<Entry>( maxEntries );
@@ -172,15 +167,26 @@ public:
         _meta[0] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntriesX );
         _meta[1] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntriesX );
         
-        _pair[0] = alloc.CAlloc<Pair> ( maxEntriesX );
+        _pair[0] = alloc.CAlloc<Pair>( maxEntriesX );
         
         // IO buffers
-        const size_t pairBits      = _k + 1 - bucketBits + 9;
-        const size_t mapBits       = _k + 1 - bucketBits + _k + 1;
+        const uint32 bucketBits      = bblog2( _numBuckets );
+        const size_t entrySizeBits   = info::EntrySizePackedBits;       // Entries stored in fx file (tmp2)
+        const size_t pairBits        = _k + 1 - bucketBits + 9;         // Entries stored in table file (tmp1)
+        const size_t mapBits         = _k + 1 - bucketBits + _k + 1;    // Entries stored in map file (tmp1)
 
-        const size_t fxWriteSize   = (size_t)_numBuckets * perBucketEntriesSize;
-        const size_t pairWriteSize = CDiv( ( maxEntriesX ) * pairBits, 8 );
-        const size_t mapWriteSize  = CDiv( ( maxEntriesX ) * mapBits , 8 );
+        // Because bitwriter needs each slice buffer to be rounded up
+        // to block-size, we need to account for that here when allocating.
+        const size_t entrySliceAlloc = (size_t)RoundUpToNextBoundaryT( CDiv( (uint128)maxSliceEntries * entrySizeBits, 8 ), (uint128)fxBlockSize   );
+        const size_t mapSliceAslloc  = (size_t)RoundUpToNextBoundaryT( CDiv( (uint128)maxSliceEntries * mapBits      , 8 ), (uint128)pairBlockSize );
+        
+        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize ) + 
+                                            RoundUpToNextBoundaryT( CDiv( entrySizeBits * BB_DP_CROSS_BUCKET_MAX_ENTRIES, 8 ), fxBlockSize );
+
+        const size_t fxWriteSize   = entrySliceAlloc * _numBuckets; //(size_t)_numBuckets * perBucketEntriesSize;
+        const size_t pairWriteSize = CDiv( ( maxEntriesX ) * pairBits, 8 ); 
+        const size_t mapWriteSize  = mapSliceAslloc * _numBuckets;   //CDiv( ( maxEntriesX ) * mapBits , 8 ); // #TODO: Might need the cross bucket entries added here too... But maybe the multiplier covers it
 
         // #TODO: These need to have buffers rounded-up to block size per bucket I think...
         //         So we need to have this divided into bucket slices, then each sice rounded-up
