@@ -8,6 +8,7 @@
 #include <systemtopologyapi.h>
 #include <psapi.h>
 
+
 static_assert( INVALID_HANDLE_VALUE == INVALID_WIN32_HANDLE );
 
 /*
@@ -19,6 +20,9 @@ static_assert( INVALID_HANDLE_VALUE == INVALID_WIN32_HANDLE );
 #define RtlGenRandom SystemFunction036
 extern "C" BOOLEAN NTAPI RtlGenRandom( PVOID RandomBuffer, ULONG RandomBufferLength );
 #pragma comment( lib, "advapi32.lib" )
+
+static bool EnableLockMemoryPrivilege();
+
 
 // Helper structs to help us iterate these variable-length structs
 template<typename T>
@@ -109,17 +113,39 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
     SYSTEM_INFO info;
     ::GetSystemInfo( &info );
 
-//     const size_t largePageMin = GetLargePageMinimum();
+    size_t pageSize  = (size_t)info.dwPageSize;
+    DWORD  allocType = MEM_RESERVE | MEM_COMMIT;
 
-    const size_t pageSize = (size_t)info.dwPageSize;
-    size = RoundUpToNextBoundaryT( size, pageSize );
+    // #TODO: Add a hint to see if we want to allocate large pages.
+    const bool useLargePages = false; //EnableLockMemoryPrivilege();
+//    Log::Line( "Large page support: %s", useLargePages ? "true" : "false" );
+//    if( useLargePages )
+//    {
+//        pageSize = (size_t)::GetLargePageMinimum();
+//        allocType |= MEM_LARGE_PAGES;
+//    }
+//    else
+//        Log::Line( "No large page support." );
 
-    void* ptr = ::VirtualAlloc( NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
+    // See if we can allocate large pages
+    size_t allocSize = RoundUpToNextBoundaryT( size, pageSize );
 
+    void* ptr = ::VirtualAlloc( NULL, allocSize, allocType, PAGE_READWRITE );
+
+    if( !ptr && useLargePages )
+    {
+        const DWORD err = GetLastError();
+        Log::Line( "Warning: Failed to allocate large pages with error: %d.", err );
+
+        // Try without large pages
+        allocSize = RoundUpToNextBoundaryT( size, (size_t)info.dwPageSize );
+        ptr = ::VirtualAlloc( NULL, allocSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
+    }
+
+    // #TODO: Remove this
     if( ptr && initialize )
     {
         // Fault memory pages
-
         byte* page = (byte*)ptr;
 
         const size_t pageCount = size / pageSize;
@@ -519,4 +545,62 @@ int SysHost::NumaGetNodeFromPage( void* ptr )
     // }
 
     return -1;
+}
+
+// #See:
+//  https://docs.microsoft.com/en-us/windows/win32/memory/large-page-support
+//  https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
+//  https://docs.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges
+//-----------------------------------------------------------
+bool EnableLockMemoryPrivilege()
+{
+    static int32 _enabledState = 0; // 0 = uninitialized, -1 = failed to enabled, 1 = enabled
+    if( _enabledState != 0 )
+        return _enabledState == 1;
+
+    HANDLE hProc, hToken;
+    hProc = GetCurrentProcess();
+
+    if( !OpenProcessToken( hProc, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken ) )
+        return false;   // Try again later
+    
+    TOKEN_PRIVILEGES tp;
+    LUID luid;
+
+    if( !LookupPrivilegeValue(
+        NULL,                   // lookup privilege on local system
+        SE_LOCK_MEMORY_NAME,    // privilege to lookup 
+        &luid ) )               // receives LUID of privilege
+    {
+        goto Failed;
+    }
+
+    tp.PrivilegeCount           = 1;
+    tp.Privileges[0].Luid       = luid;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+    if( !AdjustTokenPrivileges(
+        hToken,
+        FALSE,
+        &tp,
+        sizeof( TOKEN_PRIVILEGES ),
+        (PTOKEN_PRIVILEGES)NULL,
+        (PDWORD)NULL ) )
+    {
+        goto Failed;
+    }
+
+    // Still have to check if it actually adjusted the privilege
+    // #See: https://devblogs.microsoft.com/oldnewthing/20211126-00/?p=105973
+    DWORD r = ::GetLastError();
+    if( r != ERROR_SUCCESS )
+        goto Failed;
+
+    _enabledState = 1;
+    return true;
+
+Failed:
+    ::CloseHandle( hToken );
+    _enabledState = -1;
+    return false;
 }
