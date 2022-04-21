@@ -67,6 +67,8 @@ DiskPlotter::DiskPlotter( const Config cfg )
     Log::Line( " P2 threads     : %u"       , _cx.p2ThreadCount );
     Log::Line( " P3 threads     : %u"       , _cx.p3ThreadCount );
     Log::Line( " IO threads     : %u"       , _cx.ioThreadCount );
+    Log::Line( " Temp1 block sz : %u"       , _cx.tmp1BlockSize );
+    Log::Line( " Temp2 block sz : %u"       , _cx.tmp2BlockSize );
 
     Log::Line( " Allocating memory" );
     _cx.heapBuffer = bbvirtalloc<byte>( _cx.heapSize );
@@ -420,7 +422,10 @@ size_t DiskPlotter::GetRequiredSizeForBuckets( const uint32 numBuckets, const si
         case 128 : return DiskFp<TableId::Table4, 128 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 256 : return DiskFp<TableId::Table4, 256 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 512 : return DiskFp<TableId::Table4, 512 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
-        case 1024: return DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
+        case 1024:
+            // We need to add a bit more here (at least 1GiB) to have enough space for P2, which keeps
+            // 2 marking table bitfields in-memory: k^32 / 8 = 0.5GiB
+            return 1032ull MB + DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
     
     default:
         Fatal( "Invalid bucket size: %u.", numBuckets );
