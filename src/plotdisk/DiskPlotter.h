@@ -7,27 +7,7 @@ class CliParser;
 class DiskPlotter
 {
 public:
-    struct Config
-    {
-        GlobalPlotConfig* globalCfg                = nullptr;
-        const char*       tmpPath                  = nullptr;
-        const char*       tmpPath2                 = nullptr;
-        size_t            workHeapSize             = 0;
-        size_t            expectedTmpDirBlockSize  = 0;
-        uint32            numBuckets               = 256;
-        uint32            ioThreadCount            = 0;
-        size_t            ioBufferSize             = 0;
-        uint32            ioBufferCount            = 0;
-        size_t            cacheSize                = 0;
-
-        bool              enableDirectIO           = false;
-
-        uint32            f1ThreadCount            = 0;
-        uint32            fpThreadCount            = 0;
-        uint32            cThreadCount             = 0;
-        uint32            p2ThreadCount            = 0;
-        uint32            p3ThreadCount            = 0;
-    };
+    using Config = DiskPlotConfig;
 
     struct PlotRequest
     {
@@ -39,7 +19,7 @@ public:
 
 public:
     // DiskPlotter();
-    DiskPlotter( const Config cfg );
+    DiskPlotter( const Config& cfg );
 
     void Plot( const PlotRequest& req );
 
@@ -54,5 +34,6 @@ public:
 
 private:
     DiskPlotContext   _cx;
+    Config            _cfg;
 };
 

@@ -16,7 +16,7 @@ enum FileSetOptions
     None       = 0,
     DirectIO   = 1 << 0,    // Use direct IO/unbuffered file IO
     Cachable   = 1 << 1,    // Use a in-memory cache for the file
-    UseTemp2   = 1 << 2,    // Use the high-frequency temp directory
+    UseTemp2   = 1 << 2,    // Open the file set the high-frequency temp directory
 };
 ImplementFlagOps( FileSetOptions );
 

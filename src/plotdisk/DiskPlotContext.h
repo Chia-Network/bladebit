@@ -7,8 +7,33 @@
 #include "plotting/Tables.h"
 #include "ChiaConsts.h"
 
+class GlobalPlotConfig;
+
+struct DiskPlotConfig
+{
+    GlobalPlotConfig* globalCfg                = nullptr;
+    const char*       tmpPath                  = nullptr;
+    const char*       tmpPath2                 = nullptr;
+    size_t            expectedTmpDirBlockSize  = 0;
+    uint32            numBuckets               = 256;
+    uint32            ioThreadCount            = 0;
+    uint32            ioBufferCount            = 0;
+    size_t            cacheSize                = 0;
+
+    bool              noTmp1DirectIO           = false; // Disable direct I/O on tmp 1
+    bool              noTmp2DirectIO           = false; // Disable direct I/O on tmp 1
+
+    uint32            f1ThreadCount            = 0;
+    uint32            fpThreadCount            = 0;
+    uint32            cThreadCount             = 0;
+    uint32            p2ThreadCount            = 0;
+    uint32            p3ThreadCount            = 0;
+};
+
 struct DiskPlotContext
 {
+    const DiskPlotConfig* cfg;
+
     const char*  tmpPath;           // Path in which to allocate temporary buffers
     const char*  tmpPath2;          // Path to store fx files and other high R/W files.
     
@@ -26,7 +51,6 @@ struct DiskPlotContext
 
     uint32       numBuckets;        // Divide entries into this many buckets
 
-    // uint32       threadCount;       // How many threads to use for in-memory plot work
     uint32       ioThreadCount;     // How many threads to use for the disk buffer writer/reader
     uint32       f1ThreadCount;     // How many threads to use for f1 generation
     uint32       fpThreadCount;     // How many threads to use for forward propagation

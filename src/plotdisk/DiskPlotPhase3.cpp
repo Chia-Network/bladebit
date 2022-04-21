@@ -1084,7 +1084,10 @@ void DiskPlotPhase3::Run()
 
     byte* cache = _context.cache;
 
-    FileSetOptions opts = FileSetOptions::DirectIO | FileSetOptions::UseTemp2;
+    FileSetOptions opts = FileSetOptions::UseTemp2;
+
+    if( !_context.cfg->noTmp2DirectIO )
+        opts |= FileSetOptions::DirectIO;
 
     if( _context.cache )
         opts |= FileSetOptions::Cachable;

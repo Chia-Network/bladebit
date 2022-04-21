@@ -24,25 +24,30 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 {
     ASSERT( cx.tmpPath );
 
-    _diskQueue->InitFileSet( FileId::T1, "t1", 1, FileSetOptions::DirectIO, nullptr );  // X (sorted on Y)
-    _diskQueue->InitFileSet( FileId::T2, "t2", 1, FileSetOptions::DirectIO, nullptr );  // Back pointers
-    _diskQueue->InitFileSet( FileId::T3, "t3", 1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::T4, "t4", 1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::T5, "t5", 1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::T6, "t6", 1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::T7, "t7", 1, FileSetOptions::DirectIO, nullptr );
+    const FileSetOptions tmp1Options = cx.cfg->noTmp1DirectIO ? FileSetOptions::None : FileSetOptions::DirectIO;
 
-    _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::T1, "t1", 1, tmp1Options, nullptr );  // X (sorted on Y)
+    _diskQueue->InitFileSet( FileId::T2, "t2", 1, tmp1Options, nullptr );  // Back pointers
+    _diskQueue->InitFileSet( FileId::T3, "t3", 1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::T4, "t4", 1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::T5, "t5", 1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::T6, "t6", 1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::T7, "t7", 1, tmp1Options, nullptr );
+
+    _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets+1, tmp1Options, nullptr );
 
     {
         const size_t cacheSize = _cx.cacheSize / 2;
 
-        FileSetOptions opts = FileSetOptions::DirectIO | FileSetOptions::UseTemp2;
+        FileSetOptions opts = FileSetOptions::UseTemp2;
+
+        if( !_cx.cfg->noTmp2DirectIO )
+            opts |= FileSetOptions::DirectIO;
 
         if( _cx.cache )
             opts |= FileSetOptions::Cachable;

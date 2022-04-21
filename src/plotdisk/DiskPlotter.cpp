@@ -21,7 +21,7 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg );
 // }
 
 //-----------------------------------------------------------
-DiskPlotter::DiskPlotter( const Config cfg )
+DiskPlotter::DiskPlotter( const Config& cfg )
 {
     ASSERT( cfg.tmpPath  );
     ASSERT( cfg.tmpPath2 );
@@ -34,12 +34,14 @@ DiskPlotter::DiskPlotter( const Config cfg )
     ZeroMem( &_cx );
     
     FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
-        "Failed to obtain temp paths block size." );
+        "Failed to obtain temp paths block size from t1: '%s' or %s t2: '%s'.", cfg.tmpPath, cfg.tmpPath2 );
 
     FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
 
     const size_t heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
 
+    _cfg            = cfg;
+    _cx.cfg         = &_cfg;
     _cx.tmpPath     = cfg.tmpPath;
     _cx.tmpPath2    = cfg.tmpPath2;
     _cx.numBuckets  = cfg.numBuckets;
@@ -236,6 +238,10 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
         if( cli.ReadStr( cfg.tmpPath, "-t1", "--temp1" ) )
             continue;
         if( cli.ReadStr( cfg.tmpPath2, "-t2", "--temp2" ) )
+            continue;
+        if( cli.ReadSwitch( cfg.noTmp1DirectIO, "--no-t1-direct" ) )
+            continue;
+        if( cli.ReadSwitch( cfg.noTmp2DirectIO, "--no-t2-direct" ) )
             continue;
         if( cli.ReadSize( cfg.cacheSize, "--cache" ) )
             continue;
@@ -502,6 +508,10 @@ Creates plots by making use of a disk to temporarily store and read values.
  -t2, --temp2 <dir> : Specify a secondary temporary directory, which will be used for data
                       that needs to be read/written from constantly.
                       If nothing is specified, --temp will be used instead.
+
+ --no-t1-direct     : Disable direct I/O on the temp 1 directory.
+
+ --no-t2-direct     : Disable direct I/O on the temp 2 directory.
 
  -s, --sizes        : Output the memory requirements for a specific bucket count.
                       To change the bucket count from the default, pass a value to -b

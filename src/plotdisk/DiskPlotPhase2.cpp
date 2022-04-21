@@ -24,14 +24,16 @@ DiskPlotPhase2::DiskPlotPhase2( DiskPlotContext& context )
 {
     DiskBufferQueue& ioQueue = *context.ioQueue;
 
+    const FileSetOptions tmp1Opts = context.cfg->noTmp1DirectIO ? FileSetOptions::None : FileSetOptions::DirectIO;
+
     // #TODO: Give the cache to the marks? Probably not needed for sucha small write...
     //        Then we would need to re-distribute the cache on Phase 3.
     // #TODO: We need to specify the temporary file location
-    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_2, "table_2_marks", 1, FileSetOptions::DirectIO, nullptr );
-    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_3, "table_3_marks", 1, FileSetOptions::DirectIO, nullptr );
-    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_4, "table_4_marks", 1, FileSetOptions::DirectIO, nullptr );
-    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_5, "table_5_marks", 1, FileSetOptions::DirectIO, nullptr );
-    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_6, "table_6_marks", 1, FileSetOptions::DirectIO, nullptr );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_2, "table_2_marks", 1, tmp1Opts, nullptr );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_3, "table_3_marks", 1, tmp1Opts, nullptr );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_4, "table_4_marks", 1, tmp1Opts, nullptr );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_5, "table_5_marks", 1, tmp1Opts, nullptr );
+    ioQueue.InitFileSet( FileId::MARKED_ENTRIES_6, "table_6_marks", 1, tmp1Opts, nullptr );
 
     ioQueue.SeekFile( FileId::T1, 0, 0, SeekOrigin::Begin );
     ioQueue.SeekFile( FileId::T2, 0, 0, SeekOrigin::Begin );
