@@ -328,7 +328,7 @@ set(bb_include_dirs
 # endmacro()
 
 # BladeBit
-add_library(lib_bladebit ${bb_sources} ${bb_headers})
+add_library(lib_bladebit ${bb_sources} ${bb_headers} src/plotdisk/DiskPlotBounded.cpp src/plotdisk/DiskPlotBounded.h)
 set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit)
 target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
 target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
