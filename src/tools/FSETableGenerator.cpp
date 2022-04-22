@@ -76,8 +76,8 @@ void DumpFSETables( FILE* file, bool compression )
         double R = i < 6 ? kRValues[i] : kC3R;  // Last one is for C3 entries
 
         std::vector<short> nCount = CreateNormalizedCount(R);
-        unsigned maxSymbolValue = nCount.size() - 1;
-        unsigned tableLog = 14;
+        unsigned maxSymbolValue = (unsigned)nCount.size() - 1;
+        unsigned tableLog       = 14;
 
         FatalIf( maxSymbolValue > 255, "maxSymbolValue > 255" );
         

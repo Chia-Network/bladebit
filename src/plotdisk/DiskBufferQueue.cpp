@@ -322,9 +322,24 @@ void DiskBufferQueue::FinishPlot( Fence& fence )
 void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* sizes )
 {
     Command* cmd = GetCommandObject( Command::WriteBuckets );
-    cmd->buckets.buffers = (byte*)buckets;
     cmd->buckets.sizes   = sizes;
+    cmd->buckets.buffers = (byte*)buckets;
     cmd->buckets.fileId  = id;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint32* counts )
+{
+    ASSERT( buckets );
+    ASSERT( elementSize );
+    ASSERT( counts );
+    ASSERT( elementSize < std::numeric_limits<uint32>::max() );
+
+    Command* cmd = GetCommandObject( Command::WriteBucketElements );
+    cmd->bucketElements.counts      = counts;
+    cmd->bucketElements.buffers     = (byte*)buckets;
+    cmd->bucketElements.fileId      = id;
+    cmd->bucketElements.elementSize = (uint32)elementSize;
 }
 
 //-----------------------------------------------------------

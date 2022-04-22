@@ -4,7 +4,6 @@
 #include "plotdisk/DiskPlotContext.h"
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
-#include "plotdisk/DiskPlotContext.h"
 #include "plotting/PlotTools.h"
 #include "pos/chacha8.h"
 #include "threading/MTJob.h"

@@ -17,44 +17,34 @@ enum FileSetOptions
     DirectIO   = 1 << 0,    // Use direct IO/unbuffered file IO
     Cachable   = 1 << 1,    // Use a in-memory cache for the file
     UseTemp2   = 1 << 2,    // Open the file set the high-frequency temp directory
+
+    Interleaved = 1 << 3,   // Alternate bucket slices between interleaved and non-interleaved
+    BlockAlign  = 1 << 4,   // Only write in block-aligned segments. Keeping a block-sized buffer for left overs.
+                            // The last write flushes the whole block.
+                            // This can be very memory-costly on file systems with large block sizes
+                            // as interleaved buckets will need many block buffers.
+                            // This must be used with DirectIO.
 };
 ImplementFlagOps( FileSetOptions );
 
 struct FileSetInitData
 {
-    void*  cache;
-    size_t cacheSize;
+    // Cachable
+    void*  cache     = nullptr; // Cache buffer
+    size_t cacheSize = 0;       // Cache size in bytes
+
+    // Interleaved
+    size_t sliceSize = 0;       // Maximum size of a bucket slice
 };
 
 struct FileSet
 {
-    const char*    name             = nullptr;
+    const char*    name            = nullptr;
     Span<IStream*> files;
-    void*          blockBuffer     = nullptr;   // For aligned reads
-    // size_t*        blockOffsets    = nullptr;
-    // IIOTransform*  transform        = nullptr;
-    FileSetOptions options          = FileSetOptions::None;
+    void*          blockBuffer     = nullptr;               // For FileSetOptions::BlockAlign
+    size_t         sliceCapacity   = 0;                     // (in bytes) For FileSetOptions::Interleaved
+    FileSetOptions options         = FileSetOptions::None;
 };
-
-// struct WriteBucketsJob : MTJob<WriteBucketsJob>
-// {
-//     FileSet*       fileSet;
-//     const uint*    sizes;
-//     const byte*    buffers;
-
-//     void Run() override;
-// };
-
-// struct WriteToFileJob : MTJob<WriteToFileJob>
-// {
-//     const byte* buffer;
-//     byte*       blockBuffer;
-//     size_t      size;
-//     FileStream* file;
-
-//     void Run() override;
-// };
-
 
 class DiskBufferQueue
 {
@@ -65,6 +55,7 @@ class DiskBufferQueue
             Void = 0,
             WriteFile,
             WriteBuckets,
+            WriteBucketElements,
             ReadFile,
             SeekFile,
             SeekBucket,
@@ -94,6 +85,15 @@ class DiskBufferQueue
                 const byte* buffers;
                 FileId      fileId;
             } buckets;
+
+            // Same as buckets, but written with element sizes instead
+            struct
+            {
+                const uint* counts;
+                const byte* buffers;
+                FileId      fileId;
+                uint32      elementSize;
+            } bucketElements;
 
             struct
             {
@@ -150,11 +150,17 @@ public:
 
     void OpenPlotFile( const char* fileName, const byte* plotId, const byte* plotMemo, uint16 plotMemoSize );
 
+/// Commands
     void FinishPlot( Fence& fence );
 
     void ResetHeap( const size_t heapSize, void* heapBuffer );
 
     void WriteBuckets( FileId id, const void* buckets, const uint* sizes );
+
+    void WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint32* counts );
+
+    template<typename T>
+    void WriteBucketElementsT( const FileId id, const T* buckets, const uint32* counts );
 
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
@@ -170,8 +176,21 @@ public:
 
     void TruncateBucket( FileId id, const ssize_t position );
 
+    // Add a memory fence into the command stream.
+    // The signal will be set once this command is reached.
+    // This ensures the caller that all commands before the
+    // fence have been processed.
+    void SignalFence( Fence& fence );
+
+    // Signal a fence with a specific value.
+    void SignalFence( Fence& fence, uint32 value );
+
+    // Instructs the command dispatch thread to wait until the specified fence has been signalled
+    void WaitForFence( Fence& fence );
+
     void CommitCommands();
 
+// Helpers
     // Obtain a buffer allocated from the work heap.
     // May block until there's a buffer available if there was none.
     // This assumes a single consumer.
@@ -192,18 +211,6 @@ public:
     // This command is serialized and should be added after 
     // any writing/reading has finished with said buffer
     void ReleaseBuffer( void* buffer );
-
-    // Add a memory fence into the command stream.
-    // The signal will be set once this command is reached.
-    // This ensures the caller that all commands before the 
-    // fence have been processed.
-    void SignalFence( Fence& fence );
-
-    // Signal a fence with a specific value.
-    void SignalFence( Fence& fence, uint32 value );
-
-    // Instructs the command dispatch thread to wait until the specified fence has been signalled
-    void WaitForFence( Fence& fence );
 
     void CompletePendingReleases();
 
@@ -290,5 +297,13 @@ private:
     char*             _delFilePathBuffer = nullptr;     // For deleting file sets
     bool              _deleterExit       = false;
     int32             _threadBindId;
-    
 };
+
+
+//-----------------------------------------------------------
+template<typename T>
+inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const T* buckets, const uint32* counts )
+{
+    WriteBucketElements( id, (void*)buckets, sizeof( T ), counts );
+}
+

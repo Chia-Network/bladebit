@@ -25,6 +25,13 @@ public:
     }
 
     //-----------------------------------------------------------
+    template<typename T>
+    inline Span<T> CAllocSpan( const size_t count, size_t alignment = alignof( T ) )
+    {
+        return Span<T>( this->CAlloc<T>( count, alignment ), count );
+    }
+
+    //-----------------------------------------------------------
     inline void* CAlloc( const size_t count, const size_t size, const size_t alignment )
     {
         const size_t paddedSize = RoundUpToNextBoundaryT( size, alignment );

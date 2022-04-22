@@ -7,7 +7,7 @@
 #include "plotting/Tables.h"
 #include "ChiaConsts.h"
 
-class GlobalPlotConfig;
+struct GlobalPlotConfig;
 
 struct DiskPlotConfig
 {
@@ -42,6 +42,7 @@ struct DiskPlotContext
 
     ThreadPool*      threadPool;
     DiskBufferQueue* ioQueue;
+    FencePool*       fencePool;
 
     size_t       heapSize;          // Size in bytes of our working heap.
     byte*        heapBuffer;        // Buffer allocated for in-memory work
@@ -80,5 +81,10 @@ struct DiskPlotContext
     uint64       plotTablePointers[10];
     uint64       plotTableSizes   [10];
 
-    Duration ioWaitTime;
+    Duration ioWaitTime;                                // Total Plot I/O wait time
+    Duration p1TableWaitTime[(uint)TableId::_Count];    // Phase 1 per-table I/O wait time
+    Duration p2TableWaitTime[(uint)TableId::_Count];    // Phase 2 per-table I/O wait time
+    Duration p3TableWaitTime[(uint)TableId::_Count];    // Phase 3 per-table I/O wait time
+    Duration cTableWaitTime;
+    Duration p7WaitTime;
 };

@@ -17,6 +17,8 @@ struct Span
 
     inline size_t Length() const { return length; }
 
+    inline T* Ptr() const { return values; }
+
     inline T& operator[]( unsigned int index ) const
     { 
         ASSERT( index < length );
