@@ -169,7 +169,7 @@ else()
     set(dev_c_opts 
         ${dev_c_opts})
 
-    set(link_opts -g -rdynamic flto
+    set(link_opts -g -rdynamic -flto
         ${link_opts})
 
     # GCC
