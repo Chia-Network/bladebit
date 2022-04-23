@@ -1,7 +1,6 @@
 #include "io/FileStream.h"
-#include "Util.h"
+#include "util/Util.h"
 #include "util/Log.h"
-
 #include <Windows.h>
 //#include <winioctl.h>
 //#include <shlwapi.h>
@@ -83,7 +82,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     else
     {
         // #TODO: Use GetLastError report error in utf8
-        file. _error = (int)GetLastError();
+        file._error = (int)GetLastError();
     }
 
     if( path16 != path16Stack )
