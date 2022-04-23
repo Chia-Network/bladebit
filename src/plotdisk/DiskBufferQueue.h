@@ -135,6 +135,16 @@ class DiskBufferQueue
         int64  bucket;  // If < 0, delete all buckets
     };
 
+#if BB_IO_METRICS_ON
+public:
+    struct IOMetric
+    {
+        size_t   size;
+        Duration time;
+        size_t   count;
+    };
+#endif
+
 public:
     DiskBufferQueue( const char* workDir1, const char* workDir2, const char* plotDir,
                      byte* workBuffer, size_t workBufferSize, uint ioThreadCount,
@@ -229,25 +239,35 @@ public:
 
     #if BB_IO_METRICS_ON
     //-----------------------------------------------------------
+    inline const IOMetric& GetReadMetrics() const { return _readMetrics; }
+    inline const IOMetric& GetWriteMetrics() const { return _writeMetrics;}
+
+    //-----------------------------------------------------------
     inline double GetAverageReadThroughput() const
     {
-        double throughput = 0;
-
-        for( uint16 i = 0; i < _metricCount; i++ )
-            throughput += _readSizes[i];
-        
-        return throughput / _metricCount;
+        const double elapsed    = TicksToSeconds( _readMetrics.time ) / (double)_readMetrics.count; 
+        const double throughput = (double)_readMetrics.size / (double)_readMetrics.count / elapsed;
+        return throughput;
     }
 
     //-----------------------------------------------------------
     inline double GetAverageWriteThroughput() const
     {
-        double throughput = 0;
+        const double elapsed    = TicksToSeconds( _writeMetrics.time ) / (double)_writeMetrics.count; 
+        const double throughput = (double)_writeMetrics.size / (double)_writeMetrics.count / elapsed;
+        return throughput;
+    }
 
-        for( uint16 i = 0; i < _metricCount; i++ )
-            throughput += _writeSizes[i];
-        
-        return throughput / _metricCount;
+    //-----------------------------------------------------------
+    inline void ClearReadMetrics()
+    {
+        _readMetrics = {};
+    }
+
+    //-----------------------------------------------------------
+    inline void ClearWriteMetrics()
+    {
+        _writeMetrics = {};
     }
     #endif
     
@@ -322,12 +342,8 @@ private:
     int32             _threadBindId;
 
 #if BB_IO_METRICS_ON
-    static constexpr uint16 _metricCount = 16;
-
-    double _readSizes [_metricCount] = {};
-    double _writeSizes[_metricCount] = {};
-    uint16 _readIdx                  = 0;
-    uint16 _writeIdx                 = 0;
+    IOMetric _readMetrics  = {};
+    IOMetric _writeMetrics = {};
 #endif
 };
 

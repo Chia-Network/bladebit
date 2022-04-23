@@ -265,8 +265,17 @@ void DiskPlotPhase1::GenF1()
 
     #if BB_IO_METRICS_ON
         const double writeThroughput = _cx.ioQueue->GetAverageWriteThroughput();
-        Log::Line( " Table 1 average write throughput %.2lf MiB ( %.2lfMB ).", 
-            writeThroughput BtoMB, writeThroughput / 1000000.0 );
+        const auto&  writes          = _cx.ioQueue->GetWriteMetrics();
+
+        Log::Line( " Table 1 I/O Metrics:" );
+        Log::Line( "  Average write throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            writeThroughput BtoMB, writeThroughput / 1000000.0, writeThroughput BtoGB, writeThroughput / 1000000000.0 );
+        Log::Line( "  Total size written: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)writes.size BtoMB, (double)writes.size / 1000000.0, (double)writes.size BtoGB, (double)writes.size / 1000000000.0 );
+        Log::Line( "  Total write commands: %llu.", (llu)writes.count );
+        Log::Line( "" );
+
+        _cx.ioQueue->ClearWriteMetrics();
     #endif
 }
 
@@ -323,13 +332,27 @@ void DiskPlotPhase1::ForwardPropagate()
         
         #if BB_IO_METRICS_ON
             const double readThroughput  = _cx.ioQueue->GetAverageReadThroughput();
+            const auto&  reads           = _cx.ioQueue->GetReadMetrics();
             const double writeThroughput = _cx.ioQueue->GetAverageWriteThroughput();
+            const auto&  writes          = _cx.ioQueue->GetWriteMetrics();
 
-            Log::Line( " Table %u average read throughput %.2lf MiB ( %.2lfMB ).", 
-                table+1, readThroughput BtoMB, readThroughput / 1000000.0 );
+            Log::Line( " Table %u I/O Metrics:", (uint32)table+1 );
+            
+            Log::Line( "  Average read throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+                readThroughput BtoMB, readThroughput / 1000000.0, readThroughput BtoGB, readThroughput / 1000000000.0 );
+            Log::Line( "  Total size read: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+                (double)reads.size BtoMB, (double)reads.size / 1000000.0, (double)reads.size BtoGB, (double)reads.size / 1000000000.0 );
+            Log::Line( "  Total read commands: %llu.", (llu)reads.count );
 
-            Log::Line( " Table %u average write throughput %.2lf MiB ( %.2lfMB ).", 
-                table+1, writeThroughput BtoMB, writeThroughput / 1000000.0 );
+            Log::Line( "  Average write throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+                writeThroughput BtoMB, writeThroughput / 1000000.0, writeThroughput BtoGB, writeThroughput / 1000000000.0 );
+            Log::Line( "  Total size written: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+                (double)writes.size BtoMB, (double)writes.size / 1000000.0, (double)writes.size BtoGB, (double)writes.size / 1000000000.0 );
+            Log::Line( "  Total write commands: %llu.", (llu)writes.count );
+            Log::Line( "" );
+
+            _cx.ioQueue->ClearReadMetrics();
+            _cx.ioQueue->ClearWriteMetrics();
         #endif
     }
 }
