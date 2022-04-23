@@ -262,6 +262,12 @@ void DiskPlotPhase1::GenF1()
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
     Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _cx.ioQueue->IOBufferWaitTime() );
+
+    #if BB_IO_METRICS_ON
+        const double writeThroughput = _cx.ioQueue->GetAverageWriteThroughput();
+        Log::Line( " Table 1 average write throughput %.2lf MiB ( %.2lfMB ).", 
+            writeThroughput BtoMB, writeThroughput / 1000000.0 );
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -305,7 +311,7 @@ void DiskPlotPhase1::ForwardPropagate()
         Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( _tableIOWaitTime ) );
 
         std::swap( _fxIn, _fxOut );
-        
+
         // No longer need fxout. Delete it
         if( table == TableId::Table7 )
         {
@@ -314,6 +320,17 @@ void DiskPlotPhase1::ForwardPropagate()
             _cx.ioQueue->CommitCommands();
             #endif
         }
+        
+        #if BB_IO_METRICS_ON
+            const double readThroughput  = _cx.ioQueue->GetAverageReadThroughput();
+            const double writeThroughput = _cx.ioQueue->GetAverageWriteThroughput();
+
+            Log::Line( " Table %u average read throughput %.2lf MiB ( %.2lfMB ).", 
+                table+1, readThroughput BtoMB, readThroughput / 1000000.0 );
+
+            Log::Line( " Table %u average write throughput %.2lf MiB ( %.2lfMB ).", 
+                table+1, writeThroughput BtoMB, writeThroughput / 1000000.0 );
+        #endif
     }
 }
 

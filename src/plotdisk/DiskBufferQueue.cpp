@@ -732,9 +732,16 @@ inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte
 {
     // if( !_useDirectIO )
     // {
+        #if BB_IO_METRICS_ON
+            const size_t toatalSize = size;
+            const auto timer = TimerBegin();
+        #endif
+
         while( size )
         {
+
             ssize_t sizeWritten = file.Write( buffer, size );
+
 
             if( sizeWritten < 1 )
             {
@@ -745,6 +752,12 @@ inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte
             size -= (size_t)sizeWritten;
             buffer += sizeWritten;
         }
+
+        #if BB_IO_METRICS_ON
+            const double elapsed = TimerEnd( timer );
+            _writeSizes[_writeIdx++] = (double)toatalSize / elapsed;
+            _writeIdx = _writeIdx & (_metricCount-1);
+        #endif
     // }
     // else
     // {
@@ -790,6 +803,11 @@ inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte
 //-----------------------------------------------------------
 inline void DiskBufferQueue::ReadFromFile( IStream& file, size_t size, byte* buffer, byte* blockBuffer, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket )
 {
+    #if BB_IO_METRICS_ON
+        const size_t toatalSize = size;
+        const auto timer = TimerBegin();
+    #endif
+
     if( !directIO )
     {
         while( size )
@@ -836,6 +854,12 @@ inline void DiskBufferQueue::ReadFromFile( IStream& file, size_t size, byte* buf
     //         buffer     += sizeRead;
     //     }
     }
+
+    #if BB_IO_METRICS_ON
+        const double elapsed = TimerEnd( timer );
+        _readSizes[_readIdx++] = (double)toatalSize / elapsed;
+        _readIdx = _readIdx & (_metricCount-1);
+    #endif
 
 //     if( remainder )
 //     {

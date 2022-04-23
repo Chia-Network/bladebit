@@ -12,7 +12,7 @@ suffix=
 ext="tar.gz"
 
 if [[ "$GITHUB_REF_NAME" != "master" ]]; then
-    suffix="-$GITHUB_REF_NAME"
+    suffix="-${GITHUB_REF_NAME}"
 fi
 
 if [[ "$os" == "windows" ]]; then

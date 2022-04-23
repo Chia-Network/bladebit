@@ -63,14 +63,17 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     Log::Line( " Heap size      : %.2lf GiB ( %.2lf MiB )", (double)_cx.heapSize BtoGB, (double)_cx.heapSize BtoMB );
     Log::Line( " Cache size     : %.2lf GiB ( %.2lf MiB )", (double)_cx.cacheSize BtoGB, (double)_cx.cacheSize BtoMB );
     Log::Line( " Bucket count   : %u"       , _cx.numBuckets    );
-    Log::Line( " F1 threads     : %u"       , _cx.f1ThreadCount );
-    Log::Line( " FP threads     : %u"       , _cx.fpThreadCount );
-    Log::Line( " C  threads     : %u"       , _cx.cThreadCount  );
-    Log::Line( " P2 threads     : %u"       , _cx.p2ThreadCount );
-    Log::Line( " P3 threads     : %u"       , _cx.p3ThreadCount );
-    Log::Line( " IO threads     : %u"       , _cx.ioThreadCount );
+    Log::Line( " F1  threads    : %u"       , _cx.f1ThreadCount );
+    Log::Line( " FP  threads    : %u"       , _cx.fpThreadCount );
+    Log::Line( " C   threads    : %u"       , _cx.cThreadCount  );
+    Log::Line( " P2  threads    : %u"       , _cx.p2ThreadCount );
+    Log::Line( " P3  threads    : %u"       , _cx.p3ThreadCount );
+    Log::Line( " I/O threads    : %u"       , _cx.ioThreadCount );
     Log::Line( " Temp1 block sz : %u"       , _cx.tmp1BlockSize );
     Log::Line( " Temp2 block sz : %u"       , _cx.tmp2BlockSize );
+#if BB_IO_METRICS_ON
+    Log::Line( " I/O metrices enabled." );
+#endif
 
     Log::Line( " Allocating memory" );
     _cx.heapBuffer = bbvirtalloc<byte>( _cx.heapSize );

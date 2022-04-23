@@ -226,6 +226,30 @@ public:
     inline double IOBufferWaitTime() const { return TicksToSeconds( _ioBufferWaitTime ); }
     inline void ResetIOBufferWaitCounter() { _ioBufferWaitTime = Duration::zero(); }
 
+
+    #if BB_IO_METRICS_ON
+    //-----------------------------------------------------------
+    inline double GetAverageReadThroughput() const
+    {
+        double throughput = 0;
+
+        for( uint16 i = 0; i < _metricCount; i++ )
+            throughput += _readSizes[i];
+        
+        return throughput / _metricCount;
+    }
+
+    //-----------------------------------------------------------
+    inline double GetAverageWriteThroughput() const
+    {
+        double throughput = 0;
+
+        for( uint16 i = 0; i < _metricCount; i++ )
+            throughput += _writeSizes[i];
+        
+        return throughput / _metricCount;
+    }
+    #endif
     
 private:
 
@@ -255,7 +279,6 @@ private:
     void CloseFileNow( const FileId fileId, const uint32 bucket );
     void DeleteFileNow( const FileId fileId, const uint32 bucket );
     void DeleteBucketNow( const FileId fileId );
-
 
     static const char* DbgGetCommandName( Command::CommandType type );
 
@@ -297,6 +320,15 @@ private:
     char*             _delFilePathBuffer = nullptr;     // For deleting file sets
     bool              _deleterExit       = false;
     int32             _threadBindId;
+
+#if BB_IO_METRICS_ON
+    static constexpr uint16 _metricCount = 16;
+
+    double _readSizes [_metricCount] = {};
+    double _writeSizes[_metricCount] = {};
+    uint16 _readIdx                  = 0;
+    uint16 _writeIdx                 = 0;
+#endif
 };
 
 

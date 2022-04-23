@@ -61,7 +61,6 @@ set(CMAKE_C_FLAGS_DEBUG_INIT)
 set(CMAKE_CXX_FLAGS_RELEASE_INIT)
 set(CMAKE_CXX_FLAGS_DEBUG_INIT)
 
-
 set(c_opts)
 set(link_opts)
 
@@ -71,6 +70,17 @@ set(dev_c_opts)
 
 set(release_link_opts)
 set(debug_link_opts)
+
+option(BENCHMARK_MODE "Enable benchmark mode for memplot. No final plot is written." OFF)
+if(BENCHMARK_MODE)
+    add_compile_definitions("BB_BENCHMARK_MODE=1")
+endif()
+
+option(ENABLE_DISK_METRICS "Enable I/O metrics for diskplot." OFF)
+if(ENABLE_DISK_METRICS)
+    add_compile_definitions("BB_IO_METRICS_ON=1")
+endif()
+
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 
