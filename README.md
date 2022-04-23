@@ -1,9 +1,11 @@
- # BladeBit Chia Plotter
+# BladeBit Chia Plotter
+
+[![Release Builds](https://github.com/Chia-Network/bladebit/actions/workflows/build-release.yml/badge.svg?branch=master&event=push)](https://github.com/Chia-Network/bladebit/actions/workflows/build-release.yml)
 
 A fast **RAM-only**, **k32-only**, Chia plotter.
 
 ## Requirements
-**416 GiB of RAM are required** to run it, plus a few more megabytes for stack space and small allocations. 
+**416 GiB of RAM are required** to run it, plus a few more megabytes for stack space and small allocations.
 
 64-bit is supported only, for obvious reasons.
 
@@ -14,7 +16,7 @@ Only **Linux** & **Windows** are supported.
 
 Install the following packages:
 ```bash
-# CentOS or Amazon Linux
+# CentOS or RHEL-based
 sudo yum group install -y "Development Tools"
 sudo yum install -y cmake gmp-devel numactl-devel
 
@@ -23,16 +25,14 @@ sudo apt install -y build-essential cmake libgmp-dev libnuma-dev
 ```
 
 ### Windows
-Must have [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its build tools installed.
+Must have at least [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its build tools installed.
 
 ## Building
 
-
-### Linux
 ```bash
 
 # Clone the repo & its submodules
-git clone && cd bladebit
+git clone https://github.com/Chia-Network/bladebit.git && cd bladebit
 
 # Create a build directory for cmake and cd into it
 mkdir -p build && cd build

@@ -1,5 +1,5 @@
 #include "io/FileStream.h"
-#include "util/Util.h"
+#include "Util.h"
 #include "util/Log.h"
 
 #include <Windows.h>
@@ -83,7 +83,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     else
     {
         // #TODO: Use GetLastError report error in utf8
-        file._error = (int)GetLastError();
+        file. _error = (int)GetLastError();
     }
 
     if( path16 != path16Stack )
@@ -151,8 +151,8 @@ ssize_t FileStream::Read( void* buffer, size_t size )
         _position += (size_t)bytesRead;
     else
     {
-        _error = (int)GetLastError();
-        return (ssize_t)-1;
+        _error    = (int)GetLastError();
+        bytesRead = -1;
     }
 
     return (ssize_t)bytesRead;
@@ -198,11 +198,11 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
         _position += (size_t)bytesWritten;
     else
     {
-        _error = (int)GetLastError();
-        return (ssize_t)-1;
+        _error       = (int)GetLastError();
+        bytesWritten = -1;
     }
 
-    return (ssize_t)bytesWritten;
+    return bytesWritten;
 }
 
 //----------------------------------------------------------
@@ -449,5 +449,3 @@ bool GetFileClusterSize( HANDLE hFile, size_t& outClusterSize )
 
     //return (bool)r;
 }
-
-
