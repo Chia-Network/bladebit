@@ -10,7 +10,7 @@ _[tT]mp/
 .dist/
 .keys/
 dist/
-
+out/
 
 .DS_Store
 *.log

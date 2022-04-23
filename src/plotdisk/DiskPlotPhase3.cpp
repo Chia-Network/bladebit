@@ -165,7 +165,6 @@ public:
             const uint32 bitSize      = EntryBitSize;
             const uint32 encodeShift  = AddressBitSize;
             const uint32 numBuckets   = _numBuckets + 1;
-            const uint32 threadCount  = self->JobCount();
 
 
             int64 count, offset, end;
@@ -1085,15 +1084,17 @@ void DiskPlotPhase3::Run()
 
     byte* cache = _context.cache;
 
-    FileSetOptions opts = FileSetOptions::DirectIO | FileSetOptions::UseTemp2;
+    FileSetOptions opts = FileSetOptions::UseTemp2;
+
+    if( !_context.cfg->noTmp2DirectIO )
+        opts |= FileSetOptions::DirectIO;
 
     if( _context.cache )
         opts |= FileSetOptions::Cachable;
 
-    FileSetInitData fdata = {
-        .cache     = cache,
-        .cacheSize = lpCacheSize
-    };
+    FileSetInitData fdata;
+    fdata.cache     = cache;
+    fdata.cacheSize = lpCacheSize;
 
     ioQueue.InitFileSet( FileId::LP, "lp", _context.numBuckets, opts, &fdata );   // LP+origin idx buckets
     
@@ -1451,6 +1452,10 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
 
 
 #if _DEBUG
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
 //-----------------------------------------------------------
 void ValidateLinePoints( const TableId table, const DiskPlotContext& context, const uint32 bucket, const uint64* linePoints, const uint64 length )
 {
@@ -1610,4 +1615,6 @@ void UnpackPark7( const byte* srcBits, uint64* dstEntries )
 
 #endif
 
+
+#pragma GCC diagnostic pop
 

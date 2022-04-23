@@ -131,9 +131,9 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         ${release_link_opts})
 
     set(debug_link_opts
-        /DEBUG:FASTLINK
+#        /DEBUG:FASTLINK
         /OPT:NOREF,NOICF,NOLBR
-        /INCREMENTAL
+#        /INCREMENTAL
         ${debug_link_opts})
 
     # Dependency config
@@ -169,7 +169,7 @@ else()
     set(dev_c_opts 
         ${dev_c_opts})
 
-    set(link_opts -g -rdynamic #flto
+    set(link_opts -g -rdynamic flto
         ${link_opts})
 
     # GCC
@@ -188,7 +188,7 @@ else()
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         
-        set(c_opts_FLAGS -ferror-limit=5 -fdeclspec -Wunknown-pragmas ${c_opts})
+        set(c_opts_FLAGS -ferror-limit=5 -fdeclspec -Wno-empty-body ${c_opts})
 
     endif()
 
@@ -328,7 +328,7 @@ set(bb_include_dirs
 # endmacro()
 
 # BladeBit
-add_library(lib_bladebit ${bb_sources} ${bb_headers})
+add_library(lib_bladebit ${bb_sources} ${bb_headers} src/plotdisk/DiskPlotBounded.cpp src/plotdisk/DiskPlotBounded.h src/io/BucketStream.cpp src/io/IOUtil.h src/io/IOUtil.cpp)
 set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit)
 target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
 target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})

@@ -17,25 +17,32 @@ static void InitPages( ThreadPool& pool, const uint32 threadCount, void* mem, co
 //-----------------------------------------------------------
 void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
 {
-    size_t      writeSize  = 4ull GB;
-    const char* testDir    = nullptr;
-    bool        noDirectIO = false;
-    uint32      passCount  = 1;
-    size_t      memReserve = 0;
+    size_t      writeSize    = 4ull GB;
+    const char* testDir      = nullptr;
+    bool        noDirectIO   = false;
+    uint32      passCount    = 1;
+    size_t      memReserve   = 0;
+    double      passDelaySec = 0.0;
 
     while( cli.HasArgs() )
     {
-        if( cli.ReadValue( writeSize, "-s", "--size" ) )
+        if( cli.ReadSize( writeSize, "-s", "--size" ) )
         {
             FatalIf( writeSize < 1, "Write size must be > 0." );
         }
         else if( cli.ReadSwitch( noDirectIO, "-d", "--no-direct-io" ) )
             continue;
-        else if( cli.ReadValue( memReserve, "-m", "--memory" ) )
+        else if( cli.ReadSize( memReserve, "-m", "--memory" ) )
             continue;
-        else if( cli.ReadValue( passCount, "-p", "--passes" ) )
+        else if( cli.ReadU32( passCount, "-p", "--passes" ) )
         {
             if( passCount < 1 ) passCount = 1;
+            continue;
+        }
+        else if( cli.ReadF64( passDelaySec, "--delay" ) )
+        {
+            if( passDelaySec < 0.0 )
+                passDelaySec = 0;
             continue;
         }
         else if( cli.ArgConsume( "-h", "--help" ) )
@@ -149,7 +156,7 @@ void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
             {
                 auto* diskFile = new FileStream();
                 FatalIf( !diskFile->Open( filePath, FileMode::Open, FileAccess::ReadWrite, flags ), 
-                    "Failed to open temporary test file at path '%s'.", testDir );
+                    "Failed to open temporary test file at path '%s' with error: %d.", testDir, diskFile->GetError() );
 
                 files[i] = diskFile;
             }
@@ -230,6 +237,9 @@ void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
                     Fatal( "Seek failed on test file with error%d (0x%x).", err, err );
                 }
             }
+
+            if( passDelaySec > 0 )
+                Thread::Sleep( (long)( passDelaySec * 1000.0 ) );
         }
     }
 
@@ -274,6 +284,8 @@ Performs read/write test on the specified disk path.
  -m, --memory <size>: Reserve memory size to use as IO cache for the file.
  
  -p, --passes <n>   : The number of passes to perform. By default it is 1.
+ 
+ --delay <secs>     : Time (in seconds) to wait between passes.
 
  -h, --help         : Print this help message and exit.
 )";

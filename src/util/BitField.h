@@ -80,7 +80,10 @@ public:
     //-----------------------------------------------------------
     inline bool operator[] ( uint64 index ) const { return Get( index ); }
     inline bool operator[] ( int64  index ) const { return Get( (uint64)index ); }
-    inline bool operator[] ( size_t index ) const { return Get( (uint64)index ); }
+
+#ifndef _WIN32
+    //inline bool operator[] ( size_t index ) const { return Get( (uint64)index ); }
+#endif
 
 private:
     uint64* _fields;

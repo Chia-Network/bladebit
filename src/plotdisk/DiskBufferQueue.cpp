@@ -322,9 +322,24 @@ void DiskBufferQueue::FinishPlot( Fence& fence )
 void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* sizes )
 {
     Command* cmd = GetCommandObject( Command::WriteBuckets );
-    cmd->buckets.buffers = (byte*)buckets;
     cmd->buckets.sizes   = sizes;
+    cmd->buckets.buffers = (byte*)buckets;
     cmd->buckets.fileId  = id;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint32* counts )
+{
+    ASSERT( buckets );
+    ASSERT( elementSize );
+    ASSERT( counts );
+    ASSERT( elementSize < std::numeric_limits<uint32>::max() );
+
+    Command* cmd = GetCommandObject( Command::WriteBucketElements );
+    cmd->bucketElements.counts      = counts;
+    cmd->bucketElements.buffers     = (byte*)buckets;
+    cmd->bucketElements.fileId      = id;
+    cmd->bucketElements.elementSize = (uint32)elementSize;
 }
 
 //-----------------------------------------------------------
@@ -644,7 +659,10 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
     Log::Debug( "  >>> Write 0x%p", buffers );
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
+    #if _DEBUG
     const size_t blockSize = _blockSize;
+    #endif
+    
     const byte*  buffer    = buffers;
 
     // if( fileSet.transform )
@@ -966,6 +984,7 @@ inline void DiskBufferQueue::CloseFileNow( const FileId fileId, const uint32 buc
 {
     FileSet& fileSet = _files[(int)fileId];
 
+    // NOTE: Why are we doing it this way?? Just add Close() to IStream.
     const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::Cachable );
     if( isHybridFile )
     {
@@ -1014,8 +1033,6 @@ void DiskBufferQueue::DeleteBucketNow( const FileId fileId )
 
     memcpy( filePath, wokrDir.c_str(), wokrDir.length() );
     char* baseName = filePath + wokrDir.length();
-
-    const bool isHybridFile = IsFlagSet( fileSet.options, FileSetOptions::Cachable );
 
     for( size_t i = 0; i < fileSet.files.length; i++ )
     {

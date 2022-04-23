@@ -24,33 +24,37 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 {
     ASSERT( cx.tmpPath );
 
-    _diskQueue->InitFileSet( FileId::T1, "t1", 1, FileSetOptions::DirectIO, nullptr );  // X (sorted on Y)
-    _diskQueue->InitFileSet( FileId::T2, "t2", 1, FileSetOptions::DirectIO, nullptr );  // Back pointers
-    _diskQueue->InitFileSet( FileId::T3, "t3", 1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::T4, "t4", 1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::T5, "t5", 1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::T6, "t6", 1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::T7, "t7", 1, FileSetOptions::DirectIO, nullptr );
+    const FileSetOptions tmp1Options = cx.cfg->noTmp1DirectIO ? FileSetOptions::None : FileSetOptions::DirectIO;
 
-    _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
-    _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets+1, FileSetOptions::DirectIO, nullptr );
+    _diskQueue->InitFileSet( FileId::T1, "t1", 1, tmp1Options, nullptr );  // X (sorted on Y)
+    _diskQueue->InitFileSet( FileId::T2, "t2", 1, tmp1Options, nullptr );  // Back pointers
+    _diskQueue->InitFileSet( FileId::T3, "t3", 1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::T4, "t4", 1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::T5, "t5", 1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::T6, "t6", 1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::T7, "t7", 1, tmp1Options, nullptr );
+
+    _diskQueue->InitFileSet( FileId::MAP2, "map2", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP3, "map3", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP4, "map4", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP5, "map5", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP6, "map6", _cx.numBuckets+1, tmp1Options, nullptr );
+    _diskQueue->InitFileSet( FileId::MAP7, "map7", _cx.numBuckets+1, tmp1Options, nullptr );
 
     {
         const size_t cacheSize = _cx.cacheSize / 2;
 
-        FileSetOptions opts = FileSetOptions::DirectIO | FileSetOptions::UseTemp2;
+        FileSetOptions opts = FileSetOptions::UseTemp2;
+
+        if( !_cx.cfg->noTmp2DirectIO )
+            opts |= FileSetOptions::DirectIO;
 
         if( _cx.cache )
             opts |= FileSetOptions::Cachable;
 
-        FileSetInitData fdata = {
-            .cache     = _cx.cache,
-            .cacheSize = cacheSize
-        };
+        FileSetInitData fdata;
+        fdata.cache     = _cx.cache;
+        fdata.cacheSize = cacheSize;
 
         _diskQueue->InitFileSet( FileId::FX0, "fx_0", _cx.numBuckets, opts, &fdata );
         
@@ -62,15 +66,13 @@ DiskPlotPhase1::DiskPlotPhase1( DiskPlotContext& cx )
 //-----------------------------------------------------------
 void DiskPlotPhase1::Run()
 {
-    DiskPlotContext& cx = _cx;
-
     #if _DEBUG && ( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE )
     {
         FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 
         if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
         {
-            if( bucketCounts.Read( cx.bucketCounts, sizeof( cx.bucketCounts ) ) != sizeof( cx.bucketCounts ) )
+            if( bucketCounts.Read( _cx.bucketCounts, sizeof( _cx.bucketCounts ) ) != sizeof( _cx.bucketCounts ) )
             {
                 Log::Error( "Failed to read from bucket counts file." );
                 goto CONTINUE;
@@ -84,7 +86,7 @@ void DiskPlotPhase1::Run()
 
         if( tableCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_TABLE_COUNTS_FNAME, FileMode::Open, FileAccess::Read ) )
         {
-            if( tableCounts.Read( cx.entryCounts, sizeof( cx.entryCounts ) ) != sizeof( cx.entryCounts ) )
+            if( tableCounts.Read( _cx.entryCounts, sizeof( _cx.entryCounts ) ) != sizeof( _cx.entryCounts ) )
             {
                 Log::Error( "Failed to read from table counts file." );
                 goto CONTINUE;
@@ -98,7 +100,7 @@ void DiskPlotPhase1::Run()
 
         if( backPtrBucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_PTR_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
         {
-            if( backPtrBucketCounts.Read( cx.ptrTableBucketCounts, sizeof( cx.ptrTableBucketCounts ) ) != sizeof( cx.ptrTableBucketCounts ) )
+            if( backPtrBucketCounts.Read( _cx.ptrTableBucketCounts, sizeof( _cx.ptrTableBucketCounts ) ) != sizeof( _cx.ptrTableBucketCounts ) )
             {
                 Fatal( "Failed to read from pointer bucket counts file." );
             }
@@ -128,10 +130,10 @@ void DiskPlotPhase1::Run()
     GenF1();
 #else
     {
-        size_t pathLen = strlen( cx.tmpPath );
+        size_t pathLen = strlen( _cx.tmpPath );
         pathLen += sizeof( BB_DP_DBG_READ_BUCKET_COUNT_FNAME );
 
-        std::string bucketsPath = cx.tmpPath;
+        std::string bucketsPath = _cx.tmpPath;
         if( bucketsPath[bucketsPath.length() - 1] != '/' && bucketsPath[bucketsPath.length() - 1] != '\\' )
             bucketsPath += "/";
 
@@ -143,7 +145,7 @@ void DiskPlotPhase1::Run()
         if( fBucketCounts.Open( bucketsPath.c_str(), FileMode::Open, FileAccess::Read ) )
         {
 
-            size_t sizeRead = fBucketCounts.Read( cx.bucketCounts[0], bucketsCountSize );
+            size_t sizeRead = fBucketCounts.Read( _cx.bucketCounts[0], bucketsCountSize );
             FatalIf( sizeRead != bucketsCountSize, "Invalid bucket counts." );
         }
         else
@@ -152,7 +154,7 @@ void DiskPlotPhase1::Run()
 
             fBucketCounts.Close();
             FatalIf( !fBucketCounts.Open( bucketsPath.c_str(), FileMode::Create, FileAccess::Write ), "File to open bucket counts file" );
-            FatalIf( fBucketCounts.Write( cx.bucketCounts[0], bucketsCountSize ) != bucketsCountSize, "Failed to write bucket counts.");
+            FatalIf( fBucketCounts.Write( _cx.bucketCounts[0], bucketsCountSize ) != bucketsCountSize, "Failed to write bucket counts.");
         }
     }
 #endif
@@ -160,18 +162,21 @@ void DiskPlotPhase1::Run()
     #if _DEBUG && BB_DP_DBG_VALIDATE_F1
     // if( 0 )
     {
-        const uint32* bucketCounts = cx.bucketCounts[0];
+        const uint32* bucketCounts = _cx.bucketCounts[0];
         uint64 totalEntries = 0;
         for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
             totalEntries += bucketCounts[i];
             
         ASSERT( totalEntries == 1ull << _K );
 
-        Debug::ValidateYFileFromBuckets( FileId::Y0, *cx.threadPool, *_diskQueue, TableId::Table1, cx.bucketCounts[0] );
+        Debug::ValidateYFileFromBuckets( FileId::Y0, *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
     }
     #endif
 
-FP:
+#if _DEBUG && BB_DP_P1_SKIP_TO_TABLE
+    FP:
+#endif
+
     ForwardPropagate();
 
     // Check all table counts
@@ -181,9 +186,9 @@ FP:
         uint64 entryCount = 0;
 
         for( int bucket = 0; bucket < (int)_cx.numBuckets; bucket++ )
-            entryCount += cx.bucketCounts[table][bucket];
+            entryCount += _cx.bucketCounts[table][bucket];
 
-        ASSERT( entryCount == cx.entryCounts[table] );
+        ASSERT( entryCount == _cx.entryCounts[table] );
     }
     #endif
 
@@ -194,7 +199,7 @@ FP:
 
         if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
         {
-            if( bucketCounts.Write( cx.bucketCounts, sizeof( cx.bucketCounts ) ) != sizeof( cx.bucketCounts ) )
+            if( bucketCounts.Write( _cx.bucketCounts, sizeof( _cx.bucketCounts ) ) != sizeof( _cx.bucketCounts ) )
                 Log::Error( "Failed to write to bucket counts file." );
         }
         else
@@ -202,7 +207,7 @@ FP:
 
         if( tableCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_TABLE_COUNTS_FNAME, FileMode::Create, FileAccess::Write ) )
         {
-            if( tableCounts.Write( cx.entryCounts, sizeof( cx.entryCounts ) ) != sizeof( cx.entryCounts ) )
+            if( tableCounts.Write( _cx.entryCounts, sizeof( _cx.entryCounts ) ) != sizeof( _cx.entryCounts ) )
                 Log::Error( "Failed to write to table counts file." );
         }
         else
@@ -210,7 +215,7 @@ FP:
 
         if( backPtrBucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_PTR_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
         {
-            if( backPtrBucketCounts.Write( cx.ptrTableBucketCounts, sizeof( cx.ptrTableBucketCounts ) ) != sizeof( cx.ptrTableBucketCounts ) )
+            if( backPtrBucketCounts.Write( _cx.ptrTableBucketCounts, sizeof( _cx.ptrTableBucketCounts ) ) != sizeof( _cx.ptrTableBucketCounts ) )
                 Log::Error( "Failed to write to back pointer bucket counts file." );
         }
         else
@@ -220,8 +225,10 @@ FP:
 
     Log::Line( " Phase 1 Total I/O wait time: %.2lf", TicksToSeconds( _cx.ioWaitTime ) + _cx.ioQueue->IOBufferWaitTime() );
 
+#if BB_DP_DBG_SKIP_TO_C_TABLES
+    CTables:
+#endif
 
-CTables:
     WriteCTables();
 
     #if !BB_DP_P1_KEEP_FILES

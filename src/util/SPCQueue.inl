@@ -125,7 +125,7 @@ GrowableSPCQueue<T,_growSize>::GrowableSPCQueue(size_t capacity )
         : _producerState( _states )
         , _consumerState( _states )
 {
-    FatalIf( capacity > std::numeric_limits<int>::max(),
+    FatalIf( capacity > (size_t)std::numeric_limits<int>::max(),
              "GrowableSPCQueue capacity cannot exceed %d.",
              std::numeric_limits<int>::max() );
 

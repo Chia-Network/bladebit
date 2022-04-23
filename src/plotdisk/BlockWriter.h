@@ -63,7 +63,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline void SubmitFinalBlock(  DiskBufferQueue& queue )
+    inline void SubmitFinalBlock( DiskBufferQueue& queue )
     {
         if( _remainderCount )
         {

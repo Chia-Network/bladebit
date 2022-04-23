@@ -44,6 +44,19 @@ struct MTJobSyncT
     // with less threads than it originally started with.
     inline bool ReduceThreadCount( uint newThreadCount );
 
+    // Locks the threads if this is the control thread and returns true.
+    // otherwise, waits for release from the control thread and returns false.
+    inline bool LockOrWait();
+
+    // Utility functions to simplify control-thread locking
+    // and releasing code. This helps keep code the same for all threads
+    // by locking only if it is the controls thread, otherwise
+    // waiting for release.
+    // BeginLockBlock() is the same as LockOrWait(). Only different for consistency in call name.
+    // EndLockBlock() will do nothing if this is not the control thread.
+    inline bool BeginLockBlock();
+    inline void EndLockBlock();
+
     inline uint JobId()    const { return _jobId; }
     inline uint JobCount() const { return _jobCount; }
 
@@ -265,6 +278,39 @@ inline void MTJobSyncT<TJob>::WaitForRelease()
     releaseLock++;
     while( releaseLock.load( std::memory_order_relaxed ) != threadThreshold );
     // Trace( " released: %d", count );
+}
+
+
+//-----------------------------------------------------------
+template<typename TJob>
+inline bool MTJobSyncT<TJob>::LockOrWait()
+{
+    if( this->IsControlThread() )
+    {
+        this->LockThreads();
+        return true;
+    }
+    else
+    {
+        this->WaitForRelease();
+    }
+
+    return false;
+}
+
+//-----------------------------------------------------------
+template<typename TJob>
+inline bool MTJobSyncT<TJob>::BeginLockBlock()
+{
+    return LockOrWait();
+}
+
+//-----------------------------------------------------------
+template<typename TJob>
+inline void MTJobSyncT<TJob>::EndLockBlock()
+{
+    if( this->IsControlThread() )
+        this->ReleaseThreads();
 }
 
 //-----------------------------------------------------------

@@ -146,21 +146,21 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
 
     while( cli.HasArgs() )
     {
-        if( cli.ReadValue( cfg.threadCount, "-t", "--threads" ) )
+        if( cli.ReadU32( cfg.threadCount, "-t", "--threads" ) )
             continue;
-        else if( cli.ReadValue( cfg.plotCount, "-n", "--count" ) )
+        else if( cli.ReadU32( cfg.plotCount, "-n", "--count" ) )
             continue;
-        else if( cli.ReadValue( farmerPublicKey, "-f", "--farmer-key" ) )
+        else if( cli.ReadStr( farmerPublicKey, "-f", "--farmer-key" ) )
             continue;
-        else if( cli.ReadValue( poolPublicKey, "-p", "--pool-key" ) )
+        else if( cli.ReadStr( poolPublicKey, "-p", "--pool-key" ) )
             continue;
-        else if( cli.ReadValue( poolContractAddress, "-c", "--pool-contract" ) )
+        else if( cli.ReadStr( poolContractAddress, "-c", "--pool-contract" ) )
             continue;
         else if( cli.ReadSwitch( cfg.warmStart, "-w", "--warm-start" ) )
             continue;
-        else if( cli.ReadValue( cfg.plotIdStr, "-i", "--plot-id" ) )
+        else if( cli.ReadStr( cfg.plotIdStr, "-i", "--plot-id" ) )
             continue;
-        else if( cli.ReadValue( cfg.plotMemoStr, "--memo" ) )
+        else if( cli.ReadStr( cfg.plotMemoStr, "--memo" ) )
             continue;
         else if( cli.ReadSwitch( cfg.showMemo, "--show-memo" ) )
             continue;

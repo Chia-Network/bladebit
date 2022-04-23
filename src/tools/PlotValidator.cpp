@@ -14,6 +14,9 @@
 #include "plotting/GlobalPlotConfig.h"
 #include <mutex>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
 #define PROOF_X_COUNT       64
 #define MAX_K_SIZE          48
 #define MAX_META_MULTIPLIER 4
@@ -114,8 +117,8 @@ static uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool );
 
 // Thread-safe log
 static std::mutex _logLock;
-static void TVLog( const uint64 id, const char* msg, va_list args );
-static void TLog( const uint64 id, const char* msg, ... );
+static void TVLog( const uint32 id, const char* msg, va_list args );
+// static void TLog( const uint32 id, const char* msg, ... );
 
 struct ValidateJob : MTJob<ValidateJob>
 {
@@ -140,7 +143,7 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
             continue;
         else if( cli.ReadSwitch( opts.unpacked, "-u", "--unpack" ) )
             continue;
-        else if( cli.ReadValue( opts.startOffset, "-o", "--offset" ) )
+        else if( cli.ReadF32( opts.startOffset, "-o", "--offset" ) )
             continue;
         else if( cli.ArgConsume( "-h", "--help" ) )
         {
@@ -315,7 +318,7 @@ uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool )
                 failedCount++;
 
             const uint64 proofsChecked = i - offset;
-            if( proofsChecked > 0 && proofsChecked % reportInterval == 0 || i + 1 == end )
+            if( ( proofsChecked > 0 && proofsChecked % reportInterval == 0 ) || i + 1 == end )
             {
                 Log( "Proofs validated: %10llu / %-10llu ( %.2lf %% ) [ %sFailed: %llu%s ]",
                     proofsChecked, count, 
@@ -617,7 +620,10 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
                 for( uint64 e = 0; e < parkEntryCount; e++ )
                 {
                     const BackPtr bp = LinePointToSquare64( (uint64)linePoints[e] );
-                    tableWriter[e] = { .left = (uint32)bp.x, .right = (uint32)bp.y };
+                    Pair pair;
+                    pair.left  = (uint32)bp.x;
+                    pair.right = (uint32)bp.y;
+                    tableWriter[e] = pair;
                 }
 
                 if( parkEntryCount < kEntriesPerPark )
@@ -1006,7 +1012,7 @@ void FxGen( const TableId table, const uint32 k,
                 break;
         }
 
-        const uint32 metaBits  = k * multiplier;
+        const uint32 metaBits  = (uint32)( k * multiplier );
         const uint32 yBits     = k + kExtraBits;
         const uint32 startByte = yBits / 8 ;
         const uint32 startBit  = yBits - startByte * 8;
@@ -1064,7 +1070,7 @@ inline uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 b
 
 
 //-----------------------------------------------------------
-void TVLog( const uint64 id, const char* msg, va_list args )
+void TVLog( const uint32 id, const char* msg, va_list args )
 {
     _logLock.lock();
     fprintf( stdout, "[%3u] ", id );
@@ -1074,12 +1080,13 @@ void TVLog( const uint64 id, const char* msg, va_list args )
 }
 
 //-----------------------------------------------------------
-void TLog( const uint64 id, const char* msg, ... )
-{
-    va_list args;
-    va_start( args, msg );
-    TVLog( id, msg, args );
-    va_end( args );
-}
+// void TLog( const uint32 id, const char* msg, ... )
+// {
+//     va_list args;
+//     va_start( args, msg );
+//     TVLog( id, msg, args );
+//     va_end( args );
+// }
 
+#pragma GCC diagnostic pop
 

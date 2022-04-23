@@ -33,6 +33,41 @@
 				"kind": "build",
 				"isDefault": true
 			}
+		},
+
+		{
+			"type"   : "shell",
+			"label"  : "rebuild_debug",
+			"detail" : "Rebuild Debug Bladebit",
+			"command": "cmake",
+
+			"args": [
+				"--build", ".",
+				"--clean-first",
+				"--target", "bladebit",
+				"--config", "Debug",
+				"-j", "24"
+			],
+			
+			"windows":{
+			},
+
+			"linux":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"osx":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
 		}
 
 		// Build Debug Develop

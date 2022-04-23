@@ -1,3 +1,8 @@
+#if _WIN32
+    #pragma warning( push )
+    #pragma warning( disable: 4804 )    // 'operation' : unsafe use of type 'bool' in operation
+#endif
+
 #include "uint128_t.build"
 #include <cstring>
 
@@ -536,3 +541,8 @@ std::ostream & operator<<(std::ostream & stream, const uint128_t & rhs){
     }
     return stream;
 }
+
+
+#if _WIN32
+    #pragma warning( pop )
+#endif

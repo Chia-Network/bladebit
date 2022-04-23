@@ -5,64 +5,44 @@
     <option name="openedFilesInfos">
       <list>
         <OpenedFileInfo>
-          <option name="caretOffset" value="387" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/CMakeLists.txt" />
+          <option name="caretOffset" value="2666" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskBufferQueue.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="6342" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/util/CliParser.h" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="217" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotmem/MemPlotter.h" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="679" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/util/KeyTools.h" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="10579" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/main_old.h" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="3746" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/main_diskplot.h" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="774" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotting/PlotTools.h" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="2273" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/util/KeyTools.cpp" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="284" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/util/Util.cpp" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="154" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/pch.h" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="999" />
+          <option name="caretOffset" value="162" />
           <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotter.h" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="4849" />
+          <option name="caretOffset" value="712" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotPhase1.cpp" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="3367" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotContext.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="100" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/util/CliParser.h" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="908" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/main.cpp" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="2051" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotPhase2.cpp" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="758" />
           <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotter.cpp" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="12336" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotPhase3.cpp" />
+          <option name="caretOffset" value="39" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotBounded.h" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="488" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotting/GlobalPlotConfig.h" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
-          <option name="caretOffset" value="6208" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/main.cpp" />
+          <option name="caretOffset" value="308" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/plotdisk/DiskPlotBounded.cpp" />
         </OpenedFileInfo>
       </list>
     </option>

@@ -58,7 +58,7 @@ public:
         size_t allocSize = 0;
 
         for( uint32 i = 0; i < _numBuckets; i++ )
-            allocSize += CDiv( bucketBitSizes[i] + _remainderBitCount[i], fsBlockSizeBits ) * fsBlockSizeBits / 8;
+            allocSize += CDivT( (size_t)bucketBitSizes[i] + (size_t)_remainderBitCount[i], fsBlockSizeBits ) * fsBlockSizeBits / 8;
 
         byte* bucketBuffers = _queue->GetBuffer( allocSize, fsBlockSize, true );
 
@@ -79,13 +79,11 @@ public:
         {
             const uint64 leftOverBitCount  = _remainderBitCount[i];
             const size_t totalBitCount     = bucketBitSizes[i] + leftOverBitCount;
-            const size_t bufferBitCapacity = CDiv( totalBitCount, fsBlockSizeBits ) * fsBlockSizeBits;
+            const size_t bufferBitCapacity = CDivT( totalBitCount, fsBlockSizeBits ) * fsBlockSizeBits;
             ASSERT( bufferBitCapacity / 64 * 64 == bufferBitCapacity );
-
-            _buckets[i] = {
-                .count  = totalBitCount,
-                .buffer = fields
-            };
+            
+            _buckets[i].count  = totalBitCount;
+            _buckets[i].buffer = fields;
             
             if( leftOverBitCount > 0 )
             {

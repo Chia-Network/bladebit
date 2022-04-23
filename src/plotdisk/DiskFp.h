@@ -15,6 +15,10 @@
     #include "DiskPlotDebug.h"
 #endif
 
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+
 template<TableId table>
 struct FpMapType { using Type = uint64; };
 
@@ -147,15 +151,10 @@ public:
     {
         using info = DiskPlotInfo<TableId::Table4, _numBuckets>;
         
-        const uint32 bucketBits    = bblog2( _numBuckets );
-        const size_t maxEntries    = info::MaxBucketEntries;
-        const size_t maxEntriesX   = maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
-        const size_t entrySizeBits = info::EntrySizePackedBits;
-        
-        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
-        const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize ) + 
-                                            RoundUpToNextBoundaryT( CDiv( entrySizeBits * BB_DP_CROSS_BUCKET_MAX_ENTRIES, 8 ), fxBlockSize );
-
+        const size_t maxEntries      = info::MaxBucketEntries;
+        const size_t maxSliceEntries = info::MaxBucketSliceEntries;
+        const size_t maxEntriesX     = maxEntries + BB_DP_CROSS_BUCKET_MAX_ENTRIES;
+       
         // Working buffers
         _entries[0] = alloc.CAlloc<Entry>( maxEntries );
         _entries[1] = alloc.CAlloc<Entry>( maxEntries );
@@ -168,16 +167,30 @@ public:
         _meta[0] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntriesX );
         _meta[1] = (TMetaIn*)alloc.CAlloc<Meta4>( maxEntriesX );
         
-        _pair[0] = alloc.CAlloc<Pair> ( maxEntriesX );
+        _pair[0] = alloc.CAlloc<Pair>( maxEntriesX );
         
         // IO buffers
-        const size_t pairBits    = _k + 1 - bucketBits + 9;
-        const size_t mapBits     = _k + 1 - bucketBits + _k + 1;
+        const uint32 bucketBits      = bblog2( _numBuckets );
+        const size_t entrySizeBits   = info::EntrySizePackedBits;       // Entries stored in fx file (tmp2)
+        const size_t pairBits        = _k + 1 - bucketBits + 9;         // Entries stored in table file (tmp1)
+        const size_t mapBits         = _k + 1 - bucketBits + _k + 1;    // Entries stored in map file (tmp1)
 
-        const size_t fxWriteSize   = (size_t)_numBuckets * perBucketEntriesSize;
-        const size_t pairWriteSize = CDiv( ( maxEntriesX ) * pairBits, 8 );
-        const size_t mapWriteSize  = CDiv( ( maxEntriesX ) * mapBits , 8 );
+        // Because bitwriter needs each slice buffer to be rounded up
+        // to block-size, we need to account for that here when allocating.
+        const size_t entrySliceAlloc = (size_t)RoundUpToNextBoundaryT( CDiv( (uint128)maxSliceEntries * entrySizeBits, 8 ), (uint128)fxBlockSize   );
+        const size_t mapSliceAslloc  = (size_t)RoundUpToNextBoundaryT( CDiv( (uint128)maxSliceEntries * mapBits      , 8 ), (uint128)pairBlockSize );
+        
+        const size_t genEntriesPerBucket  = (size_t)( CDivT( maxEntries, (size_t)_numBuckets ) * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const size_t perBucketEntriesSize = RoundUpToNextBoundaryT( CDiv( entrySizeBits * genEntriesPerBucket, 8 ), fxBlockSize ) + 
+                                            RoundUpToNextBoundaryT( CDiv( entrySizeBits * BB_DP_CROSS_BUCKET_MAX_ENTRIES, 8 ), fxBlockSize );
 
+        const size_t fxWriteSize   = entrySliceAlloc * _numBuckets; //(size_t)_numBuckets * perBucketEntriesSize;
+        const size_t pairWriteSize = CDiv( ( maxEntriesX ) * pairBits, 8 ); 
+        const size_t mapWriteSize  = mapSliceAslloc * _numBuckets;   //CDiv( ( maxEntriesX ) * mapBits , 8 ); // #TODO: Might need the cross bucket entries added here too... But maybe the multiplier covers it
+
+        // #TODO: These need to have buffers rounded-up to block size per bucket I think...
+        //         So we need to have this divided into bucket slices, then each sice rounded-up
+        //         to the block size, finally, the sum of that is the allocation size.
         _fxRead [0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
         _fxRead [1]   = alloc.Alloc( fxWriteSize, fxBlockSize );
         _fxWrite[0]   = alloc.Alloc( fxWriteSize, fxBlockSize );
@@ -208,7 +221,6 @@ public:
 
             if( !IsT7Out )
             {
-                // #TODO: These need to have buffers rounded-up to block size per bucket I think
                 _fxBitWriter   = BitBucketWriter<_numBuckets>( _ioQueue, _outFxId, (byte*)fxBlocks );
                 _pairBitWriter = BitBucketWriter<1>          ( _ioQueue, FileId::T1 + (FileId)table, (byte*)pairBlocks );
             }
@@ -299,7 +311,9 @@ public:
         if( bucket > 0 )
         {
             ProcessCrossBucketEntries( bucket - 1, pairs - crossMatchCount, outY, outMeta );
-            _context.ptrTableBucketCounts[(int)table][bucket-1] += crossMatchCount;
+            ASSERT( crossMatchCount <= std::numeric_limits<uint32>::max() );
+
+            _context.ptrTableBucketCounts[(int)table][bucket-1] += (uint32)crossMatchCount;
         }
         
         WritePairsToDisk( bucket, writeEntrtyCount, pairs - crossMatchCount );
@@ -309,7 +323,7 @@ public:
         WriteEntriesToDisk( bucket, writeEntrtyCount, outY, outMeta, (EntryOut*)_entries[0] );
 
         // Save bucket length before y-sort since the pairs remain unsorted
-        _context.ptrTableBucketCounts[(int)table][bucket] += (uint64)outEntryCount;
+        _context.ptrTableBucketCounts[(int)table][bucket] += (uint32)outEntryCount;
 
         _tableEntryCount += writeEntrtyCount;
         _mapOffset       += (uint64)inEntryCount;
@@ -319,8 +333,6 @@ public:
     //-----------------------------------------------------------
     void WriteMap( const uint32 bucket, const int64 entryCount, const uint64* map, uint64* outMap )
     {
-        using TMap = typename FpMapType<table>::Type;
-
         ASSERT( entryCount < (1ll << _k) );
         
         if constexpr ( table == TableId::Table2 )
@@ -362,7 +374,6 @@ public:
             const uint32 bitSize      = Info::MapBitSize + _k - bucketBits;
             const uint32 encodeShift  = Info::MapBitSize;
             const uint32 numBuckets   = _numBuckets + 1;
-            const uint32 threadCount  = self->JobCount();
 
 
             int64 count, offset, end;
@@ -1226,3 +1237,7 @@ private:
 
     FpCrossBucketInfo _crossBucketInfo;
 };
+
+
+#pragma GCC diagnostic pop
+

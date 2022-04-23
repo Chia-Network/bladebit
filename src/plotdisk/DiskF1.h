@@ -4,7 +4,6 @@
 #include "plotdisk/DiskPlotContext.h"
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
-#include "plotdisk/DiskPlotContext.h"
 #include "plotting/PlotTools.h"
 #include "pos/chacha8.h"
 #include "threading/MTJob.h"
@@ -110,7 +109,7 @@ struct DiskF1
                 const uint64 blockCount  = ( x + entriesPerThread ) / entriesPerBlock - chachaBlock + 1;
 
                 // ChaCha gen
-                chacha8_get_keystream( &chacha, chachaBlock, blockCount, (byte*)blocks );
+                chacha8_get_keystream( &chacha, chachaBlock, (uint32)blockCount, (byte*)blocks );
 
                 const uint32* yBlocks = blocks + (x - chachaBlock * entriesPerBlock);
 
@@ -152,7 +151,7 @@ struct DiskF1
                 for( int64 i = 0; i < entriesPerThread; i++ )
                 {
                           uint64 y   = Swap32( yBlocks[i] );
-                    const uint32 dst = --pfxSum[y >> bucketBitShift];
+                    const uint64 dst = --pfxSum[y >> bucketBitShift];
                     
                     const uint64 xi = ( x + (uint64)i );    // Store bit-compressed already
 

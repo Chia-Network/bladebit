@@ -76,25 +76,26 @@
 
                 "--show-memo",
                 "diskplot",
-                "-t1", "/mnt/p5510a/disk_tmp",
-                "--f1-threads", "22",
-                "--fp-threads", "60",
+                "-t1", "~/plot-tmp",
+                // "--f1-threads", "12",
+                "--f1-threads", "3",
+                "--fp-threads", "62",
                 // "--fp-threads", "50",
 
                 // "--f1-threads", "7",
                 // "--fp-threads", "7",
 
-                "--cache", "200G",
+                // "--cache", "200G",
                 // "--cache", "96G",
                 // "--cache", "106G",
                 // "--cache", "64G",
                 // "-s",
-                // "-b", "512",
+                "-b", "1024",
 
-                "--c-threads", "24",
-                "--p2-threads", "20",
-                "--p3-threads", "42",
-                "/mnt/p5510a/disk_tmp"
+                "--c-threads", "26",
+                "--p2-threads", "24",
+                "--p3-threads", "48",
+                "~/plot-tmp"
             ],
             // ,"stopAtEntry": true
             

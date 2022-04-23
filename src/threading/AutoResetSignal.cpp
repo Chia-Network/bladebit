@@ -2,12 +2,16 @@
 #include "util/Util.h"
 #include "util/Log.h"
 
+#if PLATFORM_IS_WINDOWS
+    #include <Windows.h>
+#endif
+
 //-----------------------------------------------------------
 AutoResetSignal::AutoResetSignal()
 {
 #if PLATFORM_IS_WINDOWS
     _object = CreateEvent( NULL, FALSE, FALSE, NULL );
-    PanicIf( !_object, "AutoResetSignal::AutoResetSignal() CreateEvent() failed." );
+    PanicIf( !_object, "AutoResetSignal::AutoResetSignal() CreateEvent() failed with error: %d.", (int32)::GetLastError() );
 #else
     ZeroMem( &_object );
 
@@ -25,10 +29,8 @@ AutoResetSignal::AutoResetSignal()
 AutoResetSignal::~AutoResetSignal()
 {
 #if PLATFORM_IS_WINDOWS
-    BOOL r = CloseHandle( _object );
-    ASSERT( r );
-    if( !r )
-        Log::Error( "AutoResetSignal::~AutoResetSignal() CloseHandle() failed." );
+    const BOOL r = ::CloseHandle( _object );
+    PanicIf( !r, "AutoResetSignal::~AutoResetSignal() CloseHandle() failed with error: %d.", (int32)::GetLastError() );
 #else
     // #TODO: Log error
     int r;
@@ -45,7 +47,8 @@ AutoResetSignal::~AutoResetSignal()
 void AutoResetSignal::Reset()
 {
 #if PLATFORM_IS_WINDOWS
-    #error Not Implemented
+    const BOOL r = ::ResetEvent( _object );
+    PanicIf( !r, "AutoResetSignal::Reset ResetEvent() failed with error: %d.", (int32)GetLastError() );
 #else
     int r;
 
@@ -63,10 +66,8 @@ void AutoResetSignal::Reset()
 void AutoResetSignal::Signal()
 {
 #if PLATFORM_IS_WINDOWS
-    BOOL r = SetEvent( _object );
-    ASSERT( r );
-    if( !r )
-        Log::Error( "AutoResetSignal::Signal() SetEvent failed." );    
+    const BOOL r = SetEvent( _object );
+    PanicIf( !r, "AutoResetSignal::Signal() SetEvent() failed with error: %d.", (int32)::GetLastError() );
 #else
     int r;
 
@@ -86,14 +87,11 @@ void AutoResetSignal::Signal()
 //-----------------------------------------------------------
 AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
 {
-    // #TODO: Check if pthread_mutext_t spins for a bit suspending, 
-    //if not, perhaps use std::mutex instead.
-
 #if PLATFORM_IS_WINDOWS
     if( timeoutMS == WaitInfinite )
         timeoutMS = INFINITE;
     
-    DWORD r = WaitForSingleObject( _object, (DWORD)timeoutMS );
+    const DWORD r = WaitForSingleObject( _object, (DWORD)timeoutMS );
 
     switch( r )
     {
@@ -104,6 +102,8 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
             return WaitResultTimeOut;
 
         default:
+            // We never really handle this case, so just panic out
+            Panic( "AutoResetSignal::Wait WaitForSingleObject() failed with error: %d.", (int32)::GetLastError() );
             return WaitResultError;
     }
     
@@ -154,6 +154,7 @@ AutoResetSignal::WaitResult AutoResetSignal::Wait( int32 timeoutMS )
         case ETIMEDOUT:
             return WaitResultTimeOut;
         default:
+            Panic( "AutoResetSignal::Wait Unexpected return code for pthread_cond_timedwait(): %d.", rc );
             return WaitResultError;
     }
 #endif

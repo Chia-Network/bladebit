@@ -17,13 +17,9 @@ struct Span
 
     inline size_t Length() const { return length; }
 
-    inline T& operator[]( unsigned int index ) const
-    { 
-        ASSERT( index < length );
-        return this->values[index]; 
-    }
+    inline T* Ptr() const { return values; }
 
-    inline T& operator[]( uint64 index ) const
+    inline T& operator[]( unsigned int index ) const
     { 
         ASSERT( index < length );
         return this->values[index]; 
@@ -34,6 +30,16 @@ struct Span
         ASSERT( index < length );
         return this->values[index]; 
     }
+
+
+// size_t not the same as uint64 on clang.
+#ifdef __clang__
+    inline T& operator[]( uint64 index ) const
+    {
+        ASSERT( index < length );
+        return this->values[index];
+    }
+#endif
 
     inline T& operator[]( int index ) const
     { 
@@ -56,7 +62,6 @@ struct Span
         return Slice( index, length - index );
     }
 
-    inline Span<T> Slice( const uint64 index ) const { return Slice( (size_t)index ); }
     inline Span<T> Slice( const uint32 index ) const { return Slice( (size_t)index ); }
     inline Span<T> Slice( const int64 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
     inline Span<T> Slice( const int32 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }

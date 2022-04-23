@@ -250,7 +250,7 @@ inline bool Debug::LoadRefTable( const char* path, T*& buffer, uint64& outEntryC
         outEntryCount = *block;
 
         if( buffer == nullptr )
-            buffer = bbvirtalloc<T>( RoundUpToNextBoundary( outEntryCount * sizeof( T ), blockSize ) );
+            buffer = bbvirtalloc<T>( RoundUpToNextBoundary( outEntryCount * sizeof( T ), (int)blockSize ) );
 
         int err = 0;
         success = IOJob::ReadFromFile( file, buffer, sizeof( T ) * outEntryCount, block, blockSize, err );

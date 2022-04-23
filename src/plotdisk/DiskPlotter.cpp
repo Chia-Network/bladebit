@@ -21,7 +21,7 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg );
 // }
 
 //-----------------------------------------------------------
-DiskPlotter::DiskPlotter( const Config cfg )
+DiskPlotter::DiskPlotter( const Config& cfg )
 {
     ASSERT( cfg.tmpPath  );
     ASSERT( cfg.tmpPath2 );
@@ -34,12 +34,14 @@ DiskPlotter::DiskPlotter( const Config cfg )
     ZeroMem( &_cx );
     
     FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
-        "Failed to obtain temp paths block size." );
+        "Failed to obtain temp paths block size from t1: '%s' or %s t2: '%s'.", cfg.tmpPath, cfg.tmpPath2 );
 
     FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
 
     const size_t heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
 
+    _cfg            = cfg;
+    _cx.cfg         = &_cfg;
     _cx.tmpPath     = cfg.tmpPath;
     _cx.tmpPath2    = cfg.tmpPath2;
     _cx.numBuckets  = cfg.numBuckets;
@@ -67,6 +69,8 @@ DiskPlotter::DiskPlotter( const Config cfg )
     Log::Line( " P2 threads     : %u"       , _cx.p2ThreadCount );
     Log::Line( " P3 threads     : %u"       , _cx.p3ThreadCount );
     Log::Line( " IO threads     : %u"       , _cx.ioThreadCount );
+    Log::Line( " Temp1 block sz : %u"       , _cx.tmp1BlockSize );
+    Log::Line( " Temp2 block sz : %u"       , _cx.tmp2BlockSize );
 
     Log::Line( " Allocating memory" );
     _cx.heapBuffer = bbvirtalloc<byte>( _cx.heapSize );
@@ -229,23 +233,27 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
 {
     while( cli.HasArgs() )
     {
-        if( cli.ReadValue( cfg.numBuckets,  "-b", "--buckets" ) ) 
+        if( cli.ReadU32( cfg.numBuckets,  "-b", "--buckets" ) ) 
             continue;
-        if( cli.ReadValue( cfg.tmpPath, "-t1", "--temp1" ) )
+        if( cli.ReadStr( cfg.tmpPath, "-t1", "--temp1" ) )
             continue;
-        if( cli.ReadValue( cfg.tmpPath2, "-t2", "--temp2" ) )
+        if( cli.ReadStr( cfg.tmpPath2, "-t2", "--temp2" ) )
             continue;
-        if( cli.ReadValue( cfg.cacheSize, "--cache" ) )
+        if( cli.ReadSwitch( cfg.noTmp1DirectIO, "--no-t1-direct" ) )
             continue;
-        if( cli.ReadValue( cfg.f1ThreadCount, "--f1-threads" ) )
+        if( cli.ReadSwitch( cfg.noTmp2DirectIO, "--no-t2-direct" ) )
             continue;
-        if( cli.ReadValue( cfg.fpThreadCount, "--fp-threads" ) )
+        if( cli.ReadSize( cfg.cacheSize, "--cache" ) )
             continue;
-        if( cli.ReadValue( cfg.cThreadCount, "--c-threads" ) )
+        if( cli.ReadU32( cfg.f1ThreadCount, "--f1-threads" ) )
             continue;
-        if( cli.ReadValue( cfg.p2ThreadCount, "--p2-threads" ) )
+        if( cli.ReadU32( cfg.fpThreadCount, "--fp-threads" ) )
             continue;
-        if( cli.ReadValue( cfg.p3ThreadCount, "--p3-threads" ) )
+        if( cli.ReadU32( cfg.cThreadCount, "--c-threads" ) )
+            continue;
+        if( cli.ReadU32( cfg.p2ThreadCount, "--p2-threads" ) )
+            continue;
+        if( cli.ReadU32( cfg.p3ThreadCount, "--p3-threads" ) )
             continue;
         if( cli.ArgConsume( "-s", "--sizes" ) )
         {
@@ -420,12 +428,17 @@ size_t DiskPlotter::GetRequiredSizeForBuckets( const uint32 numBuckets, const si
         case 128 : return DiskFp<TableId::Table4, 128 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 256 : return DiskFp<TableId::Table4, 256 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 512 : return DiskFp<TableId::Table4, 512 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
-        case 1024: return DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
+        case 1024:
+            // We need to add a bit more here (at least 1GiB) to have enough space for P2, which keeps
+            // 2 marking table bitfields in-memory: k^32 / 8 = 0.5GiB
+            return 1032ull MB + DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
     
     default:
         Fatal( "Invalid bucket size: %u.", numBuckets );
         break;
     }
+
+    return 0;
 }
 
 
@@ -458,7 +471,7 @@ size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg )
 
     char* randFileName = bbmalloc<char>( pathLen + 32 );
     
-    int r = snprintf( randFileName, pathLen + 32, "%s.%llx.blk", tmpPath, randNum );
+    int r = snprintf( randFileName, pathLen + 32, "%s.%llx.blk", tmpPath, (llu)randNum );
     FatalIf( r < 1, "Unexpected error validating temp directory." );
 
     FileStream tmpFile;
@@ -495,6 +508,10 @@ Creates plots by making use of a disk to temporarily store and read values.
  -t2, --temp2 <dir> : Specify a secondary temporary directory, which will be used for data
                       that needs to be read/written from constantly.
                       If nothing is specified, --temp will be used instead.
+
+ --no-t1-direct     : Disable direct I/O on the temp 1 directory.
+
+ --no-t2-direct     : Disable direct I/O on the temp 2 directory.
 
  -s, --sizes        : Output the memory requirements for a specific bucket count.
                       To change the bucket count from the default, pass a value to -b

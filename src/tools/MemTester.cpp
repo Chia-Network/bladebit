@@ -16,11 +16,11 @@ void MemTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
 
     while( cli.HasArgs() )
     {
-        if( cli.ReadValue( memSize, "-s", "--size" ) )
+        if( cli.ReadSize( memSize, "-s", "--size" ) )
         {
             FatalIf( memSize < 1, "Memory size must be > 0." );
         }
-        else if( cli.ReadValue( passCount, "-p", "--passes" ) )
+        else if( cli.ReadU32( passCount, "-p", "--passes" ) )
         {
             if( passCount < 1 ) passCount = 1;
             continue;

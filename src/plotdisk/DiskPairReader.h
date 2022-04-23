@@ -4,6 +4,9 @@
 #include "util/StackAllocator.h"
 #include "util/BitView.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wreorder"
+
 /// #NOTE: We actually have _numBuckets+1 because there's an
 //         implicit overflow bucket that may contain entries.
 template<typename TMap, uint32 _numBuckets, uint32 _finalIdxBits>
@@ -350,10 +353,11 @@ struct DiskPairAndMapReader
 
             for( int64 i = offset; i < end; i++ )
             {
-                const uint32 left  = (uint32)reader.ReadBits64( lBits );
-                const uint32 right = left +  (uint32)reader.ReadBits64( rBits );
+                Pair pair;
+                pair.left  = (uint32)reader.ReadBits64( lBits );
+                pair.right = pair.left +  (uint32)reader.ReadBits64( rBits );
 
-                outPairs[i] = { .left = left, .right = right };
+                outPairs[i] = pair;
             }
         });
 
@@ -582,90 +586,6 @@ private:
     T              _retainedEntries[_retainCount];
 };
 
-// template<TableId _table, uint32 _numBuckets, uint64 _retainCount>
-// struct P3LReaderSelector
-// {
-//     using ReaderT = DiskMapReader<uint32, _numBuckets, _K>;
-// };
 
-// template<uint32 _numBuckets, uint64 _retainCount>
-// struct P3LReaderSelector<TableId::Table1, _numBuckets, _retainCount> 
-// {
-//     using ReaderT = SingleFileMapReader<_numBuckets, _retainCount, uint32>;
-// };
+#pragma GCC diagnostic pop
 
-// template<uint32 _numBuckets, uint64 _retainCount>
-// struct P3LReaderSelector<TableId::Table2, _numBuckets, _retainCount> 
-// {
-//     using ReaderT = SingleFileMapReader<_numBuckets, _retainCount, uint32>;
-// };
-
-// /// Utility for reading maps for P3 where the left table buckets
-// /// have to load more entries than the bucket has in order to allow
-// /// the pairs to point correctly to cross-bucket entries.
-// /// The extra entries loaded from the next bucket have to be carried over
-// /// to the start of the bucket of the next load.
-// template<TableId _table, uint32 _numBuckets, uint64 _retainCount, typename T>
-// class P3LMapReader : public IP3LMapReader<T>
-// {
-//     using ReaderT = typename P3LReaderSelector<_table>::ReaderT;
-
-// public:
-//     //-----------------------------------------------------------
-//     P3LMapReader() {}
-
-//     //-----------------------------------------------------------
-//     P3LMapReader( const FileId fileId, DiskBufferQueue* ioQueue, IAllocator& allocator, 
-//                          const uint64 maxLength, const size_t blockSize,
-//                          const uint32 bucketCounts[_numBuckets] )
-//         : _reader( fileId, ioQueue, maxLength, allocator, blockSize, _retainCount )
-//     {
-//         memcpy( _bucketCounts, bucketCounts, sizeof( _bucketCounts ) );
-//     }
-
-//     //-----------------------------------------------------------
-//     void LoadNextBucket() override
-//     {
-//         ASSERT( _bucketsLoaded < _numBuckets );
-        
-//         const uint64 bucketLength = _bucketCounts[_bucketsLoaded];
-//         const uint64 loadCount    = _bucketsLoaded == 0 ? bucketLength + _retainCount :
-//                                     _bucketsLoaded == _numBuckets - 1 ? bucketLength - _retainCount :
-//                                     bucketLength;
-
-//         _reader.LoadEntries( loadCount );
-//         _bucketsLoaded++;
-//     }
-
-//     //-----------------------------------------------------------
-//     T* ReadLoadedBucket() override
-//     {
-//         T* entries    = _reader.ReadEntries();
-//         T* dstEntries = entries;
-
-//         if( _bucketsRead > 0 )
-//         {
-//             // Copy over the retained entries from the last buffer
-//             dstEntries -= _retainCount;
-//             memcpy( dstEntries, _retainedEntries, _retainCount * sizeof( uint32 ) );
-//         }
-
-//         if( _bucketsRead < _numBuckets - 1 )
-//         {
-//             // Retain our last entries for the next buffer
-//             const uint64 entryCount = _bucketCounts[_bucketsRead] + ( _bucketsRead == 0 ? _retainCount : 0 );
-
-//             memcpy( _retainedEntries, entries + entryCount - _retainCount, _retainCount * sizeof( uint32 ) );
-//         }
-
-//         _bucketsRead++;
-//         return dstEntries;
-//     }
-
-// private:
-//     BlockReader<T> _reader;
-//     uint32         _bucketsLoaded = 0;
-//     uint32         _bucketsRead   = 0;
-//     uint32         _bucketCounts   [_numBuckets ];
-//     T              _retainedEntries[_retainCount];
-// };

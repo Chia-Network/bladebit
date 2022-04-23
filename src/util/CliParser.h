@@ -77,7 +77,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( const char*& value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadStr( const char*& value, const char* paramA, const char* paramB = nullptr )
     {
         if( !ArgMatch( paramA, paramB ) )
             return false;
@@ -92,37 +92,37 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline uint64 ReadUInt64()
+    inline uint64 ReadU64()
     {
         const char* strValue = Arg();
         NextArg();
 
         uint64 value;
-        int r = sscanf( strValue, "%llu", &value );
+        int r = sscanf( strValue, "%llu",(llu*)&value );
         FatalIf( r != 1, "Expected an uint64 value at parameter %d.", _i );
         
         return value;
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( uint64& value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadU64( uint64& value, const char* paramA, const char* paramB = nullptr )
     {
         const char* strValue = nullptr;
-        if( !ReadValue( strValue, paramA, paramB ) )
+        if( !ReadStr( strValue, paramA, paramB ) )
             return false;
 
         const char* arg = _argv[_i-2];
-        int r = sscanf( strValue, "%llu", &value );
+        int r = sscanf( strValue, "%llu", (llu*)&value );
         FatalIf( r != 1, "Invalid uint64 value for argument '%s'.", arg );
 
         return true;
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( int64& value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadI64( int64& value, const char* paramA, const char* paramB = nullptr )
     {
         const char* strValue = nullptr;
-        if( !ReadValue( strValue, paramA, paramB ) )
+        if( !ReadStr( strValue, paramA, paramB ) )
             return false;
 
         const char* arg = _argv[_i-2];
@@ -133,10 +133,10 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( uint32& value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadU32( uint32& value, const char* paramA, const char* paramB = nullptr )
     {
         uint64 u64Value = 0;
-        if( !ReadValue( u64Value, paramA, paramB ) )
+        if( !ReadU64( u64Value, paramA, paramB ) )
             return false;
 
         value = (uint32)u64Value;
@@ -147,10 +147,10 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( int32& value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadI32( int32& value, const char* paramA, const char* paramB = nullptr )
     {
         int64 i64Value = 0;
-        if( !ReadValue( i64Value, paramA, paramB ) )
+        if( !ReadI64( i64Value, paramA, paramB ) )
             return false;
 
         value = (int32)i64Value;
@@ -161,10 +161,10 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( float64& value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadF64( float64& value, const char* paramA, const char* paramB = nullptr )
     {
         const char* strValue = nullptr;
-        if( !ReadValue( strValue, paramA, paramB ) )
+        if( !ReadStr( strValue, paramA, paramB ) )
             return false;
 
         const char* arg = _argv[_i-2];
@@ -175,10 +175,10 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( float32& value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadF32( float32& value, const char* paramA, const char* paramB = nullptr )
     {
         const char* strValue = nullptr;
-        if( !ReadValue( strValue, paramA, paramB ) )
+        if( !ReadStr( strValue, paramA, paramB ) )
             return false;
 
         const char* arg = _argv[_i-2];
@@ -189,10 +189,10 @@ public:
     }
 
      //-----------------------------------------------------------
-    inline bool ReadValue( bls::G1Element* value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadPKey( bls::G1Element* value, const char* paramA, const char* paramB = nullptr )
     {
         const char* strValue = nullptr;
-        if( !ReadValue( strValue, paramA, paramB ) )
+        if( !ReadStr( strValue, paramA, paramB ) )
             return false;
 
         value = new bls::G1Element();
@@ -206,10 +206,10 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( bls::G1Element& value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadPKey( bls::G1Element& value, const char* paramA, const char* paramB = nullptr )
     {
         const char* strValue = nullptr;
-        if( !ReadValue( strValue, paramA, paramB ) )
+        if( !ReadStr( strValue, paramA, paramB ) )
             return false;
 
         if( !KeyTools::HexPKeyToG1Element( strValue, value ) )
@@ -222,10 +222,10 @@ public:
     }
     
     //-----------------------------------------------------------
-    inline bool ReadValue( PuzzleHash* value, const char* paramA, const char* paramB = nullptr )
+    inline bool ReadPuzzleHash( PuzzleHash* value, const char* paramA, const char* paramB = nullptr )
     {
         const char* strValue = nullptr;
-        if( !ReadValue( strValue, paramA, paramB ) )
+        if( !ReadStr( strValue, paramA, paramB ) )
             return false;
 
         auto* ph = new PuzzleHash();
@@ -239,10 +239,10 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline bool ReadValue( size_t& value, const char* paramA, const char* paramB = nullptr  )
+    inline bool ReadSize( size_t& value, const char* paramA, const char* paramB = nullptr  )
     {
         const char* sizeText = nullptr;
-        if( !ReadValue( sizeText, paramA, paramB ) )
+        if( !ReadStr( sizeText, paramA, paramB ) )
             return false;
 
         const char* arg = _argv[_i-2];
@@ -289,7 +289,9 @@ public:
             else if( StriCmp( "KB", suffix ) == 0 || StriCmp( "K", suffix ) == 0 )
                 multiplier = 1ull KB;
             else
-            Fatal( "Invalid suffix '%s' for argument '%s'", suffix, arg );
+            {
+                Fatal( "Invalid suffix '%s' for argument '%s'", suffix, arg );
+            }
         }
 
         size_t parsedSize = 0;
@@ -304,7 +306,7 @@ public:
         memcpy( digits, sizeText, digitsLength );
         digits[digitsLength] = 0;
 
-        FatalIf( sscanf( digits, "%llu", &parsedSize ) != 1,
+        FatalIf( sscanf( digits, "%llu", (llu*)&parsedSize ) != 1,
                  "Invalid parameters value for argument '%s'.", arg );
 
         size = parsedSize * multiplier;
