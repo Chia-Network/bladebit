@@ -169,7 +169,7 @@ else()
     set(dev_c_opts 
         ${dev_c_opts})
 
-    set(link_opts -g -rdynamic #flto
+    set(link_opts -g -rdynamic flto
         ${link_opts})
 
     # GCC
@@ -188,7 +188,7 @@ else()
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         
-        set(c_opts_FLAGS -ferror-limit=5 -fdeclspec -Wunknown-pragmas ${c_opts})
+        set(c_opts_FLAGS -ferror-limit=5 -fdeclspec -Wno-empty-body ${c_opts})
 
     endif()
 

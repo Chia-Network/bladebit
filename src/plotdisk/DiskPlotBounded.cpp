@@ -135,7 +135,7 @@ private:
         if( bucket >= 2 && _writeFence.Value() < bucket-1 )
         {
             if( self->BeginLockBlock() )
-                _writeFence.Wait( bucket - 1, _context.p1TableWaitTime[(int)] );
+                _writeFence.Wait( bucket - 1, _context.p1TableWaitTime[(int)TableId::Table1] );
 
             self->EndLockBlock();
         }

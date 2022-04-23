@@ -5,8 +5,8 @@
 BucketStream::BucketStream( IStream& baseStream, const size_t sliceSize, const uint32 numBuckets )
     : _baseStream     ( baseStream )
     , _blockBuffers   ( bbvirtallocnuma<byte>( baseStream.BlockSize() * (size_t)numBuckets * numBuckets ) ) // Virtual alloc aligned.
-    , _slicePositions     ( bbcalloc<size_t*>( numBuckets ), numBuckets )
     , _blockRemainders( bbcalloc<size_t>( (size_t)numBuckets * numBuckets ) )
+    , _slicePositions ( bbcalloc<size_t*>( numBuckets ), numBuckets )
     , _sliceSize      ( sliceSize )
     , _bucketCapacity ( sliceSize * numBuckets )
     , _numBuckets     ( numBuckets )
@@ -56,9 +56,9 @@ void BucketStream::WriteSlices( const void* slices, const uint32* sliceSizes )
             ASSERT( ((size_t)offset - _bucketCapacity * i) + size < _bucketCapacity );
 
             // #TODO: save Remainders
-            stream.Write( sliceBytes, size )
+//            stream.Write( sliceBytes, size )
 
-            _slicePositions[i][0] += size;
+//            _slicePositions[i][0] += size;
         }
     }
     else
@@ -67,10 +67,10 @@ void BucketStream::WriteSlices( const void* slices, const uint32* sliceSizes )
     }
     for( uint32 i = 0; i < _numBuckets; i++ )
     {
-        stream.Seek( offset )
-        const size_t size = sliceSizes[i];
-
-        slices += size;
+//        stream.Seek( offset )
+//        const size_t size = sliceSizes[i];
+//
+//        slices += size;
     }
 }
 
