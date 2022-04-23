@@ -166,7 +166,7 @@ else()
     set(c_opts --include=pch.h -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
 
     set(release_c_opts 
-        -O3 -flto
+        -O3 #-flto
         -D_NDEBUG=1
         -DNDEBUG=1
         ${release_c_opts})
@@ -180,7 +180,7 @@ else()
     set(dev_c_opts 
         ${dev_c_opts})
 
-    set(link_opts -g -rdynamic -flto
+    set(link_opts -g -rdynamic #-flto
         ${link_opts})
 
     # GCC
