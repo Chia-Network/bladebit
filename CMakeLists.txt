@@ -11,7 +11,8 @@ if(NOT CMAKE_BUILD_TYPE)
         FORCE
    )
 endif()
-message("Config: ${CMAKE_BUILD_TYPE}")
+message("Config  : ${CMAKE_BUILD_TYPE}")
+message("Compiler: ${CMAKE_CXX_COMPILER_ID}")
 
 project(bladebit)
 
@@ -155,7 +156,7 @@ else()
     set(c_opts --include=pch.h -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
 
     set(release_c_opts 
-        -O3 #-flto
+        -O3 -flto
         -D_NDEBUG=1
         -DNDEBUG=1
         ${release_c_opts})
