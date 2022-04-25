@@ -64,7 +64,7 @@ jobs:
           if-no-files-found: error
 
   build-ubuntu-arm64:
-    runs-on: [ARM64]
+    runs-on: [[ARM64, Linux]]
     container:
       image: ubuntu:20.04
     defaults:
@@ -98,7 +98,7 @@ jobs:
           if-no-files-found: error
 
   build-centos-arm64:
-    runs-on: [ARM64]
+    runs-on: [[ARM64, Linux]]
     container:
       image: centos:8
     steps:
