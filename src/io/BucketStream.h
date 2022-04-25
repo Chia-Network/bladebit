@@ -9,7 +9,7 @@ public:
         Interleaved
     };
 
-    BucketStream( IStream& baseStream, const size_t sliceSize, const uint32 numBuckets );
+    BucketStream( IStream& baseStream, const size_t bucketMaxSize, const uint32 numBuckets );
 
     virtual ~BucketStream();
 
@@ -17,7 +17,9 @@ public:
 
     ssize_t Write( const void* buffer, size_t size ) override;
 
-    void WriteSlices( const void* slices, const uint32* sliceSizes );
+    void WriteBucketSlices( const void* slices, const uint32* sliceSizes );
+
+    void ReadBucket( const size_t size, void* readBuffer );
 
     bool Seek( int64 offset, SeekOrigin origin ) override;
 
@@ -39,13 +41,17 @@ public:
     inline Mode GetMode() const { return _mode; }
 
 private:
-    IStream&      _baseStream;
-    byte*         _blockBuffers;
-    size_t*       _blockRemainders;
-    Span<size_t*> _slicePositions;          // Current size of each slice in a bucket (used for reading back buckets)
-    size_t        _sliceSize;           // Maximum capacity of a single slice
-    size_t        _bucketCapacity;      // Maximum capacity of a single bucket
-    uint32        _numBuckets;
-    Mode          _mode = Sequential;   // Current serialization mode
+    struct Slice
+    {
+        uint32 position;
+        uint32 size;
+    };
+private:
+    IStream&     _baseStream;
+    Span<Slice*> _sliceSizes;          // Current size of each slice in a bucket (used for reading back buckets)
+    size_t       _bucketCapacity;      // Maximum capacity of a single bucket
+    uint32       _numBuckets;
+    uint16       _bucket = 0;          // Current bucket index
+    Mode         _mode   = Sequential; // Current serialization mode
 };
 

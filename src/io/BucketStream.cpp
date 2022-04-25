@@ -2,76 +2,106 @@
 #include "util/Util.h"
 
 //-----------------------------------------------------------
-BucketStream::BucketStream( IStream& baseStream, const size_t sliceSize, const uint32 numBuckets )
+BucketStream::BucketStream( IStream& baseStream, const size_t bucketMaxSize, const uint32 numBuckets )
     : _baseStream     ( baseStream )
-    , _blockBuffers   ( bbvirtallocnuma<byte>( baseStream.BlockSize() * (size_t)numBuckets * numBuckets ) ) // Virtual alloc aligned.
-    , _blockRemainders( bbcalloc<size_t>( (size_t)numBuckets * numBuckets ) )
-    , _slicePositions ( bbcalloc<size_t*>( numBuckets ), numBuckets )
-    , _sliceSize      ( sliceSize )
-    , _bucketCapacity ( sliceSize * numBuckets )
+    , _sliceSizes     ( bbcalloc<Slice*>( numBuckets ), numBuckets )
+    , _bucketCapacity ( bucketMaxSize )
     , _numBuckets     ( numBuckets )
 {
-    size_t* sliceBuffer = bbcalloc<size_t>( numBuckets * numBuckets );
+    Slice* sliceBuffer = bbcalloc<Slice>( numBuckets * numBuckets );
 
     for( uint32 i = 0; i < numBuckets; i++ )
     {
-        _slicePositions[i] = sliceBuffer;
-        _slicePositions[i] = 0;
+        _sliceSizes[i] = sliceBuffer;
+        _sliceSizes[i] = 0;
 
         sliceBuffer += numBuckets;
     }
-
-    const uint32 numSlices = numBuckets * numBuckets;
-    for( uint32 i = 0; i < numSlices; i++ )
-        _blockRemainders[i] = 0;
 }
 
 //-----------------------------------------------------------
 BucketStream::~BucketStream()
 {
-    free( _slicePositions[0] );
-    free( _slicePositions.Ptr() );
-    free( _blockRemainders );
-    bbvirtfree( _blockBuffers );
+    free( _sliceSizes[0] );
+    free( _sliceSizes.Ptr() );
 }
 
 //-----------------------------------------------------------
-void BucketStream::WriteSlices( const void* slices, const uint32* sliceSizes )
+void BucketStream::WriteBucketSlices( const void* slices, const uint32* sliceSizes )
 {
     const byte* sliceBytes = (byte*)slices;
 
     IStream&     stream    = _baseStream;
     const size_t blockSize = stream.BlockSize();
 
-
     if( _mode == Sequential )
     {
-        // Each bucket contains all the slices
+        // Write slices across all buckets
         for( uint32 i = 0; i < _numBuckets; i++ )
         {
-            int64 offset = (int64)_slicePositions[i][0];
+            const int64 offset = i * (int64)_bucketCapacity + (int64)_sliceSizes[i][0].size;
             PanicIf( !stream.Seek( offset, SeekOrigin::Begin ), "Base stream failed to seek." );
 
-            size_t size = sliceSizes[i];
+            const size_t size = sliceSizes[i];
             ASSERT( ((size_t)offset - _bucketCapacity * i) + size < _bucketCapacity );
 
-            // #TODO: save Remainders
-//            stream.Write( sliceBytes, size )
-
-//            _slicePositions[i][0] += size;
+            // #TODO: Loop write
+            PanicIf( stream.Write( sliceBytes, size ) != (ssize_t)size, "Failed to write slice to base stream." );
+            _sliceSizes[i][0].size += size;
         }
     }
     else
     {
+        // Write the whole thing then seek to the start of the next bucket
+        size_t totalSize = sliceSizes[0];
+        for( uint32 i = 1; i < _numBuckets; i++ )
+            totalSize += sliceSizes[i];
 
+        ASSERT( totalSize <= _bucketCapacity );
+
+        PanicIf( stream.Write( sliceBytes, totalSize ) != (ssize_t)totalSize, "Failed to write bucket to base stream." );
+
+        // Save size written
+        for( uint32 i = 0; i < _numBuckets; i++ )
+            _sliceSizes[_bucket][i] = sliceSizes[i];
     }
-    for( uint32 i = 0; i < _numBuckets; i++ )
+
+    _bucket++;
+}
+
+//-----------------------------------------------------------
+void BucketStream::ReadBucket( const size_t size, void* readBuffer )
+{
+    ASSERT( _bucket < _numBuckets );
+    ASSERT( size );
+    ASSERT( size == _sliceSizes[_bucket][0] );
+    ASSERT( readBuffer );
+
+    if( _mode == Sequential )
     {
-//        stream.Seek( offset )
-//        const size_t size = sliceSizes[i];
-//
-//        slices += size;
+        // Offset to the start of the bucket
+        const int64 offset = (int64)_bucket * (int64)_bucketCapacity;
+        PanicIf( !_baseStream.Seek( offset, SeekOrigin::Begin ), "Failed to seek to bucket %u.", (uint32)_bucket );
+
+        // Whole bucket ready to read
+        PanicIf( _baseStream.Read( readBuffer, size ) != (ssize_t)size, "Failed to read bucket %u.", (uint32)_bucket );
     }
+    else
+    {
+        // Read all slices
+        byte* writer = (byte*)readBuffer;
+
+        for( uint32 i = 0; i < _numBuckets; i++ )
+        {
+            const size_t size = _sliceSizes[_bucket][i];
+
+            
+
+            writer += size;
+        }
+    }
+
+    _bucket++;
 }
 
 //-----------------------------------------------------------

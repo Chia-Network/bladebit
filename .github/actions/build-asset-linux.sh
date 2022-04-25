@@ -23,7 +23,7 @@ chmod +x ./bladebit
 bb_version="$(./bladebit --version | xargs)"
 
 if [[ "$bb_version" != "$BB_VERSION" ]]; then
-    >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
+    >&2 echo "Incorrect bladebit version. Got '$bb_version' but expected '$BB_VERSION'."
     exit 1
 fi
 

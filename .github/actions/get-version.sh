@@ -11,6 +11,7 @@ version=$(cat VERSION)
 suffix=
 ext="tar.gz"
 
+echo "Ref n ame: '$GITHUB_REF_NAME'"
 if [[ "$GITHUB_REF_NAME" != "master" ]]; then
     suffix="-${GITHUB_REF_NAME}"
 fi
