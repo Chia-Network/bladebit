@@ -100,7 +100,7 @@ jobs:
   build-centos-arm64:
     runs-on: [ARM64, Linux]
     container:
-      image: centos:8
+      image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
@@ -149,7 +149,7 @@ jobs:
           
           mkdir build && cd build
           cmake ..
-          bash -e -o pipefail ../extract-version.sh
+          bash -e -o pipefail ../embed-version.sh
           cat ../src/Version.h
           cmake --build . --target bladebit --config Release
 
