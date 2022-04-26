@@ -208,6 +208,14 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             PrintUsage();
             exit( 0 );
         }
+        else if( cli.ArgConsume( "--about" ) )
+        {
+            Log::Line( "Version : %s", BLADEBIT_VERSION_STR    );
+            Log::Line( "Commit  : %s", BLADEBIT_GIT_COMMIT     );
+            Log::Line( "Compiler: %s", BLADEBIT_BUILD_COMPILER );
+            
+            exit( 0 );
+        }
 
         // Commands
         else if( cli.ArgConsume( "diskplot" ) )
