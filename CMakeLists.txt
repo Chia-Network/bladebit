@@ -11,10 +11,12 @@ if(NOT CMAKE_BUILD_TYPE)
         FORCE
    )
 endif()
-message("Config  : ${CMAKE_BUILD_TYPE}")
-message("Compiler: ${CMAKE_CXX_COMPILER_ID}")
 
 project(bladebit)
+
+message("Config       : ${CMAKE_BUILD_TYPE}")
+message("Compiler     : ${CMAKE_CXX_COMPILER_ID}")
+# message("Compiler Path: ${CMAKE_CXX_COMPILER}")
 
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH}
@@ -199,7 +201,7 @@ else()
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         
-        set(c_opts_FLAGS -ferror-limit=5 -fdeclspec -Wno-empty-body ${c_opts})
+        set(c_opts -ferror-limit=5 -fdeclspec -Wno-empty-body ${c_opts})
 
     endif()
 

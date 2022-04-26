@@ -15,7 +15,7 @@ gcc --version
 
 mkdir build && cd build
 cmake ..
-bash -e -o pipefail ../extract-version.sh
+bash -eo pipefail ../embed-version.sh
 cmake --build . --target bladebit --config Release -j $(nproc --all)
 chmod +x ./bladebit
 
