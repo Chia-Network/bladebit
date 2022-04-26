@@ -62,8 +62,8 @@ void BucketStream::WriteBucketSlices( const void* slices, const uint32* sliceSiz
         PanicIf( stream.Write( sliceBytes, totalSize ) != (ssize_t)totalSize, "Failed to write bucket to base stream." );
 
         // Save size written
-        for( uint32 i = 0; i < _numBuckets; i++ )
-            _sliceSizes[_bucket][i] = sliceSizes[i];
+        // for( uint32 i = 0; i < _numBuckets; i++ )
+        //     _sliceSizes[_bucket][i] = sliceSizes[i];
     }
 
     _bucket++;
@@ -93,11 +93,11 @@ void BucketStream::ReadBucket( const size_t size, void* readBuffer )
 
         for( uint32 i = 0; i < _numBuckets; i++ )
         {
-            const size_t size = _sliceSizes[_bucket][i];
+            // const size_t size = _sliceSizes[_bucket][i];
 
             
 
-            writer += size;
+            // writer += size;
         }
     }
 
