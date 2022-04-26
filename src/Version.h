@@ -25,8 +25,6 @@
     #define BLADEBIT_BUILD_COMPILER "Unknown compiler"
 #endif
 
-#define BLADEBIT_BUILD_COMPILER     ""
-
 
 #define BLADEBIT_VERSION \
     ((uint64)BLADEBIT_VERSION_MAJ) << 32 \
