@@ -34,7 +34,7 @@ jobs:
   build-centos-x86-64:
     runs-on: ubuntu-20.04
     container:
-      image: centos:8
+      image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
