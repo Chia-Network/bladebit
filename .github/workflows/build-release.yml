@@ -66,7 +66,7 @@ jobs:
   build-ubuntu-arm64:
     runs-on: [ARM64, Linux]
     container:
-      image: ubuntu:20.04
+      image: ubuntu:22.04
     defaults:
       run:
         shell: bash
@@ -82,14 +82,14 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt update
-          apt install -y build-essential git libgmp-dev libnuma-dev wget
-          set -x
-          wget https://github.com/Kitware/CMake/releases/download/v3.23.1/cmake-3.23.1.tar.gz
-          tar -xzvf cmake-3.23.1.tar.gz
-          cd cmake-3.23.1
-          ./bootstrap --parallel=$(nproc --all) -- -DCMAKE_USE_OPENSSL=OFF
-          make -j $(nproc --all)
-          make install
+          apt install -y build-essential git libgmp-dev libnuma-dev cmake
+#          set -x
+#          wget https://github.com/Kitware/CMake/releases/download/v3.23.1/cmake-3.23.1.tar.gz
+#          tar -xzvf cmake-3.23.1.tar.gz
+#          cd cmake-3.23.1
+#          ./bootstrap --parallel=$(nproc --all) -- -DCMAKE_USE_OPENSSL=OFF
+#          make -j $(nproc --all)
+#          make install
           
 
       - name: Build
