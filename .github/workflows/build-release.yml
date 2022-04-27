@@ -66,7 +66,7 @@ jobs:
   build-ubuntu-arm64:
     runs-on: [ARM64, Linux]
     container:
-      image: ubuntu:22.04
+      image: chianetwork/ubuntu-20.04-builder:sha-5f8b0eefc9ddc86490680506ce731f94ecbc3a62
     defaults:
       run:
         shell: bash
@@ -81,17 +81,8 @@ jobs:
       - name: Install Prerequisites
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          apt install -y gnupg2
-          apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 871920D1991BC93C
-          apt install -y build-essential git libgmp-dev libnuma-dev cmake
-#          set -x
-#          wget https://github.com/Kitware/CMake/releases/download/v3.23.1/cmake-3.23.1.tar.gz
-#          tar -xzvf cmake-3.23.1.tar.gz
-#          cd cmake-3.23.1
-#          ./bootstrap --parallel=$(nproc --all) -- -DCMAKE_USE_OPENSSL=OFF
-#          make -j $(nproc --all)
-#          make install
-          
+          apt update
+          apt install -y build-essential git libgmp-dev libnuma-dev
 
       - name: Build
         env:
