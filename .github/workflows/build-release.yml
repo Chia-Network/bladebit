@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -22,7 +22,7 @@ jobs:
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-linux.sh
+        run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact Ubuntu x86-64
         uses: actions/upload-artifact@v2
@@ -37,7 +37,7 @@ jobs:
       image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -54,7 +54,7 @@ jobs:
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
         run: |
           source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-linux.sh
+          .github/actions/build-asset-unix.sh
       
       - name: Upload Artifact CentOS x86-64
         uses: actions/upload-artifact@v2
@@ -72,7 +72,7 @@ jobs:
         shell: bash
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -88,7 +88,7 @@ jobs:
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-linux.sh
+        run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact Ubuntu ARM64
         uses: actions/upload-artifact@v2
@@ -103,7 +103,7 @@ jobs:
       image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -120,7 +120,7 @@ jobs:
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
         run: |
           source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-linux.sh
+          .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact CentOS ARM64
         uses: actions/upload-artifact@v2
@@ -133,7 +133,7 @@ jobs:
     runs-on: windows-2019
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         shell: bash
@@ -180,7 +180,7 @@ jobs:
         uses: Chia-Network/actions/clean-workspace@main
 
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -193,7 +193,7 @@ jobs:
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-linux.sh
+        run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact macOS arm64
         uses: actions/upload-artifact@v2
@@ -209,7 +209,7 @@ jobs:
         uses: Chia-Network/actions/clean-workspace@main
 
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -222,7 +222,7 @@ jobs:
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-linux.sh
+        run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact macOS x86-64
         uses: actions/upload-artifact@v2
