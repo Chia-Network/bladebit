@@ -173,3 +173,32 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
+  build-macos-arm64:
+    runs-on: [macOS, ARM64]
+    steps:
+      - name: Cleanup Environment
+        uses: Chia-Network/actions/clean-workspace@main
+
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+
+      - name: Get Version Number
+        id: version_number
+        run: bash -e .github/actions/get-version.sh macos arm64
+
+      - name: Install Prerequisites
+        run: brew install cmake
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+        run: .github/actions/build-asset-linux.sh
+
+      - name: Upload Artifact macOS arm64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
