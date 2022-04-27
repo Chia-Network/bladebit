@@ -7,10 +7,12 @@
 #
 set -eo pipefail
 
-thread_count=$(nproc --all)
+thread_count=2
 
 if [[ $OSTYPE == 'darwin'* ]]; then
   thread_count=$(sysctl -n hw.logicalcpu)
+else
+  thread_count=$(nproc --all)
 fi
 
 # TODO: Use specific GCC version
