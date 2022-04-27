@@ -83,10 +83,11 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt update
           apt install -y build-essential git libgmp-dev libnuma-dev wget
+          set -x
           wget https://github.com/Kitware/CMake/releases/download/v3.23.1/cmake-3.23.1.tar.gz
           tar -xzvf cmake-3.23.1.tar.gz
           cd cmake-3.23.1
-          ./bootstrap --parallel $(nproc --all) -- -DCMAKE_USE_OPENSSL=OFF
+          ./bootstrap --parallel=$(nproc --all) -- -DCMAKE_USE_OPENSSL=OFF
           make -j $(nproc --all)
           make install
           
