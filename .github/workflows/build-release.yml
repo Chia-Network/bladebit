@@ -82,7 +82,8 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt update
-          apt install -y build-essential git cmake libgmp-dev libnuma-dev
+          apt install -y build-essential git libgmp-dev libnuma-dev snapd
+          snap install cmake --classic
 
       - name: Build
         env:

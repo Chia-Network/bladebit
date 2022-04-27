@@ -291,7 +291,7 @@ if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCES
             src/b3/blake3_sse41.c
             src/uint128_t/uint128_t.cpp
         )
-        # Disable blake3 convertion loss of data warnings 
+        # Disable blake3 conversion loss of data warnings
         set_source_files_properties( 
             src/b3/blake3_avx2.c
             src/b3/blake3_avx512.c
