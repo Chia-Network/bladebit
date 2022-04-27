@@ -58,11 +58,6 @@ include(cmake_modules/FindCatch2.cmake)
 
 
 # Config
-set(CMAKE_C_FLAGS_RELEASE_INIT)
-set(CMAKE_C_FLAGS_DEBUG_INIT)
-set(CMAKE_CXX_FLAGS_RELEASE_INIT)
-set(CMAKE_CXX_FLAGS_DEBUG_INIT)
-
 set(c_opts)
 set(link_opts)
 
@@ -81,6 +76,28 @@ endif()
 option(ENABLE_DISK_METRICS "Enable I/O metrics for diskplot." OFF)
 if(ENABLE_DISK_METRICS)
     add_compile_definitions("BB_IO_METRICS_ON=1")
+endif()
+
+# Embed version inline when in dev mode
+if(NOT DEFINED ENV{CI})
+    message("Embedding local build version")
+
+    set(cmd_ver bash)
+    if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+        set(cmd_ver bash.exe)
+    endif()
+
+    execute_process(COMMAND ${cmd_ver} extract-version.sh major    OUTPUT_VARIABLE ver_maj    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} extract-version.sh minor    OUTPUT_VARIABLE ver_min    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} extract-version.sh revision OUTPUT_VARIABLE ver_rev    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} extract-version.sh suffix   OUTPUT_VARIABLE ver_suffix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} extract-version.sh commit   OUTPUT_VARIABLE ver_commit WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+
+    add_compile_definitions(BLADEBIT_VERSION_MAJ=${ver_maj})
+    add_compile_definitions(BLADEBIT_VERSION_MIN=${ver_min})
+    add_compile_definitions(BLADEBIT_VERSION_REV=${ver_rev})
+    add_compile_definitions(BLADEBIT_VERSION_SUFFIX="${ver_suffix}-dev")
+    add_compile_definitions(BLADEBIT_GIT_COMMIT="${ver_commit}")
 endif()
 
 
@@ -200,7 +217,7 @@ else()
 
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-        
+
         set(c_opts -ferror-limit=5 -fdeclspec -Wno-empty-body ${c_opts})
 
     endif()

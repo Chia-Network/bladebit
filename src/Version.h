@@ -1,12 +1,29 @@
 #pragma once
 
-#define BLADEBIT_VERSION_MAJ    2
-#define BLADEBIT_VERSION_MIN    0
-#define BLADEBIT_VERSION_REV    0
-#define BLADEBIT_VERSION_SUFFIX ""
-#define BLADEBIT_GIT_COMMIT     ""
+#ifndef BLADEBIT_VERSION_MAJ
+    #define BLADEBIT_VERSION_MAJ    0
+#endif
 
-#ifdef __GNUC__
+#ifndef BLADEBIT_VERSION_MIN
+    #define BLADEBIT_VERSION_MIN    0
+#endif
+
+#ifndef BLADEBIT_VERSION_REV
+    #define BLADEBIT_VERSION_REV    0
+#endif
+
+#ifndef BLADEBIT_VERSION_SUFFIX
+    #define BLADEBIT_VERSION_SUFFIX "-dev"
+#endif
+
+#ifndef BLADEBIT_GIT_COMMIT
+    #define BLADEBIT_GIT_COMMIT     "unknown"
+#endif
+
+// Record compiler version
+#if defined( __clang__ )
+    #define BLADEBIT_BUILD_COMPILER "clang " STR(__clang_major__) "." STR(__clang_minor__) "." STR(__clang_patchlevel__)
+#elif defined( __GNUC__ )
     #define BLADEBIT_BUILD_COMPILER "gcc " STR(__GNUC__) "." STR(__GNUC_MINOR__) "." STR(__GNUC_PATCHLEVEL__)
 #elif defined( _MSC_VER )
     #define MSVC_MAJ (_MSC_FULL_VER/10000000)
@@ -19,8 +36,6 @@
     #undef MSVC_MAJ
     #undef MSVC_MIN
     #undef MSVC_REV
-#elif defined( __clang__ )
-    #define BLADEBIT_BUILD_COMPILER "clang " STR(__clang_major__) "." STR(__clang_minor__) "." STR(__clang_patchlevel__)
 #else
     #define BLADEBIT_BUILD_COMPILER "Unknown compiler"
 #endif

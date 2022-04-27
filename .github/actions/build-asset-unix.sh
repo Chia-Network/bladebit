@@ -5,9 +5,15 @@
 #   - BB_ARTIFACT_NAME
 #   - BB_VERSION
 #
-set -e
-set -o pipefail
+set -eo pipefail
 
+thread_count=2
+
+if [[ $OSTYPE == 'darwin'* ]]; then
+  thread_count=$(sysctl -n hw.logicalcpu)
+else
+  thread_count=$(nproc --all)
+fi
 
 # TODO: Use specific GCC version
 echo "System: $(uname -s)"
@@ -16,7 +22,7 @@ gcc --version
 mkdir build && cd build
 cmake ..
 bash -eo pipefail ../embed-version.sh
-cmake --build . --target bladebit --config Release -j $(nproc --all)
+cmake --build . --target bladebit --config Release -j $thread_count
 chmod +x ./bladebit
 
 # Ensure bladebit version matches expected version
