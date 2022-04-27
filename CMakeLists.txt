@@ -12,7 +12,7 @@ if(NOT CMAKE_BUILD_TYPE)
    )
 endif()
 
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version."
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version.")
 
 project(bladebit)
 
