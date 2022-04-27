@@ -14,7 +14,7 @@ endif()
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version.")
 
-project(bladebit)
+project(bladebit C CXX ASM)
 
 message("Config   : ${CMAKE_BUILD_TYPE}")
 message("Compiler : ${CMAKE_CXX_COMPILER_ID}")
@@ -279,18 +279,11 @@ file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "AMD64")
 
     if(NOT MSVC)
-        
         list(APPEND bb_sources
             src/b3/blake3_avx2_x86-64_unix.S
             src/b3/blake3_avx512_x86-64_unix.S
             src/b3/blake3_sse41_x86-64_unix.S
         )
-
-        set_source_files_properties(
-            src/b3/blake3_avx2_x86-64_unix.S
-            src/b3/blake3_avx512_x86-64_unix.S
-            src/b3/blake3_sse41_x86-64_unix.S
-            PROPERTIES LANGUAGE C)
     else()
         list(APPEND bb_sources
             src/b3/blake3_avx2.c
