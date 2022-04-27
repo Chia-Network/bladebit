@@ -10,13 +10,13 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: master
 
       # Setup Node
-      - uses: actions/setup-node@v2
-        with: { node-version: '14' }
+      - uses: actions/setup-node@v3
+        with: { node-version: '16' }
       - run: cd .github/actions && npm install @octokit/action
 
       # Upload Artifacts as Release Assets
@@ -35,6 +35,8 @@ jobs:
             bladebit-v${BB_VERSION}-ubuntu-arm64.tar.gz
             bladebit-v${BB_VERSION}-centos-arm64.tar.gz
             bladebit-v${BB_VERSION}-windows-x86-64.zip
+            bladebit-v${BB_VERSION}-macos-arm64.tar.gz
+            bladebit-v${BB_VERSION}-macos-x86-64.tar.gz
           )
 
           mkdir -p bin
