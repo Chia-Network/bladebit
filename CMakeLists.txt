@@ -12,11 +12,17 @@ if(NOT CMAKE_BUILD_TYPE)
    )
 endif()
 
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version."
+
 project(bladebit)
 
-message("Config       : ${CMAKE_BUILD_TYPE}")
-message("Compiler     : ${CMAKE_CXX_COMPILER_ID}")
-# message("Compiler Path: ${CMAKE_CXX_COMPILER}")
+message("Config   : ${CMAKE_BUILD_TYPE}")
+message("Compiler : ${CMAKE_CXX_COMPILER_ID}")
+if(DEFINED ENV{CI})
+    message("CI build : true")
+else()
+    message("CI build : false")
+endif()
 
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH}
@@ -211,7 +217,7 @@ else()
         # set(c_opts -ffat-lto-objects ${c_opts})
         
         # Build with native architecture when not building release packages
-        if(NOT DEFINED $ENV{CI})
+        if(NOT DEFINED ENV{CI})
             set(c_opts -march=native ${c_opts})
         endif()
 
