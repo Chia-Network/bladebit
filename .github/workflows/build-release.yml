@@ -81,7 +81,7 @@ jobs:
       - name: Install Prerequisites
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          apt update
+#          apt update
           apt install -y gnupg2
           apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 871920D1991BC93C
           apt install -y build-essential git libgmp-dev libnuma-dev cmake
