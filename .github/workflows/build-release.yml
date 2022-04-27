@@ -81,8 +81,9 @@ jobs:
       - name: Install Prerequisites
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 871920D1991BC93C
           apt update
+          apt install -y gnupg2
+          apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 871920D1991BC93C
           apt install -y build-essential git libgmp-dev libnuma-dev cmake
 #          set -x
 #          wget https://github.com/Kitware/CMake/releases/download/v3.23.1/cmake-3.23.1.tar.gz
