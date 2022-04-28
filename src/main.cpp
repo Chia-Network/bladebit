@@ -211,9 +211,9 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
         else if( cli.ArgConsume( "--about" ) )
         {
             Log::Line( "BladeBit Chia Plotter" );
-            Log::Line( "Version      : %s", BLADEBIT_VERSION_STR    );
-            Log::Line( "Git Commit   : %s", BLADEBIT_GIT_COMMIT     );
-            Log::Line( "Compiled With: %s", BLADEBIT_BUILD_COMPILER );
+            Log::Line( "Version      : %s", BLADEBIT_VERSION_STR   );
+            Log::Line( "Git Commit   : %s", BLADEBIT_GIT_COMMIT    );
+            Log::Line( "Compiled With: %s", BBGetCompilerVersion() );
             
             exit( 0 );
         }

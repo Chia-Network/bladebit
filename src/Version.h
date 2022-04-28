@@ -22,23 +22,49 @@
 
 // Record compiler version
 #if defined( __clang__ )
-    #define BLADEBIT_BUILD_COMPILER "clang " STR(__clang_major__) "." STR(__clang_minor__) "." STR(__clang_patchlevel__)
+    struct BBCompilerVer
+    {
+        static constexpr const char* compiler = "clang";
+        static constexpr uint32_t major    = __clang_major__;
+        static constexpr uint32_t minor    = __clang_minor__;
+        static constexpr uint32_t revision = __clang_patchlevel__;
+    };
 #elif defined( __GNUC__ )
-    #define BLADEBIT_BUILD_COMPILER "gcc " STR(__GNUC__) "." STR(__GNUC_MINOR__) "." STR(__GNUC_PATCHLEVEL__)
+    struct BBCompilerVer
+    {
+        static constexpr const char* compiler = "gcc";
+        static constexpr uint32_t major    = __GNUC__;
+        static constexpr uint32_t minor    = __GNUC_MINOR__;
+        static constexpr uint32_t revision = __GNUC_PATCHLEVEL__;
+    };
 #elif defined( _MSC_VER )
-    #define MSVC_MAJ (_MSC_FULL_VER/10000000)
-    #define MSVC_MIN ((_MSC_FULL_VER/100000)-(MSVC_MAJ*100))
-    #define MSVC_REV ((_MSC_FULL_VER/10)-((_MSC_FULL_VER/1000000)*1000000))
-    #define MSVC_BUILD (_MSC_FULL_VER-(_MSC_FULL_VER/10*10))
+    struct BBCompilerVer
+    {
+        static constexpr const char* compiler = "msvc";
+        static constexpr uint32_t major    = _MSC_VER / 100u;
+        static constexpr uint32_t minor    = _MSC_VER - major * 100u;
+        static constexpr uint32_t revision = _MSC_FULL_VER - _MSC_VER * 100000u;
+    };
 
-    #define BLADEBIT_BUILD_COMPILER "msvc " STR(MSVC_MAJ) "." STR(MSVC_MIN) "." STR(MSVC_REV) "." STR(MSVC_BUILD)
-
-    #undef MSVC_MAJ
-    #undef MSVC_MIN
-    #undef MSVC_REV
 #else
-    #define BLADEBIT_BUILD_COMPILER "Unknown compiler"
+    #warning "Unknown compiler"
+    struct BBCompilerVer
+    {
+        static constexpr const char* compiler = "unknown";
+        static constexpr uint32_t major    = 0;
+        static constexpr uint32_t minor    = 0;
+        static constexpr uint32_t revision = 0;
+    };
 #endif
+
+// #NOTE: Not thread safe
+inline const char* BBGetCompilerVersion()
+{
+    static char c[256] = {};
+    sprintf( c, "%s %u.%u.%u", BBCompilerVer::compiler, BBCompilerVer::major,
+                               BBCompilerVer::minor, BBCompilerVer::revision );
+    return c;
+}
 
 
 #define BLADEBIT_VERSION \
