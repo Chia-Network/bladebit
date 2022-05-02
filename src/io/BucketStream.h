@@ -9,7 +9,7 @@ public:
         Interleaved
     };
 
-    BucketStream( IStream& baseStream, const size_t bucketMaxSize, const uint32 numBuckets );
+    BucketStream( IStream& baseStream, const size_t sliceSize, const uint32 numBuckets );
 
     virtual ~BucketStream();
 
@@ -47,11 +47,16 @@ private:
         uint32 size;
     };
 private:
-    IStream&     _baseStream;
-    Span<Slice*> _sliceSizes;          // Current size of each slice in a bucket (used for reading back buckets)
-    size_t       _bucketCapacity;      // Maximum capacity of a single bucket
-    uint32       _numBuckets;
-    uint16       _bucket = 0;          // Current bucket index
+    IStream&      _baseStream;
+    Span<size_t*> _slices;              // Info about each bucket slice
+    size_t        _sliceCapacity;       // Maximum size of a single bucket slice
+    size_t        _bucketCapacity;      // Maximum capacity of a single bucket
+    uint32        _numBuckets;
+
+    union {
+        uint16    _slice  = 0; // Current slice index (when writing in sequential mode),
+        uint16    _bucket;     // or current bucket index (when writing interleaved).
+    };
     Mode         _mode   = Sequential; // Current serialization mode
 };
 
