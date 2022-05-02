@@ -228,7 +228,6 @@ void DiskPlotPhase1::Run()
 #if BB_DP_DBG_SKIP_TO_C_TABLES
     CTables:
 #endif
-
     WriteCTables();
 
     #if !BB_DP_P1_KEEP_FILES

@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -22,7 +22,7 @@ jobs:
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-linux.sh
+        run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact Ubuntu x86-64
         uses: actions/upload-artifact@v2
@@ -34,10 +34,10 @@ jobs:
   build-centos-x86-64:
     runs-on: ubuntu-20.04
     container:
-      image: centos:8
+      image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -54,7 +54,7 @@ jobs:
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
         run: |
           source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-linux.sh
+          .github/actions/build-asset-unix.sh
       
       - name: Upload Artifact CentOS x86-64
         uses: actions/upload-artifact@v2
@@ -64,15 +64,15 @@ jobs:
           if-no-files-found: error
 
   build-ubuntu-arm64:
-    runs-on: [ARM64]
+    runs-on: [ARM64, Linux]
     container:
-      image: ubuntu:20.04
+      image: chianetwork/ubuntu-20.04-builder:latest
     defaults:
       run:
         shell: bash
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -82,13 +82,13 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt update
-          apt install -y build-essential git cmake libgmp-dev libnuma-dev
+          apt install -y build-essential git libgmp-dev libnuma-dev
 
       - name: Build
         env:
           BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-linux.sh
+        run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact Ubuntu ARM64
         uses: actions/upload-artifact@v2
@@ -98,12 +98,12 @@ jobs:
           if-no-files-found: error
 
   build-centos-arm64:
-    runs-on: [ARM64]
+    runs-on: [ARM64, Linux]
     container:
-      image: centos:8
+      image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
@@ -120,7 +120,7 @@ jobs:
           BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
         run: |
           source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-linux.sh
+          .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact CentOS ARM64
         uses: actions/upload-artifact@v2
@@ -133,7 +133,7 @@ jobs:
     runs-on: windows-2019
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get Version Number
         shell: bash
@@ -149,7 +149,7 @@ jobs:
           
           mkdir build && cd build
           cmake ..
-          bash -e -o pipefail ../extract-version.sh
+          bash -e -o pipefail ../embed-version.sh
           cat ../src/Version.h
           cmake --build . --target bladebit --config Release
 
@@ -173,3 +173,60 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
+  build-macos-arm64:
+    runs-on: [macOS, ARM64]
+    steps:
+      - name: Cleanup Environment
+        uses: Chia-Network/actions/clean-workspace@main
+
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Get Version Number
+        id: version_number
+        run: bash -e .github/actions/get-version.sh macos arm64
+
+      - name: Install Prerequisites
+        run: brew install cmake
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+        run: .github/actions/build-asset-unix.sh
+
+      - name: Upload Artifact macOS arm64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
+  build-macos-x86-64:
+    runs-on: macOS-latest
+    steps:
+      - name: Cleanup Environment
+        uses: Chia-Network/actions/clean-workspace@main
+
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Get Version Number
+        id: version_number
+        run: .github/actions/get-version.sh macos x86-64
+
+      - name: Install Prerequisites
+        run: brew install cmake
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+        run: .github/actions/build-asset-unix.sh
+
+      - name: Upload Artifact macOS x86-64
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error

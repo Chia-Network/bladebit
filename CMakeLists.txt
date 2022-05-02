@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,10 +11,18 @@ if(NOT CMAKE_BUILD_TYPE)
         FORCE
    )
 endif()
-message("Config  : ${CMAKE_BUILD_TYPE}")
-message("Compiler: ${CMAKE_CXX_COMPILER_ID}")
 
-project(bladebit)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version.")
+
+project(bladebit C CXX ASM)
+
+message("Config   : ${CMAKE_BUILD_TYPE}")
+message("Compiler : ${CMAKE_CXX_COMPILER_ID}")
+if(DEFINED ENV{CI})
+    message("CI build : true")
+else()
+    message("CI build : false")
+endif()
 
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH}
@@ -56,11 +64,6 @@ include(cmake_modules/FindCatch2.cmake)
 
 
 # Config
-set(CMAKE_C_FLAGS_RELEASE_INIT)
-set(CMAKE_C_FLAGS_DEBUG_INIT)
-set(CMAKE_CXX_FLAGS_RELEASE_INIT)
-set(CMAKE_CXX_FLAGS_DEBUG_INIT)
-
 set(c_opts)
 set(link_opts)
 
@@ -81,6 +84,47 @@ if(ENABLE_DISK_METRICS)
     add_compile_definitions("BB_IO_METRICS_ON=1")
 endif()
 
+# Embed version inline when in dev mode
+if((NOT DEFINED ENV{CI}) AND (NOT DEFINED CACHE{bb_version_embedded}))
+    message("Embedding local build version")
+
+    set(bb_version_embedded on CACHE BOOL "Version embedding has already happened.")
+
+    set(cmd_ver bash)
+    if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+        set(cmd_ver bash.exe)
+    endif()
+
+    execute_process(COMMAND ${cmd_ver} extract-version.sh major    OUTPUT_VARIABLE bb_ver_maj    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} extract-version.sh minor    OUTPUT_VARIABLE bb_ver_min    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} extract-version.sh revision OUTPUT_VARIABLE bb_ver_rev    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} extract-version.sh suffix   OUTPUT_VARIABLE bb_ver_suffix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} extract-version.sh commit   OUTPUT_VARIABLE bb_ver_commit WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+
+    # Remove trailing whitespace incurred in windows gitbash
+    string(STRIP "${bb_ver_maj}"    bb_ver_maj)
+    string(STRIP "${bb_ver_min}"    bb_ver_min)
+    string(STRIP "${bb_ver_rev}"    bb_ver_rev)
+    string(STRIP "${bb_ver_suffix}" bb_ver_suffix)
+    string(STRIP "${bb_ver_commit}" bb_ver_commit)
+
+    set(bb_ver_suffix ${bb_ver_suffix}-dev)
+
+    # This is slow on windows, so let's cache them
+    set(bb_ver_maj    ${bb_ver_maj}    CACHE STRING "")
+    set(bb_ver_min    ${bb_ver_min}    CACHE STRING "")
+    set(bb_ver_rev    ${bb_ver_rev}    CACHE STRING "")
+    set(bb_ver_suffix ${bb_ver_suffix} CACHE STRING "")
+    set(bb_ver_commit ${bb_ver_commit} CACHE STRING "")
+endif()
+
+if(NOT DEFINED ENV{CI})
+    add_compile_definitions(BLADEBIT_VERSION_MAJ=${bb_ver_maj})
+    add_compile_definitions(BLADEBIT_VERSION_MIN=${bb_ver_min})
+    add_compile_definitions(BLADEBIT_VERSION_REV=${bb_ver_rev})
+    add_compile_definitions(BLADEBIT_VERSION_SUFFIX="${bb_ver_suffix}")
+    add_compile_definitions(BLADEBIT_GIT_COMMIT="${bb_ver_commit}")
+endif()
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 
@@ -192,14 +236,14 @@ else()
         # set(c_opts -ffat-lto-objects ${c_opts})
         
         # Build with native architecture when not building release packages
-        if(NOT DEFINED $ENV{CI})
+        if(NOT DEFINED ENV{CI})
             set(c_opts -march=native ${c_opts})
         endif()
 
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-        
-        set(c_opts_FLAGS -ferror-limit=5 -fdeclspec -Wno-empty-body ${c_opts})
+
+        set(c_opts -ferror-limit=5 -fdeclspec -Wno-empty-body ${c_opts})
 
     endif()
 
@@ -254,18 +298,11 @@ file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "AMD64")
 
     if(NOT MSVC)
-        
         list(APPEND bb_sources
             src/b3/blake3_avx2_x86-64_unix.S
             src/b3/blake3_avx512_x86-64_unix.S
             src/b3/blake3_sse41_x86-64_unix.S
         )
-
-        set_source_files_properties(
-            src/b3/blake3_avx2_x86-64_unix.S
-            src/b3/blake3_avx512_x86-64_unix.S
-            src/b3/blake3_sse41_x86-64_unix.S
-            PROPERTIES LANGUAGE C)
     else()
         list(APPEND bb_sources
             src/b3/blake3_avx2.c
@@ -273,7 +310,7 @@ if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64" OR ${CMAKE_HOST_SYSTEM_PROCES
             src/b3/blake3_sse41.c
             src/uint128_t/uint128_t.cpp
         )
-        # Disable blake3 convertion loss of data warnings 
+        # Disable blake3 conversion loss of data warnings
         set_source_files_properties( 
             src/b3/blake3_avx2.c
             src/b3/blake3_avx512.c

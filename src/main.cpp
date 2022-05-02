@@ -208,6 +208,15 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             PrintUsage();
             exit( 0 );
         }
+        else if( cli.ArgConsume( "--about" ) )
+        {
+            Log::Line( "BladeBit Chia Plotter" );
+            Log::Line( "Version      : %s", BLADEBIT_VERSION_STR   );
+            Log::Line( "Git Commit   : %s", BLADEBIT_GIT_COMMIT    );
+            Log::Line( "Compiled With: %s", BBGetCompilerVersion() );
+            
+            exit( 0 );
+        }
 
         // Commands
         else if( cli.ArgConsume( "diskplot" ) )
@@ -228,7 +237,6 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
                         Log::Line( "*** Warning: Failed to increase file limit to with error %d (0x%02x). Plotting may fail ***", err, err );
                     }
                 }
-
             #endif
 
             DiskPlotter::Config diskCfg;
