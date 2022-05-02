@@ -237,7 +237,6 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
                         Log::Line( "*** Warning: Failed to increase file limit to with error %d (0x%02x). Plotting may fail ***", err, err );
                     }
                 }
-
             #endif
 
             DiskPlotter::Config diskCfg;
