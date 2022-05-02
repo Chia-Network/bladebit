@@ -101,11 +101,11 @@
         for( uint32 slice = 0; slice < _numBuckets; slice++ )
         {
             const int64 offset = (int64)(_bucketStart + slice * _sliceCapacity );
-            PanicIf( !_baseStream.Seek( offset, SeekOrigin::Begin ), "Failed to seek for reading." );
+            PanicIf( !stream.Seek( offset, SeekOrigin::Begin ), "Failed to seek for reading." );
 
             // #TODO: Loop read, or use IOJob
             const size_t  sliceSize = _slices[_bucket][slice];
-            const ssize_t sizeRead  = _baseStream.Read( buffer, sliceSize );
+            const ssize_t sizeRead  = stream.Read( buffer, sliceSize );
             PanicIf( sizeRead != (ssize_t)sliceSize, "Failed to read slice %u of bucket %u.", slice, (uint32)_bucket );
 
             buffer += sliceSize;
