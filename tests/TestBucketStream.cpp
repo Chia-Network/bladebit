@@ -5,23 +5,21 @@
 const uint32 k                = 24;
 const uint32 entryCount       = 1ull << k;
 
+const size_t cacheSize    = entryCount * sizeof( uint32 );
+void*        cache        = bbmalloc<void>( cacheSize  );
+uint32*      bucketBuffer = bbcalloc<uint32>( entryCount );
+
 //-----------------------------------------------------------
 template<uint32 _numBuckets>
-void TestBuckets( ThreadPool& pool, uint32* entries, void* cache, const size_t cacheSize )
+void TestBuckets()
 {
     const uint32 entriesPerBucket = entryCount / _numBuckets;
     const uint32 entriesPerSlice  = entriesPerBucket / _numBuckets;
     ASSERT( entriesPerSlice * _numBuckets == entriesPerBucket );
 
-    // Generate entries in sequence
-    AnonMTJob::Run( pool, [=]( AnonMTJob* self ){
-
-        uint32 count, offset, end;
-        GetThreadOffsets( self, entryCount, count, offset, end );
-
-        for( uint32 i = offset; i < end; i++ )
-            entries[i] = i;
-    });
+    Log::Line( "Testing %u buckets", _numBuckets );
+    Log::Line( "  Entries/bucket: %u.", entriesPerBucket );
+    Log::Line( "  Entries/slice : %u.", entriesPerSlice );
 
 #if PLATFORM_IS_WINDOWS
     const char* path = "nul";
@@ -35,10 +33,49 @@ void TestBuckets( ThreadPool& pool, uint32* entries, void* cache, const size_t c
 
     BucketStream stream( memStream, entriesPerSlice * sizeof( uint32 ), _numBuckets );
 
-    // Write our entries (which are in ordinal sequence) sequential mode
-    for( uint32 bucket = 0; bucket = _numBuckets; bucket++ )
-    {
+    // Write our entries in sequential mode (entries will contain valuies 0..numEntries-1)
+    uint32* writer = bucketBuffer;
 
+    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+    {
+        const uint32 bucketOffset = bucket * entriesPerBucket;
+
+        for( uint32 slice = 0; slice < _numBuckets; slice++ )
+        {
+            const uint32 sliceOffset = bucketOffset + slice * entriesPerSlice;
+
+            for( uint32 i = 0; i < entriesPerSlice; i++ )
+                writer[i] = sliceOffset + i;
+
+            writer += entriesPerSlice;
+        }
+    }
+
+    // Write the bucket
+    {
+        uint32 sliceSizes[_numBuckets];
+        for( uint32 slice = 0; slice < _numBuckets; slice++ )
+            sliceSizes[slice] = entriesPerSlice * sizeof( uint32 );
+
+        stream.WriteBucketSlices( bucketBuffer, sliceSizes );
+    }
+
+    // Read it back, still in sequential mode
+    ENSURE( stream.Seek( 0, SeekOrigin::Begin ) );
+
+    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+    {
+        stream.ReadBucket( entriesPerBucket * sizeof( uint32 ), bucketBuffer );
+
+        uint32 e = bucket * entriesPerBucket;
+
+        // Validate entries
+        for( uint32 i = 0; i < entriesPerBucket; i++, e++ )
+        {
+            ENSURE( e == bucketBuffer[e] );
+        }
+
+        // Now write it in interleaved mode
     }
 }
 
@@ -47,18 +84,9 @@ TEST_CASE( "bucket-stream", "[unit-core]" )
 {
     SysHost::InstallCrashHandler();
 
-
-
-
-    uint32* entries = bbcalloc<uint32>( entryCount );
-
-
-
-//    ThreadPool pool( SysHost::GetLogicalCPUCount() );
-//
-//    AnonMTJob::Run( pool, [=]( AnonMTJob* self ){
-//
-//        uint64 count, offset, end;
-//        GetThreadOffsets( self, entryCount, count, offset, end );
-//    });
+    TestBuckets<64>();
+    TestBuckets<128>();
+    TestBuckets<256>();
+    TestBuckets<512>();
+    TestBuckets<1024>();
 }

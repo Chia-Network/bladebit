@@ -219,7 +219,7 @@ bool GrowableSPCQueue<T,_growSize>::Write(T*& outValue )
     _nextState     = (++_nextState) % 2;
 
     _producerState->buffer         = newBuffer;
-    _producerState->capacity       = newCapacity;
+    _producerState->capacity       = (int)newCapacity;
     _producerState->committedCount = 0;
 
     _oldPendingCount = _pendingCount;

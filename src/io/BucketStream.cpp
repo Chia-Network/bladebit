@@ -87,8 +87,8 @@
  {
     ASSERT( _bucket < _numBuckets );
     ASSERT( size );
-    ASSERT( size == _slices[_bucket][0] );
     ASSERT( readBuffer );
+    // #TODO: Remove the read size... We don't need that here...
 
     byte* buffer = (byte*)readBuffer;
     IStream& stream = _baseStream;
