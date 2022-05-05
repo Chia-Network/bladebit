@@ -2,8 +2,8 @@
 #include "io/BucketStream.h"
 #include "io/HybridStream.h"    // #TODO: Use/Implement a MemoryStream instead.
 
-const uint32 k                = 24;
-const uint32 entryCount       = 1ull << k;
+const uint32 k            = 24;
+const uint32 entryCount   = 1ull << k;
 
 const size_t cacheSize    = entryCount * sizeof( uint32 );
 void*        cache        = bbmalloc<void>( cacheSize  );
