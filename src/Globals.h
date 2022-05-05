@@ -52,7 +52,12 @@
 #define TimerEnd( startTime ) \
     (std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - (startTime) ).count() / 1000.0)
 
+#define TimerEndTicks( startTime ) \
+    (std::chrono::steady_clock::now() - (startTime))
 
+#define TicksToSeconds( duration ) \
+    ( std::chrono::duration_cast<std::chrono::nanoseconds>( (duration) ).count() * 1e-9 )
+    
 
 #define ImplementFlagOps( FlagType ) \
 inline FlagType operator | ( FlagType lhs, FlagType rhs )                                               \
@@ -88,6 +93,53 @@ inline FlagType operator ~ ( FlagType lhs )                                     
     return lhs;                                                                                         \
 }
 
+#define ImplementArithmeticOps( EnumType ) \
+constexpr inline EnumType operator+( EnumType lhs, EnumType rhs )   \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    return static_cast<EnumType>( static_cast<BaseT>( lhs ) +       \
+                                  static_cast<BaseT>( rhs ) );      \
+}                                                                   \
+constexpr inline EnumType operator+( EnumType lhs, int rhs )        \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    return static_cast<EnumType>( static_cast<BaseT>( lhs ) + rhs); \
+}                                                                   \
+                                                                    \
+constexpr inline EnumType operator-( EnumType lhs, EnumType rhs )   \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    return static_cast<EnumType>( static_cast<BaseT>( lhs ) -       \
+                                  static_cast<BaseT>( rhs ) );      \
+}                                                                   \
+constexpr inline EnumType operator-( EnumType lhs, int rhs )        \
+{                                                                   \
+    using BaseT = typename std::underlying_type<EnumType>::type;    \
+    return static_cast<EnumType>( static_cast<BaseT>( lhs ) - rhs );\
+}                                                                   \
+/* Prefix ++*/                                                      \
+constexpr inline EnumType& operator++( EnumType& self )             \
+{                                                                   \
+    self = self + static_cast<EnumType>( 1 );                       \
+    return self;                                                    \
+}                                                                   \
+/* Postfix ++*/                                                     \
+constexpr inline EnumType operator++( EnumType& self, int )         \
+{                                                                   \
+    return ++self;                                                  \
+}                                                                   \
+/* Prefix --*/                                                      \
+constexpr inline EnumType& operator--( EnumType& self )             \
+{                                                                   \
+    self = self - static_cast<EnumType>( 1 );                       \
+    return self;                                                    \
+}                                                                   \
+/* Postfix --*/                                                     \
+constexpr inline EnumType operator--( EnumType& self, int )         \
+{                                                                   \
+    return --self;                                                  \
+}                                                                   \
+                                                                    \
 
 
 template< typename T>
@@ -134,22 +186,15 @@ inline T ToggleFlag( T& flags, T flag, bool value )
 }
 
 
-template<typename T>
-struct Span
+template<size_t _size>
+struct NBytes
 {
-    T*     values;
-    size_t length;
+    uint8_t data[_size];
 
-    inline Span(){}
-
-    inline Span( T* values, size_t length )
-        : values( values )
-        , length( length )
-    {}
-
-    inline T& operator[]( unsigned int index ) const { return this->values[index]; }
-    inline T& operator[]( int index ) const { return this->values[index]; }
-
+    inline uint8_t& operator[]( size_t index ) const { return this->values[index]; }
+    inline uint8_t& operator[]( uint32_t index ) const { return this->values[index]; }
+    inline uint8_t& operator[]( int32_t index ) const { return this->values[index]; }
+    inline uint8_t& operator[]( int64_t index ) const { return this->values[index]; }
 };
 
-typedef Span<unsigned char> ByteSpan;
+

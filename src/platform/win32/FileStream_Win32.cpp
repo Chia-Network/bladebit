@@ -1,10 +1,11 @@
 #include "io/FileStream.h"
-#include "Util.h"
+#include "util/Util.h"
 #include "util/Log.h"
+#include <Windows.h>
+//#include <winioctl.h>
+//#include <shlwapi.h>
+//#pragma comment( lib, "Shlwapi.lib" )
 
-#include <winioctl.h>
-#include <shlwapi.h>
-#pragma comment( lib, "Shlwapi.lib" )
 
 const size_t BUF16_STACK_LEN = 1024;
 
@@ -39,10 +40,10 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     if( access == FileAccess::None )
         access = FileAccess::Read;
 
-    const DWORD dwShareMode           = 0;
-    const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS : 
-                                        mode == FileMode::Open   ? OPEN_ALWAYS   :
-                                                                   OPEN_EXISTING;
+    const DWORD dwShareMode           = FILE_SHARE_READ | FILE_SHARE_WRITE;  // #TODO: Specify this as flags, for now we need full share for MT I/O
+    const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS :
+                                        mode == FileMode::Open   ? OPEN_EXISTING : OPEN_ALWAYS;
+
     DWORD dwFlags  = FILE_ATTRIBUTE_NORMAL;
     DWORD dwAccess = 0;
 
@@ -60,6 +61,9 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
 
     if( fd != INVALID_HANDLE_VALUE )
     {
+        // Clear error in case we're re-opening an existing file (it emits ERROR_ALREADY_EXISTS)
+        GetLastError();
+
         // Get the block (cluster) size
         size_t blockSize;
 
@@ -68,8 +72,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
 
         file._fd            = fd;
         file._blockSize     = blockSize;
-        file._writePosition = 0;
-        file._readPosition  = 0;
+        file._position      = 0;
         file._access        = access;
         file._flags         = flags;
         file._error         = 0;
@@ -105,8 +108,7 @@ void FileStream::Close()
     #endif
 
     _fd            = INVALID_HANDLE_VALUE;
-    _writePosition = 0;
-    _readPosition  = 0;
+    _position      = 0;
     _access        = FileAccess::None;
     _error         = 0;
     _blockSize     = 0;
@@ -145,11 +147,11 @@ ssize_t FileStream::Read( void* buffer, size_t size )
     const BOOL r = ReadFile( _fd, buffer, bytesToRead, &bytesRead, NULL );
     
     if( r )
-        _readPosition += (size_t)bytesRead;
+        _position += (size_t)bytesRead;
     else
     {
-        _error = (int)GetLastError();
-        return (ssize_t)-1;
+        _error    = (int)GetLastError();
+        bytesRead = -1;
     }
 
     return (ssize_t)bytesRead;
@@ -192,14 +194,14 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
     BOOL r = WriteFile( _fd, buffer, bytesToWrite, &bytesWritten, NULL );
 
     if( r )
-        _writePosition += (size_t)bytesWritten;
+        _position += (size_t)bytesWritten;
     else
     {
-        _error = (int)GetLastError();
-        return (ssize_t)-1;
+        _error       = (int)GetLastError();
+        bytesWritten = -1;
     }
 
-    return (ssize_t)bytesWritten;
+    return bytesWritten;
 }
 
 //----------------------------------------------------------
@@ -234,8 +236,7 @@ bool FileStream::Seek( int64 offset, SeekOrigin origin )
     if( !r )
         _error = GetLastError();
 
-    _writePosition = (size_t)newPosition.QuadPart;
-    _readPosition  = (size_t)newPosition.QuadPart;
+    _position = (size_t)newPosition.QuadPart;
     
     return (bool)r;
 }
@@ -258,6 +259,39 @@ bool FileStream::Flush()
 bool FileStream::IsOpen() const
 {
     return HasValidFD();
+}
+
+//-----------------------------------------------------------
+ssize_t FileStream::Size()
+{
+    LARGE_INTEGER size;
+    const BOOL r = ::GetFileSizeEx( _fd, &size );
+
+    if( !r )
+    {
+        _error = ::GetLastError();
+        Log::Line( "Error: GetFileSizeEx() failed with error: %d", _error );
+        return 0;
+    }
+
+    return (ssize_t)size.QuadPart;
+}
+
+//-----------------------------------------------------------
+bool FileStream::Truncate( const ssize_t length )
+{
+    if( !Seek( (int64)length, SeekOrigin::Begin ) )
+        return false;
+
+    const BOOL r = ::SetEndOfFile( _fd );
+    if( !r )
+    {
+        _error = ::GetLastError();
+        Log::Line( "Error: SetEndOfFile() failed with error: %d", _error );
+        return false;
+    }
+
+    return true;
 }
 
 //-----------------------------------------------------------

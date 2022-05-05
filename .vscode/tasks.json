@@ -33,6 +33,41 @@
 				"kind": "build",
 				"isDefault": true
 			}
+		},
+
+		{
+			"type"   : "shell",
+			"label"  : "rebuild_debug",
+			"detail" : "Rebuild Debug Bladebit",
+			"command": "cmake",
+
+			"args": [
+				"--build", ".",
+				"--clean-first",
+				"--target", "bladebit",
+				"--config", "Debug",
+				"-j", "24"
+			],
+			
+			"windows":{
+			},
+
+			"linux":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"osx":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
 		}
 
 		// Build Debug Develop
@@ -58,6 +93,128 @@
 
 			"osx":{
 				"problemMatcher": [ "$gcc" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+
+		// Build Tests Debug
+		,{
+			"type"   : "shell",
+			"label"  : "build_tests_debug",
+			"command": "cmake",
+			
+			"args": [
+				"--build", ".",
+				"--target", "tests",
+				"--config", "Debug",
+				"-j", "24"
+			],
+
+			"problemMatcher": [ "$gcc" ],
+			
+			"windows":{
+				"problemMatcher":[ "$msCompile" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+
+		// Build Disk Debug
+		,{
+			"type"   : "shell",
+			"label"  : "build_disk_debug",
+			"detail" : "Build Disk Debug",
+			"command": "cmake",
+			
+			"args": [
+				"--build", ".",
+				"--target", "bladebit_disk",
+				"--config", "Debug",
+				"-j", "24"
+			],
+			
+			"windows":{
+			},
+
+			"linux":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"osx":{
+				"problemMatcher": [ "$gcc" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+
+		// Build plot_tool tool
+		,{
+			"type"   : "shell",
+			"label"  : "build_plot_tool_debug",
+			"command": "cmake",
+			
+			"args": [
+				"--build", ".",
+				"--target", "plot_tool",
+				"--config", "Debug",
+				"-j", "24"
+			],
+			
+			"problemMatcher": [ "$gcc" ],
+
+			"windows":{
+				"problemMatcher":[ "$msCompile" ]
+			},
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+
+		// Build fsegen
+		,{
+			"type"   : "shell",
+			"label"  : "build_fsegen_debug",
+			"command": "cmake",
+			
+			"args": [
+				"--build", ".",
+				"--target", "fsegen",
+				"--config", "Debug",
+				"-j", "24"
+			],
+
+			"problemMatcher": [ "$gcc" ],
+			
+			"windows":{
+				"problemMatcher":[ "$msCompile" ]
 			},
 
 			"options": {

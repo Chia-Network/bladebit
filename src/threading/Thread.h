@@ -1,8 +1,14 @@
 #pragma once
 #include "Platform.h"
-#include <atomic>
+
 
 typedef void (*ThreadRunner)( void* data );
+
+enum class ThreadPriority
+{
+    Normal = 0,
+    High
+};
 
 class Thread
 {
@@ -14,6 +20,8 @@ public:
 
 //     static uint64 SetAffinity( uint64 affinity );
     // void SetName( const char* name );
+    template<typename TParam>
+    void Run( void (*runner)( TParam* param ), TParam* param );
 
     void Run( ThreadRunner runner, void* param );
 
@@ -24,12 +32,14 @@ public:
 
     bool HasExited() const;
 
+    bool SetPriority( const ThreadPriority priority );
+    
 private:
     
     #if PLATFORM_IS_UNIX
         static void* ThreadStarterUnix( Thread* thread );
     #elif PLATFORM_IS_WINDOWS
-        static DWORD ThreadStarterWin( LPVOID );
+        static unsigned long ThreadStarterWin( intptr_t );
     #else
         #error Unimplemented
     #endif
@@ -55,3 +65,12 @@ private:
 
     std::atomic<ThreadState> _state;
 };
+
+
+//-----------------------------------------------------------
+template<typename TParam>
+inline void Thread::Run( void ( *runner )( TParam* param ), TParam* param )
+{
+    Run( reinterpret_cast<ThreadRunner>( runner ), (void*)param );
+}
+

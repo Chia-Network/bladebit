@@ -1,10 +1,18 @@
 #include "Log.h"
 
+#if _DEBUG && defined( _WIN32 )
+    #include <Windows.h>
+    #include <debugapi.h>
+#endif
 
 FILE* Log::_outStream = nullptr;
 FILE* Log::_errStream = nullptr;
 
 bool Log::_verbose = false;
+
+// #if DBG_LOG_ENABLE
+    std::atomic<int> _dbglock = 0;
+// #endif
 
 //-----------------------------------------------------------
 inline FILE* Log::GetOutStream()
@@ -67,6 +75,10 @@ void Log::Line( const char* msg, ... )
 void Log::Write( const char* msg, va_list args )
 {
     vfprintf( GetOutStream(), msg, args );
+
+#if _DEBUG && defined( _WIN32 )
+    //::OutputDebugStringA( (LPCSTR)msg );
+#endif
 }
 
 //-----------------------------------------------------------
@@ -110,6 +122,10 @@ void Log::Error( const char* msg, va_list args )
 void Log::WriteError( const char* msg, va_list args )
 {
     vfprintf( GetErrStream(), msg, args );
+    
+#if _DEBUG && defined( _WIN32 )
+    //::OutputDebugStringA( (LPCSTR)msg );
+#endif
 }
 
 //-----------------------------------------------------------
@@ -154,4 +170,59 @@ void Log::Flush()
 void Log::FlushError()
 {
     fflush( GetErrStream() );
+}
+
+
+#if DBG_LOG_ENABLE
+
+//-----------------------------------------------------------
+void Log::Debug( const char* msg, ... )
+{
+    va_list args;
+    va_start( args, msg );
+
+    DebugV( msg, args );
+
+    va_end( args );
+}
+
+
+//-----------------------------------------------------------
+void Log::DebugV( const char* msg, va_list args )
+{
+    const size_t BUF_SIZE = 1024;
+    char buffer[BUF_SIZE];
+
+    int count = vsnprintf( buffer, BUF_SIZE, msg, args );
+
+    ASSERT( count >= 0 );
+    count = std::min( count, (int)BUF_SIZE-1 );
+
+    buffer[count] = '\n'; 
+
+    DebugWrite( buffer, (size_t)count + 1 );
+}
+
+//-----------------------------------------------------------
+void Log::DebugWrite( const char* msg, size_t size )
+{
+    SafeWrite( msg, size );
+}
+
+#endif
+
+//-----------------------------------------------------------
+void Log::SafeWrite( const char* msg, size_t size )
+{
+    // #TODO: Just use a futex
+    // Lock
+    int lock = 0;
+    while( !_dbglock.compare_exchange_weak( lock, 1 ) )
+        lock = 0;
+    
+    fwrite( msg, 1, size, stderr );
+    fflush( stderr );
+
+    // Unlock
+    _dbglock.store( 0, std::memory_order_release );
 }

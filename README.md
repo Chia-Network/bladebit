@@ -16,7 +16,7 @@ Only **Linux** & **Windows** are supported.
 
 Install the following packages:
 ```bash
-# CentOS or Amazon Linux
+# CentOS or RHEL-based
 sudo yum group install -y "Development Tools"
 sudo yum install -y cmake gmp-devel numactl-devel
 
@@ -25,10 +25,9 @@ sudo apt install -y build-essential cmake libgmp-dev libnuma-dev
 ```
 
 ### Windows
-Must have [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its build tools installed.
+Must have at least [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its build tools installed.
 
 ## Building
-
 
 ```bash
 
@@ -36,8 +35,7 @@ Must have [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its bu
 git clone https://github.com/Chia-Network/bladebit.git && cd bladebit
 
 # Create a build directory for cmake and cd into it
-mkdir build
-cd build
+mkdir -p build && cd build
 
 # Generate config files & build
 cmake ..

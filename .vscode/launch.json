@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name"          : "Bladebit",
+            "name"          : "Bladebit RAM",
             "type"          : "cppdbg",
             "request"       : "launch",
             "stopAtEntry"   : false,
@@ -38,35 +38,198 @@
                 "-v",
                 "${workspaceFolder}/.sandbox"
             ]
-        }
+        },
 
-        ,{
-            "name"       : "Bladebit Dev",
+        {
+            "name"       : "Bladebit Disk",
             
             "type"          : "cppdbg",
             "request"       : "launch",
             "stopAtEntry"   : false,
             "cwd"           : "${workspaceFolder}",
-            "preLaunchTask" : "build_dev_debug",
+            "preLaunchTask" : "build_debug",
             "console"       : "internalConsole",
+
+            "program": "${workspaceFolder}/build/bladebit",
+            
+            "osx": {
+                "MIMode": "lldb"
+            },
 
             "windows": {
                 "type"   : "cppvsdbg",
-                "program": "${workspaceFolder}/build/debug/bladebit_dev.exe"
-            },
-            
-            "linux": {
-                "program": "${workspaceFolder}/build/bladebit_dev"
+                "program": "${workspaceFolder}/build/debug/bladebit.exe"
             },
 
-            "osx": {
-                "program": "${workspaceFolder}/build/bladebit_dev"
+            "args": [
+                "-f", "ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef",
+                "-p", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8",
+//                 "-c", "xch1uf48n3f50xrs7zds0uek9wp9wmyza6crnex6rw8kwm3jnm39y82q5mvps6",
+                // "-t", "7",
+                "-w",
+                // "-v",
+                "-i", "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835",    // No overflow
+                "--memo", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef01b7bf8a22a9ac82a003e07b551c851ea683839f3e1beb8ac9ede57d2c020669",
+
+                // "-i", "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73",    // Yes overflow
+                // "--memo", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef207d52406afa2b6d7d92ea778f407205bd9dca40816c1b1cacfca2a6612b93eb",
+
+                "--show-memo",
+                "diskplot",
+                "-t1", "~/plot/tmp",
+                // "--f1-threads", "12",
+                "--f1-threads", "3",
+                "--fp-threads", "62",
+                // "--fp-threads", "50",
+
+                // "--f1-threads", "7",
+                // "--fp-threads", "7",
+
+                // "--cache", "200G",
+                // "--cache", "96G",
+                // "--cache", "106G",
+                // "--cache", "64G",
+                // "-s",
+                // "-b", "1024",
+
+                "--c-threads", "26",
+                "--p2-threads", "24",
+                "--p3-threads", "48",
+                "~/plot/tmp"
+            ],
+            // ,"stopAtEntry": true
+            
+            "environment": []
+        },
+
+        {
+            "name"         : "IOTest",
+            
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_debug",
+            "console"       : "internalConsole",
+            "program"       : "${workspaceFolder}/build/bladebit",
+
+            "windows": {
+                "type"   : "cppvsdbg",
+                "program": "${workspaceFolder}/build/debug/bladebit.exe"
             },
+            
+            "osx": {
+                "program"       : "${workspaceFolder}/build/bladebit",
+                "MIMode": "lldb"
+            },
+            
+            "environment": [],
+            
+            "args": [
+                
+                // "-t", "32",
+                // "iotest", 
+                // "memtest",
+                // "-s", "64MB"
+                // "-s", "32G",
+                // "-m", "32G",
+                // "/mnt/p5510a/disk_tmp"
+                
+                /// macOS
+                "-t", "8",
+                "memtest",
+                "-s", "6G",
+                ".sandbox"
+            ]
+        },
+
+        {
+            "name"         : "Tests",
+            
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_tests_debug",
+            "console"       : "internalConsole",
+
+            "program": "${workspaceRoot}/build/tests",
+            
+            "environment": [],
+
+            "args": [
+                "-b",
+                // "F1CompressToBits"
+                // "F1GenBucketized"
+                // "FxSort"
+                // "FxDisk"
+                // "F1Disk"
+                "PairsAndMap"
+            ]
+        }
+
+
+
+        ,{
+            "name"       : "Plot Tool",
+            
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_debug",
+            "console"       : "internalConsole",
+
+            "program": "${workspaceFolder}/build/bladebit",
+
+            "windows": {
+                "type"   : "cppvsdbg",
+                "program": "${workspaceFolder}/build/debug/bladebit.exe"
+            },
+            
+            "environment": [],
+
+            "args": [
+                /// Validate
+                "-t", "32",
+                // "-t", "1",
+                // "validate",
+                // "-m",
+                // "-u",
+                // "-o", "99.7",
+                // "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-03-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot.tmp",
+
+                // "/mnt/p5510a/disk_tmp/plot.dat"
+
+                /// Compare
+                "plotcmp",
+                "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-53-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+                "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-03-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+            ]
+        },
+
+        {
+            "name"       : "FSEGen",
+            
+            "type"          : "cppdbg",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_fsegen_debug",
+            "console"       : "internalConsole",
+
+            "program": "${workspaceRoot}/build/fsegen",
+
+            // "windows": {
+            //     "type"   : "cppvsdbg",
+            //     "program": "${workspaceFolder}/build/debug/fsegen.exe"
+            // },
             
             "environment": [],
 
             "args": [
             ]
         }
+
     ]
 }
