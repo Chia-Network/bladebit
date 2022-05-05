@@ -13,6 +13,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version.")
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC Runtime Library")
 
 project(bladebit C CXX ASM)
 
@@ -61,6 +62,8 @@ endif()
 # Catch
 # TODO: Add configuration var to disable this
 include(cmake_modules/FindCatch2.cmake)
+set_target_properties(Catch2 PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set_target_properties(Catch2WithMain PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 
 # Config
@@ -159,7 +162,6 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         ${link_opts})
 
     set(release_c_opts 
-        /MT
         /Oi
         /O2
         /Gy
@@ -168,8 +170,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /D_NDEBUG=1
         ${release_c_opts})
 
-    set(debug_c_opts 
-        /MTd
+    set(debug_c_opts
         /Od
         /DDEBUG=1
         /D_DEBUG=1
@@ -376,8 +377,12 @@ set(bb_include_dirs
 # endmacro()
 
 # BladeBit
-add_library(lib_bladebit ${bb_sources} ${bb_headers} src/plotdisk/DiskPlotBounded.cpp src/plotdisk/DiskPlotBounded.h src/io/BucketStream.cpp src/io/IOUtil.h src/io/IOUtil.cpp)
-set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit)
+add_library(lib_bladebit ${bb_sources} ${bb_headers})
+
+set_target_properties(lib_bladebit PROPERTIES
+        OUTPUT_NAME bladebit
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+)
 target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
 target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
 
@@ -407,6 +412,7 @@ target_link_libraries(fsegen PRIVATE lib_bladebit)
 
 # Tests
 add_executable(tests ${src_tests} ${bb_headers})
+set_target_properties(tests PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 
 # Pretty source view for IDE projects

@@ -15,7 +15,7 @@ namespace {
 }
 
 //-----------------------------------------------------------
-TEST_CASE( "No Race Conditions", "[GrowableSPCQueue]" )
+TEST_CASE( "spc-queue", "[unit-core]" )
 {
     Thread producer;
 
