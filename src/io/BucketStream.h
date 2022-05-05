@@ -33,30 +33,42 @@ public:
 
     int GetError() override;
 
-    inline void SwitchMode()
-    {
-        _mode = (Mode)(((uint32)_mode + 1) & 1); // (mode + 1) % 2
-    }
-
-    inline Mode GetMode() const { return _mode; }
+    inline Mode GetWriteMode() const { return _writeMode; }
+    inline Mode GetReadMode() const { return (Mode)(((uint32)_writeMode + 1) & 1); }
 
 private:
+    inline void SwitchMode()
+    {
+        _writeMode = (Mode)(((uint32)_writeMode + 1) & 1); // (mode + 1) % 2
+    }
+
     struct Slice
     {
         uint32 position;
         uint32 size;
     };
 private:
-    IStream&      _baseStream;
-    Span<size_t*> _slices;              // Info about each bucket slice
+    IStream&      _baseStream;          // Backing stream where we actually write data
+    Span<size_t*> _sequentialSlices;    // Info about each bucket slice
+    Span<size_t*> _interleavedSlices;   // Info about each bucket slice
     size_t        _sliceCapacity;       // Maximum size of a single bucket slice
     size_t        _bucketCapacity;      // Maximum capacity of a single bucket
     uint32        _numBuckets;
 
+    // Keep track of current bucket or slice. These are
+    // opposite to each other depending on the current mode being used.
+    // In sequential mode you write in slices across all buckets, and read in buckets.
+    // In interleaved mode you write in buckets and read in slices across all buckets.
     union {
-        uint16    _slice  = 0; // Current slice index (when writing in sequential mode),
-        uint16    _bucket;     // or current bucket index (when writing interleaved).
+        uint16 _writeSlice = 0;
+        uint16 _writeBucket;
     };
-    Mode         _mode   = Sequential; // Current serialization mode
+
+    union {
+        uint16 _readSlice = 0;
+        uint16 _readBucket;
+    };
+
+    Mode _writeMode = Sequential; // Current write mode. The read mode is the opposite
 };
 

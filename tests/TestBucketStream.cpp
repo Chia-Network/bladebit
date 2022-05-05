@@ -33,34 +33,52 @@ void TestBuckets()
 
     BucketStream stream( memStream, entriesPerSlice * sizeof( uint32 ), _numBuckets );
 
-    // Write our entries in sequential mode (entries will contain valuies 0..numEntries-1)
-    uint32* writer = bucketBuffer;
+    uint32 sliceSizes[_numBuckets];
+    for( uint32 slice = 0; slice < _numBuckets; slice++ )
+        sliceSizes[slice] = entriesPerSlice * sizeof( uint32 );
 
-    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
-    {
-        const uint32 bucketOffset = bucket * entriesPerBucket;
+    auto WriteSlice = [&]( const uint32 slice ) {
 
-        for( uint32 slice = 0; slice < _numBuckets; slice++ )
+        uint32* writer = bucketBuffer;
+
+        for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
-            const uint32 sliceOffset = bucketOffset + slice * entriesPerSlice;
+            const uint32 entryOffset = bucket * entriesPerBucket + slice * entriesPerSlice;
 
             for( uint32 i = 0; i < entriesPerSlice; i++ )
-                writer[i] = sliceOffset + i;
+                writer[i] = entryOffset + i;
 
             writer += entriesPerSlice;
         }
-    }
-
-    // Write the bucket
-    {
-        uint32 sliceSizes[_numBuckets];
-        for( uint32 slice = 0; slice < _numBuckets; slice++ )
-            sliceSizes[slice] = entriesPerSlice * sizeof( uint32 );
 
         stream.WriteBucketSlices( bucketBuffer, sliceSizes );
-    }
+    };
+
+    // Write our entries in sequential mode (entries will contain valuies 0..numEntries-1)
+    for( uint32 slice = 0; slice < _numBuckets; slice++ )
+        WriteSlice( slice );
 
     // Read it back, still in sequential mode
+    ENSURE( stream.Seek( 0, SeekOrigin::Begin ) );
+
+    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+    {
+        stream.ReadBucket( entriesPerBucket * sizeof( uint32 ), bucketBuffer );
+
+        uint32 e = bucket * entriesPerBucket;
+
+        // Validate read entries
+        for( uint32 i = 0; i < entriesPerBucket; i++, e++ )
+        {
+            ENSURE( e == bucketBuffer[i] );
+        }
+
+        // Write in interleaved mode now. This will write all slices
+        // to the space reserved for the bucket we just read
+        WriteSlice( bucket );
+    }
+
+    // Now read in interleaved mode
     ENSURE( stream.Seek( 0, SeekOrigin::Begin ) );
 
     for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
@@ -72,10 +90,27 @@ void TestBuckets()
         // Validate entries
         for( uint32 i = 0; i < entriesPerBucket; i++, e++ )
         {
-            ENSURE( e == bucketBuffer[e] );
+            ENSURE( e == bucketBuffer[i] );
         }
 
-        // #TODO: Now write it in interleaved mode
+        // Write in sequential mode again
+        WriteSlice( bucket );
+    }
+
+    // Finally, read it back, still in sequential mode again and validate
+    ENSURE( stream.Seek( 0, SeekOrigin::Begin ) );
+
+    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+    {
+        stream.ReadBucket( entriesPerBucket * sizeof( uint32 ), bucketBuffer );
+
+        uint32 e = bucket * entriesPerBucket;
+
+        // Validate read entries
+        for( uint32 i = 0; i < entriesPerBucket; i++, e++ )
+        {
+            ENSURE( e == bucketBuffer[i] );
+        }
     }
 }
 
