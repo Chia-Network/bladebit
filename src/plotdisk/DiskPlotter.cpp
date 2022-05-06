@@ -71,6 +71,8 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     Log::Line( " I/O threads    : %u"       , _cx.ioThreadCount );
     Log::Line( " Temp1 block sz : %u"       , _cx.tmp1BlockSize );
     Log::Line( " Temp2 block sz : %u"       , _cx.tmp2BlockSize );
+    Log::Line( " Temp1 path     : %s"       , _cx.tmpPath       );
+    Log::Line( " Temp2 path     : %s"       , _cx.tmpPath2      );
 #if BB_IO_METRICS_ON
     Log::Line( " I/O metrices enabled." );
 #endif
