@@ -393,6 +393,8 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
     else if( cfg.poolPublicKey )
         Log::Line( " Pool public key       : %s", poolPublicKey   );
 
+    Log::Line( " Output path           : %s", cfg.outputFolder );
+
     Log::Line( "" );
 }
 
