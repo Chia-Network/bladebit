@@ -149,6 +149,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /wd4514
         /wd4626
         /wd5027
+        /wd4819
         /DUNICODE=1
         /DWIN32_LEAN_AND_MEAN=1
         /DNOMINMAX=1
