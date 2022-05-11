@@ -32,9 +32,6 @@ public:
     static void PrintUsage();
 
 private:
-    void PlotBounded( const PlotRequest& req );
-
-private:
     DiskPlotContext   _cx;
     Config            _cfg;
 };

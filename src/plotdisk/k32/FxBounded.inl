@@ -36,14 +36,14 @@ public:
 
     //-----------------------------------------------------------
     DiskPlotFxBounded( DiskPlotContext& context )
-        : _context( context )
-        , _ioQueue( *context.ioQueue )
-        , _yReadFence    ( context.fencePool->RequireFence() )
-        , _metaReadFence ( context.fencePool->RequireFence() )
-        , _indexReadFence( context.fencePool->RequireFence() )
-        , _fxWriteFence  ( context.fencePool->RequireFence() )
-        , _pairWriteFence( context.fencePool->RequireFence() )
-        , _mapWriteFence ( context.fencePool->RequireFence() )
+        : _context       ( context )
+        , _ioQueue       ( *context.ioQueue )
+        , _yReadFence    ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
+        , _metaReadFence ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
+        , _indexReadFence( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
+        , _fxWriteFence  ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
+        , _pairWriteFence( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
+        , _mapWriteFence ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
     {
 
     }
@@ -56,14 +56,22 @@ public:
     //-----------------------------------------------------------
     static size_t GetRequiredHeapSize( const size_t t1BlockSize, const size_t t2BlockSize )
     {
-        return 0;
+        DiskPlotContext cx = {};
+
+        DiskPlotFxBounded<rTable, _numBuckets> instance( cx );
+
+        DummyAllocator allocator;
+        instance.AllocateBuffers( allocator, t1BlockSize, t2BlockSize );
+        const size_t requiredSize = allocator.Size();
+
+        return requiredSize;
     }
 
     //-----------------------------------------------------------
     void AllocateBuffers( IAllocator& allocator, const size_t t1BlockSize, const size_t t2BlockSize )
     {
         const uint64 kEntryCount      = 1ull << _k;
-        const uint64 entriesPerBucket = (uint64)( kEntryCount * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const uint64 entriesPerBucket = (uint64)( kEntryCount / _numBuckets * BB_DP_XTRA_ENTRIES_PER_BUCKET );
 
         _y[0] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
         _y[1] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );

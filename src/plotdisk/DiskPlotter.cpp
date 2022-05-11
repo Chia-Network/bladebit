@@ -41,6 +41,7 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
 
     const size_t heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
+    ASSERT( heapSize );
 
     _cfg            = cfg;
     _cx.cfg         = &_cfg;
@@ -106,11 +107,12 @@ DiskPlotter::DiskPlotter( const Config& cfg )
                 Log::Error( "WARNING: Failed to bind NUMA memory on the cache." );
         }
     }
-  
+
     // Initialize our Thread Pool and IO Queue
-    const int32 ioThreadId = -1;    // Force unbounded IO thread for now. We should bind it to the last used thread, of the max threads used...
+    const int32 ioThreadId = -1;    // Force unpinned IO thread for now. We should bind it to the last used thread, of the max threads used...
     _cx.threadPool = new ThreadPool( sysLogicalCoreCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
     _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.tmpPath2, gCfg.outputFolder, _cx.heapBuffer, _cx.heapSize, _cx.ioThreadCount, ioThreadId );
+    _cx.fencePool  = new FencePool( 8 );
 
     // if( cfg.globalCfg->warmStart )
     // #TODO: IMPORTANT: Remove this after testing
@@ -142,6 +144,8 @@ void DiskPlotter::Plot( const PlotRequest& req )
     memset( _cx.bucketSlices        , 0, sizeof( _cx.bucketSlices ) );
     // #TODO: Reset the rest of the state, including the heap & the ioQueue
 
+    const bool bounded = _cx.cfg->bounded;
+
     Log::Line( "Started plot." );
     auto plotTimer = TimerBegin();
 
@@ -151,42 +155,60 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
     _cx.ioQueue->OpenPlotFile( req.plotFileName, req.plotId, req.plotMemo, req.plotMemoSize );
 
-    if( !_cx.cfg->bounded )
     {
-        {
-            Log::Line( "Running Phase 1" );
-            const auto timer = TimerBegin();
+        Log::Line( "Running Phase 1" );
+        const auto timer = TimerBegin();
 
+        if( bounded )
+        {
+            K32BoundedPhase1 phase1( _cx );
+            phase1.Run();
+        }
+        else
+        {
             DiskPlotPhase1 phase1( _cx );
             phase1.Run();
-
-            const double elapsed = TimerEnd( timer );
-            Log::Line( "Finished Phase 1 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
         }
 
-        {
-            Log::Line( "Running Phase 2" );
-            const auto timer = TimerBegin();
-
-            DiskPlotPhase2 phase2( _cx );
-            phase2.Run();
-
-            const double elapsed = TimerEnd( timer );
-            Log::Line( "Finished Phase 2 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
-        }
-
-        {
-            Log::Line( "Running Phase 3" );
-            const auto timer = TimerBegin();
-
-            DiskPlotPhase3 phase3( _cx );
-            phase3.Run();
-
-            const double elapsed = TimerEnd( timer );
-            Log::Line( "Finished Phase 3 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
-        }
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 1 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
     }
 
+    {
+        Log::Line( "Running Phase 2" );
+        const auto timer = TimerBegin();
+
+        if( bounded )
+        {
+            Fatal( "Phase 2 bounded not implemented." );
+        }
+        else
+        {
+            DiskPlotPhase2 phase2( _cx );
+            phase2.Run();
+        }
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 2 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
+    }
+
+    {
+        Log::Line( "Running Phase 3" );
+        const auto timer = TimerBegin();
+
+        if( bounded )
+        {
+            Fatal( "Phase 3 bounded not implemented." );
+        }
+        else
+        {
+            DiskPlotPhase3 phase3( _cx );
+            phase3.Run();
+        }
+
+        const double elapsed = TimerEnd( timer );
+        Log::Line( "Finished Phase 3 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
+    }
     Log::Line("Total plot I/O wait time: %.2lf seconds.", TicksToSeconds( _cx.ioWaitTime ) );
 
 
@@ -235,12 +257,6 @@ void DiskPlotter::Plot( const PlotRequest& req )
         // Rename plot file
         ioQueue.FinishPlot( fence );
     }
-}
-
-//-----------------------------------------------------------
-void DiskPlotter::PlotBounded( const PlotRequest& req )
-{
-
 }
 
 //-----------------------------------------------------------
