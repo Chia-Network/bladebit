@@ -11,6 +11,8 @@
 #include "DiskPlotPhase3.h"
 #include "SysHost.h"
 
+#include "k32/DiskPlotBounded.h"
+
 
 size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg );
 
@@ -29,16 +31,16 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     // Initialize tables for matching
     LoadLTargets();
     
+    ZeroMem( &_cx );
+
     GlobalPlotConfig& gCfg = *cfg.globalCfg;
 
-    ZeroMem( &_cx );
-    
     FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
         "Failed to obtain temp paths block size from t1: '%s' or %s t2: '%s'.", cfg.tmpPath, cfg.tmpPath2 );
 
     FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
 
-    const size_t heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
+    const size_t heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
 
     _cfg            = cfg;
     _cx.cfg         = &_cfg;
@@ -97,7 +99,7 @@ DiskPlotter::DiskPlotter( const Config& cfg )
             _cx.cacheSize = alignedCacheSize;
         }
 
-        _cx.cache = bbvirtallocnuma<byte>( _cx.cacheSize );
+        _cx.cache = bbvirtalloc<byte>( _cx.cacheSize );
         if( numa && !gCfg.disableNuma )
         {
             if( !SysHost::NumaSetMemoryInterleavedMode( _cx.cache, _cx.cacheSize  ) )
@@ -137,8 +139,8 @@ void DiskPlotter::Plot( const PlotRequest& req )
     memset( _cx.bucketCounts        , 0, sizeof( _cx.bucketCounts ) );
     memset( _cx.entryCounts         , 0, sizeof( _cx.entryCounts ) );
     memset( _cx.ptrTableBucketCounts, 0, sizeof( _cx.ptrTableBucketCounts ) );
+    memset( _cx.bucketSlices        , 0, sizeof( _cx.bucketSlices ) );
     // #TODO: Reset the rest of the state, including the heap & the ioQueue
-
 
     Log::Line( "Started plot." );
     auto plotTimer = TimerBegin();
@@ -149,38 +151,42 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
     _cx.ioQueue->OpenPlotFile( req.plotFileName, req.plotId, req.plotMemo, req.plotMemoSize );
 
+    if( !_cx.cfg->bounded )
     {
-        Log::Line( "Running Phase 1" );
-        const auto timer = TimerBegin();
+        {
+            Log::Line( "Running Phase 1" );
+            const auto timer = TimerBegin();
 
-        DiskPlotPhase1 phase1( _cx );
-        phase1.Run();
+            DiskPlotPhase1 phase1( _cx );
+            phase1.Run();
 
-        const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 1 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
+            const double elapsed = TimerEnd( timer );
+            Log::Line( "Finished Phase 1 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
+        }
+
+        {
+            Log::Line( "Running Phase 2" );
+            const auto timer = TimerBegin();
+
+            DiskPlotPhase2 phase2( _cx );
+            phase2.Run();
+
+            const double elapsed = TimerEnd( timer );
+            Log::Line( "Finished Phase 2 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
+        }
+
+        {
+            Log::Line( "Running Phase 3" );
+            const auto timer = TimerBegin();
+
+            DiskPlotPhase3 phase3( _cx );
+            phase3.Run();
+
+            const double elapsed = TimerEnd( timer );
+            Log::Line( "Finished Phase 3 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
+        }
     }
 
-    {
-        Log::Line( "Running Phase 2" );
-        const auto timer = TimerBegin();
-
-        DiskPlotPhase2 phase2( _cx );
-        phase2.Run();
-
-        const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 2 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
-    }
-
-    {
-        Log::Line( "Running Phase 3" );
-        const auto timer = TimerBegin();
-
-        DiskPlotPhase3 phase3( _cx );
-        phase3.Run();
-
-        const double elapsed = TimerEnd( timer );
-        Log::Line( "Finished Phase 3 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
-    }
     Log::Line("Total plot I/O wait time: %.2lf seconds.", TicksToSeconds( _cx.ioWaitTime ) );
 
 
@@ -232,11 +238,19 @@ void DiskPlotter::Plot( const PlotRequest& req )
 }
 
 //-----------------------------------------------------------
+void DiskPlotter::PlotBounded( const PlotRequest& req )
+{
+
+}
+
+//-----------------------------------------------------------
 void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
 {
     while( cli.HasArgs() )
     {
         if( cli.ReadU32( cfg.numBuckets,  "-b", "--buckets" ) ) 
+            continue;
+        if( cli.ReadSwitch( cfg.bounded, "--k32-bounded" ) )
             continue;
         if( cli.ReadStr( cfg.tmpPath, "-t1", "--temp1" ) )
             continue;
@@ -260,6 +274,8 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
             continue;
         if( cli.ArgConsume( "-s", "--sizes" ) )
         {
+            // #TODO: Get sizes for bounded
+
             FatalIf( cfg.numBuckets < BB_DP_MIN_BUCKET_COUNT || cfg.numBuckets > BB_DP_MAX_BUCKET_COUNT,
                 "Buckets must be between %u and %u, inclusive.", (uint)BB_DP_MIN_BUCKET_COUNT, (uint)BB_DP_MAX_BUCKET_COUNT );
             FatalIf( ( cfg.numBuckets & ( cfg.numBuckets - 1 ) ) != 0, "Buckets must be power of 2." );
@@ -268,10 +284,10 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
             if( cfg.tmpPath )
             {
                 cfg.tmpPath2 = cfg.tmpPath2 ? cfg.tmpPath2 : cfg.tmpPath;
-                heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, cfg.tmpPath2, cfg.tmpPath );
+                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, cfg.tmpPath2, cfg.tmpPath );
             }
             else
-                heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, 1, 1 );
+                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, 1, 1 );
                 
             Log::Line( "Buckets: %u | Heap Sizes: %.2lf GiB", cfg.numBuckets, (double)heapSize BtoGB );
             exit( 0 );
@@ -306,6 +322,9 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
         "Buckets must be between %u and %u, inclusive.", (uint)BB_DP_MIN_BUCKET_COUNT, (uint)BB_DP_MAX_BUCKET_COUNT );
 
     FatalIf( ( cfg.numBuckets & ( cfg.numBuckets - 1 ) ) != 0, "Buckets must be power of 2." );
+
+    FatalIf( cfg.numBuckets >= 1024, "1024 buckets are not allowed for plots < k33." );
+    FatalIf( cfg.numBuckets < 128 && !cfg.bounded, "64 buckets is only allowed for bounded k=32 plots." );
 
     const uint32 sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
 
@@ -360,6 +379,7 @@ bool DiskPlotter::GetTmpPathsBlockSizes( const char* tmpPath1, const char* tmpPa
 
     size_t blockSizes[2] = { 0 };
 
+    // #TODO: Don't do this. We can just use the dir to get block size
     for( int32 i = 0; i < 2; i++ )
     {
         size_t len = lengths[i];
@@ -413,34 +433,40 @@ EXIT:
 }
 
 //-----------------------------------------------------------
-size_t DiskPlotter::GetRequiredSizeForBuckets( const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2 )
+size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2 )
 {
     size_t blockSizes[2] = { 0 };
 
     if( !GetTmpPathsBlockSizes( tmpPath1, tmpPath2, blockSizes[0], blockSizes[1] ) )
         return 0;
 
-    return GetRequiredSizeForBuckets( numBuckets, blockSizes[0], blockSizes[1] );
+    return GetRequiredSizeForBuckets( bounded, numBuckets, blockSizes[0], blockSizes[1] );
 }
 
 //-----------------------------------------------------------
-size_t DiskPlotter::GetRequiredSizeForBuckets( const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize )
+size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize )
 {
+    if( bounded )
+        return K32BoundedPhase1::GetRequiredSize( numBuckets, pairsBlockSize, fxBlockSize );
+
     switch( numBuckets )
     {
-        case 128 : return DiskFp<TableId::Table4, 128 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
+        case 128 : return DiskFp<TableId::Table4, 128>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 256 : return DiskFp<TableId::Table4, 256 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 512 : return DiskFp<TableId::Table4, 512 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 1024:
+            Fatal( "1024 buckets are currently unsupported." );
+            return 0;
             // We need to add a bit more here (at least 1GiB) to have enough space for P2, which keeps
             // 2 marking table bitfields in-memory: k^32 / 8 = 0.5GiB
-            return 1032ull MB + DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
-    
+//            return 1032ull MB + DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
+
+
     default:
-        Fatal( "Invalid bucket size: %u.", numBuckets );
         break;
     }
 
+    Fatal( "Invalid bucket size: %u.", numBuckets );
     return 0;
 }
 
@@ -503,7 +529,11 @@ Creates plots by making use of a disk to temporarily store and read values.
 
 [OPTIONS]
  -b, --buckets <n>  : The number of buckets to use. The default is 256.
-                      You may specify one of: 128, 256, 512, 1024.
+                      You may specify one of: 128, 256, 512, 1024 and 64 for if --k32-bounded is enabled.
+                      1024 is not available for plots of k < 33.
+
+ --k32-bounded      : Create a bounded k32 plot. That is a plot that does not overflow entries
+                      over 2^32;
 
  -t1, --temp1 <dir> : The temporary directory to use when plotting.
                       *REQUIRED*

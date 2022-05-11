@@ -5,12 +5,12 @@ enum class FileId
 {
     None = 0,
 
-    // Bounded Phase 1:
-    Y,
-    META,
-
     // Phase 1 fx, key, metadata
     FX0, FX1,
+
+    // Bounded Phase 1:
+    META0, META1,
+    INDEX0, INDEX1,
 
     // Table 7 fx values
     F7,

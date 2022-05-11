@@ -24,13 +24,15 @@ public:
     void Plot( const PlotRequest& req );
 
     static bool   GetTmpPathsBlockSizes(  const char* tmpPath1, const char* tmpPath2, size_t& tmpPath1Size, size_t& tmpPath2Size );
-    static size_t GetRequiredSizeForBuckets( const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2 );
-    static size_t GetRequiredSizeForBuckets( const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize );
+    static size_t GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2 );
+    static size_t GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize );
     
     static void ParseCommandLine( CliParser& cli, Config& cfg );
 
     static void PrintUsage();
 
+private:
+    void PlotBounded( const PlotRequest& req );
 
 private:
     DiskPlotContext   _cx;

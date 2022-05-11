@@ -31,6 +31,12 @@ struct Span
         return this->values[index]; 
     }
 
+    inline T& operator[]( int64 index ) const
+    {
+        ASSERT( index < length );
+        return this->values[index];
+    }
+
 
 // size_t not the same as uint64 on clang.
 #ifdef __clang__

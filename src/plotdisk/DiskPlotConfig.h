@@ -5,7 +5,7 @@
 
 #define BB_DP_BUCKET_COUNT              ( 1u << kExtraBits ) // 64 with kExtraBits == 6 // #TODO: Remove this and make buckets configurable
 
-#define BB_DP_MIN_BUCKET_COUNT 128      // Below 128 we can't fit y+map in a qword.
+#define BB_DP_MIN_BUCKET_COUNT 64      // Below 128 we can't fit y+map in a qword, so it's only available in bounded mode.
 #define BB_DP_MAX_BUCKET_COUNT 1024
 
 #define BB_DP_ENTRIES_PER_BUCKET        ( ( 1ull << _K ) / BB_DP_BUCKET_COUNT )

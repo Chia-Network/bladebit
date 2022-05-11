@@ -377,7 +377,7 @@ set(bb_include_dirs
 # endmacro()
 
 # BladeBit
-add_library(lib_bladebit ${bb_sources} ${bb_headers})
+add_library(lib_bladebit ${bb_sources} ${bb_headers} src/plotdisk/k32/FpMatchBounded.inl src/plotdisk/k32/F1Bounded.inl)
 
 set_target_properties(lib_bladebit PROPERTIES
         OUTPUT_NAME bladebit
@@ -391,7 +391,7 @@ target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c
 target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
 target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
 
-add_executable(bladebit ${bb_headers} src/main.cpp)
+add_executable(bladebit ${bb_headers} src/main.cpp src/plotdisk/k32/FxBounded.inl)
 target_link_libraries(bladebit PRIVATE lib_bladebit)
 
 add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/sandbox/sandbox_main.cpp ${src_dev} ${bb_headers})

@@ -1,4 +1,4 @@
-#include "DiskPlotBounded.h"
+#pragma once
 #include "util/Util.h"
 #include "util/StackAllocator.h"
 #include "pos/chacha8.h"
@@ -7,8 +7,6 @@
 #include "plotdisk/DiskPlotContext.h"
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
-#include "plotting/PlotTools.h"
-
 
 template<uint32 _numBuckets>
 class K32BoundedF1
@@ -65,7 +63,7 @@ public:
                 chacha8_get_keystream( &chacha, blockOffset, blockCount, (byte*)blocks.Ptr() );
 
                 // Write blocks to disk buckets
-                WriteToBuckets( self, blockCount, blockOffset * _entriesPerBlock );
+                WriteToBuckets( bucket, self, blocks.Ptr(), blockCount, blockOffset * _entriesPerBlock );
 
                 blockOffset += _blocksPerBucket; // Offset to block start at next bucket
             }
@@ -118,8 +116,8 @@ private:
         {
             memcpy( elementCounts.Ptr(), totalCounts, sizeof( totalCounts ) );
 
-            _ioQueue.WriteBucketElementsT( FileId::Y   , yEntries.Ptr(), elementCounts.Ptr() );
-            _ioQueue.WriteBucketElementsT( FileId::META, xEntries.Ptr(), elementCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT( FileId::FX1  , yEntries.Ptr(), elementCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT( FileId::META1, xEntries.Ptr(), elementCounts.Ptr() );
             _ioQueue.SignalFence( _writeFence, bucket+1 );
             _ioQueue.CommitCommands();
 
@@ -157,46 +155,3 @@ private:
     uint32* _xEntries     [2];
     uint32  _elementCounts[2][_numBuckets] = {};
 };
-
-template<uint32 _numBuckets>
-class K32BoundedPhase1
-{
-    //-----------------------------------------------------------
-    K32BoundedPhase1( DiskPlotContext& context )
-        : _context( context )
-        , _ioQueue( _ioQueue )
-    {
-        // Open files
-        FileSetOptions  opts = FileSetOptions::None;
-        FileSetInitData data = {};
-
-        opts = FileSetOptions::UseTemp2;
-        _ioQueue.InitFileSet( FileId::Y   , "y"   , _numBuckets, opts, &data );
-        _ioQueue.InitFileSet( FileId::META, "meta", _numBuckets, opts, &data );
-    }
-
-    //-----------------------------------------------------------
-    void Run()
-    {
-        Log::Line( "Table 1: F1 generation" );
-
-        {
-            StackAllocator allocator( _context.heapBuffer, _context.heapSize );
-            K32BoundedF1<_numBuckets> f1( _context, allocator );
-            f1.Run();
-        }
-
-        Fx();
-    }
-
-    //-----------------------------------------------------------
-    void Fx()
-    {
-
-    }
-
-private:
-    DiskPlotContext& _context;
-    DiskBufferQueue& _ioQueue;
-};
-

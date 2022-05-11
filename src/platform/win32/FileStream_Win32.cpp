@@ -184,7 +184,7 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
     {
         // We can only write in block sizes. But since the user may have
         // specified a size greater than DWORD, our clamping it to 
-        // DWORD's max can cause it to become not bounded to block size,
+        // DWORD's max can cause it to become not k32 to block size,
         // even if the user's original size was block-bound.
         // So let's limit this to a block size.
         bytesToWrite = (DWORD)(bytesToWrite / _blockSize * _blockSize);
