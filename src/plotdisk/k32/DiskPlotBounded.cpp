@@ -14,19 +14,25 @@
 //-----------------------------------------------------------
 K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
     : _context( context )
-    , _ioQueue( _ioQueue )
+    , _ioQueue( *_context.ioQueue )
 {
     const uint32 numBuckets = context.numBuckets;
 
     // Open files
-    FileSetOptions  opts = FileSetOptions::None;
-    FileSetInitData data = {};
+    FileSetOptions opts = FileSetOptions::None | FileSetOptions::Interleaved;
+    
+    if( !context.cfg->noTmp2DirectIO )
+        opts |= FileSetOptions::DirectIO;
 
-    opts = FileSetOptions::UseTemp2;
-    _ioQueue.InitFileSet( FileId::FX0  , "y0"   , numBuckets, opts, &data );
-    _ioQueue.InitFileSet( FileId::FX1  , "y1"   , numBuckets, opts, &data );
-    _ioQueue.InitFileSet( FileId::META0, "meta0", numBuckets, opts, &data );
-    _ioQueue.InitFileSet( FileId::META1, "meta1", numBuckets, opts, &data );
+    FileSetInitData data = {};
+    opts |= FileSetOptions::UseTemp2;
+
+    _ioQueue.InitFileSet( FileId::FX0   , "y0"    , numBuckets, opts, &data );
+    _ioQueue.InitFileSet( FileId::FX1   , "y1"    , numBuckets, opts, &data );
+    _ioQueue.InitFileSet( FileId::INDEX0, "index0", numBuckets, opts, &data );
+    _ioQueue.InitFileSet( FileId::INDEX1, "index1", numBuckets, opts, &data );
+    _ioQueue.InitFileSet( FileId::META0 , "meta0" , numBuckets, opts, &data );
+    _ioQueue.InitFileSet( FileId::META1 , "meta1" , numBuckets, opts, &data );
 }
 
 //-----------------------------------------------------------
@@ -83,9 +89,33 @@ void K32BoundedPhase1::RunWithBuckets()
 template<uint32 _numBuckets>
 void K32BoundedPhase1::RunF1()
 {
+    Log::Line( "Generating f1..." );
+    auto timer = TimerBegin();
+
     StackAllocator allocator( _context.heapBuffer, _context.heapSize );
     K32BoundedF1<_numBuckets> f1( _context, allocator );
     f1.Run();
+
+    _context.entryCounts[(int)TableId::Table1] = 1ull << 32;
+
+    double elapsed = TimerEnd( timer );
+    Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
+    Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _context.ioQueue->IOBufferWaitTime() );
+
+    #if BB_IO_METRICS_ON
+        const double writeThroughput = _context.ioQueue->GetAverageWriteThroughput();
+        const auto&  writes          = _context.ioQueue->GetWriteMetrics();
+
+        Log::Line( " Table 1 I/O Metrics:" );
+        Log::Line( "  Average write throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            writeThroughput BtoMB, writeThroughput / 1000000.0, writeThroughput BtoGB, writeThroughput / 1000000000.0 );
+        Log::Line( "  Total size written: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)writes.size BtoMB, (double)writes.size / 1000000.0, (double)writes.size BtoGB, (double)writes.size / 1000000000.0 );
+        Log::Line( "  Total write commands: %llu.", (llu)writes.count );
+        Log::Line( "" );
+
+        _context.ioQueue->ClearWriteMetrics();
+    #endif
 }
 
 //-----------------------------------------------------------

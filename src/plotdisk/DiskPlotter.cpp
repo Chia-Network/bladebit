@@ -146,14 +146,14 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
     const bool bounded = _cx.cfg->bounded;
 
-    Log::Line( "Started plot." );
-    auto plotTimer = TimerBegin();
-
     _cx.plotId       = req.plotId;
     _cx.plotMemo     = req.plotMemo;
     _cx.plotMemoSize = req.plotMemoSize;
 
     _cx.ioQueue->OpenPlotFile( req.plotFileName, req.plotId, req.plotMemo, req.plotMemoSize );
+
+    Log::Line( "Started plot." );
+    auto plotTimer = TimerBegin();
 
     {
         Log::Line( "Running Phase 1" );

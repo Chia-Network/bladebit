@@ -128,6 +128,12 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     fileSet.blockBuffer  = nullptr;
     fileSet.options      = options;
 
+    if( IsFlagSet( options, FileSetOptions::Interleaved ) )
+    {
+        fileSet.sliceSizes.values = new Span<size_t>[bucketCount]{ Span<size_t>( new size_t[bucketCount]{}, bucketCount ) };
+        fileSet.sliceSizes.length = bucketCount;
+    }
+
     const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable ) && optsData->cacheSize > 0;
     ASSERT( !isCachable || optsData );
 
@@ -553,7 +559,14 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd WriteBuckets: (%u) addr:0x%p", cmd.buckets.fileId, cmd.buckets.buffers );
             #endif
-            CmdWriteBuckets( cmd );
+            CmdWriteBuckets( cmd, 1 );
+        break;
+
+        case Command::WriteBucketElements:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd WriteBucketElements: (%u) addr:0x%p elementSz: %llu", cmd.buckets.fileId, cmd.buckets.buffers, (llu)cmd.bucketElements.elementSize );
+            #endif
+            CmdWriteBuckets( cmd, cmd.bucketElements.elementSize );
         break;
 
         case Command::WriteFile:
@@ -645,13 +658,13 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
+void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementSize )
 {
-    const FileId fileId      = cmd.buckets.fileId;
-    const uint*  sizes       = cmd.buckets.sizes;
-    const byte*  buffers     = cmd.buckets.buffers;
+    const FileId fileId  = cmd.buckets.fileId;
+    const uint*  sizes   = cmd.buckets.sizes;
+    const byte*  buffers = cmd.buckets.buffers;
+    FileSet&     fileSet = _files[(int)fileId];
 
-    FileSet&     fileSet     = _files[(int)fileId];
     // ASSERT( IsFlagSet( fileBuckets.files[0]->GetFileAccess(), FileAccess::ReadWrite ) );
 
     const uint32 bucketCount = (uint32)fileSet.files.length;
@@ -660,27 +673,40 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd )
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
     #if _DEBUG
-    const size_t blockSize = _blockSize;
+        const size_t blockSize = fileSet.files[0]->BlockSize();
     #endif
     
-    const byte*  buffer    = buffers;
+    const byte*  buffer = buffers;
 
-    // if( fileSet.transform )
-    // {
-    //     IIOTransform::TransformData data = {
-    //         .buffer      = (void*)buffers,
-    //         .numBuckets  = bucketCount,
-    //         .bucketSizes = (uint32*)sizes
-    //     };
+    if( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) )
+    {
+        // Write in interleaved mode, a whole bucket is written at once
+        // #TODO: Save interleaved sizes here
+        size_t writeSize = 0;
+        for( uint i = 0; i < bucketCount; i++ )
+        {
+            const size_t sliceSize = sizes[i] * elementSize;
+            writeSize += sliceSize;
 
-    //     // #TODO: Profile time elapsed here
-    //     fileSet.transform->Write( data );
-    // }
+            // Save slice sizes for reading
+            fileSet.sliceSizes[fileSet.bucket][i] = sliceSize;
+        }
 
+
+        // #TODO: Do we have to round-up the size to block boundary?
+        ASSERT( writeSize / blockSize * blockSize == writeSize );
+
+        ASSERT( fileSet.bucket < fileSet.files.Length() );
+        WriteToFile( *fileSet.files[fileSet.bucket], writeSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, fileSet.bucket );
+
+        fileSet.bucket++;
+        fileSet.bucket %= fileSet.files.Length();
+        return;
+    }
     
     for( uint i = 0; i < bucketCount; i++ )
     {
-        const size_t bufferSize = sizes[i];
+        const size_t bufferSize = sizes[i] * elementSize;
         
         // Only write up-to the block-aligned boundary. The caller is in charge of handling unlaigned data.
         ASSERT( bufferSize == bufferSize / blockSize * blockSize );
@@ -696,6 +722,38 @@ void DiskBufferQueue::CndWriteFile( const Command& cmd )
 {
     FileSet& fileBuckets = _files[(int)cmd.file.fileId];
     WriteToFile( *fileBuckets.files[cmd.file.bucket], cmd.file.size, cmd.file.buffer, (byte*)fileBuckets.blockBuffer, fileBuckets.name, cmd.file.bucket );
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::CmdReadBuckets( const Command& cmd )
+{
+    const FileId fileId  = cmd.buckets.fileId;
+    FileSet&     fileSet = _files[(int)fileId];   
+    
+    byte* buffer = (byte*)cmd.buckets.buffers;
+
+    ASSERT( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) );
+    ASSERT( fileSet.sliceSizes.Ptr() );
+    ASSERT( fileSet.bucket == 0 );      // Should be in bucket 0 at this point // #NOTE: Perhaps have the user specify the bucket to read instead?
+
+    const uint32       bucketCount = (uint32)fileSet.files.Length();
+
+    const Span<size_t> sliceSizes  = fileSet.sliceSizes[fileSet.bucket];
+    const size_t       blockSize   = fileSet.files[0]->BlockSize();
+
+    for( uint32 bucket = 0; bucket < bucketCount; bucket++ )
+    {
+        const size_t sliceSize   = sliceSizes[bucket];
+        const size_t alignedSize = RoundUpToNextBoundaryT( sliceSize, blockSize );
+
+        // #TODO: Always have to read into an aligned buffer. Figure this out
+
+        ReadFromFile( *fileSet.files[bucket], alignedSize, buffer, nullptr, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket )
+
+    }
+
+    fileSet.bucket++;
+    fileSet.bucket %= fileSet.files.Length();
 }
 
 //-----------------------------------------------------------

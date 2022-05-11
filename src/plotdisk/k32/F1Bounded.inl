@@ -35,10 +35,10 @@ public:
         const uint32 blockBufferSize = blockCount * threadCount * _entriesPerBlock;
         _blockBuffer = allocator.CAllocSpan<uint32>( blockBufferSize );
 
-        _yEntries[0] = allocator.CAlloc<uint32>( _entriesPerBucket );
-        _yEntries[1] = allocator.CAlloc<uint32>( _entriesPerBucket );
-        _xEntries[0] = allocator.CAlloc<uint32>( _entriesPerBucket );
-        _xEntries[1] = allocator.CAlloc<uint32>( _entriesPerBucket );
+        _yEntries[0] = allocator.CAlloc<uint32>( _entriesPerBucket, context.tmp2BlockSize );
+        _yEntries[1] = allocator.CAlloc<uint32>( _entriesPerBucket, context.tmp2BlockSize );
+        _xEntries[0] = allocator.CAlloc<uint32>( _entriesPerBucket, context.tmp2BlockSize );
+        _xEntries[1] = allocator.CAlloc<uint32>( _entriesPerBucket, context.tmp2BlockSize );
     }
 
     //-----------------------------------------------------------
@@ -68,6 +68,14 @@ public:
                 blockOffset += _blocksPerBucket; // Offset to block start at next bucket
             }
         });
+
+        Fence& fence = _context.fencePool->RequireFence();
+        fence.Reset( 0 );
+        _ioQueue.SignalFence( fence, 1 );
+        _ioQueue.CommitCommands();
+        fence.Wait( 1 );
+
+        _context.fencePool->RestoreAllFences();
     }
 
 private:

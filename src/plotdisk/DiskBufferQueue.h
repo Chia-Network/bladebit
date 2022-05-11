@@ -18,12 +18,14 @@ enum FileSetOptions
     Cachable   = 1 << 1,    // Use a in-memory cache for the file
     UseTemp2   = 1 << 2,    // Open the file set the high-frequency temp directory
 
-    Interleaved = 1 << 3,   // Alternate bucket slices between interleaved and non-interleaved
+    Interleaved = 1 << 3,   // Write in interleaved mode. That is all slices written to a single bucket.
+
     BlockAlign  = 1 << 4,   // Only write in block-aligned segments. Keeping a block-sized buffer for left overs.
                             // The last write flushes the whole block.
                             // This can be very memory-costly on file systems with large block sizes
                             // as interleaved buckets will need many block buffers.
                             // This must be used with DirectIO.
+
 };
 ImplementFlagOps( FileSetOptions );
 
@@ -34,16 +36,19 @@ struct FileSetInitData
     size_t cacheSize = 0;       // Cache size in bytes
 
     // Interleaved
-    size_t sliceSize = 0;       // Maximum size of a bucket slice
+    // size_t sliceSize = 0;       // Maximum size of a bucket slice
 };
 
 struct FileSet
 {
-    const char*    name            = nullptr;
-    Span<IStream*> files;
-    void*          blockBuffer     = nullptr;               // For FileSetOptions::BlockAlign
-    size_t         sliceCapacity   = 0;                     // (in bytes) For FileSetOptions::Interleaved
-    FileSetOptions options         = FileSetOptions::None;
+    const char*        name            = nullptr;
+    Span<IStream*>     files;
+    void*              blockBuffer     = nullptr;               // For FileSetOptions::BlockAlign
+    // size_t          sliceCapacity   = 0;                     // (in bytes) For FileSetOptions::Interleaved
+    Span<Span<size_t>> sliceSizes;
+    uint32             bucket          = 0; // Current bucket. Valid when writing in interleaved mode
+    FileSetOptions     options         = FileSetOptions::None;
+
 };
 
 class DiskBufferQueue
@@ -174,6 +179,11 @@ public:
 
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
+    void ReadBucketElements( const FileId id, void* buffer, size_t elementCount );
+
+    template<typename T>
+    void ReadBucketElementsT( const FileId id, T* buffer );
+
     void ReadFile( FileId id, uint bucket, void* dstBuffer, size_t readSize );
 
     void SeekFile( FileId id, uint bucket, int64 offset, SeekOrigin origin );
@@ -283,8 +293,9 @@ private:
 
     void ExecuteCommand( Command& cmd );
 
-    void CmdWriteBuckets( const Command& cmd );
+    void CmdWriteBuckets( const Command& cmd, const size_t elementSize );
     void CndWriteFile( const Command& cmd );
+    void CmdReadBuckets( const Command& cmd );
     void CmdReadFile( const Command& cmd );
     void CmdSeekBucket( const Command& cmd );
 
@@ -355,3 +366,9 @@ inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const T* buc
     WriteBucketElements( id, (void*)buckets, sizeof( T ), counts );
 }
 
+//-----------------------------------------------------------
+template<typename T>
+inline void DiskBufferQueue::ReadBucketElementsT( const FileId id, T* buffer )
+{
+    ReadBucketElements( id, buffer, sizeof( T ) );
+}

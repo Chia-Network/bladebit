@@ -157,7 +157,7 @@ private:
             Span<uint32>   yOut    = _yTmp;
             Span<TMetaOut> metaOut( (TMetaIn*)metaTmp.Ptr(), matchCount );
 
-            GenFx( self, yInput, metaIn, pairs, yOut, metaOut, bucket );
+            // GenFx( self, yInput, metaIn, pairs, yOut, metaOut, bucket );
 
 
             // #TODO: Write bucekt
