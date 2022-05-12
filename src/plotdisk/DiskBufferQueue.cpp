@@ -130,8 +130,9 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
 
     if( IsFlagSet( options, FileSetOptions::Interleaved ) )
     {
-        fileSet.sliceSizes.values = new Span<size_t>[bucketCount]{ Span<size_t>( new size_t[bucketCount]{}, bucketCount ) };
-        fileSet.sliceSizes.length = bucketCount;
+        fileSet.sliceSizes.SetTo( new Span<size_t>[bucketCount], bucketCount );
+        for( uint32 i = 0; i < bucketCount; i++ )
+            fileSet.sliceSizes[i].SetTo( new size_t[bucketCount]{}, bucketCount );
     }
 
     const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable ) && optsData->cacheSize > 0;
@@ -681,7 +682,6 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
     if( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) )
     {
         // Write in interleaved mode, a whole bucket is written at once
-        // #TODO: Save interleaved sizes here
         size_t writeSize = 0;
         for( uint i = 0; i < bucketCount; i++ )
         {
@@ -748,7 +748,7 @@ void DiskBufferQueue::CmdReadBuckets( const Command& cmd )
 
         // #TODO: Always have to read into an aligned buffer. Figure this out
 
-        ReadFromFile( *fileSet.files[bucket], alignedSize, buffer, nullptr, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket )
+        // ReadFromFile( *fileSet.files[bucket], alignedSize, buffer, nullptr, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket )
 
     }
 

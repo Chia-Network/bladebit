@@ -122,6 +122,6 @@ void K32BoundedPhase1::RunF1()
 template<uint32 _numBuckets>
 void K32BoundedPhase1::RunFx( const TableId table )
 {
-}
 
+}
 

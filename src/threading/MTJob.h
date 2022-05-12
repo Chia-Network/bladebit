@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "threading/ThreadPool.h"
+#include "util/Util.h"
 #include <cstring>
 #if _DEBUG
     #include "util/Log.h"
@@ -371,16 +372,48 @@ struct PrefixSumJob : public MTJob<TJob>
         uint32  bucketSize,
         TCount* counts,
         TCount* pfxSum,
-        TCount* bucketCounts );
+        TCount* bucketCounts )
+    {
+        CalculatePrefixSumImpl<0>( bucketSize, counts, pfxSum, bucketCounts );
+    }
+
+    template<typename EntryType1>
+    inline void CalculateBlockAlignedPrefixSum(
+        uint32  bucketSize,
+        uint32  blockSize,
+        TCount* counts,
+        TCount* pfxSum,
+        TCount* bucketCounts )
+    {
+        const uint32 entrySize       = (uint32)sizeof( EntryType1 );
+        const uint32 entriesPerBlock = blockSize / entrySize;
+        ASSERT( entriesPerBlock * entrySize == blockSize );
+
+        CalculatePrefixSumImpl<1>( bucketSize, counts, pfxSum, bucketCounts, &entriesPerBlock );
+    }
+
+private:
+    template<uint32 AlignEntryCount=0>
+    inline void CalculatePrefixSumImpl(
+        uint32        bucketSize,
+        TCount*       counts,
+        TCount*       pfxSum,
+        TCount*       bucketCounts,
+        const uint32* entriesPerBlocks = nullptr,
+        TCount*       pfxSum2          = nullptr
+    );
 };
 
 //-----------------------------------------------------------
 template<typename TJob, typename TCount>
-inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
+template<uint32 AlignEntryCount>
+inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
         uint32  bucketSize,
         TCount* counts,
         TCount* pfxSum,
-        TCount* bucketCounts )
+        TCount* bucketCounts,
+  const uint32* entriesPerBlocks,
+        TCount* pfxSum2 )
 {
     const uint32 jobId    = this->JobId();
     const uint32 jobCount = this->JobCount();
@@ -389,8 +422,9 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
     this->SyncThreads();
 
     // Add up all of the jobs counts
+    // Add-up all thread's bucket counts
     memset( pfxSum, 0, sizeof( TCount ) * bucketSize );
-
+    
     for( uint32 i = 0; i < jobCount; i++ )
     {
         const TCount* tCounts = this->GetJob( i ).counts;
@@ -400,11 +434,31 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
     }
 
     // If we're the control thread, retain the total bucket count
-    if( this->IsControlThread() )
+    if( this->IsControlThread() && bucketCounts != nullptr )
     {
         memcpy( bucketCounts, pfxSum, sizeof( TCount ) * bucketSize );
     }
 
+    uint32 alignedEntryIndex = 0;
+
+    if constexpr ( AlignEntryCount > 0 )
+    {
+        // We now need to add padding to the total counts to ensure the starting
+        // location of each slice is block aligned.
+        const uint32 entriesPerBlock = entriesPerBlocks[alignedEntryIndex++];
+
+        for( uint32 i = bucketSize-1; i > 0; i-- )
+        {
+            // Round-up the previous bucket's entry count to be block aligned,
+            // then we can add that as padding to this bucket's prefix count
+            // ensuring the first entry of the slice falls onto the start of a block.
+            const uint32 entryCount        = pfxSum[i-1];
+            const uint32 alignedEntryCount = CDivT( entryCount, entriesPerBlock ) * entriesPerBlock;
+            const uint32 padding           = alignedEntryCount - entryCount;
+            pfxSum[i] += padding;
+        }
+    }
+    
     // Calculate the prefix sum
     for( uint32 i = 1; i < bucketSize; i++ )
         pfxSum[i] += pfxSum[i-1];

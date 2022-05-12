@@ -15,6 +15,12 @@ struct Span
         , length( length )
     {}
 
+    inline void SetTo( T* values, const size_t length )
+    {
+        this->values = values;
+        this->length = length;
+    }
+
     inline size_t Length() const { return length; }
 
     inline T* Ptr() const { return values; }
