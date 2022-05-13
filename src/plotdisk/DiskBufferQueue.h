@@ -13,10 +13,10 @@ class IIOTransform;
 
 enum FileSetOptions
 {
-    None       = 0,
-    DirectIO   = 1 << 0,    // Use direct IO/unbuffered file IO
-    Cachable   = 1 << 1,    // Use a in-memory cache for the file
-    UseTemp2   = 1 << 2,    // Open the file set the high-frequency temp directory
+    None        = 0,
+    DirectIO    = 1 << 0,   // Use direct IO/unbuffered file IO
+    Cachable    = 1 << 1,   // Use a in-memory cache for the file
+    UseTemp2    = 1 << 2,   // Open the file set the high-frequency temp directory
 
     Interleaved = 1 << 3,   // Write in interleaved mode. That is all slices written to a single bucket.
 
@@ -61,6 +61,7 @@ class DiskBufferQueue
             WriteFile,
             WriteBuckets,
             WriteBucketElements,
+            ReadBucket,
             ReadFile,
             SeekFile,
             SeekBucket,
@@ -295,7 +296,7 @@ private:
 
     void CmdWriteBuckets( const Command& cmd, const size_t elementSize );
     void CndWriteFile( const Command& cmd );
-    void CmdReadBuckets( const Command& cmd );
+    void CmdReadBucket( const Command& cmd );
     void CmdReadFile( const Command& cmd );
     void CmdSeekBucket( const Command& cmd );
 

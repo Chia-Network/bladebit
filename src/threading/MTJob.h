@@ -128,7 +128,6 @@ private:
     ThreadPool& _pool;
 };
 
-
 struct AnonMTJob : public MTJob<AnonMTJob>
 {
     std::function<void(AnonMTJob*)>* func;
@@ -383,13 +382,15 @@ struct PrefixSumJob : public MTJob<TJob>
         uint32  blockSize,
         TCount* counts,
         TCount* pfxSum,
-        TCount* bucketCounts )
+        TCount* bucketCounts,
+        TCount* offsets,
+        TCount* alignedTotalCounts )
     {
         const uint32 entrySize       = (uint32)sizeof( EntryType1 );
         const uint32 entriesPerBlock = blockSize / entrySize;
         ASSERT( entriesPerBlock * entrySize == blockSize );
 
-        CalculatePrefixSumImpl<1>( bucketSize, counts, pfxSum, bucketCounts, &entriesPerBlock );
+        CalculatePrefixSumImpl<1>( bucketSize, counts, pfxSum, bucketCounts, &entriesPerBlock, offsets );
     }
 
 private:
@@ -399,8 +400,10 @@ private:
         TCount*       counts,
         TCount*       pfxSum,
         TCount*       bucketCounts,
-        const uint32* entriesPerBlocks = nullptr,
-        TCount*       pfxSum2          = nullptr
+        const uint32* entriesPerBlocks   = nullptr,
+        TCount*       offsets            = nullptr,
+        TCount*       alignedTotalCounts = nullptr,
+        TCount*       pfxSum2            = nullptr
     );
 };
 
@@ -413,6 +416,8 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
         TCount* pfxSum,
         TCount* bucketCounts,
   const uint32* entriesPerBlocks,
+        TCount* offsets,
+        TCount* alignedTotalCounts,
         TCount* pfxSum2 )
 {
     const uint32 jobId    = this->JobId();
@@ -452,11 +457,26 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
             // Round-up the previous bucket's entry count to be block aligned,
             // then we can add that as padding to this bucket's prefix count
             // ensuring the first entry of the slice falls onto the start of a block.
-            const uint32 entryCount        = pfxSum[i-1];
-            const uint32 alignedEntryCount = CDivT( entryCount, entriesPerBlock ) * entriesPerBlock;
-            const uint32 padding           = alignedEntryCount - entryCount;
-            pfxSum[i] += padding;
+            const uint32 prevEntryCount        = pfxSum[i-1] + offsets[i-1];
+            const uint32 prevAlignedEntryCount = CDivT( prevEntryCount, entriesPerBlock ) * entriesPerBlock;
+            const uint32 paddingFromPrevBucket = prevAlignedEntryCount - prevEntryCount;
+
+            // Calculate our next offset before updating our total count, which is the the entries
+            // our last block occupies, if its not full.
+            const uint32 offset     = offsets[i];
+            const uint32 entryCount = pfxSum[i] + offset;
+            const uint32 blockCount = CDivT( entryCount, entriesPerBlock ); ASSERT( blockCount > 0 );
+            
+            offsets[i] = entryCount - ( blockCount - 1 ) * entriesPerBlock; // Update our offset for the next round
+            pfxSum[i] += paddingFromPrevBucket + offset;                    // Update our total count for alignment purposes
         }
+
+        // Add the offset to the first bucket slice as well
+        pfxSum[0] += offsets[0];
+
+        const uint32 b0Aligned = CDivT( pfxSum[0], entriesPerBlock ) * entriesPerBlock;
+        const uint32 b0Padding = b0Aligned - pfxSum[0];
+        offsets[0] = (entriesPerBlock - b0Padding) & (entriesPerBlock - 1);
     }
     
     // Calculate the prefix sum

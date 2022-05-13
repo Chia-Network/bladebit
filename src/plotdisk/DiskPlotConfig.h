@@ -10,6 +10,7 @@
 
 #define BB_DP_ENTRIES_PER_BUCKET        ( ( 1ull << _K ) / BB_DP_BUCKET_COUNT )
 #define BB_DP_XTRA_ENTRIES_PER_BUCKET   1.1
+#define BB_DP_ENTRY_SLICE_MULTIPLIER    1.07
 
 
 #define BB_DP_MAX_BC_GROUP_PER_BUCKET 300000        // There's around 284,190 groups per bucket (of bucket size 64)

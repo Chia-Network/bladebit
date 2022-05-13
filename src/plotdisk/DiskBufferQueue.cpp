@@ -577,6 +577,14 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             CndWriteFile( cmd );
         break;
 
+        case Command::ReadBucket:
+            #if DBG_LOG_ENABLE
+                Log::Debug( "[DiskBufferQueue] ^ Cmd ReadBucket: (%u) bucket:%u sz:%llu addr:0x%p", cmd.file.fileId, cmd.file.bucket, cmd.file.size, cmd.file.buffer );
+            #endif
+            CmdReadBucket( cmd );
+        break;
+
+
         case Command::ReadFile:
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd ReadFile: (%u) bucket:%u sz:%llu addr:0x%p", cmd.file.fileId, cmd.file.bucket, cmd.file.size, cmd.file.buffer );
@@ -673,11 +681,11 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
     Log::Debug( "  >>> Write 0x%p", buffers );
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
-    #if _DEBUG
-        const size_t blockSize = fileSet.files[0]->BlockSize();
-    #endif
+    const size_t blockSize = fileSet.files[0]->BlockSize();
+    // #if _DEBUG
+    // #endif
     
-    const byte*  buffer = buffers;
+    const byte* buffer = buffers;
 
     if( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) )
     {
@@ -686,7 +694,12 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
         for( uint i = 0; i < bucketCount; i++ )
         {
             const size_t sliceSize = sizes[i] * elementSize;
-            writeSize += sliceSize;
+            
+            // Slices must be block-aligned
+            // #TODO: This should be set as an option...
+            const size_t alignedSliceSize = CDivT( sliceSize, blockSize ) * blockSize;
+            
+            writeSize += alignedSliceSize;
 
             // Save slice sizes for reading
             fileSet.sliceSizes[fileSet.bucket][i] = sliceSize;
@@ -725,7 +738,7 @@ void DiskBufferQueue::CndWriteFile( const Command& cmd )
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::CmdReadBuckets( const Command& cmd )
+void DiskBufferQueue::CmdReadBucket( const Command& cmd )
 {
     const FileId fileId  = cmd.buckets.fileId;
     FileSet&     fileSet = _files[(int)fileId];   
@@ -746,7 +759,7 @@ void DiskBufferQueue::CmdReadBuckets( const Command& cmd )
         const size_t sliceSize   = sliceSizes[bucket];
         const size_t alignedSize = RoundUpToNextBoundaryT( sliceSize, blockSize );
 
-        // #TODO: Always have to read into an aligned buffer. Figure this out
+        // #TODO: Always have to read into an aligned buffer. Figure this out...
 
         // ReadFromFile( *fileSet.files[bucket], alignedSize, buffer, nullptr, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket )
 

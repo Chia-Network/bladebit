@@ -18,9 +18,8 @@ class K32BoundedF1
     static constexpr uint32 _entriesPerBucket       = (uint32)( _kEntryCount / _numBuckets );
     static constexpr uint32 _entriesPerBlock        = kF1BlockSize / sizeof( uint32 );
     static constexpr uint32 _blocksPerBucket        = _entriesPerBucket * sizeof( uint32 ) / kF1BlockSize;
-    static constexpr uint32 _maxEntriesPerSlice     = _entriesPerBucket / _numBuckets;
-    static constexpr uint32 _maxEntriesPerIOBucket  = ((uint32)(_maxEntriesPerSlice * BB_DP_XTRA_ENTRIES_PER_BUCKET) * _numBuckets );
-
+    static constexpr uint32 _maxEntriesPerSlice     = ((uint32)(_entriesPerBucket / _numBuckets) * BB_DP_ENTRY_SLICE_MULTIPLIER);
+    
 public:
     //-----------------------------------------------------------
     K32BoundedF1( DiskPlotContext& context, IAllocator& allocator )
@@ -30,13 +29,16 @@ public:
     {
         const uint32 threadCount = context.f1ThreadCount;
 
-        // We need to add padding to our buffers because each slice need to have
-        // their start location block-aligned for reading.
-        // #OR: We could do it on the IOQueue where we could keep a block
-        //      left-over per bucket file.
-        //      Which, when we do a multi-bucket slice read we would
-        //      save the left over? We can't because we need to make sure the
-        //      buffer we're given is not aligned
+        // We need to pad our slices to block size
+        const uint32 blockSize               = _ioQueue.BlockSize( FileId::FX1 );
+        const uint32 entriesPerSliceAligned  = RoundUpToNextBoundaryT( _maxEntriesPerSlice, blockSize ) + blockSize / sizeof( uint32 ); // Need an extra block for when we offset the entries
+        const uint32 entriesPerBucketAligned = entriesPerSliceAligned * _numBuckets;                                                    // in subsequent slices
+        ASSERT( entriesPerBucketAligned >= _entriesPerBucket );
+
+        #if _DEBUG
+            _maxEntriesPerIOBucket = entriesPerBucketAligned;
+        #endif
+
 
         // Get the maximum block count per thread
         uint32 blockCount, _;
@@ -45,10 +47,10 @@ public:
         const uint32 blockBufferSize = blockCount * threadCount * _entriesPerBlock;
         _blockBuffer = allocator.CAllocSpan<uint32>( blockBufferSize );
 
-        _yEntries[0] = allocator.CAllocSpan<uint32>( _maxEntriesPerIOBucket, context.tmp2BlockSize );
-        _yEntries[1] = allocator.CAllocSpan<uint32>( _maxEntriesPerIOBucket, context.tmp2BlockSize );
-        _xEntries[0] = allocator.CAllocSpan<uint32>( _maxEntriesPerIOBucket, context.tmp2BlockSize );
-        _xEntries[1] = allocator.CAllocSpan<uint32>( _maxEntriesPerIOBucket, context.tmp2BlockSize );
+        _yEntries[0] = allocator.CAllocSpan<uint32>( entriesPerBucketAligned, context.tmp2BlockSize );
+        _yEntries[1] = allocator.CAllocSpan<uint32>( entriesPerBucketAligned, context.tmp2BlockSize );
+        _xEntries[0] = allocator.CAllocSpan<uint32>( entriesPerBucketAligned, context.tmp2BlockSize );
+        _xEntries[1] = allocator.CAllocSpan<uint32>( entriesPerBucketAligned, context.tmp2BlockSize );
     }
 
     //-----------------------------------------------------------
@@ -100,16 +102,17 @@ private:
         const uint32 fsBlockSize      = (uint32)_ioQueue.BlockSize( FileId::FX1 );
 
         // Distribute to buckets
-        uint32 counts     [_numBuckets] = { 0 };
+        uint32 counts     [_numBuckets] = {};
         uint32 pfxSum     [_numBuckets];
         uint32 totalCounts[_numBuckets];
+        uint32 offsets    [_numBuckets] = {};
 
 //        memset( counts, 0, sizeof( counts ) );
 
         for( uint32 i = 0; i < entryCount; i++ )
             counts[Swap32( blocks[i] ) >> bucketBitShift]++;
 
-        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, fsBlockSize, counts, pfxSum, totalCounts );
+        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, fsBlockSize, counts, pfxSum, totalCounts, offsets );
 
         const uint32 yBits = _k + kExtraBits - bucketBits;
         const uint32 yMask = (uint32)(( 1ull << yBits ) - 1);
@@ -173,5 +176,9 @@ private:
     Span<uint32> _yEntries     [2];
     Span<uint32> _xEntries     [2];
     uint32       _elementCounts[2][_numBuckets] = {};
+
+#if _DEBUG
+    uint32 _maxEntriesPerIOBucket;
+#endif
 };
 
