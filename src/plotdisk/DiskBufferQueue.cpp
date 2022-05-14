@@ -691,20 +691,21 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
     {
         // Write in interleaved mode, a whole bucket is written at once
         size_t writeSize = 0;
+
         for( uint i = 0; i < bucketCount; i++ )
         {
             const size_t sliceSize = sizes[i] * elementSize;
-            
+
             // Slices must be block-aligned
             // #TODO: This should be set as an option...
             const size_t alignedSliceSize = CDivT( sliceSize, blockSize ) * blockSize;
-            
-            writeSize += alignedSliceSize;
+            ASSERT( sliceSize == alignedSliceSize );
+            writeSize += sliceSize;
 
-            // Save slice sizes for reading
+            // Save slice sizes for reading?
+            // #TODO: Remove this? Have the user specify it, since they have a different alignment...?
             fileSet.sliceSizes[fileSet.bucket][i] = sliceSize;
         }
-
 
         // #TODO: Do we have to round-up the size to block boundary?
         ASSERT( writeSize / blockSize * blockSize == writeSize );
@@ -716,11 +717,11 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
         fileSet.bucket %= fileSet.files.Length();
         return;
     }
-    
+
     for( uint i = 0; i < bucketCount; i++ )
     {
         const size_t bufferSize = sizes[i] * elementSize;
-        
+
         // Only write up-to the block-aligned boundary. The caller is in charge of handling unlaigned data.
         ASSERT( bufferSize == bufferSize / blockSize * blockSize );
         WriteToFile( *fileSet.files[i], bufferSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, i );
@@ -811,9 +812,7 @@ inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte
 
         while( size )
         {
-
             ssize_t sizeWritten = file.Write( buffer, size );
-
 
             if( sizeWritten < 1 )
             {

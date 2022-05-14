@@ -102,17 +102,18 @@ private:
         const uint32 fsBlockSize      = (uint32)_ioQueue.BlockSize( FileId::FX1 );
 
         // Distribute to buckets
-        uint32 counts     [_numBuckets] = {};
-        uint32 pfxSum     [_numBuckets];
-        uint32 totalCounts[_numBuckets];
-        uint32 offsets    [_numBuckets] = {};
+        uint32 counts          [_numBuckets] = {};
+        uint32 pfxSum          [_numBuckets];
+        uint32 totalCounts     [_numBuckets];
+        uint32 offsets         [_numBuckets] = {};
+        uint32 totalWriteCounts[_numBuckets];
 
 //        memset( counts, 0, sizeof( counts ) );
 
         for( uint32 i = 0; i < entryCount; i++ )
             counts[Swap32( blocks[i] ) >> bucketBitShift]++;
 
-        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, fsBlockSize, counts, pfxSum, totalCounts, offsets );
+        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, fsBlockSize, counts, pfxSum, totalCounts, offsets, totalWriteCounts );
 
         const uint32 yBits = _k + kExtraBits - bucketBits;
         const uint32 yMask = (uint32)(( 1ull << yBits ) - 1);
@@ -139,8 +140,8 @@ private:
         {
             memcpy( elementCounts.Ptr(), totalCounts, sizeof( totalCounts ) );
 
-            _ioQueue.WriteBucketElementsT( FileId::FX1  , yEntries.Ptr(), elementCounts.Ptr() );
-            _ioQueue.WriteBucketElementsT( FileId::META1, xEntries.Ptr(), elementCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT( FileId::FX1  , yEntries.Ptr(), totalWriteCounts );
+            _ioQueue.WriteBucketElementsT( FileId::META1, xEntries.Ptr(), totalWriteCounts );
             _ioQueue.SignalFence( _writeFence, bucket+1 );
             _ioQueue.CommitCommands();
 

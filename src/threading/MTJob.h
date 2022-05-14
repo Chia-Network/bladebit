@@ -390,7 +390,7 @@ struct PrefixSumJob : public MTJob<TJob>
         const uint32 entriesPerBlock = blockSize / entrySize;
         ASSERT( entriesPerBlock * entrySize == blockSize );
 
-        CalculatePrefixSumImpl<1>( bucketSize, counts, pfxSum, bucketCounts, &entriesPerBlock, offsets );
+        CalculatePrefixSumImpl<1>( bucketSize, counts, pfxSum, bucketCounts, &entriesPerBlock, offsets, alignedTotalCounts );
     }
 
 private:
@@ -469,14 +469,16 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
             
             offsets[i] = entryCount - ( blockCount - 1 ) * entriesPerBlock; // Update our offset for the next round
             pfxSum[i] += paddingFromPrevBucket + offset;                    // Update our total count for alignment purposes
+            alignedTotalCounts[i] = blockCount * entriesPerBlock;
         }
 
         // Add the offset to the first bucket slice as well
         pfxSum[0] += offsets[0];
 
-        const uint32 b0Aligned = CDivT( pfxSum[0], entriesPerBlock ) * entriesPerBlock;
-        const uint32 b0Padding = b0Aligned - pfxSum[0];
-        offsets[0] = (entriesPerBlock - b0Padding) & (entriesPerBlock - 1);
+        const uint32 b0BlockCount = CDivT( pfxSum[0], entriesPerBlock ); ASSERT( b0BlockCount > 0 );
+
+        offsets[0]            = pfxSum[0] - (b0BlockCount - 1) * entriesPerBlock;
+        alignedTotalCounts[0] = b0BlockCount * entriesPerBlock;
     }
     
     // Calculate the prefix sum
