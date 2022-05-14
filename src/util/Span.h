@@ -74,9 +74,27 @@ struct Span
         return Slice( index, length - index );
     }
 
+    inline Span<T> Slice() const
+    {
+        return Slice( 0, length );
+    }
+
     inline Span<T> Slice( const uint32 index ) const { return Slice( (size_t)index ); }
     inline Span<T> Slice( const int64 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
     inline Span<T> Slice( const int32 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
+
+    inline void CopyTo( Span<T>& other, const size_t size ) const
+    {
+        ASSERT( length >= size );
+        ASSERT( other.length >= size );
+
+        memcpy( other.values, values, size );
+    }
+
+    inline void CopyTo( Span<T>& other ) const
+    {
+        CopyTo( other, length );
+    }
 };
 
 typedef Span<uint8_t> ByteSpan;

@@ -18,7 +18,9 @@ enum FileSetOptions
     Cachable    = 1 << 1,   // Use a in-memory cache for the file
     UseTemp2    = 1 << 2,   // Open the file set the high-frequency temp directory
 
-    Interleaved = 1 << 3,   // Write in interleaved mode. That is all slices written to a single bucket.
+    
+    // BatchedSlices = 1 << 3, // Write bucket slices in a batch, instead of a slice per each bucket.
+    Interleaved   = 1 << 3,   // Write in interleaved mode. That is all slices written to a single bucket.
 
     BlockAlign  = 1 << 4,   // Only write in block-aligned segments. Keeping a block-sized buffer for left overs.
                             // The last write flushes the whole block.
@@ -101,6 +103,12 @@ class DiskBufferQueue
                 uint32      elementSize;
             } bucketElements;
 
+            struct {
+                Span<void>* buffer;
+                FileId      fileId;
+                uint32      elementSize;
+            } readBucket;
+
             struct
             {
                 FileId     fileId;
@@ -180,10 +188,10 @@ public:
 
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
-    void ReadBucketElements( const FileId id, void* buffer, size_t elementCount );
+    void ReadBucketElements( const FileId id, Span<void>& buffer, const size_t elementSize );
 
     template<typename T>
-    void ReadBucketElementsT( const FileId id, T* buffer );
+    void ReadBucketElementsT( const FileId id, Span<T>& buffer );
 
     void ReadFile( FileId id, uint bucket, void* dstBuffer, size_t readSize );
 
@@ -326,6 +334,8 @@ private:
     // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];
     size_t           _blockSize          = 0;
+    byte*            _t1BlockBuffer      = nullptr;         // Temporary temp1 dir block buffer user for slice reading
+    byte*            _t2BlockBuffer      = nullptr;         // Temporary temp2 dir block buffer user for slice reading
     
     char*            _filePathBuffer     = nullptr;         // For creating file sets
 
@@ -369,7 +379,7 @@ inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const T* buc
 
 //-----------------------------------------------------------
 template<typename T>
-inline void DiskBufferQueue::ReadBucketElementsT( const FileId id, T* buffer )
+inline void DiskBufferQueue::ReadBucketElementsT( const FileId id, Span<T>& buffer )
 {
-    ReadBucketElements( id, buffer, sizeof( T ) );
+    ReadBucketElements( id, reinterpret_cast<Span<void>&>( buffer ), sizeof( T ) );
 }

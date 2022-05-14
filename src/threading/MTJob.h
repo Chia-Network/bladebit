@@ -438,12 +438,6 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
             pfxSum[j] += tCounts[j];
     }
 
-    // If we're the control thread, retain the total bucket count
-    if( this->IsControlThread() && bucketCounts != nullptr )
-    {
-        memcpy( bucketCounts, pfxSum, sizeof( TCount ) * bucketSize );
-    }
-
     uint32 alignedEntryIndex = 0;
 
     if constexpr ( AlignEntryCount > 0 )
@@ -479,6 +473,12 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
 
         offsets[0]            = pfxSum[0] - (b0BlockCount - 1) * entriesPerBlock;
         alignedTotalCounts[0] = b0BlockCount * entriesPerBlock;
+    }
+
+    // If we're the control thread, retain the total bucket count
+    if( this->IsControlThread() && bucketCounts != nullptr )
+    {
+        memcpy( bucketCounts, pfxSum, sizeof( TCount ) * bucketSize );
     }
     
     // Calculate the prefix sum

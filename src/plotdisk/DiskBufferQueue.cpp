@@ -360,6 +360,15 @@ void DiskBufferQueue::WriteFile( FileId id, uint bucket, const void* buffer, siz
 }
 
 //-----------------------------------------------------------
+void DiskBufferQueue::ReadBucketElements( const FileId id, Span<void>& buffer, const size_t elementSize )
+{
+    Command* cmd = GetCommandObject( Command::ReadBucket );
+    cmd->readBucket.buffer      = &buffer;
+    cmd->readBucket.elementSize = elementSize;
+    cmd->readBucket.fileId      = id;
+}
+
+//-----------------------------------------------------------
 void DiskBufferQueue::ReadFile( FileId id, uint bucket, void* dstBuffer, size_t readSize )
 {
     Command* cmd = GetCommandObject( Command::ReadFile );
@@ -579,7 +588,7 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
 
         case Command::ReadBucket:
             #if DBG_LOG_ENABLE
-                Log::Debug( "[DiskBufferQueue] ^ Cmd ReadBucket: (%u) bucket:%u sz:%llu addr:0x%p", cmd.file.fileId, cmd.file.bucket, cmd.file.size, cmd.file.buffer );
+                Log::Debug( "[DiskBufferQueue] ^ Cmd ReadBucket: (%u) bucket:%u esz:%llu", cmd.readBucket.fileId, cmd.readBucket.elementSize );
             #endif
             CmdReadBucket( cmd );
         break;
@@ -697,10 +706,10 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
             const size_t sliceSize = sizes[i] * elementSize;
 
             // Slices must be block-aligned
-            // #TODO: This should be set as an option...
+            // #TODO: This should be set as an option...? Or should we always align?
             const size_t alignedSliceSize = CDivT( sliceSize, blockSize ) * blockSize;
-            ASSERT( sliceSize == alignedSliceSize );
-            writeSize += sliceSize;
+            // ASSERT( sliceSize == alignedSliceSize );
+            writeSize += alignedSliceSize;
 
             // Save slice sizes for reading?
             // #TODO: Remove this? Have the user specify it, since they have a different alignment...?
@@ -741,29 +750,55 @@ void DiskBufferQueue::CndWriteFile( const Command& cmd )
 //-----------------------------------------------------------
 void DiskBufferQueue::CmdReadBucket( const Command& cmd )
 {
-    const FileId fileId  = cmd.buckets.fileId;
+    const FileId fileId  = cmd.readBucket.fileId;
     FileSet&     fileSet = _files[(int)fileId];   
     
-    byte* buffer = (byte*)cmd.buckets.buffers;
+    Span<byte>& buffer = const_cast<Span<byte>&>( reinterpret_cast<const Span<byte>&>( cmd.readBucket.buffer ) );
 
-    ASSERT( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) );
+    ASSERT( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) );    // #TODO: Read bucket is just a single file read without this flag
     ASSERT( fileSet.sliceSizes.Ptr() );
-    ASSERT( fileSet.bucket == 0 );      // Should be in bucket 0 at this point // #NOTE: Perhaps have the user specify the bucket to read instead?
-
+    // ASSERT( fileSet.bucket == 0 );      // Should be in bucket 0 at this point // #NOTE: Perhaps have the user specify the bucket to read instead?
+    
+    const bool         directIO    = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
     const uint32       bucketCount = (uint32)fileSet.files.Length();
-
     const Span<size_t> sliceSizes  = fileSet.sliceSizes[fileSet.bucket];
     const size_t       blockSize   = fileSet.files[0]->BlockSize();
 
-    for( uint32 bucket = 0; bucket < bucketCount; bucket++ )
+    auto   readBuffer  = buffer.Slice();
+    auto   blockBuffer = Span<byte>( (byte*)fileSet.blockBuffer, 0 );
+    size_t sizeRead    = 0;
+
+    Span<byte> tempBlock;
+
+    for( uint32 slice = 0; slice < bucketCount; slice++ )
     {
-        const size_t sliceSize   = sliceSizes[bucket];
-        const size_t alignedSize = RoundUpToNextBoundaryT( sliceSize, blockSize );
+        const size_t sliceSize   = sliceSizes[slice];
+        const size_t alignedSize = CDivT( sliceSize, blockSize ) * blockSize;   // Sizes are written aligned, and must also be read aligned
 
-        // #TODO: Always have to read into an aligned buffer. Figure this out...
+        ReadFromFile( *fileSet.files[fileSet.bucket], alignedSize, readBuffer.Ptr(), nullptr, blockSize,  directIO, fileSet.name, fileSet.bucket );
 
-        // ReadFromFile( *fileSet.files[bucket], alignedSize, buffer, nullptr, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket )
+        // Replace the temp block we just overwrote, if we have one
+        if( tempBlock.Length() )
+            tempBlock.CopyTo( readBuffer );
 
+        // Copy offset temporarily (only if sliceSize is not block-aligned)
+        if( sliceSize < alignedSize )
+        {
+            const auto   offset        = alignedSize - blockSize; ASSERT( sliceSize > offset );
+            const size_t lastBlockSize = sliceSize - offset;
+
+            readBuffer = readBuffer.Slice( offset );
+            tempBlock  = blockBuffer.Slice( 0, lastBlockSize );
+            
+            readBuffer.CopyTo( tempBlock, lastBlockSize );
+        }
+        else
+        {
+            readBuffer = readBuffer.Slice( alignedSize ); // We just read everything block aligned
+            tempBlock  = {};
+        }
+
+        sizeRead += sliceSize;
     }
 
     fileSet.bucket++;

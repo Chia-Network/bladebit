@@ -165,7 +165,8 @@
                 // "FxSort"
                 // "FxDisk"
                 // "F1Disk"
-                "PairsAndMap"
+                // "PairsAndMap"
+                "bucket-slice-write"
             ]
         }
 
