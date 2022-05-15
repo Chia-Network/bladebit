@@ -186,7 +186,6 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
                 const uint32 dst = --pfxSum[e >> bucketShift];
 
                 entriesBuffer[dst] = e;
-// if( e == 1835013 ) BBDebugBreak();
             }
             
             // Caluclate non-aligned test values
