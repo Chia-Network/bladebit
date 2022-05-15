@@ -365,26 +365,26 @@ struct PrefixSumJob : public MTJob<TJob>
 {
     inline virtual ~PrefixSumJob() {}
 
-    TCount* counts;
+    const TCount* counts;
 
     inline void CalculatePrefixSum(
-        uint32  bucketSize,
-        TCount* counts,
-        TCount* pfxSum,
-        TCount* bucketCounts )
+        uint32        bucketSize,
+        const TCount* counts,
+        TCount*       pfxSum,
+        TCount*       bucketCounts )
     {
         CalculatePrefixSumImpl<0>( bucketSize, counts, pfxSum, bucketCounts );
     }
 
     template<typename EntryType1>
     inline void CalculateBlockAlignedPrefixSum(
-        uint32  bucketSize,
-        uint32  blockSize,
-        TCount* counts,
-        TCount* pfxSum,
-        TCount* bucketCounts,
-        TCount* offsets,
-        TCount* alignedTotalCounts )
+              uint32  bucketSize,
+              uint32  blockSize,
+        const TCount* counts,
+              TCount* pfxSum,
+              TCount* bucketCounts,
+              TCount* offsets,
+              TCount* alignedTotalCounts )
     {
         const uint32 entrySize       = (uint32)sizeof( EntryType1 );
         const uint32 entriesPerBlock = blockSize / entrySize;
@@ -396,14 +396,14 @@ struct PrefixSumJob : public MTJob<TJob>
 private:
     template<uint32 AlignEntryCount=0>
     inline void CalculatePrefixSumImpl(
-        uint32        bucketSize,
-        TCount*       counts,
-        TCount*       pfxSum,
-        TCount*       bucketCounts,
+              uint32  bucketSize,
+        const TCount* counts,
+              TCount* pfxSum,
+              TCount* bucketCounts,
         const uint32* entriesPerBlocks   = nullptr,
-        TCount*       offsets            = nullptr,
-        TCount*       alignedTotalCounts = nullptr,
-        TCount*       pfxSum2            = nullptr
+              TCount* offsets            = nullptr,
+              TCount* alignedTotalCounts = nullptr,
+              TCount* pfxSum2            = nullptr
     );
 };
 
@@ -412,7 +412,7 @@ template<typename TJob, typename TCount>
 template<uint32 AlignEntryCount>
 inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
         uint32  bucketSize,
-        TCount* counts,
+  const TCount* counts,
         TCount* pfxSum,
         TCount* bucketCounts,
   const uint32* entriesPerBlocks,

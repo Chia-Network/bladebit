@@ -11,10 +11,10 @@
 const uint32 k          = 24;
 const uint32 entryCount = 1ull << k;
 
-Span<uint32> entriesRef;
+Span<uint32> entriesRef;        // Reference entries that we will test again. Generated all at once, then sorted.
+Span<uint32> entriesTest;       // Full set of reference entries, but bucket-sorted first. This is to test against reference entries, excluding I/O issues.
 Span<uint32> entriesTmp;
 Span<uint32> entriesBuffer;
-// Span<uint32> entriesRead ;
 
 const char*      tmpDir  = "/home/harold/plot/tmp";
 const FileId     fileId  = FileId::FX0;
@@ -30,9 +30,6 @@ auto seed = HexStringToBytes( "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f
 void GenerateRandomEntries( ThreadPool& pool )
 {
     ASSERT( seed.size() == 32 );
-
-    entriesRef = bbcvirtallocboundednuma_span<uint32>( entryCount );
-    entriesTmp = bbcvirtallocboundednuma_span<uint32>( entryCount );
 
     Job::Run( pool, [=]( Job* self ){
 
@@ -60,6 +57,80 @@ void GenerateRandomEntries( ThreadPool& pool )
 
 //-----------------------------------------------------------
 template<uint32 _numBuckets>
+void ValidateTestEntries( ThreadPool& pool, uint32 bucketCounts[_numBuckets] )
+{
+    const uint32 bucketBits  = bblog2( _numBuckets );
+    const uint32 bucketShift = k - bucketBits;
+
+    auto sliceSizes = ioQueue->SliceSizes( fileId );
+    
+    auto refEntries = entriesRef;
+
+    // Test the whole buffer first
+    {
+        auto entries = bbcvirtallocboundednuma_span<uint32>( entryCount ); 
+        entriesTest.CopyTo( entries );
+        ENSURE( entries.EqualElements( entriesTest ) );
+
+        RadixSort256::Sort<BB_DP_MAX_JOBS>( pool, entries.Ptr(), entriesTmp.Ptr(), entries.Length() );
+        ENSURE( entries.EqualElements( entriesRef ) );
+
+        bbvirtfreebounded( entries.Ptr() );
+    }
+
+    uint32 offsets[_numBuckets] = {};
+
+    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+    {
+        const size_t bucketLength   = bucketCounts[bucket];
+              size_t ioBucketLength = 0;
+
+        auto testBucket = entriesBuffer.Slice( 0, bucketLength );
+        auto writer     = testBucket;
+        auto reader     = entriesTest;
+
+        // Read slices from all buckets
+        for( uint32 slice = 0; slice < _numBuckets; slice++ )
+        {
+            const size_t sliceSize = sliceSizes[slice][bucket] / sizeof( uint32 );
+
+            auto readSlice = reader.Slice( offsets[slice], sliceSize );
+            readSlice.CopyTo( writer );
+
+            for( uint32 i = 0; i < sliceSize; i++ )
+            {
+                ENSURE( writer[i] >> bucketShift == bucket );
+            }
+
+            if( slice + 1 < _numBuckets )
+            {
+                size_t readOffset = 0;;
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                    readOffset += sliceSizes[slice][i] / sizeof( uint32 );
+
+                writer = writer.Slice( sliceSize  );
+                reader = reader.Slice( readOffset );
+            }
+
+            offsets[slice] += sliceSize;
+            ioBucketLength += sliceSize;
+        }
+        
+        ENSURE( ioBucketLength == bucketLength );
+
+        // Sort the bucket
+        RadixSort256::Sort<BB_DP_MAX_JOBS>( pool, testBucket.Ptr(), entriesTmp.Ptr(), testBucket.Length() );
+
+        // Validate it
+        auto refBucket = refEntries.Slice( 0, bucketLength );
+        ENSURE( testBucket.EqualElements( refBucket ) );
+
+        refEntries = refEntries.Slice( bucketLength );
+    }
+}
+
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
 void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
 {
     Log::Line( "Testing buckets: %u", _numBuckets );
@@ -77,7 +148,9 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
         const uint32 bucketShift      = k - bucketBits;
         const size_t blockSize        = ioQueue->BlockSize( fileId );
         
-        Span<uint32> srcEntries = entriesRef.Slice();
+        Span<uint32> srcEntries  = entriesRef.Slice();
+        Span<uint32> testEntries = entriesTest.Slice();
+
 
         uint32 count, offset, end;
         GetThreadOffsets( self, entriesPerBucket, count, offset, end );
@@ -86,6 +159,7 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
         uint32 offsets           [_numBuckets] = {};
         uint32 totalCounts       [_numBuckets];
         uint32 alignedWriteCounts[_numBuckets];
+        uint32 prevOffsets       [_numBuckets] = {};
 
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
@@ -95,7 +169,10 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
             for( uint32 i = offset; i < end; i++ )
                 counts[srcEntries[i] >> bucketShift]++;
 
+
             // Prefix sum
+            memcpy( prevOffsets, offsets, sizeof( offsets ) );
+
             self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, totalCounts, offsets, alignedWriteCounts );
 
             // Distribute entries to buckets
@@ -106,11 +183,23 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
 
                 entriesBuffer[dst] = e;
             }
+            
+            // Caluclate non-aligned test values
+            self->CalculatePrefixSum( _numBuckets, counts, pfxSum, nullptr );
+            
+            // Distribute test entries to buckets
+            for( uint32 i = offset; i < end; i++ )
+            {
+                const uint32 e   = srcEntries[i];
+                const uint32 dst = --pfxSum[e >> bucketShift];
+
+                testEntries[dst] = e;
+            }
 
             // Write to disk
             if( self->BeginLockBlock() )
             {
-                ioQueue->WriteBucketElements( fileId, entriesBuffer.Ptr(), sizeof( uint32 ), alignedWriteCounts, totalCounts );
+                ioQueue->WriteBucketElementsT<uint32>( fileId, entriesBuffer.Ptr(), alignedWriteCounts, totalCounts );
                 ioQueue->SignalFence( fence );
                 ioQueue->CommitCommands();
                 fence.Wait();
@@ -122,10 +211,39 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
                     ENSURE( sliceSize == totalCounts[i] );
                 }
 
+                // Update total bucket coutns
                 for( uint32 i = 0; i < _numBuckets; i++ )
                     pBucketCounts[i] += totalCounts[i];
+
+                size_t alignedBucketLength = 0;
+                size_t bucketLength        = 0;
+                
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                {
+                    bucketLength        += totalCounts[i];
+                    alignedBucketLength += alignedWriteCounts[i];
+                }
+                ENSURE( entriesPerBucket == bucketLength );
+                ENSURE( alignedBucketLength >= bucketLength );
+
+                // Validate entries against test entries
+                auto test   = testEntries.Slice( 0, bucketLength );
+                auto target = entriesBuffer.Slice( 0, alignedBucketLength );
+
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                {
+                    auto testSlice   = test.Slice( 0, totalCounts[i] );
+                    auto targetSlice = target.Slice( prevOffsets[i], testSlice.Length() );
+
+                    ENSURE( testSlice.EqualElements( targetSlice ) );
+
+                    test   = test.Slice( totalCounts[i] );
+                    target = target.Slice( alignedWriteCounts[i] );
+                }
             }
             self->EndLockBlock();
+
+            testEntries = testEntries.Slice( entriesPerBucket );
 
             // Write next bucket slices
             srcEntries = srcEntries.Slice( entriesPerBucket );
@@ -157,12 +275,16 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
         }
     }
 
+    // Validate against test non-I/O entries first
+    ValidateTestEntries<_numBuckets>( pool, bucketCounts );
+
     // Read back entries and validate them
     auto refSlice = entriesRef.Slice();
+
     for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
     {
-        auto readBuffer = entriesBuffer.Slice();
-        const size_t capacity = readBuffer.Length();
+              auto   readBuffer = entriesBuffer.Slice();
+        const size_t capacity   = readBuffer.Length();
 
         ioQueue->ReadBucketElementsT( fileId, readBuffer );
         ioQueue->SignalFence( fence );
@@ -210,7 +332,12 @@ TEST_CASE( "bucket-slice-write", "[unit-core]" )
     const uint32 entriesPerBucket        = entryCount / minBuckets;
     const uint32 maxEntriesPerSlice      = ((uint32)(entriesPerBucket / minBuckets) * BB_DP_ENTRY_SLICE_MULTIPLIER);
     const uint32 entriesPerSliceAligned  = RoundUpToNextBoundaryT( maxEntriesPerSlice, blockSize ) + blockSize / sizeof( uint32 ); // Need an extra block for when we offset the entries
-    const uint32 entriesPerBucketAligned = entriesPerSliceAligned * minBuckets;                                                    // in subsequent slices
+    const uint32 entriesPerBucketAligned = entriesPerSliceAligned * minBuckets;    
+    
+    
+    entriesRef  = bbcvirtallocboundednuma_span<uint32>( entryCount );
+    entriesTest = bbcvirtallocboundednuma_span<uint32>( entryCount );
+    entriesTmp  = bbcvirtallocboundednuma_span<uint32>( entryCount ); 
 
     entriesBuffer = bbcvirtallocboundednuma_span<uint32>( (size_t)( entriesPerBucketAligned ) );
     // entriesRead  = bbcvirtallocboundednuma_span<uint32>( (size_t)( entriesPerBucketAligned ) );

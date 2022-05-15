@@ -712,7 +712,7 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
             ASSERT( sliceWriteSize / blockSize * blockSize == sliceWriteSize );
             
             // Save slice sizes for reading-back the bucket
-            fileSet.sliceSizes[fileSet.bucket][i] = sliceSizes[i] * elementSize;    // #TODO: Should we do element size here?
+            fileSet.sliceSizes[fileSet.bucket][i] = sliceSizes[i] * elementSize;    // #TODO: Should we not do element size here?
 
             writeSize += sliceWriteSize;
         }

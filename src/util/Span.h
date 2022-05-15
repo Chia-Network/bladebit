@@ -91,7 +91,7 @@ struct Span
         ASSERT( length >= size );
         ASSERT( other.length >= size );
 
-        memcpy( other.values, values, size );
+        memcpy( other.values, values, size * sizeof( T ) );
     }
 
     inline void CopyTo( Span<T>& other ) const
@@ -104,7 +104,7 @@ struct Span
         ASSERT( count <= other.length );
         ASSERT( length >= count );
         
-        return memcmp( values, other.values, count ) == 0;
+        return memcmp( values, other.values, count * sizeof( T ) ) == 0;
     }
 
     inline bool EqualElements( const Span<T>& other ) const
