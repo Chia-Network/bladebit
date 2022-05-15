@@ -24,7 +24,6 @@ Fence fence;
 using Job = AnonPrefixSumJob<uint32>;
 
 auto seed = HexStringToBytes( "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835" );
-        
 
 //-----------------------------------------------------------
 void GenerateRandomEntries( ThreadPool& pool )
@@ -117,6 +116,11 @@ void ValidateTestEntries( ThreadPool& pool, uint32 bucketCounts[_numBuckets] )
         }
         
         ENSURE( ioBucketLength == bucketLength );
+        // if( bucket == 7 )
+        // {
+        //     for( uint32 i = 0; i < ioBucketLength; i++ )
+        //         if( testBucket[i] == 1835013 ) BBDebugBreak();
+        // }
 
         // Sort the bucket
         RadixSort256::Sort<BB_DP_MAX_JOBS>( pool, testBucket.Ptr(), entriesTmp.Ptr(), testBucket.Length() );
@@ -182,6 +186,7 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
                 const uint32 dst = --pfxSum[e >> bucketShift];
 
                 entriesBuffer[dst] = e;
+// if( e == 1835013 ) BBDebugBreak();
             }
             
             // Caluclate non-aligned test values
@@ -232,7 +237,7 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
 
                 for( uint32 i = 0; i < _numBuckets; i++ )
                 {
-                    auto testSlice   = test.Slice( 0, totalCounts[i] );
+                    auto testSlice   = test  .Slice( 0, totalCounts[i] );
                     auto targetSlice = target.Slice( prevOffsets[i], testSlice.Length() );
 
                     ENSURE( testSlice.EqualElements( targetSlice ) );

@@ -450,7 +450,8 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
     {
         // We now need to add padding to the total counts to ensure the starting
         // location of each slice is block aligned.
-        const uint32 entriesPerBlock = entriesPerBlocks[alignedEntryIndex++];
+        const uint32 entriesPerBlock    = entriesPerBlocks[alignedEntryIndex++];
+        const uint32 modEntriesPerBlock = entriesPerBlock - 1;
 
         for( uint32 i = bucketSize-1; i > 0; i-- )
         {
@@ -463,22 +464,22 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
 
             // Calculate our next offset before updating our total count, which is the the entries
             // our last block occupies, if its not full.
-            const uint32 offset     = offsets[i];
-            const uint32 entryCount = pfxSum[i] + offset;
-            const uint32 blockCount = CDivT( entryCount, entriesPerBlock ); ASSERT( blockCount > 0 );
+            const uint32 offset            = offsets[i];
+            const uint32 entryCount        = pfxSum[i] + offset;
+            const uint32 alignedEntryCount = CDivT( entryCount, entriesPerBlock ) * entriesPerBlock;
             
-            offsets[i] = entryCount - ( blockCount - 1 ) * entriesPerBlock; // Update our offset for the next round
-            pfxSum[i] += paddingFromPrevBucket + offset;                    // Update our total count for alignment purposes
-            alignedTotalCounts[i] = blockCount * entriesPerBlock;
+            offsets[i] = ( entryCount - (alignedEntryCount - entriesPerBlock) ) & modEntriesPerBlock;  // Update our offset for the next round
+            pfxSum[i] += paddingFromPrevBucket + offset;                                                // Update our total count for alignment purposes
+            alignedTotalCounts[i] = alignedEntryCount;                                                  // Set number of entries that have to be written to disk (always starts and ends at a block boundary)
         }
 
         // Add the offset to the first bucket slice as well
         pfxSum[0] += offsets[0];
 
-        const uint32 b0BlockCount = CDivT( pfxSum[0], entriesPerBlock ); ASSERT( b0BlockCount > 0 );
+        const uint32 b0AlignedCount = CDivT( pfxSum[0], entriesPerBlock ) * entriesPerBlock;
 
-        offsets[0]            = pfxSum[0] - (b0BlockCount - 1) * entriesPerBlock;
-        alignedTotalCounts[0] = b0BlockCount * entriesPerBlock;
+        offsets[0]            = ( pfxSum[0] - (b0AlignedCount - entriesPerBlock) ) & modEntriesPerBlock;
+        alignedTotalCounts[0] = b0AlignedCount;
     }
     
     // Calculate the prefix sum

@@ -109,7 +109,7 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     const bool useTmp2    = IsFlagSet( options, FileSetOptions::UseTemp2 );
 
     const std::string& wokrDir = isPlotFile ? _plotDir :
-                                     useTmp2 ? _workDir2 : _workDir1;
+                                    useTmp2 ? _workDir2 : _workDir1;
     memcpy( _filePathBuffer, wokrDir.c_str(), wokrDir.length() );
 
     const char* pathBuffer = _filePathBuffer;
@@ -201,7 +201,8 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
         if( i == 0 && IsFlagSet( options, FileSetOptions::DirectIO ) )
         {
             // const size_t totalBlockSize = file->BlockSize() * bucketCount;
-            fileSet.blockBuffer = bbvirtalloc<void>( file->BlockSize() );
+            fileSet.blockBuffer = bbvirtalloc<void>( file->BlockSize() );   // #TODO: This should be removed, and we should use
+                                                                            //        a shared one per temp dir.
         }
     }
 
@@ -760,10 +761,10 @@ void DiskBufferQueue::CmdReadBucket( const Command& cmd )
     ASSERT( fileSet.sliceSizes.Ptr() );
     // ASSERT( fileSet.bucket == 0 );      // Should be in bucket 0 at this point // #NOTE: Perhaps have the user specify the bucket to read instead?
     
-    const bool         directIO    = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
-    const uint32       bucketCount = (uint32)fileSet.files.Length();
-    const auto         sliceSizes  = fileSet.sliceSizes;
-    const size_t       blockSize   = fileSet.files[0]->BlockSize();
+    const bool   directIO    = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
+    const uint32 bucketCount = (uint32)fileSet.files.Length();
+    const auto   sliceSizes  = fileSet.sliceSizes;
+    const size_t blockSize   = fileSet.files[0]->BlockSize();
 
     auto readBuffer  = Span<byte>( cmd.readBucket.buffer->Ptr(), cmd.readBucket.buffer->Length() * elementSize );
     auto blockBuffer = Span<byte>( (byte*)fileSet.blockBuffer, blockSize );
@@ -776,7 +777,7 @@ void DiskBufferQueue::CmdReadBucket( const Command& cmd )
         const size_t readSize    = sliceSize + tempBlock.Length();
         const size_t alignedSize = CDivT( readSize, blockSize ) * blockSize;   // Sizes are written aligned, and must also be read aligned
 
-        ReadFromFile( *fileSet.files[slice], alignedSize, readBuffer.Ptr(), nullptr, blockSize,  directIO, fileSet.name, fileSet.bucket );
+        ReadFromFile( *fileSet.files[slice], alignedSize, readBuffer.Ptr(), nullptr, blockSize, directIO, fileSet.name, fileSet.bucket );
 
         // Replace the temp block we just overwrote, if we have one
         if( tempBlock.Length() )
@@ -785,6 +786,8 @@ void DiskBufferQueue::CmdReadBucket( const Command& cmd )
         // Copy offset temporarily (only if readSize is not block-aligned)
         if( readSize < alignedSize )
         {
+            ASSERT( alignedSize - readSize < blockSize );
+            
             const auto   lastBlockOffset = alignedSize - blockSize;         ASSERT( readSize > lastBlockOffset );
             const size_t lastBlockSize   = readSize - lastBlockOffset;
 
