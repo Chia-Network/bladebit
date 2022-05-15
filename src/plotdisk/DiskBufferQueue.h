@@ -89,22 +89,15 @@ class DiskBufferQueue
 
             struct
             {
-                const uint* sizes;
+                const uint* writeSizes;  // Size that will actually be written to disk (usually padded and block-aligned)
+                const uint* sliceSizes;  // Actual number of slices that we have per-bucket. This used to store it for reading-back buckets.
                 const byte* buffers;
                 FileId      fileId;
+                uint32      elementSize; // Size of each element in the buffer
             } buckets;
 
-            // Same as buckets, but written with element sizes instead
-            struct
-            {
-                const uint* counts;
-                const byte* buffers;
-                FileId      fileId;
-                uint32      elementSize;
-            } bucketElements;
-
             struct {
-                Span<void>* buffer;
+                Span<byte>* buffer;
                 FileId      fileId;
                 uint32      elementSize;
             } readBucket;
@@ -179,16 +172,16 @@ public:
 
     void ResetHeap( const size_t heapSize, void* heapBuffer );
 
-    void WriteBuckets( FileId id, const void* buckets, const uint* sizes );
+    void WriteBuckets( FileId id, const void* buckets, const uint* writeSizes, const uint32* sliceSizes = nullptr );
 
-    void WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint32* counts );
+    void WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint32* writeCounts, const uint32* sliceCounts = nullptr );
 
     template<typename T>
-    void WriteBucketElementsT( const FileId id, const T* buckets, const uint32* counts );
+    void WriteBucketElementsT( const FileId id, const T* buckets, const uint32* writeCounts, const uint32* sliceCounts = nullptr );
 
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
-    void ReadBucketElements( const FileId id, Span<void>& buffer, const size_t elementSize );
+    void ReadBucketElements( const FileId id, Span<byte>& buffer, const size_t elementSize );
 
     template<typename T>
     void ReadBucketElementsT( const FileId id, Span<T>& buffer );
@@ -232,6 +225,10 @@ public:
     { 
         return _workHeap.Alloc( size, alignment, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
     }
+
+    #if _DEBUG || BB_TEST_MODE
+        const Span<Span<size_t>> SliceSizes( const FileId fileId ) const { return _files[(int)fileId].sliceSizes; }
+    #endif
 
     // byte* GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer = true );
 
@@ -372,14 +369,14 @@ private:
 
 //-----------------------------------------------------------
 template<typename T>
-inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const T* buckets, const uint32* counts )
+inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const T* buckets, const uint32* writeCounts, const uint32* sliceCounts  )
 {
-    WriteBucketElements( id, (void*)buckets, sizeof( T ), counts );
+    WriteBucketElements( id, (byte*)buckets, sizeof( T ), writeCounts, sliceCounts );
 }
 
 //-----------------------------------------------------------
 template<typename T>
 inline void DiskBufferQueue::ReadBucketElementsT( const FileId id, Span<T>& buffer )
 {
-    ReadBucketElements( id, reinterpret_cast<Span<void>&>( buffer ), sizeof( T ) );
+    ReadBucketElements( id, reinterpret_cast<Span<byte>&>( buffer ), sizeof( T ) );
 }

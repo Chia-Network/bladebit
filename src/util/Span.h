@@ -1,5 +1,5 @@
 #pragma once
-
+#include <string.h>
 
 template<typename T>
 struct Span
@@ -8,7 +8,10 @@ struct Span
     T*     values;
     size_t length;
 
-    inline Span(){}
+    inline Span()
+        : values( nullptr )
+        , length( 0 )
+    {}
 
     inline Span( T* values, size_t length )
         : values( values )
@@ -94,6 +97,22 @@ struct Span
     inline void CopyTo( Span<T>& other ) const
     {
         CopyTo( other, length );
+    }
+
+    inline bool EqualElements( const Span<T>& other, const size_t count ) const
+    {
+        ASSERT( count <= other.length );
+        ASSERT( length >= count );
+        
+        return memcmp( values, other.values, count ) == 0;
+    }
+
+    inline bool EqualElements( const Span<T>& other ) const
+    {
+        if( other.length != length )
+            return false;
+
+        return EqualElements( other, length );
     }
 };
 

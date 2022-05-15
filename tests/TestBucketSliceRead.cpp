@@ -66,7 +66,9 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
     
     // Fence* fence = &_fence;
     fence.Reset( 0 );
-    fence.Signal();
+
+    uint32 bucketCounts[_numBuckets] = {};
+    uint32* pBucketCounts = bucketCounts;
 
     Job::Run( pool, threadCount, [=, &fence]( Job* self ) {
 
@@ -81,8 +83,8 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
         GetThreadOffsets( self, entriesPerBucket, count, offset, end );
 
         uint32 pfxSum            [_numBuckets];
-        uint32 totalCounts       [_numBuckets];
         uint32 offsets           [_numBuckets] = {};
+        uint32 totalCounts       [_numBuckets];
         uint32 alignedWriteCounts[_numBuckets];
 
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
@@ -108,10 +110,20 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
             // Write to disk
             if( self->BeginLockBlock() )
             {
-                ioQueue->WriteBucketElements( fileId, entriesBuffer.Ptr(), sizeof( uint32 ), totalCounts );
+                ioQueue->WriteBucketElements( fileId, entriesBuffer.Ptr(), sizeof( uint32 ), alignedWriteCounts, totalCounts );
                 ioQueue->SignalFence( fence );
                 ioQueue->CommitCommands();
                 fence.Wait();
+
+                auto sliceSizes = ioQueue->SliceSizes( fileId );
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                {
+                    const size_t sliceSize = sliceSizes[bucket][i] / sizeof( uint32 );
+                    ENSURE( sliceSize == totalCounts[i] );
+                }
+
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                    pBucketCounts[i] += totalCounts[i];
             }
             self->EndLockBlock();
 
@@ -127,17 +139,51 @@ void RunForBuckets( ThreadPool& pool, const uint32 threadCount )
     ioQueue->CommitCommands();
     fence.Reset();
 
+    // Total I/O queue bucket length must match our bucket length
+    {
+        auto sliceSizes = ioQueue->SliceSizes( fileId );
+
+        for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+        {
+            size_t bucketLength = 0;
+            
+            for( uint32 slice = 0; slice < _numBuckets; slice++ )
+                bucketLength += sliceSizes[slice][bucket];
+
+            ENSURE( bucketLength / sizeof( uint32 ) * sizeof( uint32 ) == bucketLength );
+            
+            bucketLength /= sizeof( uint32 );
+            ENSURE( bucketLength == bucketCounts[bucket] );
+        }
+    }
+
     // Read back entries and validate them
+    auto refSlice = entriesRef.Slice();
     for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
     {
         auto readBuffer = entriesBuffer.Slice();
+        const size_t capacity = readBuffer.Length();
 
         ioQueue->ReadBucketElementsT( fileId, readBuffer );
         ioQueue->SignalFence( fence );
         ioQueue->CommitCommands();
         fence.Wait();
 
-        // RadixSort256::Sort<BB_DP_MAX_JOBS>( pool, entriesRef.Ptr(), entriesTmp.Ptr(), entriesRef.Length() );
+        ENSURE( readBuffer.Length() <= capacity );
+        ENSURE( readBuffer.Length() == bucketCounts[bucket] );
+
+        RadixSort256::Sort<BB_DP_MAX_JOBS>( pool, readBuffer.Ptr(), entriesTmp.Ptr(), readBuffer.Length() );
+
+        if( !readBuffer.EqualElements( refSlice, readBuffer.Length() ) )
+        {
+            // Find first failure
+            for( uint32 i = 0; i < readBuffer.Length(); i++ )
+            {
+                ENSURE( readBuffer[i] == refSlice[i] );
+            }
+        }
+
+        refSlice = refSlice.Slice( readBuffer.Length() );
     }
 }
 
@@ -160,9 +206,9 @@ TEST_CASE( "bucket-slice-write", "[unit-core]" )
 
     // Allocate buffers
     const uint32 minBuckets = 64;
-    const uint32 blockSize              = (uint32)ioQueue->BlockSize( fileId );
-    const uint32 entriesPerBucket       = entryCount / minBuckets;
-    const uint32 maxEntriesPerSlice     = ((uint32)(entriesPerBucket / minBuckets) * BB_DP_ENTRY_SLICE_MULTIPLIER);
+    const uint32 blockSize               = (uint32)ioQueue->BlockSize( fileId );
+    const uint32 entriesPerBucket        = entryCount / minBuckets;
+    const uint32 maxEntriesPerSlice      = ((uint32)(entriesPerBucket / minBuckets) * BB_DP_ENTRY_SLICE_MULTIPLIER);
     const uint32 entriesPerSliceAligned  = RoundUpToNextBoundaryT( maxEntriesPerSlice, blockSize ) + blockSize / sizeof( uint32 ); // Need an extra block for when we offset the entries
     const uint32 entriesPerBucketAligned = entriesPerSliceAligned * minBuckets;                                                    // in subsequent slices
 
