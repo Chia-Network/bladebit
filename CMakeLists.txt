@@ -156,6 +156,8 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /D_HAS_EXCEPTIONS=0
         ${c_opts})
     
+    set(tests_c_opts /DBB_TEST_MODE=1 ${tests_c_opts})
+    
     set(link_opts 
         /SUBSYSTEM:CONSOLE
         /STACK:33554432,1048576
@@ -209,6 +211,8 @@ else()
 
     # *Nix
     set(c_opts --include=pch.h -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
+
+    set(tests_c_opts -DBB_TEST_MODE=1 ${tests_c_opts})
 
     set(release_c_opts 
         -O3 #-flto
@@ -412,6 +416,8 @@ target_link_libraries(fsegen PRIVATE lib_bladebit)
 
 # Tests
 add_executable(tests ${src_tests} ${bb_headers})
+target_compile_options(tests PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
+target_compile_options(tests PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
 set_target_properties(tests PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 

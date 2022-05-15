@@ -156,7 +156,9 @@
 
             "program": "${workspaceRoot}/build/tests",
             
-            "environment": [],
+            "environment": [
+                // { "name": "bbtest_thread_count", "value": "2" }
+            ],
 
             "args": [
                 "-b",
