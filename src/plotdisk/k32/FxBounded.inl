@@ -154,9 +154,6 @@ private:
     //-----------------------------------------------------------
     void RunMT( Job* self )
     {
-//        using TYOut    = typename K32TYOut<rTable>::Type;
-        // using TMetaIn  = typename K32MetaType<rTable>::In;
-        // using TMetaOut = typename K32MetaType<rTable>::Out;
         const TableId lTable      = rTable-1;
         const uint32  threadCount = self->JobCount();
 
@@ -210,14 +207,14 @@ private:
             // Sort meta on Y
             WaitForFence( self, _metaReadFence, bucket );
 
-            Span<TMetaIn> metaTmp( (TMetaIn*)_meta[0].Ptr(), yInput.Length() );
-            Span<TMetaIn> metaIn ( (TMetaIn*)_metaTmp.Ptr(), yInput.Length() );
+            Span<TMetaIn> metaTmp = _meta[0].As<TMetaIn>().SliceSize( yInput.Length() );
+            Span<TMetaIn> metaIn  = _metaTmp.As<TMetaIn>().SliceSize( yInput.Length() );
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
             // Gen fx
             if( self->IsLastThread() )
             Span<uint32>   yOut    = _yTmp;
-            Span<TMetaOut> metaOut( (TMetaOut*)metaTmp.Ptr(), matches.Length() );
+            Span<TMetaOut> metaOut = metaTmp.As<TMetaOut>().SliceSize( matches.Length() );
 
             // GenFx( self, yInput, metaIn, matches, yOut, metaOut, bucket );
 
