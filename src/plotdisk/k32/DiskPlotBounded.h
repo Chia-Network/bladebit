@@ -20,8 +20,8 @@ private:
     template<uint32 _numBuckets>
     void RunF1();
 
-    template<uint32 _numBuckets>
-    void RunFx( const TableId table );
+    template<TableId table, uint32 _numBuckets>
+    void RunFx();
 
 private:
     DiskPlotContext& _context;

@@ -30,7 +30,7 @@ public:
         const uint32 threadCount = context.f1ThreadCount;
 
         // We need to pad our slices to block size
-        const uint32 blockSize               = _ioQueue.BlockSize( FileId::FX1 );
+        const uint32 blockSize               = _ioQueue.BlockSize( FileId::FX0 );
         const uint32 entriesPerSliceAligned  = RoundUpToNextBoundaryT( _maxEntriesPerSlice, blockSize ) + blockSize / sizeof( uint32 ); // Need an extra block for when we offset the entries
         const uint32 entriesPerBucketAligned = entriesPerSliceAligned * _numBuckets;                                                    // in subsequent slices
         ASSERT( entriesPerBucketAligned >= _entriesPerBucket );
@@ -51,6 +51,13 @@ public:
         _yEntries[1] = allocator.CAllocSpan<uint32>( entriesPerBucketAligned, context.tmp2BlockSize );
         _xEntries[0] = allocator.CAllocSpan<uint32>( entriesPerBucketAligned, context.tmp2BlockSize );
         _xEntries[1] = allocator.CAllocSpan<uint32>( entriesPerBucketAligned, context.tmp2BlockSize );
+
+        _offsets = allocator.CAllocSpan<Span<uint32>>( threadCount );
+        for( uint32 i = 0; i < _offsets.Length(); i++ )
+        {
+            _offsets[i] = allocator.CAllocSpan<uint32>( _numBuckets );
+            _offsets[i].ZeroOutElements();
+        }
     }
 
     //-----------------------------------------------------------
@@ -99,29 +106,39 @@ private:
         const uint32 bucketBits       = bblog2( _numBuckets );
         const uint32 bucketBitShift   = _k - bucketBits;
         const uint32 kMinusKExtraBits = _k - kExtraBits;
-        const uint32 fsBlockSize      = (uint32)_ioQueue.BlockSize( FileId::FX1 );
+        const uint32 fsBlockSize      = (uint32)_ioQueue.BlockSize( FileId::FX0 );
 
         // Distribute to buckets
-        uint32 counts          [_numBuckets] = {};
-        uint32 pfxSum          [_numBuckets];
-        uint32 totalCounts     [_numBuckets];
-        uint32 offsets         [_numBuckets] = {};
-        uint32 totalWriteCounts[_numBuckets];
-
-//        memset( counts, 0, sizeof( counts ) );
-
+        uint32 counts            [_numBuckets] = {};
+        uint32 pfxSum            [_numBuckets];
+        uint32 totalCounts       [_numBuckets];
+        uint32 alignedTotalCounts[_numBuckets];
+        
+        // Count bucket entries
         for( uint32 i = 0; i < entryCount; i++ )
             counts[Swap32( blocks[i] ) >> bucketBitShift]++;
+        
+        // Prefix sum
+        Span<uint32> offsets = _offsets[self->JobId()];
+        
+        Span<uint32> yEntries, xEntries, elementCounts, alignedElementCounts;
+        GetNextBuffer( self, bucket, yEntries, xEntries, elementCounts, alignedElementCounts );
 
-        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, fsBlockSize, counts, pfxSum, totalCounts, offsets, totalWriteCounts );
+        uint32* pTotalCounts        = totalCounts;
+        uint32* pAlignedTotalCounts = alignedTotalCounts;
 
+        if( self->IsControlThread() )
+        {
+            pTotalCounts        = elementCounts.Ptr();
+            pAlignedTotalCounts = alignedElementCounts.Ptr();
+        }
+
+        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, fsBlockSize, counts, pfxSum, pTotalCounts, offsets.Ptr(), pAlignedTotalCounts );
+
+        // Distribute slices to buckets
         const uint32 yBits = _k + kExtraBits - bucketBits;
         const uint32 yMask = (uint32)(( 1ull << yBits ) - 1);
 
-        Span<uint32> yEntries, xEntries, elementCounts;
-        GetNextBuffer( self, bucket, yEntries, xEntries, elementCounts );
-
-        // Distribute slices to buckets
         for( uint32 i = 0; i < entryCount; i++ )
         {
                   uint32 y   = Swap32( blocks[i] );
@@ -138,10 +155,8 @@ private:
         // Write to disk
         if( self->BeginLockBlock() )
         {
-            memcpy( elementCounts.Ptr(), totalCounts, sizeof( totalCounts ) );
-
-            _ioQueue.WriteBucketElementsT( FileId::FX1  , yEntries.Ptr(), totalWriteCounts );
-            _ioQueue.WriteBucketElementsT( FileId::META1, xEntries.Ptr(), totalWriteCounts );
+            _ioQueue.WriteBucketElementsT( FileId::FX0  , yEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT( FileId::META0, xEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
             _ioQueue.SignalFence( _writeFence, bucket+1 );
             _ioQueue.CommitCommands();
 
@@ -152,7 +167,9 @@ private:
     }
 
     //-----------------------------------------------------------
-    void GetNextBuffer( Job* self, const uint32 bucket, Span<uint32>& yEntries, Span<uint32>& xEntries, Span<uint32>& totalCounts )
+    void GetNextBuffer( Job* self, const uint32 bucket, 
+                        Span<uint32>& yEntries, Span<uint32>& xEntries,
+                        Span<uint32>& elementCounts, Span<uint32>& alignedElementCounts )
     {
         if( bucket >= 2 && _writeFence.Value() < bucket-1 )
         {
@@ -162,9 +179,10 @@ private:
             self->EndLockBlock();
         }
 
-        yEntries    = _yEntries[bucket & 1];
-        xEntries    = _xEntries[bucket & 1];
-        totalCounts = Span<uint32>( _elementCounts[bucket & 1], _numBuckets );
+        yEntries             = _yEntries[bucket & 1];
+        xEntries             = _xEntries[bucket & 1];
+        elementCounts        = Span<uint32>( _elementCounts[bucket & 1], _numBuckets );
+        alignedElementCounts = Span<uint32>( _alignedElementCounts[bucket & 1], _numBuckets );
     }
 
 private:
@@ -174,9 +192,12 @@ private:
     Span<uint32>        _blockBuffer;
 
     // I/O buffers
-    Span<uint32> _yEntries     [2];
-    Span<uint32> _xEntries     [2];
-    uint32       _elementCounts[2][_numBuckets] = {};
+    Span<uint32> _yEntries[2];
+    Span<uint32> _xEntries[2];
+    uint32       _elementCounts       [2][_numBuckets] = {};
+    uint32       _alignedElementCounts[2][_numBuckets] = {};
+    
+    Span<Span<uint32>> _offsets;
 
 #if _DEBUG
     uint32 _maxEntriesPerIOBucket;

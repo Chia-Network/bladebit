@@ -81,7 +81,19 @@ void K32BoundedPhase1::RunWithBuckets()
 
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
     {
-        RunFx<_numBuckets>( table );
+        switch( table )
+        {
+            case TableId::Table2: RunFx<TableId::Table2, _numBuckets>(); break;
+            case TableId::Table3: RunFx<TableId::Table3, _numBuckets>(); break;
+            case TableId::Table4: RunFx<TableId::Table4, _numBuckets>(); break;
+            case TableId::Table5: RunFx<TableId::Table5, _numBuckets>(); break;
+            case TableId::Table6: RunFx<TableId::Table6, _numBuckets>(); break;
+            case TableId::Table7: RunFx<TableId::Table7, _numBuckets>(); break;
+        
+            default:
+                PanicExit();
+                break;
+        }
     }
 }
 
@@ -119,9 +131,10 @@ void K32BoundedPhase1::RunF1()
 }
 
 //-----------------------------------------------------------
-template<uint32 _numBuckets>
-void K32BoundedPhase1::RunFx( const TableId table )
+template<TableId table, uint32 _numBuckets>
+void K32BoundedPhase1::RunFx()
 {
-
+    DiskPlotFxBounded<table, _numBuckets> fx( _context );
+    fx.Run();
 }
 

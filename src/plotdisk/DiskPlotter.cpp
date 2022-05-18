@@ -380,7 +380,7 @@ bool DiskPlotter::GetTmpPathsBlockSizes( const char* tmpPath1, const char* tmpPa
         strlen( tmpPath2 ),
     };
 
-    const size_t RAND_PART     =  16;
+    const size_t RAND_PART      =  16;
     const size_t RAND_FILE_SIZE = RAND_PART + 4;    // 5 = '.' + ".tmp"
     const size_t MAX_LENGTH     = 1024 + RAND_FILE_SIZE + 1;
     char stackPath[MAX_LENGTH+1];

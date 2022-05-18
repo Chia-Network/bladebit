@@ -12,34 +12,40 @@ class FxMatcherBounded
 public:
 
     //-----------------------------------------------------------
-    void Match( Job* self, const Span<uint32> yEntries, Span<Pair> pairs, const uint32 bucket )
+    Span<Pair> Match( Job* self, 
+        const uint32       bucket, 
+        const Span<uint32> yEntries, 
+              Span<uint32> groupsBuffer,
+              Span<Pair>   pairs )
     {
         const uint32 id = self->JobId();
 
+        _groupBuffers[id] = groupsBuffer;
+
         uint32 startIndex;
-        const uint32 groupCount = ScanGroups( self, yEntries, bucket, startIndex );
-        ASSERT( groupCount > 0 );
+        const Span<uint32> groups = ScanGroups( self, bucket, yEntries, groupsBuffer, startIndex );
+        ASSERT( groups.Length() );
 
-        const Span<uint32> groupBoundaries( _groupIndices[id], groupCount );
+        const uint32 matchCount = MatchGroups( self,
+                                               startIndex,
+                                               groups,
+                                               yEntries,
+                                               pairs,
+                                               bucket,
+                                               pairs.Length() );
 
-        uint32 matchCount = MatchGroups( self,
-                                         startIndex,
-                                         groupCount,
-                                         groupBoundaries,
-                                         yEntries,
-                                         pairs,
-                                         bucket,
-                                         _maxMatches );
-
-        _matchCounts[id] = matchCount;
-
-        self->SyncThreads();
+        return pairs.Slice( 0, matchCount );
     }
 
 private:
 
     //-----------------------------------------------------------
-    uint32 ScanGroups( Job* self, const Span<uint32> yEntries, const uint64 bucket, uint32& outStartIndex )
+    const Span<uint32> ScanGroups( 
+        Job*               self, 
+        const uint64       bucket, 
+        const Span<uint32> yEntries, 
+        Span<uint32>       groupBuffer,
+        uint32&            outStartIndex )
     {
         const uint64 yMask = bucket << 32;
         const uint32 id    = self->JobId();
@@ -67,14 +73,15 @@ private:
         const uint32* end = self->IsLastThread() ? yEntries.Ptr() + yEntries.Length() : _startPositions[id+1];
 
         // Now scan for all groups
-        uint32* groupIndices = _groupIndices[id];
-        uint32  groupCount   = 0;
+        const uint32 maxGroups    = groupBuffer.Length();
+        Span<uint32> groupIndices = groupBuffer;
+        uint32       groupCount   = 0;
         while( ++entries < end )
         {
             const uint64 g = (yMask | (uint64)*entries) / kBC;
             if( g != curGroup )
             {
-                ASSERT( groupCount < _maxMatches );
+                ASSERT( groupCount < maxGroups );
                 groupIndices[groupCount++] = (uint32)(uintptr_t)(entries - start);
 
                 ASSERT( g - curGroup > 1 || groupCount == 1 || groupIndices[groupCount-1] - groupIndices[groupCount-2] <= 350 );
@@ -87,30 +94,30 @@ private:
         // Add the end location of the last R group
         if( self->IsLastThread() )
         {
-            ASSERT( groupCount < _maxMatches );
+            ASSERT( groupCount < maxGroups );
             groupIndices[groupCount] = (uint32)yEntries.Length();
         }
         else
         {
-            ASSERT( groupCount+1 < _maxMatches );
+            ASSERT( groupCount+1 < maxGroups );
             groupIndices[groupCount++] = (uint32)(uintptr_t)(_startPositions[id+1] - start);
-            groupIndices[groupCount  ] = _groupIndices[id+1][0];
+            groupIndices[groupCount  ] = _groupBuffers[id+1][0];
         }
 
-        return groupCount;
+        return groupIndices.Slice( 0, groupCount + 1 ); // There's always an extra 'ghost' group used to get the end position of the last R group
     }
 
     //-----------------------------------------------------------
     uint32 MatchGroups( Job* self,
-                        const uint32 startIndex,
-                        const uint32 groupCount,
+                        const uint32       startIndex,
                         const Span<uint32> groupBoundaries,
                         const Span<uint32> yEntries,
-                        Span<Pair> pairs,
-                        const uint32 bucket,
-                        const uint64 maxPairs )
+                        Span<Pair>         pairs,
+                        const uint32       bucket,
+                        const uint64       maxPairs )
     {
         const uint64 bucketMask = ((uint64)bucket) << 32;
+        const uint32 groupCount = groupBoundaries.Length() - 1; // Ignore the extra ghost group
 
         uint32 pairCount = 0;
 
@@ -195,8 +202,6 @@ private:
     }
 
 private:
-    uint32           _maxMatches;
     const uint32*    _startPositions[BB_DP_MAX_JOBS];// = { 0 };
-    uint32           _matchCounts   [BB_DP_MAX_JOBS];// = { 0 };
-    uint32*          _groupIndices  [BB_DP_MAX_JOBS];
+    Span<uint32>     _groupBuffers  [BB_DP_MAX_JOBS];
 };

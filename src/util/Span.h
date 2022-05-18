@@ -82,6 +82,12 @@ struct Span
         return Slice( 0, length );
     }
 
+    inline Span<T> SliceSize( const size_t size ) const
+    {
+        ASSERT( size <= length );
+        return Slice( 0, size );
+    }
+
     inline Span<T> Slice( const uint32 index ) const { return Slice( (size_t)index ); }
     inline Span<T> Slice( const int64 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
     inline Span<T> Slice( const int32 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
@@ -99,6 +105,14 @@ struct Span
         CopyTo( other, length );
     }
 
+    inline void ZeroOutElements()
+    {
+        if( length < 1 )
+            return;
+
+        memset( values, 0, sizeof( T ) * length );
+    }
+
     inline bool EqualElements( const Span<T>& other, const size_t count ) const
     {
         ASSERT( count <= other.length );
@@ -113,6 +127,15 @@ struct Span
             return false;
 
         return EqualElements( other, length );
+    }
+
+    template<typename TCast>
+    inline Span<TCast> As() const
+    {
+        const size_t size         = sizeof( T ) * length;
+        const size_t targetLength = size / sizeof( TCast );
+
+        return Span<TCast>( reinterpret_cast<TCast*>( values ), targetLength );
     }
 };
 
