@@ -95,7 +95,6 @@ public:
         _indexBuffers[1] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
 
 
-
         // Work buffers
         _yTmp       = allocator.CAllocSpan<uint64>  ( entriesPerBucket, t2BlockSize );
         _metaTmp[0] = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t2BlockSize );
@@ -103,11 +102,19 @@ public:
         _sortKey    = allocator.CAllocSpan<uint32>  ( entriesPerBucket );
         _pairBuffer = allocator.CAllocSpan<Pair>    ( entriesPerBucket );
 
-        // Write buffers //#NOTE: No need, we can use the same buffer we just read from,
-        //                        as that buffer won't be in
-        // _yWriteBuffer     = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
-        // _indexWriteBuffer = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
-        // _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( entriesPerBucket, t2BlockSize );
+        _offsets = allocator.CAllocSpan<uint32*>( _context.fpThreadCount );
+        for( uint32 i = 0; i < _offsets.Length(); i++ )
+        {
+            Span<uint32> offsets = allocator.CAllocSpan<uint32>( _numBuckets );
+            offsets.ZeroOutElements();
+
+            _offsets[i] = offsets.Ptr();
+        }
+
+        // Write buffers
+        _yWriteBuffer     = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
+        _indexWriteBuffer = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
+        _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( entriesPerBucket, t2BlockSize );
 
         _map    = allocator.CAllocSpan<uint64>( entriesPerBucket );
         _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
@@ -389,13 +396,17 @@ private:
 
     //-----------------------------------------------------------
     void WriteEntries( Job* self,
+                       const uint32         bucket,
                        const Span<uint64>   yIn,
                        const Span<TMetaIn>  metaIn,
                              Span<uint32>   yOut,
                              Span<TMetaOut> metaOut,
-                             Span<uint32>   indices,
-                       const uint32         bucket )
+                             Span<uint32>   idxOut )
     {
+        const uint32 blockSize = (uint32)_ioQueue.BlockSize( _yId[1] );
+        const uint32 id        = (uint32)self->JobId();
+
+
         // Distribute to buckets
         const uint32 logBuckets = bblog2( _numBuckets );
         static_assert( kExtraBits <= logBuckets );
@@ -405,15 +416,29 @@ private:
 
         const int64 entryCount = (int64)yIn.Length();
 
-        uint32 counts     [_numBuckets] = {};
-        uint32 pfxSum     [_numBuckets];
-//        uint32 totalCounts[_numBuckets];
-        uint32* bucketSlices = _context.bucketSlices[(int)rTable & 1][bucket];
+        uint32  counts           [_numBuckets] = {};
+        uint32  pfxSum           [_numBuckets];
+        uint32  pfxSumMeta       [_numBuckets];
+        // uint32  totalCounts      [_numBuckets];
+        uint32  alignedCountsY   [_numBuckets];
+        uint32  alignedCountsMeta[_numBuckets];
+        
+        uint32* sliceCounts = _context.bucketSlices[(int)rTable & 1][bucket];
+        uint32* offsets     = _offsets[id];
 
         for( int64 i = 0; i < entryCount; i++ )
             counts[yIn[i] >> bucketShift]++;
 
-        self->CalculatePrefixSum( _numBuckets, counts, pfxSum, bucketSlices );
+        self->CalculateBlockAlignedPrefixSum2( 
+            _numBuckets, 
+            blockSize, 
+            counts, 
+            pfxSum, 
+            pfxSumMeta,
+            sliceCounts,
+            offsets,
+            alignedCountsY,
+            alignedCountsMeta );
 
         // Distribute to buckets
         int64 offset, _;
@@ -426,7 +451,7 @@ private:
 
             yOut   [dstIdx] = (uint32)(y & yMask);
             metaOut[dstIdx] = metaIn[i];
-            indices[dstIdx] = (uint32)(offset + i);
+            idxOut [dstIdx] = (uint32)(offset + i);
         }
 
         // Write to disk
@@ -434,15 +459,15 @@ private:
         {
             // #NOTE: Should we wait per file?
             if( bucket > 0 )
-                _fxWriteFence.Wait( bucket, _tableIOWait );
+                _fxWriteFence.Wait( bucket, _tableIOWait ); 
 
             const FileId yId    = _yId   [1];
             const FileId metaId = _metaId[1];
             const FileId idxId  = _idxId [1];
 
-            _ioQueue.WriteBucketElementsT<uint32>( yId   , yOut.Ptr()   , bucketSlices );
-            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, (TMetaOut*)metaOut.Ptr(), bucketSlices );
-            _ioQueue.WriteBucketElementsT<uint32>( idxId , indices.Ptr(), bucketSlices );
+            _ioQueue.WriteBucketElementsT<uint32>  ( yId   , yOut   .Ptr(), sliceCounts, alignedCountsY    );
+            _ioQueue.WriteBucketElementsT<uint32>  ( idxId , idxOut .Ptr(), sliceCounts, alignedCountsY    );
+            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(), sliceCounts, alignedCountsMeta );
             _ioQueue.SignalFence( _fxWriteFence, bucket+1 );
             _ioQueue.CommitCommands();
         }
@@ -660,9 +685,9 @@ private:
     Span<TMetaIn>    _meta [_numBuckets];
 
     // Write buffers
-    // Span<uint32>     _yWriteBuffer;
-    // Span<uint32>     _indexWriteBuffer;
-    // Span<TMetaOut>   _metaWriteBuffer;
+    Span<uint32>     _yWriteBuffer;
+    Span<uint32>     _indexWriteBuffer;
+    Span<TMetaOut>   _metaWriteBuffer;
     Span<uint64>     _map;
     Span<uint32>     _pairsL;
     Span<uint16>     _pairsR;
@@ -678,6 +703,9 @@ private:
 
     // Matching
     FxMatcherBounded _matcher;
+
+    // Distributing to buckets
+    Span<uint32*>    _offsets;
 
     // I/O Synchronization fences
     Fence& _yReadFence;

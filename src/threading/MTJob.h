@@ -401,6 +401,26 @@ struct PrefixSumJob : public MTJob<TJob>
         CalculatePrefixSumImpl<1>( bucketSize, counts, pfxSum, bucketCounts, &entriesPerBlock, offsets, alignedTotalCounts );
     }
 
+    template<typename EntryType1, typename EntryType2>
+    inline void CalculateBlockAlignedPrefixSum2(
+              uint32  bucketSize,
+              uint32  blockSize,
+        const TCount* counts,
+              TCount* pfxSum,
+              TCount* pfxSum2,
+              TCount* bucketCounts,
+              TCount* offsets,
+              TCount* alignedTotalCounts1,
+              TCount* alignedTotalCounts2 )
+    {
+        const uint32 entrySize[2]       = { (uint32)sizeof( EntryType1 ), (uint32)sizeof( EntryType2 ) };
+        const uint32 entriesPerBlock[2] = { blockSize / entrySize[0], blockSize / entrySize[1] };
+        ASSERT( entriesPerBlock[0] * entrySize[0] == blockSize );
+        ASSERT( entriesPerBlock[1] * entrySize[1] == blockSize );
+
+        CalculatePrefixSumImpl<2>( bucketSize, counts, pfxSum, bucketCounts, &entriesPerBlock, offsets, alignedTotalCounts1, pfxSum2, alignedTotalCounts2 );
+    }
+
 private:
     template<uint32 AlignEntryCount=0>
     inline void CalculatePrefixSumImpl(
@@ -408,10 +428,11 @@ private:
         const TCount* counts,
               TCount* pfxSum,
               TCount* bucketCounts,
-        const uint32* entriesPerBlocks   = nullptr,
-              TCount* offsets            = nullptr,
-              TCount* alignedTotalCounts = nullptr,
-              TCount* pfxSum2            = nullptr
+        const uint32* entriesPerBlocks    = nullptr,
+              TCount* offsets             = nullptr,
+              TCount* alignedTotalCounts  = nullptr,
+              TCount* pfxSum2             = nullptr,
+              TCount* alignedTotalCounts2 = nullptr
     );
 };
 
@@ -426,7 +447,8 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
   const uint32* entriesPerBlocks,
         TCount* offsets,
         TCount* alignedTotalCounts,
-        TCount* pfxSum2 )
+        TCount* pfxSum2,
+        TCount* alignedTotalCounts2 )
 {
     const uint32 jobId    = this->JobId();
     const uint32 jobCount = this->JobCount();
@@ -456,6 +478,7 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
 
     if constexpr ( AlignEntryCount > 0 )
     {
+    AlignEntries:
         // We now need to add padding to the total counts to ensure the starting
         // location of each slice is block aligned.
         const uint32 entriesPerBlock    = entriesPerBlocks[alignedEntryIndex++];
@@ -477,8 +500,8 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
             const uint32 alignedEntryCount = CDivT( entryCount, entriesPerBlock ) * entriesPerBlock;
             
             offsets[i] = ( entryCount - (alignedEntryCount - entriesPerBlock) ) & modEntriesPerBlock;  // Update our offset for the next round
-            pfxSum[i] += paddingFromPrevBucket + offset;                                                // Update our total count for alignment purposes
-            alignedTotalCounts[i] = alignedEntryCount;                                                  // Set number of entries that have to be written to disk (always starts and ends at a block boundary)
+            pfxSum [i] += paddingFromPrevBucket + offset;                                              // Update our total count for alignment purposes
+            alignedTotalCounts[i] = alignedEntryCount;                                                 // Set number of entries that have to be written to disk (always starts and ends at a block boundary)
         }
 
         // Add the offset to the first bucket slice as well
