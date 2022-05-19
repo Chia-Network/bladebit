@@ -33,7 +33,7 @@ class DiskPlotFxBounded
     using TMetaOut = typename K32MetaType<rTable>::Out;
     using Job     = AnonPrefixSumJob<uint32>;
     static constexpr uint32 _k               = 32;
-    static constexpr uint64 _maxTableEntries = 1ull << _k;
+    static constexpr uint64 _maxTableEntries = (1ull << _k) - 1;
 
 public:
 
@@ -84,22 +84,32 @@ public:
         const uint64 entriesPerBucket = (uint64)( kEntryCount / _numBuckets * BB_DP_XTRA_ENTRIES_PER_BUCKET );
         _entriesPerBucket = entriesPerBucket;
 
-        _y[0] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
-        _y[1] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
-        _yTmp = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
+        // Read buffers
+        _yBuffers[0]     = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
+        _yBuffers[1]     = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
 
-        _sortKey = allocator.CAllocSpan<uint32>( entriesPerBucket );
+        _metaBuffers[0]  = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t2BlockSize );
+        _metaBuffers[1]  = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t2BlockSize );
 
-        _meta[0]  = Span<TMetaIn>( (TMetaIn*)allocator.CAlloc<Meta4>( entriesPerBucket, t2BlockSize ), entriesPerBucket );
-        _meta[1]  = Span<TMetaIn>( (TMetaIn*)allocator.CAlloc<Meta4>( entriesPerBucket, t2BlockSize ), entriesPerBucket );
-        _metaTmp  = allocator.CAllocSpan<Meta4>( entriesPerBucket, t2BlockSize );
+        _indexBuffers[0] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
+        _indexBuffers[1] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
 
-        _index[0] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
-        _index[1] = allocator.CAllocSpan<uint32>( entriesPerBucket, t2BlockSize );
 
-        _map        = allocator.CAllocSpan<uint64>( entriesPerBucket );
-        _pairBuffer = allocator.CAllocSpan<Pair>  ( entriesPerBucket );
 
+        // Work buffers
+        _yTmp       = allocator.CAllocSpan<uint64>  ( entriesPerBucket, t2BlockSize );
+        _metaTmp[0] = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t2BlockSize );
+        _metaTmp[1] = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t2BlockSize );
+        _sortKey    = allocator.CAllocSpan<uint32>  ( entriesPerBucket );
+        _pairBuffer = allocator.CAllocSpan<Pair>    ( entriesPerBucket );
+
+        // Write buffers //#NOTE: No need, we can use the same buffer we just read from,
+        //                        as that buffer won't be in
+        // _yWriteBuffer     = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
+        // _indexWriteBuffer = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
+        // _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( entriesPerBucket, t2BlockSize );
+
+        _map    = allocator.CAllocSpan<uint64>( entriesPerBucket );
         _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
         _pairsR = allocator.CAllocSpan<uint16>( entriesPerBucket );
     }
@@ -133,12 +143,26 @@ public:
                 _pairs[i]  = pairBuffer.Slice( 0, matchesPerThread );
                 pairBuffer = pairBuffer.Slice( matchesPerThread );
             }
+
+            for( uint32 i = 0; i < _numBuckets; i++ )
+            {
+                const uint32 bufIdx = i & 1; // % 2
+                _y    [i] = _yBuffers    [bufIdx];
+                _index[i] = _indexBuffers[bufIdx];
+                _meta [i] = _metaBuffers [bufIdx].As<TMetaIn>();
+            }
         }
         
         // Run mmulti-threaded
         Job::Run( *_context.threadPool, threadCount, [=]( Job* self ) {
             RunMT( self );
         });
+
+        _context.entryCounts[(int)rTable] = _tableEntryCount;
+
+        Log::Line( " Sorting : Completed in %.2lf seconds.", TicksToSeconds( _sortTime  ) );
+        Log::Line( " Matching: Completed in %.2lf seconds.", TicksToSeconds( _matchTime ) );
+        Log::Line( " Fx      : Completed in %.2lf seconds.", TicksToSeconds( _fxTime    ) );
 
         // Ensure all I/O has completed
         Fence& fence = _context.fencePool->RequireFence();
@@ -154,8 +178,8 @@ private:
     //-----------------------------------------------------------
     void RunMT( Job* self )
     {
-        const TableId lTable      = rTable-1;
-        const uint32  threadCount = self->JobCount();
+        const uint32 threadCount = self->JobCount();
+        const uint32 id          = self->JobId();
 
         ReadNextBucket( self, 0 );
 
@@ -164,37 +188,41 @@ private:
             ReadNextBucket( self, bucket + 1 ); // Read next bucket in background
             WaitForFence( self, _yReadFence, bucket );
 
-            // const uint32 entryCount = _context.bucketCounts[(int)lTable][bucket];
-
             Span<uint32> yInput     = _y[bucket];
             const uint32 entryCount = yInput.Length();
             
             Span<uint32> sortKey = _sortKey.SliceSize( entryCount );
-            SortY( self, entryCount, yInput.Ptr(), _yTmp.Ptr(), sortKey.Ptr(), _metaTmp.As<uint32>().Ptr() );
+            SortY( self, entryCount, yInput.Ptr(), _yTmp.As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[0].As<uint32>().Ptr() );
 
-            const Span<Pair> matches = Match( self, bucket, yInput );
-//            WritePairs( self );
+            Span<Pair> matches = Match( self, bucket, yInput );
 
             // Count the total match count
-            uint64 totalMatches = 0;
-            self->SyncThreads();
-            for( uint32 i = 0; i < threadCount; i++ )
-                totalMatches += _pairs[i].Length();
+            uint32 totalMatches = 0;
+            uint32 matchOffset  = 0;
             
-            // #TODO: This is only for the last table..
-            // if( totalMatches > _maxTableEntries )
-            // {
-            //     // Prevent calculating fx for overflow matches
-            //     if( self->IsLastThread() )
-            //     {
-            //         const uint32 overflowEntries = (uint32)( totalMatches - _maxTableEntries );
-            //         ASSERT( overflowEntries < matches.Length() );
+            for( uint32 i = 0; i < threadCount; i++ )
+                totalMatches += (uint32)_pairs[i].Length();
 
-            //         matches = matches.Slice( 0, matches.Length() - overflowEntries );
-            //     }
+            for( uint32 i = 0; i < id; i++ )
+                matchOffset += (uint32)_pairs[i].Length();
 
-            //     totalMatches = _maxTableEntries;
-            // }
+            // Prevent overflow entries
+            const uint64 tableEntryCount = _tableEntryCount;
+            if( bucket == _numBuckets-1 && (tableEntryCount + totalMatches) > _maxTableEntries )
+            {
+                // Prevent calculating fx for overflow matches
+                if( self->IsLastThread() )
+                {
+                    const uint32 overflowEntries = (uint32)( (tableEntryCount + totalMatches) - _maxTableEntries );
+                    ASSERT( overflowEntries < matches.Length() );
+
+                    matches = matches.SliceSize( matches.Length() - overflowEntries );
+                }
+
+                totalMatches = _maxTableEntries;
+            }
+
+            //            WritePairs( self, pairs, matchCount );
 
             // Generate and write map
             if constexpr ( rTable > TableId::Table2 )
@@ -205,22 +233,34 @@ private:
             }
 
             // Sort meta on Y
-            WaitForFence( self, _metaReadFence, bucket );
+            Span<TMetaIn> metaTmp = _meta[bucket].SliceSize( yInput.Length() );
+            Span<TMetaIn> metaIn  = _metaTmp[0].As<TMetaIn>().SliceSize( yInput.Length() );
 
-            Span<TMetaIn> metaTmp = _meta[0].As<TMetaIn>().SliceSize( yInput.Length() );
-            Span<TMetaIn> metaIn  = _metaTmp.As<TMetaIn>().SliceSize( yInput.Length() );
+            WaitForFence( self, _metaReadFence, bucket );
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
             // Gen fx
-            if( self->IsLastThread() )
-            Span<uint32>   yOut    = _yTmp;
-            Span<TMetaOut> metaOut = metaTmp.As<TMetaOut>().SliceSize( matches.Length() );
+            {
+                Span<uint64>   yOut    = _yTmp.Slice( matchOffset, matches.Length() );
+                Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().Slice( matchOffset, matches.Length() );  //( (TMetaOut*)metaTmp.Ptr(), matches.Length() );
 
-            // GenFx( self, yInput, metaIn, matches, yOut, metaOut, bucket );
+                TimePoint timer;
+                if( self->IsControlThread() )
+                    timer = TimerBegin();
+                
+                GenFx( self, bucket, matches, yInput, metaIn, yOut, metaOut );
+                self->SyncThreads();
+
+                if( self->IsControlThread() )
+                    _fxTime += TimerEndTicks( timer );
+            }
 
 
             // #TODO: Write bucekt
 //            WriteEntries( self )
+
+            if( self->IsControlThread() )
+                _tableEntryCount += totalMatches;
         }
     }
 
@@ -231,19 +271,27 @@ private:
         constexpr uint32 iterations = 4;
         const     uint32 shiftBase  = 8;
 
+        TimePoint timer;
+        if( self->IsControlThread() )
+            timer = TimerBegin();
+
         uint32 shift = 0;
 
         uint32 counts     [Radix];
         uint32 prefixSum  [Radix];
         uint32 totalCounts[Radix];
 
-        uint64 length, offset, _;
-        GetThreadOffsets( self, entryCount, length, offset, _ );
+        uint64 length, offset, end;
+        GetThreadOffsets( self, entryCount, length, offset, end );
 
         uint32* input    = ySrc;
         uint32* tmp      = yTmp;
         uint32* keyInput = sortKeySrc;
         uint32* keyTmp   = sortKeyTmp;
+
+        // Gen sort key first
+        for( uint64 i = offset; i < end; i++ )
+            sortKeySrc[i] = (uint32)i;
 
         for( uint32 iter = 0; iter < iterations ; iter++, shift += shiftBase )
         {
@@ -276,19 +324,30 @@ private:
             std::swap( keyInput, keyTmp );
             self->SyncThreads();
         }
+
+        if( self->IsControlThread() )
+            _sortTime += TimerEndTicks( timer );
     }
 
     //-----------------------------------------------------------
     template<typename T>
     void SortOnYKey( Job* self, const Span<uint32> key, const Span<T> input, Span<T> output )
     {
+        TimePoint timer;
+        if( self->IsControlThread() )
+            timer = TimerBegin();
+
         uint32 count, offset, end;
         GetThreadOffsets( self, (uint32)key.Length(), count, offset, end );
 
         for( uint32 i = offset; i < end; i++ )
             output[i] = input[key[i]];
 
+
         self->SyncThreads();
+        
+        if( self->IsControlThread() )
+            _sortTime += TimerEndTicks( timer );
     }
 
     //-----------------------------------------------------------
@@ -298,13 +357,21 @@ private:
         const uint32 threadCount = self->JobCount();
 
         // use metaTmp as a buffer for group boundaries
-        Span<uint32> groupBuffer  = _metaTmp.As<uint32>();
+        Span<uint32> groupBuffer  = _metaTmp[0].As<uint32>();
         const uint32 maxGroups    = (uint32)( groupBuffer.Length() / threadCount );
         Span<uint32> groupIndices = groupBuffer.Slice( maxGroups * id, maxGroups );
 
+        TimePoint timer;
+        if( self->IsControlThread() )
+            timer = TimerBegin();
+    
         auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
-        _pairs[id] = matches;
 
+        self->SyncThreads();
+        if( self->IsControlThread() )
+            _matchTime += TimerEndTicks( timer );
+
+        _pairs[id] = matches;
         return matches;
     }
 
@@ -383,34 +450,14 @@ private:
     }
 
     //-----------------------------------------------------------
+    template<typename TYOut>
     void GenFx( Job* self,
-                const Span<uint32> yIn,
-                const Span<Meta4>  metaIn,
-                const Span<Pair>   pairs )
-    {
-        using TYOut    = typename K32TYOut<rTable>::Type;
-        using TMetaIn  = typename K32MetaType<rTable>::In;
-        using TMetaOut = typename K32MetaType<rTable>::Out;
-
-//        TMetaOut
-
-        const Span<TMetaIn> tableMetaIn ( (TMetaIn*)metaIn.Ptr(), metaIn.Length() );
-
-        // Output buffers
-//        Span<TMetaOut> tableMetaOut( (TMetaOut*)metaOut.Ptr(), metaOut.Length() );
-
-//        GenFx<TYOut, TMetaIn, TMetaOut>( self, yIn, tableMetaIn, pairs, )
-    }
-
-    //-----------------------------------------------------------
-    template<typename TYOut, typename TMetaIn, typename TMetaOut>
-    void GenFx( Job* self,
+                const uint32        bucket,
+                const Span<Pair>    pairs,
                 const Span<uint32>  yIn,
                 const Span<TMetaIn> metaIn,
-                const Span<Pair>    pairs,
                 Span<TYOut>         yOut,
-                Span<TMetaOut>      metaOut,
-                const uint32        bucket )
+                Span<TMetaOut>      metaOut )
     {
         constexpr size_t MetaInMulti  = TableMetaIn <rTable>::Multiplier;
         constexpr size_t MetaOutMulti = TableMetaOut<rTable>::Multiplier;
@@ -427,7 +474,7 @@ private:
 
         const size_t bufferSize  = CDiv( ySize + metaSizeLR, 8 );
 
-        const uint32 id         = self->JobId();
+        // const uint32 id         = self->JobId();
         const uint32 matchCount = pairs.Length();
         const uint64 yMask      = (uint64)bucket << 32;
 
@@ -509,8 +556,8 @@ private:
                 // const uint64 l1 = metaInB[left ];
                 // const uint64 r0 = metaInA[right];
                 // const uint64 r1 = metaInB[right];
-                const Meta4 l = metaIn[left];
-                const Meta4 r = metaIn[right];
+                const K32Meta4 l = metaIn[left];
+                const K32Meta4 r = metaIn[right];
 
                 input[0] = Swap64( y    << 26 | l.m0 >> 38 );
                 input[1] = Swap64( l.m0 << 26 | l.m1 >> 38 );
@@ -560,14 +607,20 @@ private:
     //-----------------------------------------------------------
     void ReadNextBucket( Job* self, const uint32 bucket )
     {
+        if( bucket >= _numBuckets )
+            return;
+
         if( !self->IsControlThread() )
             return;
 
         _ioQueue.ReadBucketElementsT( _yId[0], _y[bucket] );
         _ioQueue.SignalFence( _yReadFence, bucket + 1 );
 
-        _ioQueue.ReadBucketElementsT( _idxId[0], _index[bucket] );
-        _ioQueue.SignalFence( _indexReadFence, bucket + 1 );
+        if constexpr ( rTable > TableId::Table2 )
+        {
+            _ioQueue.ReadBucketElementsT( _idxId[0], _index[bucket] );
+            _ioQueue.SignalFence( _indexReadFence, bucket + 1 );
+        }
 
         _ioQueue.ReadBucketElementsT<TMetaIn>( _metaId[0], _meta[bucket] );
         _ioQueue.SignalFence( _metaReadFence, bucket + 1 );
@@ -588,25 +641,39 @@ private:
     DiskPlotContext& _context;
     DiskBufferQueue& _ioQueue;
 
-    uint32 _entriesPerBucket = 0;
+    uint32              _entriesPerBucket = 0;
+    std::atomic<uint64> _tableEntryCount  = 0;
 
     // I/O
     FileId _yId   [2];
     FileId _idxId [2];
     FileId _metaId[2];
 
+    // Read buffers
+    Span<uint32>     _yBuffers    [2];
+    Span<uint32>     _indexBuffers[2];
+    Span<K32Meta4>   _metaBuffers [2];
+
+    // Read views
     Span<uint32>     _y    [_numBuckets];
     Span<uint32>     _index[_numBuckets];
     Span<TMetaIn>    _meta [_numBuckets];
+
+    // Write buffers
+    // Span<uint32>     _yWriteBuffer;
+    // Span<uint32>     _indexWriteBuffer;
+    // Span<TMetaOut>   _metaWriteBuffer;
     Span<uint64>     _map;
     Span<uint32>     _pairsL;
     Span<uint16>     _pairsR;
     
-    // Temp working buffers
-    Span<uint32>     _yTmp;
+    // Working buffers
+    Span<uint64>     _yTmp;
     Span<uint32>     _sortKey;
-    Span<Meta4>      _metaTmp;
+    Span<K32Meta4>   _metaTmp[2];
     Span<Pair>       _pairBuffer;
+
+    // Working views
     Span<Pair>       _pairs[BB_DP_MAX_JOBS];    // Pairs buffer divided per thread
 
     // Matching
@@ -621,6 +688,10 @@ private:
     Fence& _mapWriteFence;
 
 
-    // I/O wait accumulator
+public:
+    // Timings
     Duration _tableIOWait = Duration::zero();
+    Duration _sortTime    = Duration::zero();
+    Duration _matchTime   = Duration::zero();
+    Duration _fxTime      = Duration::zero();
 };

@@ -134,7 +134,14 @@ void K32BoundedPhase1::RunF1()
 template<TableId table, uint32 _numBuckets>
 void K32BoundedPhase1::RunFx()
 {
+    Log::Line( "Table %u", table+1 );
+    auto timer = TimerBegin();
+
     DiskPlotFxBounded<table, _numBuckets> fx( _context );
     fx.Run();
+
+    Log::Line( "Completed table %u in %.2lf seconds with %.llu entries.", table+1, TimerEnd( timer ), _context.entryCounts[(int)table] );
+    Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( fx._tableIOWait ) );
+
 }
 

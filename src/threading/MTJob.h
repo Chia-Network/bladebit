@@ -47,7 +47,7 @@ struct MTJobSyncT
 
     // Locks the threads if this is the control thread and returns true.
     // otherwise, waits for release from the control thread and returns false.
-    inline bool LockOrWait();
+    // inline bool LockOrWait();
 
     // Utility functions to simplify control-thread locking
     // and releasing code. This helps keep code the same for all threads
@@ -282,27 +282,33 @@ inline void MTJobSyncT<TJob>::WaitForRelease()
 
 
 //-----------------------------------------------------------
+// template<typename TJob>
+// inline bool MTJobSyncT<TJob>::LockOrWait()
+// {
+//     if( this->IsControlThread() )
+//     {
+//         this->LockThreads();
+//         return true;
+//     }
+//     else
+//     {
+//         this->WaitForRelease();
+//     }
+
+//     return false;
+// }
+
+//-----------------------------------------------------------
 template<typename TJob>
-inline bool MTJobSyncT<TJob>::LockOrWait()
+inline bool MTJobSyncT<TJob>::BeginLockBlock()
 {
     if( this->IsControlThread() )
     {
         this->LockThreads();
         return true;
     }
-    else
-    {
-        this->WaitForRelease();
-    }
 
     return false;
-}
-
-//-----------------------------------------------------------
-template<typename TJob>
-inline bool MTJobSyncT<TJob>::BeginLockBlock()
-{
-    return LockOrWait();
 }
 
 //-----------------------------------------------------------
@@ -311,6 +317,8 @@ inline void MTJobSyncT<TJob>::EndLockBlock()
 {
     if( this->IsControlThread() )
         this->ReleaseThreads();
+    else
+        this->WaitForRelease();
 }
 
 //-----------------------------------------------------------

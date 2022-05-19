@@ -152,7 +152,7 @@ private:
             xEntries[dst] = x;
         }
 
-        // Write to disk
+        // Write to disk (and synchronize threads)
         if( self->BeginLockBlock() )
         {
             _ioQueue.WriteBucketElementsT( FileId::FX0  , yEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
@@ -164,6 +164,9 @@ private:
                 _context.bucketCounts[(int)TableId::Table1][i] += totalCounts[i];
         }
         self->EndLockBlock();
+
+        // #NOTE: Somehow we're not getting synced here... So sync explicitly again
+        self->SyncThreads();
     }
 
     //-----------------------------------------------------------
