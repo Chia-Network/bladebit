@@ -80,7 +80,7 @@
                 "--f1-threads", "12",
                 // "--f1-threads", "3",
                 // "--fp-threads", "62",
-                "--fp-threads", "48",
+                "--fp-threads", "62",
 
                 // "--f1-threads", "7",
                 // "--fp-threads", "7",

@@ -102,13 +102,29 @@ public:
         _sortKey    = allocator.CAllocSpan<uint32>  ( entriesPerBucket );
         _pairBuffer = allocator.CAllocSpan<Pair>    ( entriesPerBucket );
 
-        _offsets = allocator.CAllocSpan<uint32*>( _context.fpThreadCount );
-        for( uint32 i = 0; i < _offsets.Length(); i++ )
-        {
-            Span<uint32> offsets = allocator.CAllocSpan<uint32>( _numBuckets );
-            offsets.ZeroOutElements();
+        const uint32 threadCount = _context.fpThreadCount;
 
-            _offsets[i] = offsets.Ptr();
+        _sliceCountY[0]           = allocator.CAllocSpan<uint32>( _numBuckets );
+        _sliceCountY[1]           = allocator.CAllocSpan<uint32>( _numBuckets );
+        _sliceCountMeta[0]        = allocator.CAllocSpan<uint32>( _numBuckets );
+        _sliceCountMeta[1]        = allocator.CAllocSpan<uint32>( _numBuckets );
+        _alignedSliceCountY[0]    = allocator.CAllocSpan<uint32>( _numBuckets );
+        _alignedSliceCountY[1]    = allocator.CAllocSpan<uint32>( _numBuckets );
+        _alignedsliceCountMeta[0] = allocator.CAllocSpan<uint32>( _numBuckets );
+        _alignedsliceCountMeta[1] = allocator.CAllocSpan<uint32>( _numBuckets );
+
+        _offsetsY    = allocator.CAllocSpan<uint32*>( threadCount );
+        _offsetsMeta = allocator.CAllocSpan<uint32*>( threadCount );
+
+        for( uint32 i = 0; i < _offsetsY.Length(); i++ )
+        {
+            Span<uint32> offsetsY    = allocator.CAllocSpan<uint32>( _numBuckets );
+            Span<uint32> offsetsMeta = allocator.CAllocSpan<uint32>( _numBuckets );
+            offsetsY   .ZeroOutElements();
+            offsetsMeta.ZeroOutElements();
+
+            _offsetsY   [i] = offsetsY   .Ptr();
+            _offsetsMeta[i] = offsetsMeta.Ptr();
         }
 
         // Write buffers
@@ -167,17 +183,13 @@ public:
 
         _context.entryCounts[(int)rTable] = _tableEntryCount;
 
-        Log::Line( " Sorting : Completed in %.2lf seconds.", TicksToSeconds( _sortTime  ) );
-        Log::Line( " Matching: Completed in %.2lf seconds.", TicksToSeconds( _matchTime ) );
-        Log::Line( " Fx      : Completed in %.2lf seconds.", TicksToSeconds( _fxTime    ) );
+        Log::Line( " Sorting      : Completed in %.2lf seconds.", TicksToSeconds( _sortTime  ) );
+        Log::Line( " Distribution : Completed in %.2lf seconds.", TicksToSeconds( _distributeTime ) );
+        Log::Line( " Matching     : Completed in %.2lf seconds.", TicksToSeconds( _matchTime ) );
+        Log::Line( " Fx           : Completed in %.2lf seconds.", TicksToSeconds( _fxTime    ) );
 
         // Ensure all I/O has completed
-        Fence& fence = _context.fencePool->RequireFence();
-        fence.Reset( 0 );
-        _ioQueue.SignalFence( fence, 1 );
-        _ioQueue.CommitCommands();
-        fence.Wait();
-
+        _fxWriteFence.Wait( _numBuckets, _tableIOWait );
         _context.fencePool->RestoreAllFences();
     }
 
@@ -246,7 +258,7 @@ private:
             WaitForFence( self, _metaReadFence, bucket );
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
-            // Gen fx
+            // Gen fx & write
             {
                 Span<uint64>   yOut    = _yTmp.Slice( matchOffset, matches.Length() );
                 Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().Slice( matchOffset, matches.Length() );  //( (TMetaOut*)metaTmp.Ptr(), matches.Length() );
@@ -254,17 +266,15 @@ private:
                 TimePoint timer;
                 if( self->IsControlThread() )
                     timer = TimerBegin();
-                
+
                 GenFx( self, bucket, matches, yInput, metaIn, yOut, metaOut );
                 self->SyncThreads();
 
                 if( self->IsControlThread() )
                     _fxTime += TimerEndTicks( timer );
+
+                WriteEntries( self, bucket, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
             }
-
-
-            // #TODO: Write bucekt
-//            WriteEntries( self )
 
             if( self->IsControlThread() )
                 _tableEntryCount += totalMatches;
@@ -398,14 +408,17 @@ private:
     void WriteEntries( Job* self,
                        const uint32         bucket,
                        const Span<uint64>   yIn,
-                       const Span<TMetaIn>  metaIn,
+                       const Span<TMetaOut> metaIn,
                              Span<uint32>   yOut,
                              Span<TMetaOut> metaOut,
                              Span<uint32>   idxOut )
     {
+        TimePoint timer;
+        if( self->IsControlThread() )
+            timer = TimerBegin();
+
         const uint32 blockSize = (uint32)_ioQueue.BlockSize( _yId[1] );
         const uint32 id        = (uint32)self->JobId();
-
 
         // Distribute to buckets
         const uint32 logBuckets = bblog2( _numBuckets );
@@ -416,29 +429,22 @@ private:
 
         const int64 entryCount = (int64)yIn.Length();
 
-        uint32  counts           [_numBuckets] = {};
-        uint32  pfxSum           [_numBuckets];
-        uint32  pfxSumMeta       [_numBuckets];
-        // uint32  totalCounts      [_numBuckets];
-        uint32  alignedCountsY   [_numBuckets];
-        uint32  alignedCountsMeta[_numBuckets];
-        
-        uint32* sliceCounts = _context.bucketSlices[(int)rTable & 1][bucket];
-        uint32* offsets     = _offsets[id];
+        uint32 counts    [_numBuckets] = {};
+        uint32 pfxSum    [_numBuckets];
+        uint32 pfxSumMeta[_numBuckets];
+
+        const uint32 sliceIdx = bucket & 1; // % 2
+
+        Span<uint32> ySliceCounts          = _sliceCountY[sliceIdx];
+        Span<uint32> metaSliceCounts       = _sliceCountMeta[sliceIdx];
+        Span<uint32> yAlignedSliceCount    = _alignedSliceCountY[sliceIdx];
+        Span<uint32> metaAlignedsliceCount = _alignedsliceCountMeta[sliceIdx];
 
         for( int64 i = 0; i < entryCount; i++ )
             counts[yIn[i] >> bucketShift]++;
 
-        self->CalculateBlockAlignedPrefixSum2( 
-            _numBuckets, 
-            blockSize, 
-            counts, 
-            pfxSum, 
-            pfxSumMeta,
-            sliceCounts,
-            offsets,
-            alignedCountsY,
-            alignedCountsMeta );
+        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, ySliceCounts.Ptr(), _offsetsY[id], yAlignedSliceCount.Ptr() );
+        self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaAlignedsliceCount.Ptr(), _offsetsMeta[id], metaAlignedsliceCount.Ptr() );
 
         // Distribute to buckets
         int64 offset, _;
@@ -446,12 +452,14 @@ private:
 
         for( int64 i = 0; i < entryCount; i++ )
         {
-            const uint64 y      = yIn[i];
-            const uint32 dstIdx = --pfxSum[y >> bucketShift];
+            const uint64 y       = yIn[i];
+            const uint32 yBucket = (uint32)(y >> bucketShift);
+            const uint32 yDst    = --pfxSum    [yBucket];
+            const uint32 metaDst = --pfxSumMeta[yBucket];
 
-            yOut   [dstIdx] = (uint32)(y & yMask);
-            metaOut[dstIdx] = metaIn[i];
-            idxOut [dstIdx] = (uint32)(offset + i);
+            yOut   [yDst]    = (uint32)(y & yMask);
+            idxOut [yDst]    = (uint32)(offset + i);
+            metaOut[metaDst] = metaIn[i];
         }
 
         // Write to disk
@@ -465,13 +473,17 @@ private:
             const FileId metaId = _metaId[1];
             const FileId idxId  = _idxId [1];
 
-            _ioQueue.WriteBucketElementsT<uint32>  ( yId   , yOut   .Ptr(), sliceCounts, alignedCountsY    );
-            _ioQueue.WriteBucketElementsT<uint32>  ( idxId , idxOut .Ptr(), sliceCounts, alignedCountsY    );
-            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(), sliceCounts, alignedCountsMeta );
+            _ioQueue.WriteBucketElementsT<uint32>  ( yId   , yOut   .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT<uint32>  ( idxId , idxOut .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedsliceCount.Ptr(), metaSliceCounts.Ptr() );
             _ioQueue.SignalFence( _fxWriteFence, bucket+1 );
             _ioQueue.CommitCommands();
         }
         self->EndLockBlock();
+
+
+        if( self->IsControlThread() )
+            _distributeTime += TimerEndTicks( timer );
     }
 
     //-----------------------------------------------------------
@@ -663,8 +675,8 @@ private:
     }
 
 private:
-    DiskPlotContext& _context;
-    DiskBufferQueue& _ioQueue;
+    DiskPlotContext&    _context;
+    DiskBufferQueue&    _ioQueue;
 
     uint32              _entriesPerBucket = 0;
     std::atomic<uint64> _tableEntryCount  = 0;
@@ -705,7 +717,12 @@ private:
     FxMatcherBounded _matcher;
 
     // Distributing to buckets
-    Span<uint32*>    _offsets;
+    Span<uint32*>    _offsetsY;
+    Span<uint32*>    _offsetsMeta;
+    Span<uint32>     _sliceCountY   [2];
+    Span<uint32>     _sliceCountMeta[2];
+    Span<uint32>     _alignedSliceCountY   [2];
+    Span<uint32>     _alignedsliceCountMeta[2];
 
     // I/O Synchronization fences
     Fence& _yReadFence;
@@ -718,8 +735,9 @@ private:
 
 public:
     // Timings
-    Duration _tableIOWait = Duration::zero();
-    Duration _sortTime    = Duration::zero();
-    Duration _matchTime   = Duration::zero();
-    Duration _fxTime      = Duration::zero();
+    Duration _tableIOWait    = Duration::zero();
+    Duration _sortTime       = Duration::zero();
+    Duration _distributeTime = Duration::zero();
+    Duration _matchTime      = Duration::zero();
+    Duration _fxTime         = Duration::zero();
 };
