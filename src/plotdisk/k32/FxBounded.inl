@@ -34,6 +34,12 @@ class DiskPlotFxBounded
     using Job     = AnonPrefixSumJob<uint32>;
     static constexpr uint32 _k               = 32;
     static constexpr uint64 _maxTableEntries = (1ull << _k) - 1;
+    static constexpr uint32 _bucketBits      = bblog2( _numBuckets );
+
+    static constexpr uint32 _pairsMaxDelta   = 512;
+    static constexpr uint32 _pairsRightBits  = bblog2( _pairsMaxDelta );
+    static constexpr uint32 _pairBitSize     = _k - _bucketBits + _pairsRightBits;
+
 
 public:
 
@@ -133,8 +139,14 @@ public:
         _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( entriesPerBucket, t2BlockSize );
 
         _map    = allocator.CAllocSpan<uint64>( entriesPerBucket );
-        _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
-        _pairsR = allocator.CAllocSpan<uint16>( entriesPerBucket );
+
+        byte* pairBlocks = (byte*)alloc.CAlloc( 1, t1BlockSize, t1BlockSize );
+        _pairBitWriter   = BitBucketWriter<1>( _ioQueue, FileId::T1 + (FileId)rTable, pairBlocks );
+
+        const size_t pairsWriteSize = CDiv( entriesPerBucket * _pairBitSize, 8 );
+        _pairsWriteBuffer = allocator.AllocT<byte>( pairsWriteSize, t1BlockSize  )
+        // _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
+        // _pairsR = allocator.CAllocSpan<uint16>( entriesPerBucket );
     }
 
     // Generate fx for a whole table
@@ -241,7 +253,7 @@ private:
                 totalMatches = _maxTableEntries;
             }
 
-            //            WritePairs( self, pairs, matchCount );
+            WritePairs( self, matches );
 
             // Generate and write map
             if constexpr ( rTable > TableId::Table2 )
@@ -395,13 +407,70 @@ private:
     //-----------------------------------------------------------
     void WriteMap( Job* self, const Span<uint32> indexInput, const Span<uint32> sortKey )
     {
-
+        
     }
 
     //-----------------------------------------------------------
-    void WritePairs( Job* self, const Span<Pair> pairs, const int64 matchCount, const uint32 bucket )
+    void WritePairs( Job* self, const uint32 bucket, const uint32 totalMatchCount, const Span<Pair> matches, const uint64 dstOffset )
     {
+        // Need to wait for our write buffer to be ready to use again
+        
+        if( self->BeginLockBlock() )
+        {
+            if( bucket > 0 )
+                _pairWriteFence.Wait( bucket );
+
+            uint64 bitBucketSizes = totalMatchCount * _pairBitSize;
+            _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer.Ptr() );
+        }
+        self->EndLockBlock();
+
         // #TOOD: Write pairs raw? Or bucket-relative? Maybe raw for now
+        // for( uint64 i = 0; i < matches.Length(); i++ )
+        // {
+        //     const Pair& pair = matches[i];
+
+        //     outLeft [i] = pair.left;
+        //     outRight[i] = (uint16)(pair.right - pair.left);
+        // }
+
+        // #NOTE: For now we write compressed as in standard FP.        
+        BitWriter writer = _pairBitWriter.GetWriter( 0, dstOffset * _pairBitSize );
+
+        ASSERT( matches.Length() > 2 );
+        PackPairs( self, matches.Slice( 0, 2 ), writer );
+        self->SyncThreads();
+        PackPairs( self, matches.Slice( 2 ), writer );
+        
+        // Write to disk
+        if( self->BeginLockBlock() )
+        {
+            // _ioQueue.WriteFile( FileId::T1 + (FileId)rTable, bucket,  )
+            _pairBitWriter.Submit();
+            _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );
+            _ioQueue.CommitCommands();
+        }
+        self->EndLockBlock();
+    }
+
+    //-----------------------------------------------------------
+    void PackPairs( Job* self, const Span<Pair> pairs, BitWriter& writer )
+    {
+        self;
+
+        const uint32 shift = _pairsRightBits;
+        const uint64 mask  = ( 1ull << shift ) - 1;
+
+        const Pair* pair = pairs.Ptr();
+        const Pair* end  = pair + pairs.Length();
+
+        while( pair < end )
+        {
+            ASSERT( pair->right - pair->left < _pairsMaxDelta );
+
+            writer.Write( ( (uint64)(pair->right - pair->left) << shift ) | ( pair->left & mask ), _pairBitSize );
+            pair++;
+        }
     }
 
     //-----------------------------------------------------------
@@ -682,9 +751,10 @@ private:
     std::atomic<uint64> _tableEntryCount  = 0;
 
     // I/O
-    FileId _yId   [2];
-    FileId _idxId [2];
-    FileId _metaId[2];
+    FileId              _yId   [2];
+    FileId              _idxId [2];
+    FileId              _metaId[2];
+    BitBucketWriter<1>  _pairBitWriter;
 
     // Read buffers
     Span<uint32>     _yBuffers    [2];
@@ -701,8 +771,7 @@ private:
     Span<uint32>     _indexWriteBuffer;
     Span<TMetaOut>   _metaWriteBuffer;
     Span<uint64>     _map;
-    Span<uint32>     _pairsL;
-    Span<uint16>     _pairsR;
+    Span<byte>       _pairsWriteBuffer;
     
     // Working buffers
     Span<uint64>     _yTmp;
