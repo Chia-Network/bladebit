@@ -2,6 +2,7 @@
 #include "plotdisk/DiskPlotContext.h"
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
+#include "plotdisk/BitBucketWriter.h"
 #include "util/StackAllocator.h"
 #include "FpMatchBounded.inl"
 #include "b3/blake3.h"
@@ -77,14 +78,14 @@ public:
         DiskPlotFxBounded<rTable, _numBuckets> instance( cx );
 
         DummyAllocator allocator;
-        instance.AllocateBuffers( allocator, t1BlockSize, t2BlockSize );
+        instance.AllocateBuffers( allocator, t1BlockSize, t2BlockSize, true );
         const size_t requiredSize = allocator.Size();
 
         return requiredSize;
     }
 
     //-----------------------------------------------------------
-    void AllocateBuffers( IAllocator& allocator, const size_t t1BlockSize, const size_t t2BlockSize )
+    void AllocateBuffers( IAllocator& allocator, const size_t t1BlockSize, const size_t t2BlockSize, const bool dryRun )
     {
         const uint64 kEntryCount      = 1ull << _k;
         const uint64 entriesPerBucket = (uint64)( kEntryCount / _numBuckets * BB_DP_XTRA_ENTRIES_PER_BUCKET );
@@ -138,13 +139,14 @@ public:
         _indexWriteBuffer = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
         _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( entriesPerBucket, t2BlockSize );
 
-        _map    = allocator.CAllocSpan<uint64>( entriesPerBucket );
-
-        byte* pairBlocks = (byte*)alloc.CAlloc( 1, t1BlockSize, t1BlockSize );
-        _pairBitWriter   = BitBucketWriter<1>( _ioQueue, FileId::T1 + (FileId)rTable, pairBlocks );
+        _map = allocator.CAllocSpan<uint64>( entriesPerBucket );
 
         const size_t pairsWriteSize = CDiv( entriesPerBucket * _pairBitSize, 8 );
-        _pairsWriteBuffer = allocator.AllocT<byte>( pairsWriteSize, t1BlockSize  )
+        _pairsWriteBuffer = allocator.AllocT<byte>( pairsWriteSize, t1BlockSize );
+        byte* pairBlocks  = (byte*)allocator.CAlloc( 1, t1BlockSize, t1BlockSize );
+        
+        if( !dryRun )
+            _pairBitWriter = BitBucketWriter<1>( _ioQueue, FileId::T1 + (FileId)rTable, pairBlocks );
         // _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
         // _pairsR = allocator.CAllocSpan<uint16>( entriesPerBucket );
     }
@@ -164,7 +166,7 @@ public:
         
         // Allocate buffers
         StackAllocator allocator( _context.heapBuffer, _context.heapSize );
-        AllocateBuffers( allocator, _context.tmp1BlockSize, _context.tmp2BlockSize );
+        AllocateBuffers( allocator, _context.tmp1BlockSize, _context.tmp2BlockSize, false );
 
         // Init buffers
         const uint32 threadCount = _context.fpThreadCount;
@@ -230,12 +232,14 @@ private:
             // Count the total match count
             uint32 totalMatches = 0;
             uint32 matchOffset  = 0;
-            
+
             for( uint32 i = 0; i < threadCount; i++ )
                 totalMatches += (uint32)_pairs[i].Length();
 
             for( uint32 i = 0; i < id; i++ )
                 matchOffset += (uint32)_pairs[i].Length();
+
+            ASSERT( totalMatches <= _entriesPerBucket );
 
             // Prevent overflow entries
             const uint64 tableEntryCount = _tableEntryCount;
@@ -253,7 +257,7 @@ private:
                 totalMatches = _maxTableEntries;
             }
 
-            WritePairs( self, matches );
+            WritePairs( self, bucket, totalMatches, matches, matchOffset );
 
             // Generate and write map
             if constexpr ( rTable > TableId::Table2 )
@@ -395,12 +399,12 @@ private:
             timer = TimerBegin();
     
         auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
+        _pairs[id] = matches;
 
         self->SyncThreads();
         if( self->IsControlThread() )
             _matchTime += TimerEndTicks( timer );
 
-        _pairs[id] = matches;
         return matches;
     }
 
@@ -413,26 +417,20 @@ private:
     //-----------------------------------------------------------
     void WritePairs( Job* self, const uint32 bucket, const uint32 totalMatchCount, const Span<Pair> matches, const uint64 dstOffset )
     {
+        ASSERT( dstOffset + matches.length <= totalMatchCount );
+
         // Need to wait for our write buffer to be ready to use again
-        
         if( self->BeginLockBlock() )
         {
             if( bucket > 0 )
                 _pairWriteFence.Wait( bucket );
 
             uint64 bitBucketSizes = totalMatchCount * _pairBitSize;
-            _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer.Ptr() );
+            _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer );
         }
         self->EndLockBlock();
 
         // #TOOD: Write pairs raw? Or bucket-relative? Maybe raw for now
-        // for( uint64 i = 0; i < matches.Length(); i++ )
-        // {
-        //     const Pair& pair = matches[i];
-
-        //     outLeft [i] = pair.left;
-        //     outRight[i] = (uint16)(pair.right - pair.left);
-        // }
 
         // #NOTE: For now we write compressed as in standard FP.        
         BitWriter writer = _pairBitWriter.GetWriter( 0, dstOffset * _pairBitSize );
@@ -445,7 +443,6 @@ private:
         // Write to disk
         if( self->BeginLockBlock() )
         {
-            // _ioQueue.WriteFile( FileId::T1 + (FileId)rTable, bucket,  )
             _pairBitWriter.Submit();
             _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );
             _ioQueue.CommitCommands();
@@ -771,7 +768,7 @@ private:
     Span<uint32>     _indexWriteBuffer;
     Span<TMetaOut>   _metaWriteBuffer;
     Span<uint64>     _map;
-    Span<byte>       _pairsWriteBuffer;
+    byte*            _pairsWriteBuffer;
     
     // Working buffers
     Span<uint64>     _yTmp;

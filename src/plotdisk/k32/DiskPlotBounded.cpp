@@ -19,20 +19,38 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
     const uint32 numBuckets = context.numBuckets;
 
     // Open files
-    FileSetOptions opts = FileSetOptions::None | FileSetOptions::Interleaved;
-    
-    if( !context.cfg->noTmp2DirectIO )
-        opts |= FileSetOptions::DirectIO;
 
-    FileSetInitData data = {};
-    opts |= FileSetOptions::UseTemp2;
+    // Temp1
+    {
 
-    _ioQueue.InitFileSet( FileId::FX0   , "y0"    , numBuckets, opts, &data );
-    _ioQueue.InitFileSet( FileId::FX1   , "y1"    , numBuckets, opts, &data );
-    _ioQueue.InitFileSet( FileId::INDEX0, "index0", numBuckets, opts, &data );
-    _ioQueue.InitFileSet( FileId::INDEX1, "index1", numBuckets, opts, &data );
-    _ioQueue.InitFileSet( FileId::META0 , "meta0" , numBuckets, opts, &data );
-    _ioQueue.InitFileSet( FileId::META1 , "meta1" , numBuckets, opts, &data );
+        const FileSetOptions tmp1Options = context.cfg->noTmp1DirectIO ? FileSetOptions::None : FileSetOptions::DirectIO;
+
+        _ioQueue.InitFileSet( FileId::T1, "t1", 1, tmp1Options, nullptr );  // X (sorted on Y)
+        _ioQueue.InitFileSet( FileId::T2, "t2", 1, tmp1Options, nullptr );  // Back pointers
+        _ioQueue.InitFileSet( FileId::T3, "t3", 1, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::T4, "t4", 1, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::T5, "t5", 1, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::T6, "t6", 1, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::T7, "t7", 1, tmp1Options, nullptr );
+    }
+
+    // Temp2
+    {
+        FileSetOptions opts = FileSetOptions::None | FileSetOptions::Interleaved;
+        
+        if( !context.cfg->noTmp2DirectIO )
+            opts |= FileSetOptions::DirectIO;
+
+        FileSetInitData data = {};
+        opts |= FileSetOptions::UseTemp2;
+
+        _ioQueue.InitFileSet( FileId::FX0   , "y0"    , numBuckets, opts, &data );
+        _ioQueue.InitFileSet( FileId::FX1   , "y1"    , numBuckets, opts, &data );
+        _ioQueue.InitFileSet( FileId::INDEX0, "index0", numBuckets, opts, &data );
+        _ioQueue.InitFileSet( FileId::INDEX1, "index1", numBuckets, opts, &data );
+        _ioQueue.InitFileSet( FileId::META0 , "meta0" , numBuckets, opts, &data );
+        _ioQueue.InitFileSet( FileId::META1 , "meta1" , numBuckets, opts, &data );
+    }
 }
 
 //-----------------------------------------------------------

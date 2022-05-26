@@ -5,9 +5,9 @@
 #include "plotdisk/DiskPlotContext.h"
 #include "plotdisk/FpGroupMatcher.h"
 #include "plotdisk/FpFxGen.h"
-#include "DiskPlotInfo.h"
-#include "BitBucketWriter.h"
-#include "BlockWriter.h"
+#include "plotdisk/BlockWriter.h"
+#include "plotdisk/DiskPlotInfo.h"
+#include "plotdisk/BitBucketWriter.h"
 #include "util/StackAllocator.h"
 #include "plotting/TableWriter.h"
 

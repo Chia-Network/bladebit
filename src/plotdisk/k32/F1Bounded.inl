@@ -166,6 +166,7 @@ private:
         self->EndLockBlock();
 
         // #NOTE: Somehow we're not getting synced here... So sync explicitly again
+        // #NOTE2: The issue is still happening even with this sync.
         self->SyncThreads();
     }
 
