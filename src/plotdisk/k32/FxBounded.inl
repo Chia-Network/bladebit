@@ -3,6 +3,7 @@
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
 #include "plotdisk/BitBucketWriter.h"
+#include "plotdisk/MapWriter.h"
 #include "util/StackAllocator.h"
 #include "FpMatchBounded.inl"
 #include "b3/blake3.h"
@@ -146,9 +147,19 @@ public:
         byte* pairBlocks  = (byte*)allocator.CAlloc( 1, t1BlockSize, t1BlockSize );
         
         if( !dryRun )
+        {
             _pairBitWriter = BitBucketWriter<1>( _ioQueue, FileId::T1 + (FileId)rTable, pairBlocks );
+            
+            // _mapWriter = MapWriter<_numBuckets, false>( _ioQueue, FileId::MAP2 + (FileId)(rTable-1), allocator, 
+            //                                             entriesPerBucket, t1BlockSize, _mapWriteFence, _tableIOWait );
+        }
+        else
+        {
+            // _mapWriter = MapWriter<_numBuckets, false>( entriesPerBucket, allocator, t1BlockSize );
+        }
         // _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
         // _pairsR = allocator.CAllocSpan<uint16>( entriesPerBucket );
+
     }
 
     // Generate fx for a whole table
@@ -189,6 +200,9 @@ public:
                 _meta [i] = _metaBuffers [bufIdx].As<TMetaIn>();
             }
         }
+
+        // Set some initial fence status
+        _mapWriteFence.Signal( 0 );
         
         // Run mmulti-threaded
         Job::Run( *_context.threadPool, threadCount, [=]( Job* self ) {
@@ -227,6 +241,28 @@ private:
             Span<uint32> sortKey = _sortKey.SliceSize( entryCount );
             SortY( self, entryCount, yInput.Ptr(), _yTmp.As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[0].As<uint32>().Ptr() );
 
+
+            ///
+            /// Write reverse map, given the previous table's y origin indices
+            ///
+            if constexpr ( rTable > TableId::Table2 )
+            {
+                WaitForFence( self, _indexReadFence, bucket );
+
+                Span<uint32> indices = _metaTmp[0].As<uint32>();
+
+                SortOnYKey( self, sortKey, _index[bucket], indices );
+                WriteMap( self, indices, _map.SliceSize( entryCount ), (uint32)_tableEntryCount );
+            }
+            else
+            {
+                // #TOOD Write T1 x
+            }
+
+
+            ///
+            /// Match
+            ///
             Span<Pair> matches = Match( self, bucket, yInput );
 
             // Count the total match count
@@ -258,14 +294,6 @@ private:
             }
 
             WritePairs( self, bucket, totalMatches, matches, matchOffset );
-
-            // Generate and write map
-            if constexpr ( rTable > TableId::Table2 )
-            {
-                WaitForFence( self, _indexReadFence, bucket );
-            // Span<uint32> indexInput = _index  [bucket];
-//            WriteMap( self, indexInput, sortKey ); // Write reverse map, given the previous table's y origin indices
-            }
 
             // Sort meta on Y
             Span<TMetaIn> metaTmp = _meta[bucket].SliceSize( yInput.Length() );
@@ -409,9 +437,57 @@ private:
     }
 
     //-----------------------------------------------------------
-    void WriteMap( Job* self, const Span<uint32> indexInput, const Span<uint32> sortKey )
+    void WriteMap( Job* self, const Span<uint32> bucketIndices, Span<uint64> mapOut, const uint32 tableOffset )
     {
-        
+        const uint32 bucketShift   = _k - _bucketBits;
+        const uint32 bitSize       = _k + bucketShift;
+
+        uint32 counts     [_numBuckets] = { 0 };
+        uint32 pfxSum     [_numBuckets];
+        uint32 totalCounts[_numBuckets];
+
+        uint32 count, offset, _;
+        GetThreadOffsets( self, (uint32)bucketIndices.Length(), count, offset, _ );
+
+        auto indices = bucketIndices.Slice( offset, count );
+
+        // Count buckets
+        for( size_t i = 0; i < indices.Length(); i++ )
+        {
+            const uint32 b = indices[i] >> bucketShift; ASSERT( b < _numBuckets );
+            counts[b]++;
+        }
+
+        self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
+
+        // Wait for write fence
+        if( self->BeginLockBlock() )
+            _mapWriteFence.Wait();
+        self->EndLockBlock();
+
+        // Distribute as 64-bit entries
+        const uint64 outOffset = tableOffset + offset;
+
+        for( size_t i = 0; i < indices.Length(); i++ )
+        {
+            const uint64 origin = indices[i];
+            const uint32 b      = origin >> bucketShift;    ASSERT( b < _numBuckets );
+
+            const uint32 dstIdx = --pfxSum[b];
+
+            mapOut[dstIdx] = (origin << _k) | (outOffset + i);  // (origin, dst index)
+        }
+
+        // Write map to disk
+        if( self->BeginLockBlock() )
+        {
+            memcpy( _mapCounts, totalCounts , sizeof( totalCounts ) );
+
+            _ioQueue.WriteBucketElementsT<uint64>( FileId::MAP2 + (FileId)rTable-1, mapOut.Ptr(), _mapCounts );
+            _ioQueue.SignalFence( _mapWriteFence );
+            _ioQueue.CommitCommands();
+        }
+        self->EndLockBlock();
     }
 
     //-----------------------------------------------------------
@@ -782,6 +858,10 @@ private:
     // Matching
     FxMatcherBounded _matcher;
 
+    // Map
+    // MapWriter<_numBuckets, false> _mapWriter;
+    uint32 _mapCounts[_numBuckets];
+
     // Distributing to buckets
     Span<uint32*>    _offsetsY;
     Span<uint32*>    _offsetsMeta;
@@ -807,3 +887,4 @@ public:
     Duration _matchTime      = Duration::zero();
     Duration _fxTime         = Duration::zero();
 };
+

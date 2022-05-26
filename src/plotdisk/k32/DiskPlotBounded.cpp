@@ -32,6 +32,13 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
         _ioQueue.InitFileSet( FileId::T5, "t5", 1, tmp1Options, nullptr );
         _ioQueue.InitFileSet( FileId::T6, "t6", 1, tmp1Options, nullptr );
         _ioQueue.InitFileSet( FileId::T7, "t7", 1, tmp1Options, nullptr );
+
+        _ioQueue.InitFileSet( FileId::MAP2, "map2", numBuckets, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::MAP3, "map3", numBuckets, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::MAP4, "map4", numBuckets, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::MAP5, "map5", numBuckets, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::MAP6, "map6", numBuckets, tmp1Options, nullptr );
+        _ioQueue.InitFileSet( FileId::MAP7, "map7", numBuckets, tmp1Options, nullptr );
     }
 
     // Temp2
