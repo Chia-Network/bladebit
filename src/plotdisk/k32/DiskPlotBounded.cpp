@@ -65,14 +65,14 @@ K32BoundedPhase1::~K32BoundedPhase1()
 {}
 
 //-----------------------------------------------------------
-size_t K32BoundedPhase1::GetRequiredSize( const uint32 numBuckets, const size_t t1BlockSize, const size_t t2BlockSize )
+size_t K32BoundedPhase1::GetRequiredSize( const uint32 numBuckets, const size_t t1BlockSize, const size_t t2BlockSize, const uint32 threadCount )
 {
     switch( numBuckets )
     {
-        case 64 : return DiskPlotFxBounded<TableId::Table4,64 >::GetRequiredHeapSize( t1BlockSize, t2BlockSize );
-        case 128: return DiskPlotFxBounded<TableId::Table4,128>::GetRequiredHeapSize( t1BlockSize, t2BlockSize );
-        case 256: return DiskPlotFxBounded<TableId::Table4,256>::GetRequiredHeapSize( t1BlockSize, t2BlockSize );
-        case 512: return DiskPlotFxBounded<TableId::Table4,512>::GetRequiredHeapSize( t1BlockSize, t2BlockSize );
+        case 64 : return DiskPlotFxBounded<TableId::Table4,64 >::GetRequiredHeapSize( t1BlockSize, t2BlockSize, threadCount );
+        case 128: return DiskPlotFxBounded<TableId::Table4,128>::GetRequiredHeapSize( t1BlockSize, t2BlockSize, threadCount );
+        case 256: return DiskPlotFxBounded<TableId::Table4,256>::GetRequiredHeapSize( t1BlockSize, t2BlockSize, threadCount );
+        case 512: return DiskPlotFxBounded<TableId::Table4,512>::GetRequiredHeapSize( t1BlockSize, t2BlockSize, threadCount );
         default:
             break;
     }

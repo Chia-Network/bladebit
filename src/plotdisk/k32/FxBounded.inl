@@ -8,6 +8,10 @@
 #include "FpMatchBounded.inl"
 #include "b3/blake3.h"
 
+#if _DEBUG
+    #include "algorithm/RadixSort.h"
+#endif
+
 typedef uint32 K32Meta1;
 typedef uint64 K32Meta2;
 struct K32Meta3 { uint32 m0, m1, m2; };
@@ -72,21 +76,21 @@ public:
     }
 
     //-----------------------------------------------------------
-    static size_t GetRequiredHeapSize( const size_t t1BlockSize, const size_t t2BlockSize )
+    static size_t GetRequiredHeapSize( const size_t t1BlockSize, const size_t t2BlockSize, const uint32 threadCount )
     {
         DiskPlotContext cx = {};
 
-        DiskPlotFxBounded<rTable, _numBuckets> instance( cx );
+        DiskPlotFxBounded<TableId::Table4, _numBuckets> instance( cx );
 
         DummyAllocator allocator;
-        instance.AllocateBuffers( allocator, t1BlockSize, t2BlockSize, true );
+        instance.AllocateBuffers( allocator, t1BlockSize, t2BlockSize, threadCount, true );
         const size_t requiredSize = allocator.Size();
 
         return requiredSize;
     }
 
     //-----------------------------------------------------------
-    void AllocateBuffers( IAllocator& allocator, const size_t t1BlockSize, const size_t t2BlockSize, const bool dryRun )
+    void AllocateBuffers( IAllocator& allocator, const size_t t1BlockSize, const size_t t2BlockSize, const uint32 threadCount, const bool dryRun )
     {
         const uint64 kEntryCount      = 1ull << _k;
         const uint64 entriesPerBucket = (uint64)( kEntryCount / _numBuckets * BB_DP_XTRA_ENTRIES_PER_BUCKET );
@@ -110,8 +114,6 @@ public:
         _sortKey    = allocator.CAllocSpan<uint32>  ( entriesPerBucket );
         _pairBuffer = allocator.CAllocSpan<Pair>    ( entriesPerBucket );
 
-        const uint32 threadCount = _context.fpThreadCount;
-
         _sliceCountY[0]           = allocator.CAllocSpan<uint32>( _numBuckets );
         _sliceCountY[1]           = allocator.CAllocSpan<uint32>( _numBuckets );
         _sliceCountMeta[0]        = allocator.CAllocSpan<uint32>( _numBuckets );
@@ -128,11 +130,15 @@ public:
         {
             Span<uint32> offsetsY    = allocator.CAllocSpan<uint32>( _numBuckets );
             Span<uint32> offsetsMeta = allocator.CAllocSpan<uint32>( _numBuckets );
-            offsetsY   .ZeroOutElements();
-            offsetsMeta.ZeroOutElements();
 
-            _offsetsY   [i] = offsetsY   .Ptr();
-            _offsetsMeta[i] = offsetsMeta.Ptr();
+            if( !dryRun )
+            {
+                offsetsY   .ZeroOutElements();
+                offsetsMeta.ZeroOutElements();
+
+                _offsetsY   [i] = offsetsY   .Ptr();
+                _offsetsMeta[i] = offsetsMeta.Ptr();
+            }
         }
 
         // Write buffers
@@ -177,7 +183,7 @@ public:
         
         // Allocate buffers
         StackAllocator allocator( _context.heapBuffer, _context.heapSize );
-        AllocateBuffers( allocator, _context.tmp1BlockSize, _context.tmp2BlockSize, false );
+        AllocateBuffers( allocator, _context.tmp1BlockSize, _context.tmp2BlockSize,  _context.fpThreadCount, false );
 
         // Init buffers
         const uint32 threadCount = _context.fpThreadCount;
@@ -219,6 +225,10 @@ public:
         // Ensure all I/O has completed
         _fxWriteFence.Wait( _numBuckets, _tableIOWait );
         _context.fencePool->RestoreAllFences();
+
+        #if _DEBUG
+            ValidateIndices();
+        #endif
     }
 
 private:
@@ -232,6 +242,8 @@ private:
 
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
+            // if( bucket == 63 && self->JobId() == 0 ) BBDebugBreak();
+
             ReadNextBucket( self, bucket + 1 ); // Read next bucket in background
             WaitForFence( self, _yReadFence, bucket );
 
@@ -248,11 +260,12 @@ private:
             if constexpr ( rTable > TableId::Table2 )
             {
                 WaitForFence( self, _indexReadFence, bucket );
+                ASSERT( _index[bucket].Length() == entryCount );
 
-                Span<uint32> indices = _metaTmp[0].As<uint32>();
+                Span<uint32> indices = _metaTmp[0].As<uint32>().SliceSize( entryCount );
 
                 SortOnYKey( self, sortKey, _index[bucket], indices );
-                WriteMap( self, indices, _map.SliceSize( entryCount ), (uint32)_tableEntryCount );
+                WriteMap( self, indices, _map.SliceSize( entryCount ), _mapOffset );
             }
             else
             {
@@ -317,11 +330,14 @@ private:
                 if( self->IsControlThread() )
                     _fxTime += TimerEndTicks( timer );
 
-                WriteEntries( self, bucket, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
+                WriteEntries( self, bucket,  (uint32)_tableEntryCount + matchOffset, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
             }
 
             if( self->IsControlThread() )
+            {
                 _tableEntryCount += totalMatches;
+                _mapOffset       += entryCount;
+            }
         }
     }
 
@@ -439,8 +455,7 @@ private:
     //-----------------------------------------------------------
     void WriteMap( Job* self, const Span<uint32> bucketIndices, Span<uint64> mapOut, const uint32 tableOffset )
     {
-        const uint32 bucketShift   = _k - _bucketBits;
-        const uint32 bitSize       = _k + bucketShift;
+        const uint32 bucketShift = _k - _bucketBits;
 
         uint32 counts     [_numBuckets] = { 0 };
         uint32 pfxSum     [_numBuckets];
@@ -549,6 +564,7 @@ private:
     //-----------------------------------------------------------
     void WriteEntries( Job* self,
                        const uint32         bucket,
+                       const uint32         idxOffset,
                        const Span<uint64>   yIn,
                        const Span<TMetaOut> metaIn,
                              Span<uint32>   yOut,
@@ -589,9 +605,6 @@ private:
         self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaAlignedsliceCount.Ptr(), _offsetsMeta[id], metaAlignedsliceCount.Ptr() );
 
         // Distribute to buckets
-        int64 offset, _;
-        GetThreadOffsets( self, (int64)yIn.Length(), _, offset, _ );
-
         for( int64 i = 0; i < entryCount; i++ )
         {
             const uint64 y       = yIn[i];
@@ -600,7 +613,7 @@ private:
             const uint32 metaDst = --pfxSumMeta[yBucket];
 
             yOut   [yDst]    = (uint32)(y & yMask);
-            idxOut [yDst]    = (uint32)(offset + i);
+            idxOut [yDst]    = idxOffset + (uint32)i;   ASSERT( (uint64)idxOffset + (uint64)i < (1ull << _k) );
             metaOut[metaDst] = metaIn[i];
         }
 
@@ -817,11 +830,66 @@ private:
     }
 
 private:
+    // DEBUG
+    #if _DEBUG
+    //-----------------------------------------------------------
+    void ValidateIndices()
+    {
+        Log::Line( "[DEBUG: Validating table %u indices]", rTable+1 );
+
+        // Load indices
+        const uint64 entryCount = _context.entryCounts[(int)rTable];
+
+        const FileId fileId = _idxId[1];
+        _ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
+        _ioQueue.CommitCommands();
+
+        Span<uint32> indices    = bbcvirtallocboundednuma_span<uint32>( entryCount );
+        Span<uint32> tmpIndices = bbcvirtallocboundednuma_span<uint32>( entryCount );
+        
+        {
+            Log::Line( " Loading indices" );
+            Fence fence;
+            Span<uint32> writer = indices;
+
+            for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+            {
+                Span<uint32> reader = tmpIndices;
+
+                _ioQueue.ReadBucketElementsT<uint32>( fileId, reader );
+                _ioQueue.SignalFence( fence );
+                _ioQueue.CommitCommands();
+                fence.Wait();
+
+                reader.CopyTo( writer );
+                writer = writer.Slice( reader.Length() );
+            }
+        }
+
+        // Now sort our entries
+        Log::Line( " Sorting indices" );
+        RadixSort256::Sort<BB_DP_MAX_JOBS>( *_context.threadPool, indices.Ptr(), tmpIndices.Ptr(), indices.Length() );
+
+        // Now validate them
+        Log::Line( " Validating indices" );
+        for( size_t i = 0; i < indices.Length(); i++ )
+        {
+            ASSERT( indices[i] == i );
+        }
+
+        Log::Line( " Indices are valid" );
+        bbvirtfreebounded( indices.Ptr() );
+        bbvirtfreebounded( tmpIndices.Ptr() );
+    }
+    #endif
+
+private:
     DiskPlotContext&    _context;
     DiskBufferQueue&    _ioQueue;
 
     uint32              _entriesPerBucket = 0;
-    std::atomic<uint64> _tableEntryCount  = 0;
+    std::atomic<uint32> _mapOffset        = 0;  // For writing maps
+    std::atomic<uint64> _tableEntryCount  = 0;  // For writing indices
 
     // I/O
     FileId              _yId   [2];

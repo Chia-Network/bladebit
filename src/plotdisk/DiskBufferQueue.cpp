@@ -839,7 +839,10 @@ void DiskBufferQueue::CmdSeekBucket( const Command& cmd )
         {
             int err = fileBuckets.files[i]->GetError();
             Fatal( "[DiskBufferQueue] Failed to seek file %s.%u with error %d (0x%x)", fileBuckets.name, i, err, err );
+
         }
+        
+        // #TODO: Set the bucket number to 0 on origin == 0?
     }
 }
 

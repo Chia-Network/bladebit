@@ -40,17 +40,6 @@ DiskPlotter::DiskPlotter( const Config& cfg )
 
     FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
 
-    const size_t heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
-    ASSERT( heapSize );
-
-    _cfg            = cfg;
-    _cx.cfg         = &_cfg;
-    _cx.tmpPath     = cfg.tmpPath;
-    _cx.tmpPath2    = cfg.tmpPath2;
-    _cx.numBuckets  = cfg.numBuckets;
-    _cx.heapSize    = heapSize;
-    _cx.cacheSize   = cfg.cacheSize;
-
     const uint  sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
     const auto* numa                = SysHost::GetNUMAInfo();
 
@@ -61,6 +50,17 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     _cx.cThreadCount  = cfg.cThreadCount  == 0 ? gCfg.threadCount : std::min( cfg.cThreadCount , sysLogicalCoreCount );
     _cx.p2ThreadCount = cfg.p2ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p2ThreadCount, sysLogicalCoreCount );
     _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
+
+    const size_t heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize, _cx.fpThreadCount );
+    ASSERT( heapSize );
+
+    _cfg            = cfg;
+    _cx.cfg         = &_cfg;
+    _cx.tmpPath     = cfg.tmpPath;
+    _cx.tmpPath2    = cfg.tmpPath2;
+    _cx.numBuckets  = cfg.numBuckets;
+    _cx.heapSize    = heapSize;
+    _cx.cacheSize   = cfg.cacheSize;
 
     Log::Line( "[Bladebit Disk Plotter]" );
     Log::Line( " Heap size      : %.2lf GiB ( %.2lf MiB )", (double)_cx.heapSize BtoGB, (double)_cx.heapSize BtoMB );
@@ -300,10 +300,10 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
             if( cfg.tmpPath )
             {
                 cfg.tmpPath2 = cfg.tmpPath2 ? cfg.tmpPath2 : cfg.tmpPath;
-                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, cfg.tmpPath2, cfg.tmpPath );
+                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, cfg.tmpPath2, cfg.tmpPath, BB_DP_MAX_JOBS );
             }
             else
-                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, 1, 1 );
+                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, 1, 1, BB_DP_MAX_JOBS );
                 
             Log::Line( "Buckets: %u | Heap Sizes: %.2lf GiB", cfg.numBuckets, (double)heapSize BtoGB );
             exit( 0 );
@@ -449,21 +449,21 @@ EXIT:
 }
 
 //-----------------------------------------------------------
-size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2 )
+size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2, const uint32 threadCount )
 {
     size_t blockSizes[2] = { 0 };
 
     if( !GetTmpPathsBlockSizes( tmpPath1, tmpPath2, blockSizes[0], blockSizes[1] ) )
         return 0;
 
-    return GetRequiredSizeForBuckets( bounded, numBuckets, blockSizes[0], blockSizes[1] );
+    return GetRequiredSizeForBuckets( bounded, numBuckets, blockSizes[0], blockSizes[1], threadCount );
 }
 
 //-----------------------------------------------------------
-size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize )
+size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize, const uint32 threadCount )
 {
     if( bounded )
-        return K32BoundedPhase1::GetRequiredSize( numBuckets, pairsBlockSize, fxBlockSize );
+        return K32BoundedPhase1::GetRequiredSize( numBuckets, pairsBlockSize, fxBlockSize, threadCount );
 
     switch( numBuckets )
     {

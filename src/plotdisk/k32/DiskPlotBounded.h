@@ -10,7 +10,7 @@ public:
 
     void Run();
 
-    static size_t GetRequiredSize( const uint32 numBuckets, const size_t t1BlockSize, const size_t t2BlockSize );
+    static size_t GetRequiredSize( const uint32 numBuckets, const size_t t1BlockSize, const size_t t2BlockSize, const uint32 threadCount );
 
 private:
 
