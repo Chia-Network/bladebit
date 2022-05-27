@@ -102,9 +102,20 @@ void K32BoundedPhase1::Run()
 template<uint32 _numBuckets>
 void K32BoundedPhase1::RunWithBuckets()
 {
-    RunF1<_numBuckets>();
+    TableId startTable = TableId::Table2;
 
-    for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
+    #if defined( _DEBUG ) && defined( BB_DP_P1_SKIP_TO_TABLE ) 
+    {
+        _context.entryCounts[0] = 1ull << 32;
+        ASSERT( BB_DP_P1_START_TABLE > TableId::Table2 );
+        startTable = BB_DP_P1_START_TABLE;
+    }
+    #else
+        RunF1<_numBuckets>();
+    #endif
+
+
+    for( TableId table = startTable; table <= TableId::Table7; table++ )
     {
         switch( table )
         {

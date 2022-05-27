@@ -43,7 +43,10 @@ namespace Debug
     void LoadRefLPIndexTable( const TableId table, uint32*& buffer, uint64& outEntryCount );
 
     template<uint32 _numBuckets>
-    void ValidatePairs(  DiskPlotContext& context, const TableId table );
+    void ValidatePairs( DiskPlotContext& context, const TableId table );
+
+    template<uint32 _numBuckets>
+    void ValidateK32Pairs( DiskPlotContext& context, const TableId table );
 }
 
 template<TableId table, uint32 numBuckets, typename TYOut>
@@ -436,3 +439,9 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
     bbvirtfree( tmpPairs );
 }
 
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
+void Debug::ValidateK32Pairs( DiskPlotContext& context, const TableId table )
+{
+
+}

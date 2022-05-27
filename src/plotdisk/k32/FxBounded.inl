@@ -12,6 +12,17 @@
     #include "algorithm/RadixSort.h"
 #endif
 
+#define _VALIDATE_Y 1
+#if _VALIDATE_Y
+    uint32       _refBucketCounts[BB_DP_MAX_BUCKET_COUNT];
+    Span<uint64> _yRef;
+    Span<uint64> _yRefWriter;
+    
+    template<uint32 _numBuckets>
+    void DbgValidateY( const TableId table, DiskPlotContext& context );
+#endif
+
+
 typedef uint32 K32Meta1;
 typedef uint64 K32Meta2;
 struct K32Meta3 { uint32 m0, m1, m2; };
@@ -146,14 +157,15 @@ public:
         _indexWriteBuffer = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
         _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( entriesPerBucket, t2BlockSize );
 
-        _map = allocator.CAllocSpan<uint64>( entriesPerBucket );
 
         const size_t pairsWriteSize = CDiv( entriesPerBucket * _pairBitSize, 8 );
+        _mapWriteBuffer   = allocator.CAllocSpan<uint64>  ( entriesPerBucket, t1BlockSize );
         _pairsWriteBuffer = allocator.AllocT<byte>( pairsWriteSize, t1BlockSize );
         byte* pairBlocks  = (byte*)allocator.CAlloc( 1, t1BlockSize, t1BlockSize );
         
         if( !dryRun )
         {
+            ASSERT( (uintptr_t)_mapWriteBuffer.Ptr() / t1BlockSize * t1BlockSize == (uintptr_t)_mapWriteBuffer.Ptr() );
             _pairBitWriter = BitBucketWriter<1>( _ioQueue, FileId::T1 + (FileId)rTable, pairBlocks );
             
             // _mapWriter = MapWriter<_numBuckets, false>( _ioQueue, FileId::MAP2 + (FileId)(rTable-1), allocator, 
@@ -209,7 +221,7 @@ public:
 
         // Set some initial fence status
         _mapWriteFence.Signal( 0 );
-        
+
         // Run mmulti-threaded
         Job::Run( *_context.threadPool, threadCount, [=]( Job* self ) {
             RunMT( self );
@@ -227,7 +239,10 @@ public:
         _context.fencePool->RestoreAllFences();
 
         #if _DEBUG
-            ValidateIndices();
+            // ValidateIndices();
+        #endif
+        #if _VALIDATE_Y
+            DbgValidateY();
         #endif
     }
 
@@ -265,7 +280,7 @@ private:
                 Span<uint32> indices = _metaTmp[0].As<uint32>().SliceSize( entryCount );
 
                 SortOnYKey( self, sortKey, _index[bucket], indices );
-                WriteMap( self, indices, _map.SliceSize( entryCount ), _mapOffset );
+                WriteMap( self, indices, _mapWriteBuffer, _mapOffset );
             }
             else
             {
@@ -329,6 +344,20 @@ private:
 
                 if( self->IsControlThread() )
                     _fxTime += TimerEndTicks( timer );
+
+                #if _VALIDATE_Y
+                if( self->IsControlThread() )
+                {
+                    if( _yRef.Ptr() == nullptr )
+                    {
+                        _yRef = Span<uint64>( bbcvirtallocboundednuma<uint64>( 1ull << 32 ), 1ull << 32 );
+                        _yRefWriter = _yRef;
+                    }
+
+                    _yTmp.SliceSize( totalMatches ).CopyTo( _yRefWriter );
+                    _yRefWriter = _yRefWriter.Slice( totalMatches );
+                }
+                #endif
 
                 WriteEntries( self, bucket,  (uint32)_tableEntryCount + matchOffset, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
             }
@@ -430,6 +459,9 @@ private:
     //-----------------------------------------------------------
     Span<Pair> Match( Job* self, const uint32 bucket, Span<uint32> yEntries )
     {
+        if( rTable == TableId::Table4 && bucket == 3 && self->JobId() == 0 )
+            BBDebugBreak();
+            
         const uint32 id          = self->JobId();
         const uint32 threadCount = self->JobCount();
 
@@ -456,10 +488,11 @@ private:
     void WriteMap( Job* self, const Span<uint32> bucketIndices, Span<uint64> mapOut, const uint32 tableOffset )
     {
         const uint32 bucketShift = _k - _bucketBits;
+        const uint32 blockSize   = (uint32)_ioQueue.BlockSize( FileId::MAP2 );
 
-        uint32 counts     [_numBuckets] = { 0 };
-        uint32 pfxSum     [_numBuckets];
-        uint32 totalCounts[_numBuckets];
+        uint32 counts [_numBuckets] = { 0 };
+        uint32 pfxSum [_numBuckets];
+        uint32 offsets[_numBuckets];
 
         uint32 count, offset, _;
         GetThreadOffsets( self, (uint32)bucketIndices.Length(), count, offset, _ );
@@ -473,7 +506,21 @@ private:
             counts[b]++;
         }
 
-        self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
+        uint32* pSliceCounts   = nullptr;
+        uint32* pAlignedCounts = nullptr;
+        uint32* pOffsets       = offsets;
+
+        if( self->IsControlThread() )
+        {
+            pSliceCounts   = _mapSliceCounts;
+            pAlignedCounts = _mapAlignedCounts;
+            pOffsets       = _mapOffsets;
+        }
+        else
+            memcpy( offsets, _mapOffsets, sizeof( offsets ) );
+
+        self->CalculateBlockAlignedPrefixSum<uint64>( _numBuckets, blockSize, counts, pfxSum, pSliceCounts, pOffsets, pAlignedCounts );
+        // self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
 
         // Wait for write fence
         if( self->BeginLockBlock() )
@@ -488,7 +535,7 @@ private:
             const uint64 origin = indices[i];
             const uint32 b      = origin >> bucketShift;    ASSERT( b < _numBuckets );
 
-            const uint32 dstIdx = --pfxSum[b];
+            const uint32 dstIdx = --pfxSum[b]; ASSERT( dstIdx < mapOut.Length() );
 
             mapOut[dstIdx] = (origin << _k) | (outOffset + i);  // (origin, dst index)
         }
@@ -496,9 +543,7 @@ private:
         // Write map to disk
         if( self->BeginLockBlock() )
         {
-            memcpy( _mapCounts, totalCounts , sizeof( totalCounts ) );
-
-            _ioQueue.WriteBucketElementsT<uint64>( FileId::MAP2 + (FileId)rTable-1, mapOut.Ptr(), _mapCounts );
+            _ioQueue.WriteBucketElementsT<uint64>( FileId::MAP2 + (FileId)rTable-2, mapOut.Ptr(), _mapAlignedCounts, _mapSliceCounts );
             _ioQueue.SignalFence( _mapWriteFence );
             _ioQueue.CommitCommands();
         }
@@ -506,7 +551,8 @@ private:
     }
 
     //-----------------------------------------------------------
-    void WritePairs( Job* self, const uint32 bucket, const uint32 totalMatchCount, const Span<Pair> matches, const uint64 dstOffset )
+    void WritePairs( Job* self, const uint32 bucket, const uint32 totalMatchCount, 
+                     const Span<Pair> matches, const uint64 dstOffset )
     {
         ASSERT( dstOffset + matches.length <= totalMatchCount );
 
@@ -530,7 +576,7 @@ private:
         PackPairs( self, matches.Slice( 0, 2 ), writer );
         self->SyncThreads();
         PackPairs( self, matches.Slice( 2 ), writer );
-        
+
         // Write to disk
         if( self->BeginLockBlock() )
         {
@@ -602,7 +648,7 @@ private:
             counts[yIn[i] >> bucketShift]++;
 
         self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, ySliceCounts.Ptr(), _offsetsY[id], yAlignedSliceCount.Ptr() );
-        self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaAlignedsliceCount.Ptr(), _offsetsMeta[id], metaAlignedsliceCount.Ptr() );
+        self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedsliceCount.Ptr() );
 
         // Distribute to buckets
         for( int64 i = 0; i < entryCount; i++ )
@@ -911,7 +957,7 @@ private:
     Span<uint32>     _yWriteBuffer;
     Span<uint32>     _indexWriteBuffer;
     Span<TMetaOut>   _metaWriteBuffer;
-    Span<uint64>     _map;
+    Span<uint64>     _mapWriteBuffer;
     byte*            _pairsWriteBuffer;
     
     // Working buffers
@@ -928,7 +974,9 @@ private:
 
     // Map
     // MapWriter<_numBuckets, false> _mapWriter;
-    uint32 _mapCounts[_numBuckets];
+    uint32 _mapSliceCounts  [_numBuckets];
+    uint32 _mapAlignedCounts[_numBuckets];
+    uint32 _mapOffsets      [_numBuckets] = {};
 
     // Distributing to buckets
     Span<uint32*>    _offsetsY;
@@ -955,4 +1003,52 @@ public:
     Duration _matchTime      = Duration::zero();
     Duration _fxTime         = Duration::zero();
 };
+
+
+
+#if _VALIDATE_Y
+
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
+void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context )
+{
+    // 
+    DiskBufferQueue& ioQueue = *context.ioQueue;
+    Fence fence;
+
+    const Span<uint64> yRef = _yRef.SliceSize( _context.entryCounts[(int)table] );
+          Span<uint64> yTmp = bbcvirtallocboundednuma_span<uint64>( yRef.Length() );
+
+    // Sort ref
+    {
+        RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, yRef.Ptr(), yTmp.Ptr(), yRef.Length() );
+    }
+
+    // Read
+    {
+        Span<uint32> reader = yTmp.As<uint32>();
+
+        for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+        {
+            Span<uint32> bucketReader = reader;
+            ioQueue.ReadBucketElementsT( fileId, bucketReader );
+            ioQueue.SignalFence( fence );
+            fence.Wait();
+
+            reader = reader.Slice( bucketReader.Length() );
+        }
+
+    }
+
+    // Validate
+    {
+        const uint64 yMask = 1ull << 32;
+    }
+
+    bbvirtfreebounded( yTmp.Ptr() );
+    // Reset the writer
+    _yRefWriter = _yRef;
+}
+
+#endif
 

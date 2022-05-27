@@ -57,10 +57,10 @@ private:
         const uint32* entries = start + offset;
 
         // Find base start position
-        uint64 curGroup = *entries / kBC;
+        uint64 curGroup = (yMask | (uint64)*entries) / kBC;
         while( entries > start )
         {
-            if( entries[-1] / kBC != curGroup )
+            if( ( yMask | entries[-1] ) / kBC != curGroup )
                 break;
             --entries;
         }

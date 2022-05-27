@@ -57,7 +57,7 @@
 // #define BB_DP_DBG_SKIP_TO_C_TABLES 1
 
 // #define BB_DP_P1_SKIP_TO_TABLE 1
-// #define BB_DP_P1_START_TABLE TableId::Table7
+// #define BB_DP_P1_START_TABLE TableId::Table4
 
 // Tmp file deletion (useful to keep around when developing)
 #if _DEBUG
