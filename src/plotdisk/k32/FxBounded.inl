@@ -10,16 +10,16 @@
 
 #if _DEBUG
     #include "algorithm/RadixSort.h"
-#endif
 
-#define _VALIDATE_Y 1
-#if _VALIDATE_Y
-    uint32       _refBucketCounts[BB_DP_MAX_BUCKET_COUNT];
-    Span<uint64> _yRef;
-    Span<uint64> _yRefWriter;
-    
-    template<uint32 _numBuckets>
-    void DbgValidateY( const TableId table, DiskPlotContext& context );
+    // #define _VALIDATE_Y 1
+    #if _VALIDATE_Y
+        uint32       _refBucketCounts[BB_DP_MAX_BUCKET_COUNT];
+        Span<uint64> _yRef;
+        Span<uint64> _yRefWriter;
+        
+        template<uint32 _numBuckets>
+        void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context );
+    #endif
 #endif
 
 
@@ -186,11 +186,16 @@ public:
     {
         // Prepare input files
         _ioQueue.SeekBucket( _yId[0], 0, SeekOrigin::Begin );
+        _ioQueue.SeekBucket( _yId[1], 0, SeekOrigin::Begin );
 
         if constexpr( rTable > TableId::Table2 )
+        {
             _ioQueue.SeekBucket( _idxId[0], 0, SeekOrigin::Begin );    
+            _ioQueue.SeekBucket( _idxId[1], 0, SeekOrigin::Begin );    
+        }
 
         _ioQueue.SeekBucket( _metaId[0], 0, SeekOrigin::Begin );
+        _ioQueue.SeekBucket( _metaId[1], 0, SeekOrigin::Begin );
         _ioQueue.CommitCommands();
         
         // Allocate buffers
@@ -242,7 +247,7 @@ public:
             // ValidateIndices();
         #endif
         #if _VALIDATE_Y
-            DbgValidateY();
+            DbgValidateY<_numBuckets>( rTable, _yId[1], _context );
         #endif
     }
 
@@ -459,9 +464,6 @@ private:
     //-----------------------------------------------------------
     Span<Pair> Match( Job* self, const uint32 bucket, Span<uint32> yEntries )
     {
-        if( rTable == TableId::Table4 && bucket == 3 && self->JobId() == 0 )
-            BBDebugBreak();
-            
         const uint32 id          = self->JobId();
         const uint32 threadCount = self->JobCount();
 
@@ -644,6 +646,7 @@ private:
         Span<uint32> yAlignedSliceCount    = _alignedSliceCountY[sliceIdx];
         Span<uint32> metaAlignedsliceCount = _alignedsliceCountMeta[sliceIdx];
 
+        // Count
         for( int64 i = 0; i < entryCount; i++ )
             counts[yIn[i] >> bucketShift]++;
 
@@ -974,17 +977,17 @@ private:
 
     // Map
     // MapWriter<_numBuckets, false> _mapWriter;
-    uint32 _mapSliceCounts  [_numBuckets];
-    uint32 _mapAlignedCounts[_numBuckets];
-    uint32 _mapOffsets      [_numBuckets] = {};
+    uint32        _mapSliceCounts  [_numBuckets];
+    uint32        _mapAlignedCounts[_numBuckets];
+    uint32        _mapOffsets      [_numBuckets] = {};
 
     // Distributing to buckets
-    Span<uint32*>    _offsetsY;
-    Span<uint32*>    _offsetsMeta;
-    Span<uint32>     _sliceCountY   [2];
-    Span<uint32>     _sliceCountMeta[2];
-    Span<uint32>     _alignedSliceCountY   [2];
-    Span<uint32>     _alignedsliceCountMeta[2];
+    Span<uint32*> _offsetsY;
+    Span<uint32*> _offsetsMeta;
+    Span<uint32>  _sliceCountY   [2];
+    Span<uint32>  _sliceCountMeta[2];
+    Span<uint32>  _alignedSliceCountY   [2];
+    Span<uint32>  _alignedsliceCountMeta[2];
 
     // I/O Synchronization fences
     Fence& _yReadFence;
@@ -1012,41 +1015,71 @@ public:
 template<uint32 _numBuckets>
 void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context )
 {
-    // 
-    DiskBufferQueue& ioQueue = *context.ioQueue;
-    Fence fence;
-
-    const Span<uint64> yRef = _yRef.SliceSize( _context.entryCounts[(int)table] );
-          Span<uint64> yTmp = bbcvirtallocboundednuma_span<uint64>( yRef.Length() );
-
-    // Sort ref
+    if( table > TableId::Table2 )
     {
-        RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, yRef.Ptr(), yTmp.Ptr(), yRef.Length() );
-    }
+        Log::Line( "[Validating table y %u]", table+1 );
 
-    // Read
-    {
-        Span<uint32> reader = yTmp.As<uint32>();
+        DiskBufferQueue& ioQueue = *context.ioQueue;
+        Fence fence;
 
-        for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+        ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
+        ioQueue.CommitCommands();
+
+        Span<uint64> yRef    = _yRef.SliceSize( context.entryCounts[(int)table] );
+        Span<uint64> yTmp    = bbcvirtallocboundednuma_span<uint64>( yRef.Length() );
+
+        // Sort ref
         {
-            Span<uint32> bucketReader = reader;
-            ioQueue.ReadBucketElementsT( fileId, bucketReader );
-            ioQueue.SignalFence( fence );
-            fence.Wait();
-
-            reader = reader.Slice( bucketReader.Length() );
+            Log::Line( " Sorting ref" );
+            RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, yRef.Ptr(), yTmp.Ptr(), yRef.Length() );
         }
 
+        // Read
+        {
+            Span<uint64> reader = yTmp.SliceSize( yRef.Length() / 2 );
+            Span<uint64> tmp    = yTmp.Slice( yRef.Length() / 2 );
+
+            for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+            {
+                Log::Line( " Validating %u", bucket );
+
+                Span<uint32> bucketReader = reader.As<uint32>();
+
+                ioQueue.ReadBucketElementsT( fileId, bucketReader );
+                ioQueue.SignalFence( fence );
+                ioQueue.CommitCommands();
+                fence.Wait();
+
+                // Sort
+                RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, bucketReader.Ptr(), tmp.As<uint32>().Ptr(), bucketReader.Length() );
+
+                // Expand
+                const uint64 yMask   = ((uint64)bucket) << 32;
+                Span<uint64> yValues = tmp;
+
+                for( uint32 i = 0; i < bucketReader.Length(); i++ )
+                    yValues[i] = yMask | (uint64)bucketReader[i];
+
+                // Validate
+                for( uint32 i = 0; i < bucketReader.Length(); i++ )
+                {
+                    const uint64 r = yRef   [i];
+                    const uint64 y = yValues[i];
+
+                    ASSERT( y == r );
+                }
+
+                yRef = yRef.Slice( bucketReader.Length() );
+            }
+        }
+
+        // Cleanup
+        bbvirtfreebounded( yTmp.Ptr() );
+
+        ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
+        ioQueue.CommitCommands();
     }
 
-    // Validate
-    {
-        const uint64 yMask = 1ull << 32;
-    }
-
-    bbvirtfreebounded( yTmp.Ptr() );
-    // Reset the writer
     _yRefWriter = _yRef;
 }
 
