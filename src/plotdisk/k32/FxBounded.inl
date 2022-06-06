@@ -25,7 +25,8 @@
 
 typedef uint32 K32Meta1;
 typedef uint64 K32Meta2;
-struct K32Meta3 { uint32 m0, m1, m2; };
+// struct K32Meta3 { uint32 m0, m1, m2; };
+struct K32Meta3 { uint32 m0, m1; };
 struct K32Meta4 { uint64 m0, m1; };
 struct K32NoMeta {};
 
@@ -781,10 +782,14 @@ private:
             }
             else if constexpr( MetaInMulti == 3 )
             {
-                const uint64 l0 = (uint64)metaIn[left ].m0 | ( (uint64)metaIn[left ].m1 << 32 );
-                const uint64 l1 = metaIn[left ].m2;
-                const uint64 r0 = (uint64)metaIn[right].m0 | ( (uint64)metaIn[right].m1 << 32 );
-                const uint64 r1 = metaIn[right].m2;
+                // const uint64 l0 = (uint64)metaIn[left ].m0 | ( (uint64)metaIn[left ].m1 << 32 );
+                // const uint64 l1 = metaIn[left ].m2;
+                // const uint64 r0 = (uint64)metaIn[right].m0 | ( (uint64)metaIn[right].m1 << 32 );
+                // const uint64 r1 = metaIn[right].m2;
+                const uint64 l0 = metaIn[left ].m0;
+                const uint64 l1 = metaIn[left ].m1 & 0xFFFFFFFF;
+                const uint64 r0 = metaIn[right].m0;
+                const uint64 r1 = metaIn[right].m1 & 0xFFFFFFFF;
 
                 input[0] = Swap64( y  << 26 | l0 >> 38 );
                 input[1] = Swap64( l0 << 26 | l1 >> 6  );
@@ -828,10 +833,13 @@ private:
                 const uint64 h1 = Swap64( output[1] );
                 const uint64 h2 = Swap64( output[2] );
 
-                uint64 m0 = h0 << ySize | h1 >> 26;
-                mOut.m0 = (uint32)m0;
-                mOut.m0 = (uint32)(m0 >> 32);
-                mOut.m2 = (uint32)( ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58 );
+                mOut.m0 = h0 << ySize | h1 >> 26;
+                mOut.m1 = ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58;
+
+                // uint64 m0 = h0 << ySize | h1 >> 26;
+                // mOut.m0 = (uint32)m0;
+                // mOut.m0 = (uint32)(m0 >> 32);
+                // mOut.m2 = (uint32)( ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58 );
             }
             else if constexpr ( MetaOutMulti == 4 && MetaInMulti != 2 ) // In = 2 is calculated above with L + R
             {
