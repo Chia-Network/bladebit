@@ -92,7 +92,7 @@ struct Span
     inline Span<T> Slice( const int64 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
     inline Span<T> Slice( const int32 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
 
-    inline void CopyTo( Span<T>& other, const size_t size ) const
+    inline void CopyTo( Span<T> other, const size_t size ) const
     {
         ASSERT( length >= size );
         ASSERT( other.length >= size );
@@ -100,7 +100,7 @@ struct Span
         memcpy( other.values, values, size * sizeof( T ) );
     }
 
-    inline void CopyTo( Span<T>& other ) const
+    inline void CopyTo( Span<T> other ) const
     {
         CopyTo( other, length );
     }

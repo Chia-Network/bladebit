@@ -4,6 +4,7 @@
 #include "plotdisk/DiskBufferQueue.h"
 #include "plotdisk/BitBucketWriter.h"
 #include "plotdisk/MapWriter.h"
+#include "plotdisk/BlockWriter.h"
 #include "util/StackAllocator.h"
 #include "FpMatchBounded.inl"
 #include "b3/blake3.h"
@@ -19,6 +20,90 @@
         
         template<uint32 _numBuckets>
         void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context );
+    #endif
+
+
+    #define DBG_VALIDATE_TABLES 1 
+
+    #if DBG_VALIDATE_TABLES
+        struct DebugPlot
+        {
+            using Job = AnonPrefixSumJob<uint32>;
+
+            Span<uint32> x;
+            Span<uint64> y;
+            Span<uint32> f7;
+            Span<Pair>   backPointers[7] = {};
+            uint64       _writeOffset[7] = {};
+            uint32       _pairOffset [7] = {};
+
+            inline void AllocTable( const TableId table )
+            {
+                const uint64 maxEntries = 1ull << 32;
+                if( table == TableId::Table2 )
+                {
+                    x = Span<uint32>( bbcvirtallocboundednuma<uint32>( maxEntries ), maxEntries );
+                    y = Span<uint64>( bbcvirtallocboundednuma<uint64>( maxEntries ), maxEntries );
+                }
+                else if( table == TableId::Table7 )
+                    f7 = Span<uint32>( bbcvirtallocboundednuma<uint32>( maxEntries ), maxEntries );
+                
+                backPointers[(int)table] = Span<Pair>( bbcvirtallocboundednuma<Pair>( maxEntries ), maxEntries );
+            }
+
+            inline void WriteYX( const uint64 bucket, const Span<uint32> ys, const Span<uint32> xs )
+            {
+                ASSERT( ys.Length() == xs.Length() );
+
+                xs.CopyTo( x.Slice( _writeOffset[0] ) );
+                
+                const uint64 yMask = bucket << 32;
+                auto yDst = y.Slice( _writeOffset[0] );
+                for( uint32 i = 0; i < ys.Length(); i++ )
+                    yDst[i] = yMask | y[i];
+                
+                _writeOffset[0] += xs.Length();
+            }
+
+            inline void WriteF7( const Span<uint32> f7s )
+            {
+                f7s.CopyTo( f7.Slice( _writeOffset[6] ) );
+            }
+
+            inline void WritePairs( Job* self, const TableId table, const uint32 threadOffset, const Span<Pair> pairs, const uint32 lBucketLength, const uint32 totalPairsLength )
+            {
+                const uint32 writeOffset = _writeOffset[(int)table] + threadOffset;
+                Span<Pair> dst = backPointers[(int)table].Slice( writeOffset );
+                
+                const uint32 offset = _pairOffset[(int)table];
+                pairs.CopyTo( dst );
+                
+                for( uint64 i = 0; i < pairs.Length(); i++ )
+                {
+                    dst[i].left  += offset;
+                    dst[i].right += offset;
+                }
+
+                if( self->BeginLockBlock() )
+                {
+                    _writeOffset[(int)table] += totalPairsLength;
+                    _pairOffset [(int)table] += lBucketLength;
+                }
+                self->EndLockBlock();
+            }
+
+            inline void FinishTable( const TableId table )
+            {
+                const uint64 tableLength = _writeOffset[(int)table];
+                backPointers[(int)table] = backPointers[(int)table].SliceSize( tableLength );
+
+                if( table == TableId::Table7 )
+                    f7 = f7.SliceSize( tableLength );
+            }
+        };
+    
+        static DebugPlot _dbgPlot;
+        void DbgValidatePlot( const DebugPlot& dbgPlot );
     #endif
 #endif
 
@@ -50,17 +135,15 @@ class DiskPlotFxBounded
     using TMetaIn  = typename K32MetaType<rTable>::In;
     using TMetaOut = typename K32MetaType<rTable>::Out;
     using Job     = AnonPrefixSumJob<uint32>;
+
     static constexpr uint32 _k               = 32;
     static constexpr uint64 _maxTableEntries = (1ull << _k) - 1;
     static constexpr uint32 _bucketBits      = bblog2( _numBuckets );
-
     static constexpr uint32 _pairsMaxDelta   = 512;
     static constexpr uint32 _pairsRightBits  = bblog2( _pairsMaxDelta );
     static constexpr uint32 _pairBitSize     = _k - _bucketBits + _pairsRightBits;
 
-
 public:
-
     //-----------------------------------------------------------
     DiskPlotFxBounded( DiskPlotContext& context )
         : _context       ( context )
@@ -121,8 +204,8 @@ public:
 
         // Work buffers
         _yTmp       = allocator.CAllocSpan<uint64>  ( entriesPerBucket, t2BlockSize );
-        _metaTmp[0] = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t2BlockSize );
-        _metaTmp[1] = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t2BlockSize );
+        _metaTmp[0] = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t1BlockSize ); // Align this to T1 as we use it to write x to disk.
+        _metaTmp[1] = allocator.CAllocSpan<K32Meta4>( entriesPerBucket, t1BlockSize );
         _sortKey    = allocator.CAllocSpan<uint32>  ( entriesPerBucket );
         _pairBuffer = allocator.CAllocSpan<Pair>    ( entriesPerBucket );
 
@@ -160,22 +243,32 @@ public:
 
 
         const size_t pairsWriteSize = CDiv( entriesPerBucket * _pairBitSize, 8 );
-        _mapWriteBuffer   = allocator.CAllocSpan<uint64>  ( entriesPerBucket, t1BlockSize );
         _pairsWriteBuffer = allocator.AllocT<byte>( pairsWriteSize, t1BlockSize );
         byte* pairBlocks  = (byte*)allocator.CAlloc( 1, t1BlockSize, t1BlockSize );
-        
+
         if( !dryRun )
-        {
-            ASSERT( (uintptr_t)_mapWriteBuffer.Ptr() / t1BlockSize * t1BlockSize == (uintptr_t)_mapWriteBuffer.Ptr() );
             _pairBitWriter = BitBucketWriter<1>( _ioQueue, FileId::T1 + (FileId)rTable, pairBlocks );
-            
-            // _mapWriter = MapWriter<_numBuckets, false>( _ioQueue, FileId::MAP2 + (FileId)(rTable-1), allocator, 
-            //                                             entriesPerBucket, t1BlockSize, _mapWriteFence, _tableIOWait );
+        
+        if constexpr ( rTable == TableId::Table2 )
+        {
+            _xWriter = BlockWriter<uint32>( allocator, FileId::T1, _mapWriteFence, t1BlockSize, entriesPerBucket );
         }
         else
         {
-            // _mapWriter = MapWriter<_numBuckets, false>( entriesPerBucket, allocator, t1BlockSize );
+            _mapWriteBuffer = allocator.CAllocSpan<uint64>  ( entriesPerBucket, t1BlockSize );
+            ASSERT( (uintptr_t)_mapWriteBuffer.Ptr() / t1BlockSize * t1BlockSize == (uintptr_t)_mapWriteBuffer.Ptr() );
+
+            // if( !dryRun )
+            // {
+            //     // _mapWriter = MapWriter<_numBuckets, false>( _ioQueue, FileId::MAP2 + (FileId)(rTable-1), allocator, 
+            //     //                                             entriesPerBucket, t1BlockSize, _mapWriteFence, _tableIOWait );
+            // }
+            // else
+            // {
+            //     // _mapWriter = MapWriter<_numBuckets, false>( entriesPerBucket, allocator, t1BlockSize );
+            // }
         }
+        
         // _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
         // _pairsR = allocator.CAllocSpan<uint16>( entriesPerBucket );
 
@@ -185,6 +278,10 @@ public:
     //-----------------------------------------------------------
     void Run()
     {
+        #if DBG_VALIDATE_TABLES
+            _dbgPlot.AllocTable( rTable );
+        #endif
+
         // Prepare input files
         _ioQueue.SeekBucket( _yId[0], 0, SeekOrigin::Begin );
         _ioQueue.SeekBucket( _yId[1], 0, SeekOrigin::Begin );
@@ -244,6 +341,10 @@ public:
         _fxWriteFence.Wait( _numBuckets, _tableIOWait );
         _context.fencePool->RestoreAllFences();
 
+        #if DBG_VALIDATE_TABLES
+            _dbgPlot.FinishTable( rTable );
+        #endif
+
         #if _DEBUG
             // ValidateIndices();
         #endif
@@ -272,7 +373,7 @@ private:
             const uint32 entryCount = yInput.Length();
             
             Span<uint32> sortKey = _sortKey.SliceSize( entryCount );
-            SortY( self, entryCount, yInput.Ptr(), _yTmp.As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[0].As<uint32>().Ptr() );
+            SortY( self, entryCount, yInput.Ptr(), _yTmp.As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[1].As<uint32>().Ptr() );
 
 
             ///
@@ -283,14 +384,10 @@ private:
                 WaitForFence( self, _indexReadFence, bucket );
                 ASSERT( _index[bucket].Length() == entryCount );
 
-                Span<uint32> indices = _metaTmp[0].As<uint32>().SliceSize( entryCount );
+                Span<uint32> indices = _metaTmp[1].As<uint32>().SliceSize( entryCount );
 
                 SortOnYKey( self, sortKey, _index[bucket], indices );
                 WriteMap( self, indices, _mapWriteBuffer, _mapOffset );
-            }
-            else
-            {
-                // #TOOD Write T1 x
             }
 
 
@@ -329,12 +426,40 @@ private:
 
             WritePairs( self, bucket, totalMatches, matches, matchOffset );
 
+            #if DBG_VALIDATE_TABLES
+                _dbgPlot.WritePairs( self, rTable, matchOffset, matches, _mapOffset, totalMatches );
+            #endif
+
             // Sort meta on Y
             Span<TMetaIn> metaTmp = _meta[bucket].SliceSize( yInput.Length() );
-            Span<TMetaIn> metaIn  = _metaTmp[0].As<TMetaIn>().SliceSize( yInput.Length() );
+            Span<TMetaIn> metaIn  = _metaTmp[0].As<TMetaIn>().SliceSize( yInput.Length() ); // #NOTE: _metaTmp[0] is only used here, so we can use it for writing x values to disk
+
+            if constexpr ( rTable == TableId::Table2 )
+            {
+                // #TODO: Simplify this by not making use of the block writer's buffers?
+                if( self->BeginLockBlock() )
+                    metaIn = Span<TMetaIn>( _xWriter.GetNextBuffer( _tableIOWait ), entryCount );
+                self->EndLockBlock();
+            }
 
             WaitForFence( self, _metaReadFence, bucket );
             SortOnYKey( self, sortKey, metaTmp, metaIn );
+            
+            if constexpr ( rTable == TableId::Table2 )
+            {
+                // Write x back to disk
+                if( self->BeginLockBlock() )
+                {
+                    #if DBG_VALIDATE_TABLES
+                        _dbgPlot.WriteYX( bucket, yInput, metaIn );
+                    #endif
+
+                    _xWriter.SubmitBuffer( _ioQueue, entryCount );
+                    if( bucket == _numBuckets - 1 )
+                        _xWriter.SubmitFinalBlock( _ioQueue );
+                }
+                self->EndLockBlock();
+            }
 
             // Gen fx & write
             {
@@ -365,7 +490,7 @@ private:
                 }
                 #endif
 
-                WriteEntries( self, bucket,  (uint32)_tableEntryCount + matchOffset, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
+                WriteEntries( self, bucket, (uint32)_tableEntryCount + matchOffset, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
             }
 
             if( self->IsControlThread() )
@@ -469,7 +594,7 @@ private:
         const uint32 threadCount = self->JobCount();
 
         // use metaTmp as a buffer for group boundaries
-        Span<uint32> groupBuffer  = _metaTmp[0].As<uint32>();
+        Span<uint32> groupBuffer  = _metaTmp[1].As<uint32>();
         const uint32 maxGroups    = (uint32)( groupBuffer.Length() / threadCount );
         Span<uint32> groupIndices = groupBuffer.Slice( maxGroups * id, maxGroups );
 
@@ -955,30 +1080,31 @@ private:
     BitBucketWriter<1>  _pairBitWriter;
 
     // Read buffers
-    Span<uint32>     _yBuffers    [2];
-    Span<uint32>     _indexBuffers[2];
-    Span<K32Meta4>   _metaBuffers [2];
+    Span<uint32>        _yBuffers    [2];
+    Span<uint32>        _indexBuffers[2];
+    Span<K32Meta4>      _metaBuffers [2];
 
     // Read views
-    Span<uint32>     _y    [_numBuckets];
-    Span<uint32>     _index[_numBuckets];
-    Span<TMetaIn>    _meta [_numBuckets];
+    Span<uint32>        _y    [_numBuckets];
+    Span<uint32>        _index[_numBuckets];
+    Span<TMetaIn>       _meta [_numBuckets];
 
     // Write buffers
-    Span<uint32>     _yWriteBuffer;
-    Span<uint32>     _indexWriteBuffer;
-    Span<TMetaOut>   _metaWriteBuffer;
-    Span<uint64>     _mapWriteBuffer;
-    byte*            _pairsWriteBuffer;
+    Span<uint32>        _yWriteBuffer;
+    Span<uint32>        _indexWriteBuffer;
+    Span<TMetaOut>      _metaWriteBuffer;
+    Span<uint64>        _mapWriteBuffer;
+    byte*               _pairsWriteBuffer;
+    BlockWriter<uint32> _xWriter;              // Used for Table2  (there's no map, but just x.)
     
     // Working buffers
-    Span<uint64>     _yTmp;
-    Span<uint32>     _sortKey;
-    Span<K32Meta4>   _metaTmp[2];
-    Span<Pair>       _pairBuffer;
+    Span<uint64>        _yTmp;
+    Span<uint32>        _sortKey;
+    Span<K32Meta4>      _metaTmp[2];
+    Span<Pair>          _pairBuffer;
 
     // Working views
-    Span<Pair>       _pairs[BB_DP_MAX_JOBS];    // Pairs buffer divided per thread
+    Span<Pair>          _pairs[BB_DP_MAX_JOBS];    // Pairs buffer divided per thread
 
     // Matching
     FxMatcherBounded _matcher;
@@ -1005,6 +1131,9 @@ private:
     Fence& _pairWriteFence;
     Fence& _mapWriteFence;
 
+    #if DBG_VALIDATE_TABLES
+        uint64 _dbgPairOffset = 0;
+    #endif
 
 public:
     // Timings
@@ -1013,6 +1142,9 @@ public:
     Duration _distributeTime = Duration::zero();
     Duration _matchTime      = Duration::zero();
     Duration _fxTime         = Duration::zero();
+
+private:
+    
 };
 
 
@@ -1089,6 +1221,53 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
     }
 
     _yRefWriter = _yRef;
+}
+
+#endif
+
+//-----------------------------------------------------------
+template<typename TMeta>
+void DbgValidatePairs( const TableId table, const uint32 bucket, 
+                       const Span<Pair> pairs, const Span<uint32> yIn, const Span<TMeta> metas, 
+                       const Span<uint64> yOut )
+{
+    for( size_t i = 0; i < pairs.Length(); i++ )
+    {
+        // const Pair   pair  = pairs[i];
+        // const uint64 y     = ys   [pair.left];
+        // const TMeta  metaL = metas[pair.left];
+        // const TMeta  metaR = metas[pair.right];
+
+
+
+        // 
+        // ASSERT( )
+    }
+}
+
+#if DBG_VALIDATE_TABLES
+
+//-----------------------------------------------------------
+template<TableId rTable>
+inline void DbgValidatePlotTable( const Span<Pair> pairs, const Span<uint64> yIn, const Span< )
+{
+
+}
+
+//-----------------------------------------------------------
+inline void DbgValidatePlot( const DebugPlot& dbgPlot )
+{
+    Span<uint64> yIn;
+    Span<uint64> yOut;
+    Span<uint32> metaIn;
+    Span<uint32> metaOut;
+
+    DbgValidatePlotTable<TableId::Table2>( dbgPlot );
+    
+    for( TableId rTable = TableId::Table2; rTable <= TableId::Table7; rTable++ )
+    {
+
+    }
 }
 
 #endif

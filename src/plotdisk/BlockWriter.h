@@ -19,7 +19,7 @@ public:
         const size_t allocSize = blockSize + RoundUpToNextBoundaryT( elementCount * sizeof( T ), blockSize );
 
         // Sanity check, should never happen as block sizes are power of 2 and
-        // we don't expect to use this with non Po2 elements.
+        // we don't expect to use this with non Pow2 elements.
         FatalIf( blockSize / sizeof( T ) * sizeof( T ) != blockSize, "Unexpected block size." );
 
         _buffers[0] = allocator.AllocT<T>( allocSize, blockSize );
