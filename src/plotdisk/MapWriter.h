@@ -12,7 +12,8 @@ public:
     static constexpr uint32 AddressBitSize = _k + ExtraBucket;
     static constexpr uint32 EntryBitSize   = _k - BucketBits + AddressBitSize;  // ( origin address | final address ) ( k-log2(buckets) | 32 )
 
-    using Job = AnonPrefixSumJob<uint32>;
+    using MapBitBucketWriter = BitBucketWriter<_numBuckets+ExtraBucket>;
+    using Job                = AnonPrefixSumJob<uint32>;
 
 public:
 
@@ -188,129 +189,135 @@ public:
     }
 
     //-----------------------------------------------------------
-    // template<typename TMapIn>
-    // void WriteJob( Job* self, const uint32 bucket, const uint64 tableOffset.
-    //     const Span<TMapIn> indices,
-    //           Span<uint64> mapOut, 
-    //           uint64       outMapBucketCounts[_numBuckets+ExtraBucket],
-    //           uint32       totalCounts       [_numBuckets+ExtraBucket],
-    //           uint64       totalBitCounts    [_numBuckets+ExtraBucket] )
-    // {
-    //     const uint32 bucketBits  = BucketBits;
-    //     const uint32 bucketShift = _k - bucketBits;
-    //     const uint32 bitSize     = EntryBitSize;
-    //     const uint32 encodeShift = AddressBitSize;
-    //     const uint32 numBuckets  = _numBuckets + ExtraBucket;
+    template<typename TMapIn>
+    void WriteJob( Job* self, const uint32 bucket, const uint64 tableOffset,
+        const Span<TMapIn> indices,
+              Span<uint64> mapOut, 
+              uint64       outMapBucketCounts  [_numBuckets+ExtraBucket],
+              uint32       totalCounts         [_numBuckets+ExtraBucket],
+              uint64       sharedTotalBitCounts[_numBuckets+ExtraBucket] )  // Must be 1 instance shared across all jobs
+    {
+        const uint32 bucketBits  = BucketBits;
+        const uint32 bucketShift = _k - bucketBits;
+        const uint32 bitSize     = EntryBitSize;
+        const uint32 encodeShift = AddressBitSize;
+        const uint32 numBuckets  = _numBuckets + ExtraBucket;
 
-    //     uint32 counts[numBuckets] = { 0 };
-    //     uint32 pfxSum[numBuckets];
+        uint32 counts[numBuckets] = { 0 };
+        uint32 pfxSum[numBuckets];
 
-    //     // Count buckets
-    //     for( size_t i = 0; i < indices.Length(); i++ )
-    //     {
-    //         const TMapIn b = indices[i] >> bucketShift;     ASSERT( b < numBuckets );
-    //         counts[b]++;
-    //     }
+        uint32 count, offset, _;
+        GetThreadOffsets( self, (uint32)indices.Length(), count, offset, _ );
 
-    //     self->CalculatePrefixSum( numBuckets, counts, pfxSum, totalCounts );
+        auto inIdx = indices.Slice( offset, count );
 
-    //     // Convert entries from source index to reverse map
-    //     for( size_t i = 0; i < indices.Length(); i++ )
-    //     {
-    //         const uint64 origin = indices[i];               ASSERT( origin < 0x100000000 + (1ull<<_k) / _numBuckets );
-    //         const uint64 b      = origin >> bucketShift;    ASSERT( b < numBuckets );
-    //         const uint32 dstIdx = --pfxSum[b];              ASSERT( (int64)dstIdx < entryCount );
+        // Count buckets
+        for( size_t i = 0; i < inIdx.Length(); i++ )
+        {
+            const TMapIn b = inIdx[i] >> bucketShift;     ASSERT( b < numBuckets );
+            counts[b]++;
+        }
 
-    //         const uint64 finalIdx = tableOffset + (uint64)i;
-    //         ASSERT( finalIdx < ( 1ull << encodeShift ) );
+        self->CalculatePrefixSum( numBuckets, counts, pfxSum, totalCounts );
 
-    //         mapOut[dstIdx] = (origin << encodeShift) | finalIdx;
-    //     }
+        // Convert entries from source index to reverse map
+        for( size_t i = 0; i < inIdx.Length(); i++ )
+        {
+            const uint64 origin = inIdx[i];               ASSERT( origin < 0x100000000 + (1ull<<_k) / _numBuckets );
+            const uint64 b      = origin >> bucketShift;  ASSERT( b < numBuckets );
+            const uint32 dstIdx = --pfxSum[b];            ASSERT( dstIdx < indices.Length() );
 
-    //     // Write 
-    //     auto&   bitWriter = _bucketWriter;
-    //     uint64* bitCounts = totalBitCounts;
+            const uint64 finalIdx = tableOffset + (uint64)i;
+            ASSERT( finalIdx < ( 1ull << encodeShift ) );
 
-    //     if( self->BeginLockBlock() )
-    //     {
-    //         // Convert counts to bit sizes
-    //         for( uint32 i = 0; i < numBuckets; i++ )
-    //             bitCounts[i] = (uint64)totalCounts[i] * bitSize;
+            mapOut[dstIdx] = (origin << encodeShift) | finalIdx;
+        }
 
-    //         byte* writeBuffer = GetWriteBuffer( bucket );
+        // Write 
+        auto&   bitWriter = _bucketWriter;
+        uint64* bitCounts = sharedTotalBitCounts;
 
-    //         // Wait for the buffer to be available first
-    //         if( bucket > 1 )
-    //             _writeFence->Wait( bucket - 2, *_writeWaitTime );
+        if( self->BeginLockBlock() )
+        {
+            // Convert counts to bit sizes
+            for( uint32 i = 0; i < numBuckets; i++ )
+                bitCounts[i] = (uint64)totalCounts[i] * bitSize;
 
-    //         bitWriter.BeginWriteBuckets( bitCounts, writeBuffer );
-    //     }
-    //     self->EndLockBlock();
+            byte* writeBuffer = GetWriteBuffer( bucket );
+
+            // Wait for the buffer to be available first
+            if( bucket > 1 )
+                _writeFence->Wait( bucket - 2, *_writeWaitTime );
+
+            bitWriter.BeginWriteBuckets( bitCounts, writeBuffer );
+        }
+        self->EndLockBlock();
 
 
-    //     // Bit-compress/pack each bucket entries (except the overflow bucket)
-    //     uint64 bitsWritten = 0;
+        // Bit-compress/pack each bucket entries (except the overflow bucket)
+        uint64 bitsWritten = 0;
 
-    //     for( uint32 i = 0; i < _numBuckets; i++ )
-    //     {
-    //         if( counts[i] < 1 )
-    //         {
-    //             self->SyncThreads();
-    //             continue;
-    //         }
+        for( uint32 i = 0; i < _numBuckets; i++ )
+        {
+            if( counts[i] < 1 )
+            {
+                self->SyncThreads();
+                continue;
+            }
 
-    //         const uint64 writeOffset = pfxSum[i];
-    //         const uint64 bitOffset   = writeOffset * bitSize - bitsWritten;
-    //         bitsWritten += bitCounts[i];
+            const uint64 writeOffset = pfxSum[i];
+            const uint64 bitOffset   = writeOffset * bitSize - bitsWritten;
+            bitsWritten += bitCounts[i];
 
-    //         ASSERT( bitOffset + counts[i] * bitSize <= bitCounts[i] );
+            ASSERT( bitOffset + counts[i] * bitSize <= bitCounts[i] );
 
-    //         BitWriter writer = bitWriter.GetWriter( i, bitOffset );
+            BitWriter writer = bitWriter.GetWriter( i, bitOffset );
 
-    //         const uint64* mapToWrite    = outMapBuckets + writeOffset;
-    //         const uint64* mapToWriteEnd = mapToWrite + counts[i]; 
+            const uint64* mapToWrite    = mapOut.Ptr() + writeOffset;
+            const uint64* mapToWriteEnd = mapToWrite + counts[i]; 
 
-    //         // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
-    //         const uint64* mapToWriteEndPass1 = mapToWrite + std::min( counts[i], 2u ); 
-    //         ASSERT( counts[i] > 2 );
+            // Compress a couple of entries first, so that we don't get any simultaneaous writes to the same fields
+            const uint64* mapToWriteEndPass1 = mapToWrite + std::min( counts[i], 2u ); 
+            ASSERT( counts[i] > 2 );
 
-    //         while( mapToWrite < mapToWriteEndPass1 )
-    //             writer.Write( *mapToWrite++, bitSize );
+            while( mapToWrite < mapToWriteEndPass1 )
+                writer.Write( *mapToWrite++, bitSize );
 
-    //         self->SyncThreads();
+            self->SyncThreads();
 
-    //         while( mapToWrite < mapToWriteEnd )
-    //             writer.Write( *mapToWrite++, bitSize );
-    //     }
+            while( mapToWrite < mapToWriteEnd )
+                writer.Write( *mapToWrite++, bitSize );
+        }
 
-    //     // Write the overflow bucket and then write to disk
-    //     if( self->BeginLockBlock() )
-    //     {
-    //         if constexpr( _overflow )
-    //         {
-    //             const uint32 overflowBucket = _numBuckets;
-    //             const uint64 overflowCount  = totalCounts[overflowBucket];
+        // Write the overflow bucket and then write to disk
+        if( self->BeginLockBlock() )
+        {
+            if constexpr( _overflow )
+            {
+                Fatal( "Unimplemented" );   // #TODO: Fix compiler errors
+                const uint32 overflowBucket = _numBuckets;
+                const uint64 overflowCount  = totalCounts[overflowBucket];
 
-    //             if( overflowCount )
-    //             {
-    //                 const uint64 writeOffset = pfxSum[overflowBucket];
-    //                 ASSERT( writeOffset * bitSize - bitsWritten == 0 );
+                if( overflowCount )
+                {
+                    const uint64 writeOffset = pfxSum[overflowBucket];
+                    ASSERT( writeOffset * bitSize - bitsWritten == 0 );
                     
-    //                 BitWriter writer = bitWriter.GetWriter( overflowBucket, 0 );
+                    BitWriter writer = bitWriter.GetWriter( overflowBucket, 0 );
 
-    //                 const uint64* mapToWrite  = outMapBuckets + writeOffset;
-    //                 const uint64* mapWriteEnd = mapToWrite + overflowCount;
-    //                 while( mapToWrite < mapWriteEnd )
-    //                     writer.Write( *mapToWrite++, bitSize );
-    //             }
-    //         }
+                    const uint64* mapToWrite  = mapOut.Ptr() + writeOffset;
+                    const uint64* mapWriteEnd = mapToWrite + overflowCount;
+                    while( mapToWrite < mapWriteEnd )
+                        writer.Write( *mapToWrite++, bitSize );
+                }
+            }
 
-    //         bitWriter.Submit();
-    //         _ioQueue->SignalFence( *_writeFence, bucket );
-    //         _ioQueue->CommitCommands();
-    //     }
-    //     self->EndLockBlock();
-    // }
+            bitWriter.Submit();
+            _ioQueue->SignalFence( *_writeFence, bucket );
+            _ioQueue->CommitCommands();
+        }
+        self->EndLockBlock();
+    }
 
     //-----------------------------------------------------------
     void SubmitFinalBits()
@@ -343,10 +350,10 @@ private:
     }
 
 private:
-    DiskBufferQueue*               _ioQueue         = nullptr;
-    BitBucketWriter<_numBuckets+1> _bucketWriter;
-    byte*                          _writebuffers[2] = { nullptr };
-    Fence*                         _writeFence      = nullptr;
-    Duration*                      _writeWaitTime   = nullptr;
+    DiskBufferQueue*   _ioQueue         = nullptr;
+    MapBitBucketWriter _bucketWriter;
+    byte*              _writebuffers[2] = { nullptr };
+    Fence*             _writeFence      = nullptr;
+    Duration*          _writeWaitTime   = nullptr;
 };
 

@@ -581,7 +581,7 @@ public:
         , _readFence   ( readFence  )
         , _writeFence  ( writeFence )
         , _lpWriteFence( lpWriteFence )
-        , _readId      ( readId )
+        , _readId      ( readId  )
         , _writeId     ( writeId )
     {
         _readFence   .Reset();

@@ -11,6 +11,7 @@
 
 #if _DEBUG
     #include "algorithm/RadixSort.h"
+    #include "plotting/PlotValidation.h"
 
     // #define _VALIDATE_Y 1
     #if _VALIDATE_Y
@@ -23,7 +24,7 @@
     #endif
 
 
-    #define DBG_VALIDATE_TABLES 1 
+    // #define DBG_VALIDATE_TABLES 1 
 
     #if DBG_VALIDATE_TABLES
         struct DebugPlot
@@ -258,20 +259,19 @@ public:
             _mapWriteBuffer = allocator.CAllocSpan<uint64>  ( entriesPerBucket, t1BlockSize );
             ASSERT( (uintptr_t)_mapWriteBuffer.Ptr() / t1BlockSize * t1BlockSize == (uintptr_t)_mapWriteBuffer.Ptr() );
 
-            // if( !dryRun )
-            // {
-            //     // _mapWriter = MapWriter<_numBuckets, false>( _ioQueue, FileId::MAP2 + (FileId)(rTable-1), allocator, 
-            //     //                                             entriesPerBucket, t1BlockSize, _mapWriteFence, _tableIOWait );
-            // }
-            // else
-            // {
-            //     // _mapWriter = MapWriter<_numBuckets, false>( entriesPerBucket, allocator, t1BlockSize );
-            // }
+            if( !dryRun )
+            {
+                _mapWriter = MapWriter<_numBuckets, false>( _ioQueue, FileId::MAP2 + (FileId)(rTable-2), allocator, 
+                                                            entriesPerBucket, t1BlockSize, _mapWriteFence, _tableIOWait );
+            }
+            else
+            {
+                _mapWriter = MapWriter<_numBuckets, false>( entriesPerBucket, allocator, t1BlockSize );
+            }
         }
         
         // _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
         // _pairsR = allocator.CAllocSpan<uint16>( entriesPerBucket );
-
     }
 
     // Generate fx for a whole table
@@ -387,7 +387,7 @@ private:
                 Span<uint32> indices = _metaTmp[1].As<uint32>().SliceSize( entryCount );
 
                 SortOnYKey( self, sortKey, _index[bucket], indices );
-                WriteMap( self, indices, _mapWriteBuffer, _mapOffset );
+                WriteMap( self, bucket, indices, _mapWriteBuffer, _mapOffset );
             }
 
 
@@ -613,69 +613,79 @@ private:
     }
 
     //-----------------------------------------------------------
-    void WriteMap( Job* self, const Span<uint32> bucketIndices, Span<uint64> mapOut, const uint32 tableOffset )
+    void WriteMap( Job* self, const uint32 bucket, const Span<uint32> bucketIndices, Span<uint64> mapOut, const uint32 tableOffset )
     {
-        const uint32 bucketShift = _k - _bucketBits;
-        const uint32 blockSize   = (uint32)_ioQueue.BlockSize( FileId::MAP2 );
+        uint64 outMapBucketCounts[_numBuckets];     // Pass actual bucket counts and implement them
+        uint32 totalCounts       [_numBuckets];
+        // uint64 totalBitCounts    [_numBuckets];
 
-        uint32 counts [_numBuckets] = { 0 };
-        uint32 pfxSum [_numBuckets];
-        uint32 offsets[_numBuckets];
+        _mapWriter.WriteJob( self, bucket, tableOffset, bucketIndices, mapOut,
+            outMapBucketCounts, totalCounts, _mapBitCounts );
 
-        uint32 count, offset, _;
-        GetThreadOffsets( self, (uint32)bucketIndices.Length(), count, offset, _ );
+        ///
+        /// #TODO: Fix and re-enabled Un-compressed method?:
+        ///
+        // const uint32 bucketShift = _k - _bucketBits;
+        // const uint32 blockSize   = (uint32)_ioQueue.BlockSize( FileId::MAP2 );
 
-        auto indices = bucketIndices.Slice( offset, count );
+        // uint32 counts [_numBuckets] = { 0 };
+        // uint32 pfxSum [_numBuckets];
+        // uint32 offsets[_numBuckets];
 
-        // Count buckets
-        for( size_t i = 0; i < indices.Length(); i++ )
-        {
-            const uint32 b = indices[i] >> bucketShift; ASSERT( b < _numBuckets );
-            counts[b]++;
-        }
+        // uint32 count, offset, _;
+        // GetThreadOffsets( self, (uint32)bucketIndices.Length(), count, offset, _ );
 
-        uint32* pSliceCounts   = nullptr;
-        uint32* pAlignedCounts = nullptr;
-        uint32* pOffsets       = offsets;
+        // auto indices = bucketIndices.Slice( offset, count );
 
-        if( self->IsControlThread() )
-        {
-            pSliceCounts   = _mapSliceCounts;
-            pAlignedCounts = _mapAlignedCounts;
-            pOffsets       = _mapOffsets;
-        }
-        else
-            memcpy( offsets, _mapOffsets, sizeof( offsets ) );
+        // // Count buckets
+        // for( size_t i = 0; i < indices.Length(); i++ )
+        // {
+        //     const uint32 b = indices[i] >> bucketShift; ASSERT( b < _numBuckets );
+        //     counts[b]++;
+        // }
 
-        self->CalculateBlockAlignedPrefixSum<uint64>( _numBuckets, blockSize, counts, pfxSum, pSliceCounts, pOffsets, pAlignedCounts );
+        // uint32* pSliceCounts   = nullptr;
+        // uint32* pAlignedCounts = nullptr;
+        // uint32* pOffsets       = offsets;
+
+        // if( self->IsControlThread() )
+        // {
+        //     pSliceCounts   = _mapSliceCounts;
+        //     pAlignedCounts = _mapAlignedCounts;
+        //     pOffsets       = _mapOffsets;
+        // }
+        // else
+        //     memcpy( offsets, _mapOffsets, sizeof( offsets ) );
+
+        // // self->CalculateBlockAlignedPrefixSum<uint64>( _numBuckets, blockSize, counts, pfxSum, pSliceCounts, pOffsets, pAlignedCounts );
         // self->CalculatePrefixSum( _numBuckets, counts, pfxSum, totalCounts );
 
-        // Wait for write fence
-        if( self->BeginLockBlock() )
-            _mapWriteFence.Wait();
-        self->EndLockBlock();
+        // // Wait for write fence
+        // if( self->BeginLockBlock() )
+        //     _mapWriteFence.Wait();
+        // self->EndLockBlock();
 
-        // Distribute as 64-bit entries
-        const uint64 outOffset = tableOffset + offset;
+        // // Distribute as 64-bit entries
+        // const uint64 outOffset = tableOffset + offset;
 
-        for( size_t i = 0; i < indices.Length(); i++ )
-        {
-            const uint64 origin = indices[i];
-            const uint32 b      = origin >> bucketShift;    ASSERT( b < _numBuckets );
+        // for( size_t i = 0; i < indices.Length(); i++ )
+        // {
+        //     const uint64 origin = indices[i];
+        //     const uint32 b      = origin >> bucketShift;    ASSERT( b < _numBuckets );
 
-            const uint32 dstIdx = --pfxSum[b]; ASSERT( dstIdx < mapOut.Length() );
+        //     const uint32 dstIdx = --pfxSum[b]; ASSERT( dstIdx < mapOut.Length() );
 
-            mapOut[dstIdx] = (origin << _k) | (outOffset + i);  // (origin, dst index)
-        }
+        //     mapOut[dstIdx] = (origin << _k) | (outOffset + i);  // (origin, dst index)
+        // }
 
-        // Write map to disk
-        if( self->BeginLockBlock() )
-        {
-            _ioQueue.WriteBucketElementsT<uint64>( FileId::MAP2 + (FileId)rTable-2, mapOut.Ptr(), _mapAlignedCounts, _mapSliceCounts );
-            _ioQueue.SignalFence( _mapWriteFence );
-            _ioQueue.CommitCommands();
-        }
-        self->EndLockBlock();
+        // // Write map to disk
+        // if( self->BeginLockBlock() )
+        // {
+        //     _ioQueue.WriteBucketElementsT<uint64>( FileId::MAP2 + (FileId)rTable-2, mapOut.Ptr(), _mapAlignedCounts, _mapSliceCounts );
+        //     _ioQueue.SignalFence( _mapWriteFence );
+        //     _ioQueue.CommitCommands();
+        // }
+        // self->EndLockBlock();
     }
 
     //-----------------------------------------------------------
@@ -1110,10 +1120,11 @@ private:
     FxMatcherBounded _matcher;
 
     // Map
-    // MapWriter<_numBuckets, false> _mapWriter;
-    uint32        _mapSliceCounts  [_numBuckets];
-    uint32        _mapAlignedCounts[_numBuckets];
-    uint32        _mapOffsets      [_numBuckets] = {};
+    MapWriter<_numBuckets, false> _mapWriter;
+    uint64                        _mapBitCounts[_numBuckets];    // Used by the map writer. Single instace shared accross jobs
+    // uint32        _mapSliceCounts  [_numBuckets];
+    // uint32        _mapAlignedCounts[_numBuckets];
+    // uint32        _mapOffsets      [_numBuckets] = {};
 
     // Distributing to buckets
     Span<uint32*> _offsetsY;
@@ -1248,26 +1259,68 @@ void DbgValidatePairs( const TableId table, const uint32 bucket,
 #if DBG_VALIDATE_TABLES
 
 //-----------------------------------------------------------
-template<TableId rTable>
-inline void DbgValidatePlotTable( const Span<Pair> pairs, const Span<uint64> yIn, const Span< )
+template<typename TMetaIn, typename TMetaOut>
+inline void DbgValidatePlotTable( const Span<Pair> pairs, const Span<uint64> yIn )
 {
 
 }
 
 //-----------------------------------------------------------
-inline void DbgValidatePlot( const DebugPlot& dbgPlot )
+template<TableId rTable>
+inline void DbgValidatePlotTable( const Span<Pair> pairs, const Span<uint64> yIn )
 {
-    Span<uint64> yIn;
-    Span<uint64> yOut;
-    Span<uint32> metaIn;
-    Span<uint32> metaOut;
+    using TMetaIn  = typename K32MetaType<rTable>::In;
+    using TMetaOut = typename K32MetaType<rTable>::Out;
+}
 
-    DbgValidatePlotTable<TableId::Table2>( dbgPlot );
+//-----------------------------------------------------------
+inline void DbgValidatePlot( DiskPlotContext& context, const DebugPlot& dbgPlot )
+{
+    // Span<uint32> _f7s = dbgPlot.f7;
+
+    // AnonMTJob::Run( *context.threadPool, [=]( AnonMTJob* self ){
+        
+    //     uint64 count, offset, end;
+    //     GetThreadOffsets( self, (uint64)_f7s.Length(), count, offset, end );
+
+    //     // Span<uint32> f7s = _f7s.Slice( offset, count );
+
+    //     uint64 fullProof[PROOF_X_COUNT];
+    //     Pair   backPtrs [PROOF_X_COUNT/2];
+
+    //     for( uint64 i = offset; i < end; i++ )
+    //     {
+    //         const uint32 f7 = _f7s[i];
+
+    //         // Pull full proof from back points
+    //         uint32 ptrCount = 1;
+    //         backPtrs[0] = ;
+    //         for( TableId table = TableId::Table7; table > TableId::Table1; table-- )
+    //         {
+    //             uint32 dst = 0;
+    //             for( uint32 p = 0; p < ptrCount; p++ )
+    //             {
+    //                 dbgPlot.backPointers[6][p]
+
+    //                 dst += 2;
+    //             }
+    //             ptrCount <<= 1;
+    //         }
+
+    //     }
+    // });
+
+    // Span<uint64> yIn;
+    // Span<uint64> yOut;
+    // Span<uint32> metaIn;
+    // Span<uint32> metaOut;
+
+    // DbgValidatePlotTable<TableId::Table2>( dbgPlot );
     
-    for( TableId rTable = TableId::Table2; rTable <= TableId::Table7; rTable++ )
-    {
+    // for( TableId rTable = TableId::Table2; rTable <= TableId::Table7; rTable++ )
+    // {
 
-    }
+    // }
 }
 
 #endif
