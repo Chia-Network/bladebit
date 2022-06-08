@@ -2,7 +2,6 @@
 #include "io/FileStream.h"
 #include "io/HybridStream.h"
 #include "plotdisk/DiskPlotConfig.h"
-#include "plotdisk/IOTransforms.h"
 #include "jobs/IOJob.h"
 #include "util/Util.h"
 #include "util/Log.h"

@@ -5,12 +5,36 @@
 #include "util/StackAllocator.h"
 
 
+struct K32BoundedFpCrossBucketInfo
+{
+    struct Meta4{ uint32 m[4]; };
+
+    uint32  groupCount[2];  // Groups sizes for the bucket's last 2 groups
+
+    uint32  savedY   [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    Meta4   savedMeta[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    Pair    pair     [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+
+    uint32* y           = nullptr;
+    Meta4*  meta        = nullptr;
+    uint32  matchCount  = 0;
+    uint32  matchOffset = 0;
+
+    inline uint64 EntryCount() const { return (uint64)groupCount[0] + groupCount[1]; }
+};
+
+
+
 class FxMatcherBounded
 {
     using Job = AnonPrefixSumJob<uint32>;
 
 public:
-
+    //-----------------------------------------------------------
+    FxMatcherBounded( const uint32 numBuckets )
+        : _numBuckets( numBuckets ) 
+    {}
+    
     //-----------------------------------------------------------
     Span<Pair> Match( Job* self, 
         const uint32       bucket, 
@@ -26,18 +50,48 @@ public:
         const Span<uint32> groups = ScanGroups( self, bucket, yEntries, groupsBuffer, startIndex );
         ASSERT( groups.Length() );
 
+        if( self->IsLastThread() && bucket > 0 )
+        {
+            // Perform cross bucket matches on previous bucket, now that we have the new groups
+            // #TODO: This
+        }
+
         const uint32 matchCount = MatchGroups( self,
+                                               bucket,
+                                               bucket,
                                                startIndex,
                                                groups,
                                                yEntries,
                                                pairs,
-                                               bucket,
                                                pairs.Length() );
+
+        // Save cross bucket matches
+        if( self->IsLastThread() && bucket < _numBuckets )
+        {
+            SaveCrossBucketGroups( self, bucket, groups.Slice( groups.Length()-3 ), yEntries );
+        }
 
         return pairs.Slice( 0, matchCount );
     }
 
-private:
+
+    //-----------------------------------------------------------
+    template<typename TMeta>
+    inline void SaveCrossBucketMeta( const Span<TMeta> meta )
+    {
+        auto& info = _xBucketInfo;
+
+        const size_t copyCount = info.groupCount[0] + info.groupCount[1];
+        ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+
+        memcpy( info.savedY, yEntries.Ptr() + groupIndices[0], copyCount * sizeof( uint32 ) );
+    }
+
+    //-----------------------------------------------------------
+    inline uint32 CrossBucketMatchCount() const
+    {
+        return _crossBucketMatchCount;
+    }
 
     //-----------------------------------------------------------
     const Span<uint32> ScanGroups( 
@@ -109,14 +163,17 @@ private:
 
     //-----------------------------------------------------------
     uint32 MatchGroups( Job* self,
+                        const uint32       lBucket,
+                        const uint32       rBucket,
                         const uint32       startIndex,
                         const Span<uint32> groupBoundaries,
                         const Span<uint32> yEntries,
                         Span<Pair>         pairs,
-                        const uint32       bucket,
                         const uint64       maxPairs )
     {
-        const uint64 bucketMask = ((uint64)bucket) << 32;
+        const uint64 lGroupMask = ((uint64)lBucket) << 32;
+        const uint64 rGroupMask = ((uint64)rBucket) << 32;
+
         const uint32 groupCount = groupBoundaries.Length() - 1; // Ignore the extra ghost group
 
         uint32 pairCount = 0;
@@ -125,12 +182,12 @@ private:
         uint16 rMapIndices[kBC];
 
         uint64 groupLStart = startIndex;
-        uint64 groupL      = (bucketMask | (uint64)yEntries[groupLStart]) / kBC;
+        uint64 groupL      = (lGroupMask | (uint64)yEntries[groupLStart]) / kBC;
 
         for( uint32 i = 0; i < groupCount; i++ )
         {
             const uint64 groupRStart = groupBoundaries[i];
-            const uint64 groupR      = (bucketMask | (uint64)yEntries[groupRStart]) / kBC;
+            const uint64 groupR      = (rGroupMask | (uint64)yEntries[groupRStart]) / kBC;
             const uint64 groupLEnd   = groupRStart;
 
             if( groupR - groupL == 1 )
@@ -153,7 +210,7 @@ private:
 
                 for( uint64 iR = groupRStart; iR < groupREnd; iR++ )
                 {
-                    uint64 localRY = (bucketMask | (uint64)yEntries[iR]) - groupRRangeStart;
+                    uint64 localRY = (rGroupMask | (uint64)yEntries[iR]) - groupRRangeStart;
                     ASSERT( (bucketMask | (uint64)yEntries[iR]) / kBC == groupR );
 
                     if( rMapCounts[localRY] == 0 )
@@ -165,7 +222,7 @@ private:
                 // For each group L entry
                 for( uint64 iL = groupLStart; iL < groupLEnd; iL++ )
                 {
-                    const uint64 yL     = bucketMask | (uint64)yEntries[iL];
+                    const uint64 yL     = lGroupMask | (uint64)yEntries[iL];
                     const uint64 localL = yL - groupLRangeStart;
 
                     // Iterate kExtraBitsPow = 1 << kExtraBits = 1 << 6 == 64
@@ -202,6 +259,49 @@ private:
     }
 
 private:
-    const uint32*    _startPositions[BB_DP_MAX_JOBS];// = { 0 };
-    Span<uint32>     _groupBuffers  [BB_DP_MAX_JOBS];
+    //-----------------------------------------------------------
+    uint32 CrossBucketMatch( Job* self, 
+        const uint32       bucket, 
+        const Span<uint32> yEntries, 
+              Span<uint32> groupBoundaries,
+              Span<Pair>   pairs )
+    {
+        
+    }
+
+    //-----------------------------------------------------------
+    inline void SaveCrossBucketGroups( Job* self, 
+        const uint32                 bucket,
+        const Span<uint32>           groupIndices,  // Last 3 group indices
+        const Span<uint32>           yEntries )
+    {
+        auto& info = _xBucketInfo;
+        
+        info.matchOffsetPrev = info.matchOffsetCur;
+        info.matchOffsetCur  = groupIndices[0];
+
+        if( bucket == _numBuckets-1 )
+            return;
+
+        info.groupCount[0] = groupIndices[1] - groupIndices[0];
+        info.groupCount[1] = groupIndices[2] - groupIndices[1];
+
+        const size_t copyCount = info.groupCount[0] + info.groupCount[1];
+        ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+
+        memcpy( info.savedY, yEntries.Ptr() + groupIndices[0], copyCount * sizeof( uint32 ) );
+        // memcpy( info.savedMeta, meta     + groupIndices[0], copyCount * sizeof( TMeta  ) );
+
+        // #TODO: Re-enable asserts w/ bucket mask
+        // ASSERT( info.savedY[0] / kBC == info.savedY[info.groupCount[0]-1] / kBC );
+        // ASSERT( info.savedY[info.groupCount[0]] / kBC == info.savedY[info.groupCount[0]+info.groupCount[1]-1] / kBC );
+    }
+
+// private:
+public:
+    const uint32*               _startPositions[BB_DP_MAX_JOBS];// = { 0 };
+    Span<uint32>                _groupBuffers  [BB_DP_MAX_JOBS];
+    K32BoundedFpCrossBucketInfo _xBucketInfo = {};
+    uint32                      _bucket      = 0;
+    uint32                      _numBuckets;
 };

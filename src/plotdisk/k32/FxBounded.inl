@@ -149,6 +149,7 @@ public:
     DiskPlotFxBounded( DiskPlotContext& context )
         : _context       ( context )
         , _ioQueue       ( *context.ioQueue )
+        , _matcher       ( _numBuckets )
         , _yReadFence    ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
         , _metaReadFence ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
         , _indexReadFence( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
@@ -424,6 +425,9 @@ private:
                 totalMatches = _maxTableEntries;
             }
 
+            // #TODO: Write cross-bucket pairs to previous table
+            // #TODO: Update previous bucket's count w/ cross-bucket match count
+
             WritePairs( self, bucket, totalMatches, matches, matchOffset );
 
             #if DBG_VALIDATE_TABLES
@@ -444,6 +448,8 @@ private:
 
             WaitForFence( self, _metaReadFence, bucket );
             SortOnYKey( self, sortKey, metaTmp, metaIn );
+
+            // #TODO: Save cross-bucket meta
             
             if constexpr ( rTable == TableId::Table2 )
             {
@@ -461,7 +467,9 @@ private:
                 self->EndLockBlock();
             }
 
-            // Gen fx & write
+            // #TODO: Gen cross-bucket fx & write cross-bucket entries
+
+            /// Gen fx & write
             {
                 Span<uint64>   yOut    = _yTmp.Slice( matchOffset, matches.Length() );
                 Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().Slice( matchOffset, matches.Length() );  //( (TMetaOut*)metaTmp.Ptr(), matches.Length() );

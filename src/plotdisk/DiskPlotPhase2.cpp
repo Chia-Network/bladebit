@@ -1,7 +1,6 @@
 #include "DiskPlotPhase2.h"
 #include "util/BitField.h"
 #include "algorithm/RadixSort.h"
-#include "transforms/FxTransform.h"
 #include "plotdisk/DiskPlotInfo.h"
 #include "util/StackAllocator.h"
 #include "DiskPlotInfo.h"

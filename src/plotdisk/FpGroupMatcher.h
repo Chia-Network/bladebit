@@ -20,7 +20,7 @@ struct FpCrossBucketInfo
 
     inline bool   IsLastBucket()  const { return bucket == maxBuckets-1; }
     inline bool   IsFirstBucket() const { return bucket == 0; }
-    inline uint64 EntryCount() const { return (uint64)groupCount[0] + groupCount[1]; }
+    inline uint64 EntryCount()    const { return (uint64)groupCount[0] + groupCount[1]; }
 };
 
 struct FpGroupMatcher
