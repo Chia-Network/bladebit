@@ -376,7 +376,6 @@ private:
             Span<uint32> sortKey = _sortKey.SliceSize( entryCount );
             SortY( self, entryCount, yInput.Ptr(), _yTmp.As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[1].As<uint32>().Ptr() );
 
-
             ///
             /// Write reverse map, given the previous table's y origin indices
             ///
@@ -390,40 +389,47 @@ private:
                 SortOnYKey( self, sortKey, _index[bucket], indices );
                 WriteMap( self, bucket, indices, _mapWriteBuffer, _mapOffset );
             }
+            
+            // #TODO: Move metadata back after matching, but for simplicity let's do it here now?
 
 
             ///
             /// Match
             ///
-            Span<Pair> matches = Match( self, bucket, yInput );
+            // Span<Pair> matches = Match( self, bucket, yInput );
 
             // Count the total match count
-            uint32 totalMatches = 0;
-            uint32 matchOffset  = 0;
+            // uint32 totalMatches = 0;
+            // uint32 matchOffset  = 0;
 
-            for( uint32 i = 0; i < threadCount; i++ )
-                totalMatches += (uint32)_pairs[i].Length();
+            // for( uint32 i = 0; i < threadCount; i++ )
+            //     totalMatches += (uint32)_pairs[i].Length();
 
-            for( uint32 i = 0; i < id; i++ )
-                matchOffset += (uint32)_pairs[i].Length();
+            // for( uint32 i = 0; i < id; i++ )
+            //     matchOffset += (uint32)_pairs[i].Length();
 
-            ASSERT( totalMatches <= _entriesPerBucket );
+            // ASSERT( totalMatches <= _entriesPerBucket );
 
-            // Prevent overflow entries
-            const uint64 tableEntryCount = _tableEntryCount;
-            if( bucket == _numBuckets-1 && (tableEntryCount + totalMatches) > _maxTableEntries )
-            {
-                // Prevent calculating fx for overflow matches
-                if( self->IsLastThread() )
-                {
-                    const uint32 overflowEntries = (uint32)( (tableEntryCount + totalMatches) - _maxTableEntries );
-                    ASSERT( overflowEntries < matches.Length() );
+            // // Prevent overflow entries
+            // const uint64 tableEntryCount = _tableEntryCount;
+            // if( bucket == _numBuckets-1 && (tableEntryCount + totalMatches) > _maxTableEntries )
+            // {
+            //     // Prevent calculating fx for overflow matches
+            //     if( self->IsLastThread() )
+            //     {
+            //         const uint32 overflowEntries = (uint32)( (tableEntryCount + totalMatches) - _maxTableEntries );
+            //         ASSERT( overflowEntries < matches.Length() );
 
-                    matches = matches.SliceSize( matches.Length() - overflowEntries );
-                }
+            //         matches = matches.SliceSize( matches.Length() - overflowEntries );
+            //     }
 
-                totalMatches = _maxTableEntries;
-            }
+            //     totalMatches = _maxTableEntries;
+            // }
+
+            ScanGroupsAndCrossBucketMatch( self, bucket, yInput );
+
+            if( bucket > 0 )
+                CompletePreviousBucket( self, bucket - 1 );
 
             // #TODO: Write cross-bucket pairs to previous table
             // #TODO: Update previous bucket's count w/ cross-bucket match count
@@ -434,7 +440,9 @@ private:
                 _dbgPlot.WritePairs( self, rTable, matchOffset, matches, _mapOffset, totalMatches );
             #endif
 
-            // Sort meta on Y
+            ///
+            /// Sort meta on Y
+            ///
             Span<TMetaIn> metaTmp = _meta[bucket].SliceSize( yInput.Length() );
             Span<TMetaIn> metaIn  = _metaTmp[0].As<TMetaIn>().SliceSize( yInput.Length() ); // #NOTE: _metaTmp[0] is only used here, so we can use it for writing x values to disk
 
@@ -449,11 +457,12 @@ private:
             WaitForFence( self, _metaReadFence, bucket );
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
-            // #TODO: Save cross-bucket meta
+            SaveCrossBucketMetadata( self, metaIn );
             
+            // On Table 2, metadata is our x values, which have to be saved as table 1
             if constexpr ( rTable == TableId::Table2 )
             {
-                // Write x back to disk
+                // Write (sorted-on-y) x back to disk
                 if( self->BeginLockBlock() )
                 {
                     #if DBG_VALIDATE_TABLES
@@ -466,8 +475,6 @@ private:
                 }
                 self->EndLockBlock();
             }
-
-            // #TODO: Gen cross-bucket fx & write cross-bucket entries
 
             /// Gen fx & write
             {
@@ -596,7 +603,7 @@ private:
     }
 
     //-----------------------------------------------------------
-    Span<Pair> Match( Job* self, const uint32 bucket, Span<uint32> yEntries )
+    void ScanGroupsAndCrossBucketMatch( Job* self, const uint32 bucket, Span<uint32> yEntries )
     {
         const uint32 id          = self->JobId();
         const uint32 threadCount = self->JobCount();
@@ -609,15 +616,50 @@ private:
         TimePoint timer;
         if( self->IsControlThread() )
             timer = TimerBegin();
+
+        // Scan for groups & perform cross-bucket matches for the previous bucket
+        _matcher.ScanGroupsAndMatchPreviousBucket( self, bucket, yEntries, groupIndices );
+
+        // // Match this bucket's matches
+        // _matcher.Match( self, bucket, yEntries, _pairs[id] );
     
-        auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
-        _pairs[id] = matches;
+        // auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
+        // _pairs[id] = matches;
 
         self->SyncThreads();
         if( self->IsControlThread() )
             _matchTime += TimerEndTicks( timer );
 
-        return matches;
+        // return matches;
+    }
+
+    //-----------------------------------------------------------
+    Span<Pair> Match( Job* self const uint32 bucket, const Span<uint32> yEntries const Span<TMetaIn> meta )
+    {
+
+    }
+
+    //-----------------------------------------------------------
+    inline void CompletePreviousBucket( Job* self, const uint32 bucket, const Span<Pair> pairs )
+    {
+        ASSERT( bucket > 0 );
+
+        if( self->BeginLockBlock() )
+        {
+            auto& info _matcher.GetCrossBucketInfo( bucket - 1 );
+
+            const uint32 xBucketMatchCount = info.matchCount;
+
+            Span<uint32>   yIn;
+            Span<TMetaIn>  metaIn;
+            Span<uint64>   yOut;
+            Span<TMetaOut> metaOut;
+
+            GenFx( self, bucket, pairs, yIn, metaIn, yOut, metaOut );
+
+            // Submit w/ previous bucket
+        }
+        self->EndLockBlock();
     }
 
     //-----------------------------------------------------------
@@ -1120,6 +1162,8 @@ private:
     Span<uint32>        _sortKey;
     Span<K32Meta4>      _metaTmp[2];
     Span<Pair>          _pairBuffer;
+
+    // When doing cross-bucket matching, we save the previous bucket entries as these spans (which just point to the working buffers)
 
     // Working views
     Span<Pair>          _pairs[BB_DP_MAX_JOBS];    // Pairs buffer divided per thread
