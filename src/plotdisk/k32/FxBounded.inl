@@ -243,7 +243,6 @@ public:
         _indexWriteBuffer = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
         _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( entriesPerBucket, t2BlockSize );
 
-
         const size_t pairsWriteSize = CDiv( entriesPerBucket * _pairBitSize, 8 );
         _pairsWriteBuffer = allocator.AllocT<byte>( pairsWriteSize, t1BlockSize );
         byte* pairBlocks  = (byte*)allocator.CAlloc( 1, t1BlockSize, t1BlockSize );
@@ -389,50 +388,39 @@ private:
                 SortOnYKey( self, sortKey, _index[bucket], indices );
                 WriteMap( self, bucket, indices, _mapWriteBuffer, _mapOffset );
             }
-            
-            // #TODO: Move metadata back after matching, but for simplicity let's do it here now?
-
 
             ///
             /// Match
             ///
-            // Span<Pair> matches = Match( self, bucket, yInput );
+            Span<Pair> matches = Match( self, bucket, yInput );
 
             // Count the total match count
-            // uint32 totalMatches = 0;
-            // uint32 matchOffset  = 0;
+            uint32 totalMatches = 0;
+            uint32 matchOffset  = 0;
 
-            // for( uint32 i = 0; i < threadCount; i++ )
-            //     totalMatches += (uint32)_pairs[i].Length();
+            for( uint32 i = 0; i < threadCount; i++ )
+                totalMatches += (uint32)_pairs[i].Length();
 
-            // for( uint32 i = 0; i < id; i++ )
-            //     matchOffset += (uint32)_pairs[i].Length();
+            for( uint32 i = 0; i < id; i++ )
+                matchOffset += (uint32)_pairs[i].Length();
 
-            // ASSERT( totalMatches <= _entriesPerBucket );
+            ASSERT( totalMatches <= _entriesPerBucket );
 
-            // // Prevent overflow entries
-            // const uint64 tableEntryCount = _tableEntryCount;
-            // if( bucket == _numBuckets-1 && (tableEntryCount + totalMatches) > _maxTableEntries )
-            // {
-            //     // Prevent calculating fx for overflow matches
-            //     if( self->IsLastThread() )
-            //     {
-            //         const uint32 overflowEntries = (uint32)( (tableEntryCount + totalMatches) - _maxTableEntries );
-            //         ASSERT( overflowEntries < matches.Length() );
+            // Prevent overflow entries
+            const uint64 tableEntryCount = _tableEntryCount;
+            if( bucket == _numBuckets-1 && (tableEntryCount + totalMatches) > _maxTableEntries )
+            {
+                // Prevent calculating fx for overflow matches
+                if( self->IsLastThread() )
+                {
+                    const uint32 overflowEntries = (uint32)( (tableEntryCount + totalMatches) - _maxTableEntries );
+                    ASSERT( overflowEntries < matches.Length() );
 
-            //         matches = matches.SliceSize( matches.Length() - overflowEntries );
-            //     }
+                    matches = matches.SliceSize( matches.Length() - overflowEntries );
+                }
 
-            //     totalMatches = _maxTableEntries;
-            // }
-
-            ScanGroupsAndCrossBucketMatch( self, bucket, yInput );
-
-            if( bucket > 0 )
-                CompletePreviousBucket( self, bucket - 1 );
-
-            // #TODO: Write cross-bucket pairs to previous table
-            // #TODO: Update previous bucket's count w/ cross-bucket match count
+                totalMatches = _maxTableEntries;
+            }
 
             WritePairs( self, bucket, totalMatches, matches, matchOffset );
 
@@ -458,6 +446,7 @@ private:
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
             SaveCrossBucketMetadata( self, metaIn );
+
             
             // On Table 2, metadata is our x values, which have to be saved as table 1
             if constexpr ( rTable == TableId::Table2 )
@@ -507,6 +496,9 @@ private:
 
                 WriteEntries( self, bucket, (uint32)_tableEntryCount + matchOffset, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
             }
+
+            // Generate fx for cross-bucket matches, and save the matches to an in-memory buffer
+            GenCrossBucketFx( self, bucket );
 
             if( self->IsControlThread() )
             {
@@ -603,7 +595,7 @@ private:
     }
 
     //-----------------------------------------------------------
-    void ScanGroupsAndCrossBucketMatch( Job* self, const uint32 bucket, Span<uint32> yEntries )
+    void Match( Job* self, const uint32 bucket, Span<uint32> yEntries )
     {
         const uint32 id          = self->JobId();
         const uint32 threadCount = self->JobCount();
@@ -618,48 +610,110 @@ private:
             timer = TimerBegin();
 
         // Scan for groups & perform cross-bucket matches for the previous bucket
-        _matcher.ScanGroupsAndMatchPreviousBucket( self, bucket, yEntries, groupIndices );
+        // _matcher.ScanGroupsAndMatchPreviousBucket( self, bucket, yEntries, groupIndices );
 
         // // Match this bucket's matches
         // _matcher.Match( self, bucket, yEntries, _pairs[id] );
     
-        // auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
-        // _pairs[id] = matches;
+        auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
+        _pairs[id] = matches;
 
         self->SyncThreads();
         if( self->IsControlThread() )
             _matchTime += TimerEndTicks( timer );
 
-        // return matches;
+        // Write cross-bucket pairs to disk
+        if( bucket > 0 )
+            WriteCrossBucketPairs( self, bucket-1 )
+
+        return matches;
     }
-
+    
     //-----------------------------------------------------------
-    Span<Pair> Match( Job* self const uint32 bucket, const Span<uint32> yEntries const Span<TMetaIn> meta )
+    void WriteCrossBucketPairs( Job* self, const uint32 bucket )
     {
+        auto& info = _matcher.GetCrossBucketInfo( bucket );
 
-    }
-
-    //-----------------------------------------------------------
-    inline void CompletePreviousBucket( Job* self, const uint32 bucket, const Span<Pair> pairs )
-    {
-        ASSERT( bucket > 0 );
+        if( info.matchCount < 1 )
+            return;
 
         if( self->BeginLockBlock() )
         {
-            auto& info _matcher.GetCrossBucketInfo( bucket - 1 );
+            const uint23     offset = _tableEntryCount;
+            const Span<Pair> pairs( info.pair, info.matchCount );
 
-            const uint32 xBucketMatchCount = info.matchCount;
-
-            Span<uint32>   yIn;
-            Span<TMetaIn>  metaIn;
-            Span<uint64>   yOut;
-            Span<TMetaOut> metaOut;
-
-            GenFx( self, bucket, pairs, yIn, metaIn, yOut, metaOut );
-
-            // Submit w/ previous bucket
+            _tableEntryCount += info.matchCount;
+            // #TODO: How do we handle this? We need to wait on a fence, but how?
+            // _pairWriteFence.Wait( bucket );
+            // _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer );
+            // BitWriter writer = _pairBitWriter.GetWriter( 0, dstOffset * _pairBitSize );
+            // PackPairs( self, pairs, writer );
+            // _pairBitWriter.Submit();
+            // _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );
+            // _ioQueue.CommitCommands();
         }
         self->EndLockBlock();
+    }
+
+    //-----------------------------------------------------------
+    void WritePairs( Job* self, const uint32 bucket, const uint32 totalMatchCount, 
+                     const Span<Pair> matches, const uint64 dstOffset )
+    {
+        ASSERT( dstOffset + matches.length <= totalMatchCount );
+
+        // Need to wait for our write buffer to be ready to use again
+        if( self->BeginLockBlock() )
+        {
+            if( bucket > 0 )
+            {
+                // Write crosss-bucket values pairs first, which belong to the previous bucket
+
+                _pairWriteFence.Wait( bucket );
+            }
+
+            uint64 bitBucketSizes = totalMatchCount * _pairBitSize;
+            _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer );
+        }
+        self->EndLockBlock();
+
+        // #TOOD: Write pairs raw? Or bucket-relative? Maybe raw for now
+
+        // #NOTE: For now we write compressed as in standard FP.        
+        BitWriter writer = _pairBitWriter.GetWriter( 0, dstOffset * _pairBitSize );
+
+        ASSERT( matches.Length() > 2 );
+        PackPairs( self, matches.Slice( 0, 2 ), writer );
+        self->SyncThreads();
+        PackPairs( self, matches.Slice( 2 ), writer );
+
+        // Write to disk
+        if( self->BeginLockBlock() )
+        {
+            _pairBitWriter.Submit();
+            _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );
+            _ioQueue.CommitCommands();
+        }
+        self->EndLockBlock();
+    }
+
+    //-----------------------------------------------------------
+    void PackPairs( Job* self, const Span<Pair> pairs, BitWriter& writer )
+    {
+        self;
+
+        const uint32 shift = _pairsRightBits;
+        const uint64 mask  = ( 1ull << shift ) - 1;
+
+        const Pair* pair = pairs.Ptr();
+        const Pair* end  = pair + pairs.Length();
+
+        while( pair < end )
+        {
+            ASSERT( pair->right - pair->left < _pairsMaxDelta );
+
+            writer.Write( ( (uint64)(pair->right - pair->left) << shift ) | ( pair->left & mask ), _pairBitSize );
+            pair++;
+        }
     }
 
     //-----------------------------------------------------------
@@ -736,63 +790,6 @@ private:
         //     _ioQueue.CommitCommands();
         // }
         // self->EndLockBlock();
-    }
-
-    //-----------------------------------------------------------
-    void WritePairs( Job* self, const uint32 bucket, const uint32 totalMatchCount, 
-                     const Span<Pair> matches, const uint64 dstOffset )
-    {
-        ASSERT( dstOffset + matches.length <= totalMatchCount );
-
-        // Need to wait for our write buffer to be ready to use again
-        if( self->BeginLockBlock() )
-        {
-            if( bucket > 0 )
-                _pairWriteFence.Wait( bucket );
-
-            uint64 bitBucketSizes = totalMatchCount * _pairBitSize;
-            _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer );
-        }
-        self->EndLockBlock();
-
-        // #TOOD: Write pairs raw? Or bucket-relative? Maybe raw for now
-
-        // #NOTE: For now we write compressed as in standard FP.        
-        BitWriter writer = _pairBitWriter.GetWriter( 0, dstOffset * _pairBitSize );
-
-        ASSERT( matches.Length() > 2 );
-        PackPairs( self, matches.Slice( 0, 2 ), writer );
-        self->SyncThreads();
-        PackPairs( self, matches.Slice( 2 ), writer );
-
-        // Write to disk
-        if( self->BeginLockBlock() )
-        {
-            _pairBitWriter.Submit();
-            _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );
-            _ioQueue.CommitCommands();
-        }
-        self->EndLockBlock();
-    }
-
-    //-----------------------------------------------------------
-    void PackPairs( Job* self, const Span<Pair> pairs, BitWriter& writer )
-    {
-        self;
-
-        const uint32 shift = _pairsRightBits;
-        const uint64 mask  = ( 1ull << shift ) - 1;
-
-        const Pair* pair = pairs.Ptr();
-        const Pair* end  = pair + pairs.Length();
-
-        while( pair < end )
-        {
-            ASSERT( pair->right - pair->left < _pairsMaxDelta );
-
-            writer.Write( ( (uint64)(pair->right - pair->left) << shift ) | ( pair->left & mask ), _pairBitSize );
-            pair++;
-        }
     }
 
     //-----------------------------------------------------------
@@ -874,6 +871,16 @@ private:
 
         if( self->IsControlThread() )
             _distributeTime += TimerEndTicks( timer );
+    }
+
+    //-----------------------------------------------------------
+    template<typename TYOut>
+    void GenCrossBucketFx(
+        Job* self,
+        const uint32 bucket
+    )
+    {
+
     }
 
     //-----------------------------------------------------------

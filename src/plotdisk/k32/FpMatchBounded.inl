@@ -36,10 +36,11 @@ public:
     {}
 
     //-----------------------------------------------------------
-    void ScanGroupsAndMatchPreviousBucket( Job* self, 
-            const uint32       bucket, 
-            const Span<uint32> yEntries, 
-                  Span<uint32> groupsBuffer )
+    Span<Pair>  Match( Job* self, 
+                 const uint32       bucket, 
+                 const Span<uint32> yEntries, 
+                       Span<uint32> groupsBuffer,
+                       Span<Pair>   pairs )
     {
         const uint32 id = self->JobId();
         _groupBuffers[id] = groupsBuffer;
@@ -48,15 +49,16 @@ public:
 
         Span<uint32> groups = ScanGroups( self, bucket, yEntries, groupsBuffer, startIndex );
         ASSERT( groups.Length() > 0 );
+        
         _groupBuffers[id] = groups;
 
         if( self->IsLastThread() )
         {
-            // Save cross bucket data for this bucket (to be used during the next bucket)
+            // Save last 2 group's data for this bucket (to be used during the next bucket)
             if( bucket < _numBuckets )
                 SaveCrossBucketGroups( self, bucket, groups.Slice( groups.Length()-3 ), yEntries );
 
-            // Perform cross-bucket matching for the previous bucket
+            // Perform cross-bucket matching for the previous bucket, wwith the first 2 groups of this bucket
             if( bucket > 0 )
             {
                 auto& info = GetCrossBucketInfo( bucket-1 );
@@ -64,27 +66,6 @@ public:
                 
                 CrossBucketMatch( self, bucket-1, yEntries, groups, pairs );
             }
-        }
-    }
-    
-    //-----------------------------------------------------------
-    Span<Pair> Match( Job* self, 
-        const uint32       bucket, 
-        const Span<uint32> yEntries, 
-              Span<Pair>   pairs )
-    {
-        const uint32 id = self->JobId();
-
-        // _groupBuffers[id] = groupsBuffer;
-
-        // uint32 startIndex;
-        // _groupBuffers[id] = ScanGroups( self, bucket, yEntries, groupsBuffer, startIndex );
-        // ASSERT( _groupBuffers[id].Length() > 0 );
-
-        if( self->IsLastThread() && bucket > 0 )
-        {
-            // Perform cross bucket matches on previous bucket, now that we have the new groups
-            // #TODO: This
         }
 
         const uint32 startIndex = (uint32)(uintptr_t)(_startPositions[id] - yEntries.Ptr());
@@ -98,14 +79,49 @@ public:
                                                pairs,
                                                pairs.Length() );
 
-        // Save cross bucket data
-        // if( self->IsLastThread() && bucket < _numBuckets )
-        // {
-        //     SaveCrossBucketGroups( self, bucket, groups.Slice( groups.Length()-3 ), yEntries );
-        // }
-
         return pairs.Slice( 0, matchCount );
+
     }
+    
+    //-----------------------------------------------------------
+    // Span<Pair> Match( Job* self, 
+    //     const uint32       bucket, 
+    //     const Span<uint32> yEntries, 
+    //           Span<Pair>   pairs )
+    // {
+    //     const uint32 id = self->JobId();
+
+    //     // _groupBuffers[id] = groupsBuffer;
+
+    //     // uint32 startIndex;
+    //     // _groupBuffers[id] = ScanGroups( self, bucket, yEntries, groupsBuffer, startIndex );
+    //     // ASSERT( _groupBuffers[id].Length() > 0 );
+
+    //     if( self->IsLastThread() && bucket > 0 )
+    //     {
+    //         // Perform cross bucket matches on previous bucket, now that we have the new groups
+    //         // #TODO: This
+    //     }
+
+    //     const uint32 startIndex = (uint32)(uintptr_t)(_startPositions[id] - yEntries.Ptr());
+
+    //     const uint32 matchCount = MatchGroups( self,
+    //                                            bucket,
+    //                                            bucket,
+    //                                            startIndex,
+    //                                            _groupBuffers[id],
+    //                                            yEntries,
+    //                                            pairs,
+    //                                            pairs.Length() );
+
+    //     // Save cross bucket data
+    //     // if( self->IsLastThread() && bucket < _numBuckets )
+    //     // {
+    //     //     SaveCrossBucketGroups( self, bucket, groups.Slice( groups.Length()-3 ), yEntries );
+    //     // }
+
+    //     return pairs.Slice( 0, matchCount );
+    // }
 
 
     //-----------------------------------------------------------
@@ -317,7 +333,6 @@ private:
         const Span<uint32>           groupIndices,  // Last 3 group indices
         const Span<uint32>           yEntries )
     {
-
         auto& info = GetCrossBucketInfo( bucket );
         
         GetCrossBucketInfo( bucket - 1 ).matchOffset = info.matchOffset;
