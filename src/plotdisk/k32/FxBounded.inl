@@ -173,17 +173,12 @@ public:
     }
 
     //-----------------------------------------------------------
-    static size_t GetRequiredHeapSize( const size_t t1BlockSize, const size_t t2BlockSize, const uint32 threadCount )
+    static void GetRequiredHeapSize( IAllocator& allocator, const size_t t1BlockSize, const size_t t2BlockSize, const uint32 threadCount )
     {
         DiskPlotContext cx = {};
 
         DiskPlotFxBounded<TableId::Table4, _numBuckets> instance( cx );
-
-        DummyAllocator allocator;
         instance.AllocateBuffers( allocator, t1BlockSize, t2BlockSize, threadCount, true );
-        const size_t requiredSize = allocator.Size();
-
-        return requiredSize;
     }
 
     //-----------------------------------------------------------
@@ -276,7 +271,11 @@ public:
 
     // Generate fx for a whole table
     //-----------------------------------------------------------
-    void Run()
+    void Run( IAllocator& allocator
+        #if BB_DP_FP_MATCH_X_BUCKET
+            , Span<K32CrossBucketEntries> crossBucketEntries
+        #endif
+    )
     {
         #if DBG_VALIDATE_TABLES
             _dbgPlot.AllocTable( rTable );
@@ -297,7 +296,6 @@ public:
         _ioQueue.CommitCommands();
         
         // Allocate buffers
-        StackAllocator allocator( _context.heapBuffer, _context.heapSize );
         AllocateBuffers( allocator, _context.tmp1BlockSize, _context.tmp2BlockSize,  _context.fpThreadCount, false );
 
         // Init buffers
@@ -595,7 +593,7 @@ private:
     }
 
     //-----------------------------------------------------------
-    void Match( Job* self, const uint32 bucket, Span<uint32> yEntries )
+    Span<Pair> Match( Job* self, const uint32 bucket, Span<uint32> yEntries )
     {
         const uint32 id          = self->JobId();
         const uint32 threadCount = self->JobCount();
@@ -624,11 +622,17 @@ private:
 
         // Write cross-bucket pairs to disk
         if( bucket > 0 )
-            WriteCrossBucketPairs( self, bucket-1 )
+            WriteCrossBucketPairs( self, bucket-1 );
 
         return matches;
     }
     
+    //-----------------------------------------------------------
+    void SaveCrossBucketMetadata( Job* self, const Span<TMetaIn> metaIn )
+    {
+
+    }
+
     //-----------------------------------------------------------
     void WriteCrossBucketPairs( Job* self, const uint32 bucket )
     {
@@ -639,10 +643,10 @@ private:
 
         if( self->BeginLockBlock() )
         {
-            const uint23     offset = _tableEntryCount;
+            const uint32     offset = _tableEntryCount;
             const Span<Pair> pairs( info.pair, info.matchCount );
 
-            _tableEntryCount += info.matchCount;
+            // _tableEntryCount += info.matchCount;
             // #TODO: How do we handle this? We need to wait on a fence, but how?
             // _pairWriteFence.Wait( bucket );
             // _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer );
@@ -653,6 +657,12 @@ private:
             // _ioQueue.CommitCommands();
         }
         self->EndLockBlock();
+    }
+
+    //-----------------------------------------------------------
+    void GenCrossBucketFx( Job* self, const uint32 bucket )
+    {
+
     }
 
     //-----------------------------------------------------------

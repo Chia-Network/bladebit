@@ -65,7 +65,7 @@ class StackAllocator : public IAllocator
 public:
 
     //-----------------------------------------------------------
-    inline StackAllocator( void* buffer, size_t capacity )
+    inline StackAllocator( void* buffer, const size_t capacity )
         : _buffer  ( (byte*)buffer )
         , _capacity( capacity )
     {}

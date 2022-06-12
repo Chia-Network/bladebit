@@ -477,7 +477,6 @@ size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 
             // 2 marking table bitfields in-memory: k^32 / 8 = 0.5GiB
 //            return 1032ull MB + DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
 
-
     default:
         break;
     }

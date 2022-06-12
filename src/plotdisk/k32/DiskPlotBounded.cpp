@@ -1,6 +1,5 @@
 #include "DiskPlotBounded.h"
 #include "util/Util.h"
-#include "util/StackAllocator.h"
 #include "threading/MTJob.h"
 #include "plotdisk/DiskPlotInfo.h"
 #include "plotdisk/DiskPlotContext.h"
@@ -13,16 +12,15 @@
 
 //-----------------------------------------------------------
 K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
-    : _context( context )
-    , _ioQueue( *_context.ioQueue )
+    : _context  ( context )
+    , _ioQueue  ( *_context.ioQueue )
+    , _allocator( context.heapBuffer, context.heapSize ) 
 {
     const uint32 numBuckets = context.numBuckets;
 
     // Open files
-
     // Temp1
     {
-
         const FileSetOptions tmp1Options = context.cfg->noTmp1DirectIO ? FileSetOptions::None : FileSetOptions::DirectIO;
 
         _ioQueue.InitFileSet( FileId::T1, "t1", 1, tmp1Options, nullptr );  // X (sorted on Y)
@@ -67,18 +65,25 @@ K32BoundedPhase1::~K32BoundedPhase1()
 //-----------------------------------------------------------
 size_t K32BoundedPhase1::GetRequiredSize( const uint32 numBuckets, const size_t t1BlockSize, const size_t t2BlockSize, const uint32 threadCount )
 {
+    DummyAllocator allocator;
+
+    #if BB_DP_FP_MATCH_X_BUCKET
+        allocator.CAlloc<K32CrossBucketEntries>( numBuckets );
+    #endif
+
     switch( numBuckets )
     {
-        case 64 : return DiskPlotFxBounded<TableId::Table4,64 >::GetRequiredHeapSize( t1BlockSize, t2BlockSize, threadCount );
-        case 128: return DiskPlotFxBounded<TableId::Table4,128>::GetRequiredHeapSize( t1BlockSize, t2BlockSize, threadCount );
-        case 256: return DiskPlotFxBounded<TableId::Table4,256>::GetRequiredHeapSize( t1BlockSize, t2BlockSize, threadCount );
-        case 512: return DiskPlotFxBounded<TableId::Table4,512>::GetRequiredHeapSize( t1BlockSize, t2BlockSize, threadCount );
+        case 64 : DiskPlotFxBounded<TableId::Table4,64 >::GetRequiredHeapSize( allocator, t1BlockSize, t2BlockSize, threadCount ); break;
+        case 128: DiskPlotFxBounded<TableId::Table4,128>::GetRequiredHeapSize( allocator, t1BlockSize, t2BlockSize, threadCount ); break;
+        case 256: DiskPlotFxBounded<TableId::Table4,256>::GetRequiredHeapSize( allocator, t1BlockSize, t2BlockSize, threadCount ); break;
+        case 512: DiskPlotFxBounded<TableId::Table4,512>::GetRequiredHeapSize( allocator, t1BlockSize, t2BlockSize, threadCount ); break;
+
         default:
+            Panic( "Invalid bucket count %u.", numBuckets );
             break;
     }
 
-    Panic( "Invalid bucket count %u.", numBuckets );
-    return 0;
+    return allocator.Size();
 }
 
 //-----------------------------------------------------------
@@ -114,6 +119,12 @@ void K32BoundedPhase1::RunWithBuckets()
         RunF1<_numBuckets>();
     #endif
 
+    #if BB_DP_FP_MATCH_X_BUCKET
+        _crossBucketEntries.values = _allocator.CAlloc<K32CrossBucketEntries>( _numBuckets );
+        _crossBucketEntries.length = _numBuckets;
+
+        _xBucketStackMarker = _allocator.Size();
+    #endif
 
     for( TableId table = startTable; table <= TableId::Table7; table++ )
     {
@@ -139,6 +150,7 @@ void K32BoundedPhase1::RunF1()
 {
     Log::Line( "Generating f1..." );
     auto timer = TimerBegin();
+
 
     StackAllocator allocator( _context.heapBuffer, _context.heapSize );
     K32BoundedF1<_numBuckets> f1( _context, allocator );
@@ -173,8 +185,16 @@ void K32BoundedPhase1::RunFx()
     Log::Line( "Table %u", table+1 );
     auto timer = TimerBegin();
 
+    #if BB_DP_FP_MATCH_X_BUCKET
+        _allocator.PopToMarker( _xBucketStackMarker );
+    #endif
+    
     DiskPlotFxBounded<table, _numBuckets> fx( _context );
-    fx.Run();
+    fx.Run( _allocator
+        #if BB_DP_FP_MATCH_X_BUCKET
+            , _crossBucketEntries
+        #endif
+    );
 
     Log::Line( "Completed table %u in %.2lf seconds with %.llu entries.", table+1, TimerEnd( timer ), _context.entryCounts[(int)table] );
     Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( fx._tableIOWait ) );

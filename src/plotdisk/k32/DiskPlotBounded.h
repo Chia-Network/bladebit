@@ -1,5 +1,8 @@
 #pragma once
 #include "plotdisk/DiskPlotContext.h"
+#include "util/StackAllocator.h"
+
+struct K32CrossBucketEntries;
 
 // Bounded k32 disk plotter
 class K32BoundedPhase1
@@ -26,4 +29,13 @@ private:
 private:
     DiskPlotContext& _context;
     DiskBufferQueue& _ioQueue;
+
+    StackAllocator _allocator;
+
+#if BB_DP_FP_MATCH_X_BUCKET
+    size_t                      _xBucketStackMarker = 0;
+    Span<K32CrossBucketEntries> _crossBucketEntries;
+#endif
+
 };
+
