@@ -79,7 +79,7 @@
                 "-t1", "~/plot/tmp",
                 "--f1-threads", "12",
                 // "--f1-threads", "3",
-                // "--fp-threads", "62",
+                // "--fp-threads", "1",
                 "--fp-threads", "62",
 
                 // "--f1-threads", "7",

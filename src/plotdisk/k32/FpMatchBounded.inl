@@ -63,21 +63,21 @@ public:
         
         _groupBuffers[id] = groups;
 
-        if( self->IsLastThread() )
-        {
-            // Save last 2 group's data for this bucket (to be used during the next bucket)
-            if( bucket < _numBuckets )
-                SaveCrossBucketGroups( self, bucket, groups.Slice( groups.Length()-3 ), yEntries );
+        // if( self->IsLastThread() )
+        // {
+        //     // Save last 2 group's data for this bucket (to be used during the next bucket)
+        //     if( bucket < _numBuckets )
+        //         SaveCrossBucketGroups( self, bucket, groups.Slice( groups.Length()-3 ), yEntries );
 
-            // Perform cross-bucket matching for the previous bucket, wwith the first 2 groups of this bucket
-            if( bucket > 0 )
-            {
-                auto& info = GetCrossBucketInfo( bucket-1 );
-                Span<Pair> pairs( info.pair, BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+        //     // Perform cross-bucket matching for the previous bucket, wwith the first 2 groups of this bucket
+        //     if( bucket > 0 )
+        //     {
+        //         auto& info = GetCrossBucketInfo( bucket-1 );
+        //         Span<Pair> pairs( info.pair, BB_DP_CROSS_BUCKET_MAX_ENTRIES );
                 
-                CrossBucketMatch( self, bucket-1, yEntries, groups, pairs );
-            }
-        }
+        //         CrossBucketMatch( self, bucket-1, yEntries, groups, pairs );
+        //     }
+        // }
 
         // const uint32 startIndex = (uint32)(uintptr_t)(_startPositions[id] - yEntries.Ptr());
 

@@ -301,24 +301,14 @@ public:
         // Init buffers
         const uint32 threadCount = _context.fpThreadCount;
 
+        for( uint32 i = 0; i < _numBuckets; i++ )
         {
-            const uint32 matchesPerThread =_entriesPerBucket / threadCount;
-            auto pairBuffer = _pairBuffer;
-
-            for( uint32 i = 0; i < threadCount; i++ )
-            {
-                _pairs[i]  = pairBuffer.Slice( 0, matchesPerThread );
-                pairBuffer = pairBuffer.Slice( matchesPerThread );
-            }
-
-            for( uint32 i = 0; i < _numBuckets; i++ )
-            {
-                const uint32 bufIdx = i & 1; // % 2
-                _y    [i] = _yBuffers    [bufIdx];
-                _index[i] = _indexBuffers[bufIdx];
-                _meta [i] = _metaBuffers [bufIdx].As<TMetaIn>();
-            }
+            const uint32 bufIdx = i & 1; // % 2
+            _y    [i] = _yBuffers    [bufIdx];
+            _index[i] = _indexBuffers[bufIdx];
+            _meta [i] = _metaBuffers [bufIdx].As<TMetaIn>();
         }
+        
 
         // Set some initial fence status
         _mapWriteFence.Signal( 0 );
@@ -403,6 +393,10 @@ private:
                 matchOffset += (uint32)_pairs[i].Length();
 
             ASSERT( totalMatches <= _entriesPerBucket );
+            // #if _DEBUG
+            //     if( self->IsControlThread() )
+            //         Log::Line( " [%3u] : %u", bucket, totalMatches );
+            // #endif
 
             // Prevent overflow entries
             const uint64 tableEntryCount = _tableEntryCount;
@@ -443,7 +437,7 @@ private:
             WaitForFence( self, _metaReadFence, bucket );
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
-            SaveCrossBucketMetadata( self, metaIn );
+            // SaveCrossBucketMetadata( self, metaIn );
 
             
             // On Table 2, metadata is our x values, which have to be saved as table 1
@@ -496,7 +490,7 @@ private:
             }
 
             // Generate fx for cross-bucket matches, and save the matches to an in-memory buffer
-            GenCrossBucketFx( self, bucket );
+            // GenCrossBucketFx( self, bucket );
 
             if( self->IsControlThread() )
             {
@@ -612,7 +606,10 @@ private:
 
         // // Match this bucket's matches
         // _matcher.Match( self, bucket, yEntries, _pairs[id] );
-    
+
+        const uint32 maxMatchesPerThread =_entriesPerBucket / threadCount;
+        _pairs[id] = _pairBuffer.Slice( maxMatchesPerThread * id, maxMatchesPerThread );
+   
         auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
         _pairs[id] = matches;
 
