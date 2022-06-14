@@ -135,14 +135,16 @@ class DiskPlotFxBounded
 {
     using TMetaIn  = typename K32MetaType<rTable>::In;
     using TMetaOut = typename K32MetaType<rTable>::Out;
+    using TYOut    = typename K32TYOut<rTable>::Type;
     using Job     = AnonPrefixSumJob<uint32>;
 
     static constexpr uint32 _k               = 32;
     static constexpr uint64 _maxTableEntries = (1ull << _k) - 1;
     static constexpr uint32 _bucketBits      = bblog2( _numBuckets );
     static constexpr uint32 _pairsMaxDelta   = 512;
+    static constexpr uint32 _pairsLeftBits   = _k - _bucketBits;
     static constexpr uint32 _pairsRightBits  = bblog2( _pairsMaxDelta );
-    static constexpr uint32 _pairBitSize     = _k - _bucketBits + _pairsRightBits;
+    static constexpr uint32 _pairBitSize     = _pairsLeftBits + _pairsRightBits;
 
 public:
     //-----------------------------------------------------------
@@ -319,6 +321,16 @@ public:
         });
 
         _context.entryCounts[(int)rTable] = _tableEntryCount;
+        
+        #if _DEBUG
+        {
+            uint64 tableEntryCount = 0;
+            for( uint32 i = 0; i < _numBuckets; i++ )
+                tableEntryCount += _context.bucketCounts[(int)rTable][i];
+
+            ASSERT( tableEntryCount == _tableEntryCount );
+        }
+        #endif
 
         Log::Line( " Sorting      : Completed in %.2lf seconds.", TicksToSeconds( _sortTime  ) );
         Log::Line( " Distribution : Completed in %.2lf seconds.", TicksToSeconds( _distributeTime ) );
@@ -438,7 +450,6 @@ private:
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
             // SaveCrossBucketMetadata( self, metaIn );
-
             
             // On Table 2, metadata is our x values, which have to be saved as table 1
             if constexpr ( rTable == TableId::Table2 )
@@ -459,7 +470,7 @@ private:
 
             /// Gen fx & write
             {
-                Span<uint64>   yOut    = _yTmp.Slice( matchOffset, matches.Length() );
+                Span<TYOut>    yOut    = _yTmp.As<TYOut>().Slice( matchOffset, matches.Length() );
                 Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().Slice( matchOffset, matches.Length() );  //( (TMetaOut*)metaTmp.Ptr(), matches.Length() );
 
                 TimePoint timer;
@@ -496,6 +507,9 @@ private:
             {
                 _tableEntryCount += totalMatches;
                 _mapOffset       += entryCount;
+
+                // Save bucket length before y-sort since the pairs remain unsorted
+                _context.ptrTableBucketCounts[(int)rTable][bucket] = (uint32)totalMatches;
             }
         }
     }
@@ -697,6 +711,10 @@ private:
         if( self->BeginLockBlock() )
         {
             _pairBitWriter.Submit();
+
+            if( bucket == _numBuckets-1 )
+                _pairBitWriter.SubmitLeftOvers();
+
             _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );
             _ioQueue.CommitCommands();
         }
@@ -708,7 +726,7 @@ private:
     {
         self;
 
-        const uint32 shift = _pairsRightBits;
+        const uint32 shift = _pairsLeftBits;
         const uint64 mask  = ( 1ull << shift ) - 1;
 
         const Pair* pair = pairs.Ptr();
@@ -733,6 +751,8 @@ private:
         _mapWriter.WriteJob( self, bucket, tableOffset, bucketIndices, mapOut,
             outMapBucketCounts, totalCounts, _mapBitCounts );
 
+        if( bucket == _numBuckets-1 && self->IsControlThread() )
+            _mapWriter.SubmitFinalBits();
         ///
         /// #TODO: Fix and re-enabled Un-compressed method?:
         ///
@@ -803,7 +823,7 @@ private:
     void WriteEntries( Job* self,
                        const uint32         bucket,
                        const uint32         idxOffset,
-                       const Span<uint64>   yIn,
+                       const Span<TYOut>    yIn,
                        const Span<TMetaOut> metaIn,
                              Span<uint32>   yOut,
                              Span<TMetaOut> metaOut,
@@ -820,7 +840,7 @@ private:
         const uint32 logBuckets = bblog2( _numBuckets );
         static_assert( kExtraBits <= logBuckets );
 
-        const uint32 bucketShift = _k + kExtraBits - logBuckets;
+        const uint32 bucketShift = ( std::is_same<TYOut, uint32>::value ? _k : _k + kExtraBits ) - logBuckets;
         const uint64 yMask       = ( 1ull << bucketShift ) - 1;
 
         const int64 entryCount = (int64)yIn.Length();
@@ -834,14 +854,14 @@ private:
         Span<uint32> ySliceCounts          = _sliceCountY[sliceIdx];
         Span<uint32> metaSliceCounts       = _sliceCountMeta[sliceIdx];
         Span<uint32> yAlignedSliceCount    = _alignedSliceCountY[sliceIdx];
-        Span<uint32> metaAlignedsliceCount = _alignedsliceCountMeta[sliceIdx];
+        Span<uint32> metaAlignedSliceCount = _alignedsliceCountMeta[sliceIdx];
 
         // Count
         for( int64 i = 0; i < entryCount; i++ )
             counts[yIn[i] >> bucketShift]++;
 
         self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, ySliceCounts.Ptr(), _offsetsY[id], yAlignedSliceCount.Ptr() );
-        self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedsliceCount.Ptr() );
+        self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedSliceCount.Ptr() );
 
         // Distribute to buckets
         for( int64 i = 0; i < entryCount; i++ )
@@ -867,11 +887,17 @@ private:
             const FileId metaId = _metaId[1];
             const FileId idxId  = _idxId [1];
 
+            ASSERT( ySliceCounts.Length() == metaSliceCounts.Length() );
+
             _ioQueue.WriteBucketElementsT<uint32>  ( yId   , yOut   .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
             _ioQueue.WriteBucketElementsT<uint32>  ( idxId , idxOut .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
-            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedsliceCount.Ptr(), metaSliceCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedSliceCount.Ptr(), metaSliceCounts.Ptr() );  // #TODO: Can use ySliceCounts here...
             _ioQueue.SignalFence( _fxWriteFence, bucket+1 );
             _ioQueue.CommitCommands();
+
+            // Save bucket counts
+            for( uint32 i = 0; i < _numBuckets; i++ )
+                _context.bucketCounts[(int)rTable][i] += ySliceCounts[i];
         }
         self->EndLockBlock();
 
@@ -881,17 +907,6 @@ private:
     }
 
     //-----------------------------------------------------------
-    template<typename TYOut>
-    void GenCrossBucketFx(
-        Job* self,
-        const uint32 bucket
-    )
-    {
-
-    }
-
-    //-----------------------------------------------------------
-    template<typename TYOut>
     void GenFx( Job* self,
                 const uint32        bucket,
                 const Span<Pair>    pairs,

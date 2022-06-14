@@ -156,8 +156,6 @@ void K32BoundedPhase1::RunF1()
     K32BoundedF1<_numBuckets> f1( _context, allocator );
     f1.Run();
 
-    _context.entryCounts[(int)TableId::Table1] = 1ull << 32;
-
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
     Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _context.ioQueue->IOBufferWaitTime() );
@@ -188,7 +186,7 @@ void K32BoundedPhase1::RunFx()
     #if BB_DP_FP_MATCH_X_BUCKET
         _allocator.PopToMarker( _xBucketStackMarker );
     #endif
-    
+
     DiskPlotFxBounded<table, _numBuckets> fx( _context );
     fx.Run( _allocator
         #if BB_DP_FP_MATCH_X_BUCKET

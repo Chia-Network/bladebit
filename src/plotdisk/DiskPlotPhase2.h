@@ -1,11 +1,8 @@
 #pragma once
 
 #include "plotdisk/DiskPlotContext.h"
+#include "plotdisk/DiskPairReader.h"
 #include "util/BitField.h"
-
-
-template<uint32 _numBuckets>
-struct DiskPairAndMapReader;
 
 class DiskPlotPhase2
 {
@@ -16,15 +13,14 @@ public:
     void Run();
 
 private:
-
-    template<uint32 _numBuckets>
+    template<uint32 _numBuckets, bool _bounded>
     void RunWithBuckets();
 
-    template<uint32 _numBuckets>
-    void    MarkTable( const TableId rTable, DiskPairAndMapReader<_numBuckets> reader, Pair* pairs, uint64* map, BitField lTableMarks, const BitField rTableMarks );
+    template<uint32 _numBuckets, bool _bounded>
+    void    MarkTable( const TableId rTable, DiskPairAndMapReader<_numBuckets, _bounded> reader, Pair* pairs, uint64* map, BitField lTableMarks, const BitField rTableMarks );
 
-    template<TableId table, uint32 _numBuckets>
-    void    MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader, Pair* pairs, uint64* map, BitField lTableMarks, const BitField rTableMarks );
+    template<TableId table, uint32 _numBuckets, bool _bounded>
+    void    MarkTableBuckets( DiskPairAndMapReader<_numBuckets, _bounded> reader, Pair* pairs, uint64* map, BitField lTableMarks, const BitField rTableMarks );
 
 private:
     DiskPlotContext& _context;

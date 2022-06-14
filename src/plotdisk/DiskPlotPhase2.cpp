@@ -4,7 +4,6 @@
 #include "plotdisk/DiskPlotInfo.h"
 #include "util/StackAllocator.h"
 #include "DiskPlotInfo.h"
-#include "plotdisk/DiskPairReader.h"
 
 // #DEBUG
 #include "jobs/IOJob.h"
@@ -62,21 +61,36 @@ void DiskPlotPhase2::Run()
     return;
 #endif
 
-    switch( _context.numBuckets )
+    if( _context.cfg->bounded )
     {
-        case 128 : RunWithBuckets<128 >(); break;
-        case 256 : RunWithBuckets<256 >(); break;
-        case 512 : RunWithBuckets<512 >(); break;
-        case 1024: RunWithBuckets<1024>(); break;
-        
-        default:
-        ASSERT( 0 );
-            break;
+        switch( _context.numBuckets )
+        {
+            default: break;
+            case 64  : RunWithBuckets<64  , true>(); return;
+            case 128 : RunWithBuckets<128 , true>(); return;
+            case 256 : RunWithBuckets<256 , true>(); return;
+            case 512 : RunWithBuckets<512 , true>(); return;
+        }
     }
+    else
+    {
+        switch( _context.numBuckets )
+        {
+            default: break;
+            case 128 : RunWithBuckets<128 , false>(); return;
+            case 256 : RunWithBuckets<256 , false>(); return;
+            case 512 : RunWithBuckets<512 , false>(); return;
+            case 1024: RunWithBuckets<1024, false>(); return;
+            
+        }
+    }
+
+    // Should never get here.
+    Fatal( "Unexpected bucket count." );
 }
 
 //-----------------------------------------------------------
-template<uint32 _numBuckets>
+template<uint32 _numBuckets, bool _bounded>
 void DiskPlotPhase2::RunWithBuckets()
 {
     DiskPlotContext& context = _context;
@@ -123,7 +137,7 @@ void DiskPlotPhase2::RunWithBuckets()
         const auto timer = TimerBegin();
         
         const size_t stackMarker = allocator.Size();
-        DiskPairAndMapReader<_numBuckets> reader( context, context.p2ThreadCount, readFence, table, allocator, table == TableId::Table7 );
+        DiskPairAndMapReader<_numBuckets, _bounded> reader( context, context.p2ThreadCount, readFence, table, allocator, table == TableId::Table7 );
 
         ASSERT( allocator.Size() < context.heapSize );
 
@@ -439,17 +453,17 @@ void DiskPlotPhase2::RunWithBuckets()
 }
 
 //-----------------------------------------------------------
-template<uint32 _numBuckets>
-void DiskPlotPhase2::MarkTable( const TableId rTable, DiskPairAndMapReader<_numBuckets> reader,
+template<uint32 _numBuckets, bool _bounded>
+void DiskPlotPhase2::MarkTable( const TableId rTable, DiskPairAndMapReader<_numBuckets, _bounded> reader,
                                 Pair* pairs, uint64* map, BitField lTableMarks, const BitField rTableMarks )
 {
     switch( rTable )
     {
-        case TableId::Table7: MarkTableBuckets<TableId::Table7, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
-        case TableId::Table6: MarkTableBuckets<TableId::Table6, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
-        case TableId::Table5: MarkTableBuckets<TableId::Table5, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
-        case TableId::Table4: MarkTableBuckets<TableId::Table4, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
-        case TableId::Table3: MarkTableBuckets<TableId::Table3, _numBuckets>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table7: MarkTableBuckets<TableId::Table7, _numBuckets, _bounded>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table6: MarkTableBuckets<TableId::Table6, _numBuckets, _bounded>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table5: MarkTableBuckets<TableId::Table5, _numBuckets, _bounded>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table4: MarkTableBuckets<TableId::Table4, _numBuckets, _bounded>( reader, pairs, map, lTableMarks, rTableMarks ); break;
+        case TableId::Table3: MarkTableBuckets<TableId::Table3, _numBuckets, _bounded>( reader, pairs, map, lTableMarks, rTableMarks ); break;
     
         default:
             ASSERT( 0 );
@@ -458,8 +472,8 @@ void DiskPlotPhase2::MarkTable( const TableId rTable, DiskPairAndMapReader<_numB
 }
 
 //-----------------------------------------------------------
-template<TableId rTable, uint32 _numBuckets>
-void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets> reader, 
+template<TableId rTable, uint32 _numBuckets, bool _bounded>
+void DiskPlotPhase2::MarkTableBuckets( DiskPairAndMapReader<_numBuckets, _bounded> reader, 
                                        Pair* pairs, uint64* map, BitField lTableMarks, const BitField rTableMarks )
 {
     // Load initial bucket

@@ -94,6 +94,18 @@ public:
         _ioQueue.CommitCommands();
         fence.Wait( 1 );
 
+        _context.entryCounts[(int)TableId::Table1] = 1ull << _k;
+
+         #if _DEBUG
+        {
+            uint64 tableEntryCount = 0;
+            for( uint32 i = 0; i < _numBuckets; i++ )
+                tableEntryCount += _context.bucketCounts[(int)TableId::Table1][i];
+
+            ASSERT( tableEntryCount == _context.entryCounts[(int)TableId::Table1] );
+        }
+        #endif
+
         _context.fencePool->RestoreAllFences();
     }
 
@@ -161,7 +173,7 @@ private:
             _ioQueue.CommitCommands();
 
             for( uint32 i = 0; i < _numBuckets; i++ )
-                _context.bucketCounts[(int)TableId::Table1][i] += totalCounts[i];
+                _context.bucketCounts[(int)TableId::Table1][i] += elementCounts[i];
         }
         self->EndLockBlock();
 
