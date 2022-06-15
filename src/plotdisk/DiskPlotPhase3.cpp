@@ -118,7 +118,7 @@ public:
 
 };
 
-template<TableId rTable, uint32 _numBuckets>
+template<TableId rTable, uint32 _numBuckets, bool _bounded>
 class P3StepOne
 {
 public:
@@ -164,7 +164,7 @@ public:
         
         void* rMarks = allocator.Alloc( rMarksSize, context.tmp1BlockSize );
 
-        DiskPairAndMapReader<_numBuckets> rTableReader( context, _threadCount, _readFence, rTable, allocator, false );
+        DiskPairAndMapReader<_numBuckets, _bounded> rTableReader( context, _threadCount, _readFence, rTable, allocator, false );
 
         using L1Reader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
         using LNReader = DiskMapReader<uint32, _numBuckets, _k>;
@@ -383,8 +383,7 @@ private:
                     const uint64 x = lTable[p.left ];
                     const uint64 y = lTable[p.right];
 
-                    ASSERT( x || y );
-                    outLinePoints[i] = SquareToLinePoint( x, y );
+                    ASSERT( x || y );                    outLinePoints[i] = SquareToLinePoint( x, y );
                 }
             }
         });
@@ -909,6 +908,7 @@ void DiskPlotPhase3::Run()
 
     switch( _context.numBuckets )
     {
+        case 64  : RunBuckets<64  >(); break;
         case 128 : RunBuckets<128 >(); break;
         case 256 : RunBuckets<256 >(); break;
         case 512 : RunBuckets<512 >(); break;
@@ -935,6 +935,7 @@ void DiskPlotPhase3::GetCacheSizes( size_t& outCacheSizeLP, size_t& outCacheSize
 {
     switch( _context.numBuckets )
     {
+        case 64  : GetCacheSizesForBuckets<128 >( outCacheSizeLP, outCacheSizeMap ); break;
         case 128 : GetCacheSizesForBuckets<128 >( outCacheSizeLP, outCacheSizeMap ); break;
         case 256 : GetCacheSizesForBuckets<256 >( outCacheSizeLP, outCacheSizeMap ); break;
         case 512 : GetCacheSizesForBuckets<512 >( outCacheSizeLP, outCacheSizeMap ); break;
@@ -950,7 +951,7 @@ void DiskPlotPhase3::GetCacheSizes( size_t& outCacheSizeLP, size_t& outCacheSize
 template<uint32 _numBuckets>
 void DiskPlotPhase3::GetCacheSizesForBuckets( size_t& outCacheSizeLP, size_t& outCacheSizeMap )
 {
-    const size_t lpEntrySize    = P3StepOne<TableId::Table2, _numBuckets>::_entrySizeBits;
+    const size_t lpEntrySize    = P3StepOne<TableId::Table2, _numBuckets, false>::_entrySizeBits;
     const size_t mapEntrySizeX2 = MapWriter<_numBuckets, true>::EntryBitSize * 2;
     
     static_assert( mapEntrySizeX2 >= lpEntrySize );
@@ -990,17 +991,36 @@ void DiskPlotPhase3::RunBuckets()
     {
         Log::Line( "Compressing tables %u and %u.", rTable, rTable+1 );
         const auto timer = TimerBegin();
-        switch( rTable )
+
+        if( _context.cfg->bounded )
         {
-            case TableId::Table2: ProcessTable<TableId::Table2, _numBuckets>(); break;
-            case TableId::Table3: ProcessTable<TableId::Table3, _numBuckets>(); break;
-            case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets>(); break;
-            case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets>(); break;
-            case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets>(); break;
-            case TableId::Table7: ProcessTable<TableId::Table7, _numBuckets>(); break;
-            default:
-                ASSERT( 0 );
-                break;
+            switch( rTable )
+            {
+                case TableId::Table2: ProcessTable<TableId::Table2, _numBuckets, true>(); break;
+                case TableId::Table3: ProcessTable<TableId::Table3, _numBuckets, true>(); break;
+                case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets, true>(); break;
+                case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets, true>(); break;
+                case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets, true>(); break;
+                case TableId::Table7: ProcessTable<TableId::Table7, _numBuckets, true>(); break;
+                default:
+                    ASSERT( 0 );
+                    break;
+            }
+        }
+        else
+        {
+            switch( rTable )
+            {
+                case TableId::Table2: ProcessTable<TableId::Table2, _numBuckets, false>(); break;
+                case TableId::Table3: ProcessTable<TableId::Table3, _numBuckets, false>(); break;
+                case TableId::Table4: ProcessTable<TableId::Table4, _numBuckets, false>(); break;
+                case TableId::Table5: ProcessTable<TableId::Table5, _numBuckets, false>(); break;
+                case TableId::Table6: ProcessTable<TableId::Table6, _numBuckets, false>(); break;
+                case TableId::Table7: ProcessTable<TableId::Table7, _numBuckets, false>(); break;
+                default:
+                    ASSERT( 0 );
+                    break;
+            }
         }
 
         const double elapsed = TimerEnd( timer );
@@ -1030,7 +1050,7 @@ void DiskPlotPhase3::RunBuckets()
 }
 
 //-----------------------------------------------------------
-template<TableId rTable, uint32 _numBuckets>
+template<TableId rTable, uint32 _numBuckets, bool _bounded>
 void DiskPlotPhase3::ProcessTable()
 {
     uint64 prunedEntryCount;
@@ -1041,7 +1061,7 @@ void DiskPlotPhase3::ProcessTable()
     {
         memset( _lpPrunedBucketCounts, 0, sizeof( uint64 ) * (_numBuckets+1) );
 
-        P3StepOne<rTable, _numBuckets> stepOne( _context, _mapReadId, _readFence, _writeFence );
+        P3StepOne<rTable, _numBuckets, _bounded> stepOne( _context, _mapReadId, _readFence, _writeFence );
         prunedEntryCount = stepOne.Run( _lMapPrunedBucketCounts, _lpPrunedBucketCounts );
 
         _ioWaitTime = stepOne.GetIOWaitTime();

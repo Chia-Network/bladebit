@@ -17,14 +17,8 @@ private:
     template<uint32 _numBuckets>
     void RunBuckets();
 
-    template<TableId rTable, uint32 _numBuckets>
+    template<TableId rTable, uint32 _numBuckets, bool _bounded>
     void ProcessTable();
-
-    template<TableId rTable, uint32 _numBuckets>
-    void TableFirstStep();
-
-    template<TableId rTable, uint32 _numBuckets>
-    void TableSecondStep();
 
     template<TableId rTable>
     void ConvertToLinePoints( 

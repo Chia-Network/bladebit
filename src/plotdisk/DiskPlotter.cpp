@@ -213,11 +213,11 @@ void DiskPlotter::Plot( const PlotRequest& req )
         Log::Line( "Running Phase 3" );
         const auto timer = TimerBegin();
 
-        if( bounded )
-        {
-            Fatal( "Phase 3 bounded not implemented." );
-        }
-        else
+        // if( bounded )
+        // {
+        //     Fatal( "Phase 3 bounded not implemented." );
+        // }
+        // else
         {
             DiskPlotPhase3 phase3( _cx );
             phase3.Run();

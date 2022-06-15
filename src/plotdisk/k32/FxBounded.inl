@@ -447,6 +447,27 @@ private:
             }
 
             WaitForFence( self, _metaReadFence, bucket );
+            #if _DEBUG
+            if constexpr ( rTable == TableId::Table2 )
+            {
+                if( self->BeginLockBlock() )
+                {
+                    uint32 zeroCount = 0;
+                    for( uint32 i = 0; i < entryCount; i++ )
+                    {
+                        if( metaTmp[i] == 0 )
+                            zeroCount++;
+                    }
+                    Log::Line( "Meta zeroes: %u, %u : %u", zeroCount, entryCount, entryCount - zeroCount );
+
+                    // std::sort( sortKey.Ptr(), sortKey.Ptr() + sortKey.Length() );
+                    // for( uint32 i = 0; i < entryCount; i++ )
+                    //     ASSERT( sortKey[i] == i );
+                    // Log::Line( "Sort key is ok." );
+                }
+                self->EndLockBlock();
+            }
+            #endif
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
             // SaveCrossBucketMetadata( self, metaIn );
@@ -461,6 +482,13 @@ private:
                         _dbgPlot.WriteYX( bucket, yInput, metaIn );
                     #endif
 
+#if _DEBUG
+                    uint32 zeroCount = 0;
+                    for( uint32 i = 0; i < entryCount; i++ )
+                        if( metaIn[i] == 0 )
+                            zeroCount++;
+                    Log::Line( "Meta zeroes: %u, %u : %u", zeroCount, entryCount, entryCount - zeroCount );
+#endif
                     _xWriter.SubmitBuffer( _ioQueue, entryCount );
                     if( bucket == _numBuckets - 1 )
                         _xWriter.SubmitFinalBlock( _ioQueue );
@@ -583,6 +611,8 @@ private:
     template<typename T>
     void SortOnYKey( Job* self, const Span<uint32> key, const Span<T> input, Span<T> output )
     {
+        ASSERT( key.Length() == input.Length() && input.Length() == output.Length() );
+
         TimePoint timer;
         if( self->IsControlThread() )
             timer = TimerBegin();
@@ -593,11 +623,9 @@ private:
         for( uint32 i = offset; i < end; i++ )
             output[i] = input[key[i]];
 
-
-        self->SyncThreads();
-        
-        if( self->IsControlThread() )
+        if( self->BeginLockBlock() )
             _sortTime += TimerEndTicks( timer );
+        self->EndLockBlock();
     }
 
     //-----------------------------------------------------------

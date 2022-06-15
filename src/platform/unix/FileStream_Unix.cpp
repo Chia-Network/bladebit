@@ -40,7 +40,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
             fdFlags |= O_LARGEFILE;
     #endif
 
-    if( mode == FileMode::Create )
+    if( fdFlags & O_CREAT )
         fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
 
     int fd = open( path, fdFlags, fmode );
