@@ -160,17 +160,17 @@ void DiskPlotPhase1::Run()
 #endif
 
     #if _DEBUG && BB_DP_DBG_VALIDATE_F1
-    // if( 0 )
-    {
-        const uint32* bucketCounts = _cx.bucketCounts[0];
-        uint64 totalEntries = 0;
-        for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
-            totalEntries += bucketCounts[i];
+    // if constexpr ( 0 )
+    // {
+    //     const uint32* bucketCounts = _cx.bucketCounts[0];
+    //     uint64 totalEntries = 0;
+    //     for( uint i = 0; i < BB_DP_BUCKET_COUNT; i++ )
+    //         totalEntries += bucketCounts[i];
             
-        ASSERT( totalEntries == 1ull << _K );
+    //     ASSERT( totalEntries == 1ull << _K );
 
-        Debug::ValidateYFileFromBuckets( FileId::Y0, *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
-    }
+    //     Debug::ValidateYFileFromBuckets( FileId::Y0, *_cx.threadPool, *_diskQueue, TableId::Table1, _cx.bucketCounts[0] );
+    // }
     #endif
 
 #if _DEBUG && BB_DP_P1_SKIP_TO_TABLE

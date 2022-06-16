@@ -38,6 +38,9 @@ namespace Debug
     template<typename T>
     bool LoadRefTableByName( const char* fileName, T*& buffer, uint64& outEntryCount );
 
+    template<typename T>
+    bool LoadRefTableByName( const char* fileName, Span<T>& buffer );
+
     void LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount );
 
     void LoadRefLPIndexTable( const TableId table, uint32*& buffer, uint64& outEntryCount );
@@ -227,10 +230,19 @@ inline void Debug::ValidateYForTable( const FileId fileId, DiskBufferQueue& queu
 template<typename T>
 inline bool Debug::LoadRefTableByName( const char* fileName, T*& buffer, uint64& outEntryCount )
 {
+    ASSERT( fileName );
+
     char path[1024];
     sprintf( path, "%s%s", BB_DP_DBG_REF_DIR, fileName );
-    Log::Line( " Loading reference line point table '%s'.", path );
+    Log::Line( " Loading reference table '%s'.", path );
     return LoadRefTable( path, buffer, outEntryCount );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline bool Debug::LoadRefTableByName( const char* fileName, Span<T>& buffer )
+{
+    return LoadRefTableByName( fileName, buffer.values, buffer.length );
 }
 
 //-----------------------------------------------------------

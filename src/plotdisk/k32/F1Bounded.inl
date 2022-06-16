@@ -8,6 +8,13 @@
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
 
+#if _DEBUG
+    #include "plotdisk/DiskPlotDebug.h"
+    #include "algorithm/RadixSort.h"
+    void DbgValidateF1( DiskPlotContext& context );
+#endif
+
+
 template<uint32 _numBuckets>
 class K32BoundedF1
 {
@@ -111,6 +118,10 @@ public:
         #endif
 
         _context.fencePool->RestoreAllFences();
+
+        #if ( _DEBUG && BB_DP_DBG_VALIDATE_F1 )
+            DbgValidateF1( _context );
+        #endif
     }
 
 private:
@@ -219,4 +230,129 @@ private:
     uint32 _maxEntriesPerIOBucket;
 #endif
 };
+
+
+#if _DEBUG
+
+//-----------------------------------------------------------
+void DbgValidateF1( DiskPlotContext& context )
+{
+    Log::Line( "[DEBUG: Validating y and x]" );
+
+    auto& ioQueue = *context.ioQueue;
+    ioQueue.SeekBucket( FileId::FX0, 0, SeekOrigin::Begin );
+    ioQueue.SeekBucket( FileId::META0, 0, SeekOrigin::Begin );
+    ioQueue.CommitCommands();
+
+    const uint64 entryCount = context.entryCounts[(int)TableId::Table1];
+    
+    Span<uint64> yReference = bbcvirtallocboundednuma_span<uint64>( entryCount );
+    Span<uint32> xReference = bbcvirtallocboundednuma_span<uint32>( entryCount );
+    Span<uint64> yBuffer    = bbcvirtallocboundednuma_span<uint64>( entryCount );
+    Span<uint32> xBuffer    = bbcvirtallocboundednuma_span<uint32>( entryCount );
+    Span<uint64> tmpBuffer  = bbcvirtallocboundednuma_span<uint64>( entryCount );
+    Span<uint32> tmpBuffer2 = bbcvirtallocboundednuma_span<uint32>( entryCount );
+
+    // Load reference values
+    Log::Line( " Loading reference values..." );
+    FatalIf( !Debug::LoadRefTableByName( "y.t1.tmp", yReference ), "Failed to load reference y table." );
+    ASSERT( yReference.Length() == entryCount );
+    FatalIf( !Debug::LoadRefTableByName( "x.t1.tmp", xReference ), "Failed to load reference x table." );
+    ASSERT( xReference.Length() == entryCount );
+    ASSERT( yReference.Length() == xReference.Length() );
+    
+    // Load our values
+    Log::Line( " Loading our values..." );
+    Fence& fence = context.fencePool->RequireFence();
+
+    {
+        // const size_t blockSizeEntries = context.tmp2BlockSize / sizeof( uint32 );
+        // const uint32 bucketSize       = (uint32)RoundUpToNextBoundaryT( (size_t)entryCount / 2, blockSizeEntries );
+        
+        Span<uint64> yReader = yBuffer;
+        Span<uint32> xReader = xBuffer;
+
+        const uint32 numBuckets = context.numBuckets;
+        for( uint32 bucket = 0; bucket < numBuckets; bucket++ )
+        {
+            Span<uint32> yBucket = tmpBuffer.As<uint32>();
+            Span<uint32> xBucket = tmpBuffer2;
+
+            ioQueue.ReadBucketElementsT( FileId::FX0  , yBucket );
+            ioQueue.ReadBucketElementsT( FileId::META0, xBucket );
+            ioQueue.SignalFence( fence );
+            ioQueue.CommitCommands();
+            fence.Wait();
+
+            ASSERT( yBucket.Length() && yBucket.Length() == xBucket.Length() );
+
+            const uint32 k          = 32;
+            const uint32 bucketBits = bblog2( numBuckets );
+            const uint32 yBits      = k + kExtraBits - bucketBits;
+            const uint64 yMask      = ((uint64)bucket) << yBits;
+            
+            for( size_t i = 0; i < yBucket.Length(); i++ )
+                yReader[i] = yMask | yBucket[i];
+            
+            xBucket.CopyTo( xReader );
+
+            // Sort bucket
+            RadixSort256::SortWithKey<BB_DP_MAX_JOBS>( *context.threadPool, 
+                yReader.Ptr(), tmpBuffer.Ptr(), xReader.Ptr(), tmpBuffer2.Ptr(), yBucket.Length() );
+
+            yReader = yReader.Slice( yBucket.Length() );
+            xReader = xReader.Slice( xBucket.Length() );
+        }
+
+        ASSERT( yReader.Length() == xReader.Length() );
+    }
+
+    // Sort
+    // Log::Line( " Sorting..." );
+    // RadixSort256::SortWithKey<BB_DP_MAX_JOBS>( *context.threadPool, yBuffer.Ptr(), tmpBuffer.Ptr(), xBuffer.Ptr(), tmpBuffer2.Ptr(), yBuffer.Length() );
+
+    // Compare
+    Log::Line( " Comparing values..." );
+    for( size_t i = 0; i < yBuffer.Length(); i++ )
+    {
+        const uint64 y  = yBuffer[i];
+        const uint64 yr = yReference[i];
+        const uint32 x  = xBuffer[i];
+        const uint32 xr = xReference[i];
+
+        ASSERT( y == yr );
+
+        if( x != xr )
+        {
+            if( xBuffer[i] == xReference[i+1] ) // 2-way match?
+            {
+                i++;
+                continue;
+            }
+            else if( xBuffer[i] == xReference[i+2] &&   // 3 way match?
+                     xBuffer[i+2] == xReference[i] && 
+                     xBuffer[i+1] == xReference[i+1])  
+            {
+                i+=2;
+                continue;
+            }
+            ASSERT( false );
+        }
+    }
+    // ASSERT( yReference.EqualElements( yBuffer ) );
+    // ASSERT( xReference.EqualElements( xBuffer ) );
+
+    Log::Line( " Finished." );
+    Log::Line( "" );
+
+    // Cleanup
+    context.fencePool->RestoreAllFences();
+    bbvirtfreebounded( yReference.Ptr() );
+    bbvirtfreebounded( xReference.Ptr() );
+    bbvirtfreebounded( yBuffer.Ptr() );
+    bbvirtfreebounded( xBuffer.Ptr() );
+    bbvirtfreebounded( tmpBuffer.Ptr() );
+    bbvirtfreebounded( tmpBuffer2.Ptr() );
+}
+#endif
 
