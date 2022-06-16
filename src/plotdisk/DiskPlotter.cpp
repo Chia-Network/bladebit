@@ -186,7 +186,7 @@ void DiskPlotter::Plot( const PlotRequest& req )
             #endif
         }
 
-        #if !( _DEBUG && BB_DP_DBG_SKIP_PHASE_1 )
+        #if ( _DEBUG && !BB_DP_DBG_SKIP_PHASE_1 )
             DbgWriteTableCounts( _cx );
         #endif
 
