@@ -71,7 +71,7 @@
     // #define BB_DBG_SKIP_P3_S1 1
     // #define BB_DP_DBG_P3_START_TABLE Table7
 
-    // #define BB_DP_DBG_P3_KEEP_FILES 1
+    #define BB_DP_DBG_P3_KEEP_FILES 1
 #endif
 
 #define BB_DP_FP_MATCH_X_BUCKET 1

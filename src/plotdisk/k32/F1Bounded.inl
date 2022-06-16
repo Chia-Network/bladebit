@@ -27,6 +27,8 @@ public:
         , _ioQueue   ( *context.ioQueue )
         , _writeFence( context.fencePool->RequireFence() )
     {
+        static_assert( (uint64)_blocksPerBucket * _entriesPerBlock * _numBuckets == _kEntryCount );
+        
         const uint32 threadCount = context.f1ThreadCount;
 
         // We need to pad our slices to block size
@@ -40,11 +42,13 @@ public:
         #endif
 
 
-        // Get the maximum block count per thread
+        // Get the maximum block count per thread (use the last thread id to get the maximum)
         uint32 blockCount, _;
         GetThreadOffsets( threadCount-1, threadCount, _blocksPerBucket, blockCount, _, _ );
 
         const uint32 blockBufferSize = blockCount * threadCount * _entriesPerBlock;
+        ASSERT( blockCount * threadCount >= _blocksPerBucket );
+
         _blockBuffer = allocator.CAllocSpan<uint32>( blockBufferSize );
 
         _yEntries[0] = allocator.CAllocSpan<uint32>( entriesPerBucketAligned, context.tmp2BlockSize );
@@ -96,7 +100,7 @@ public:
 
         _context.entryCounts[(int)TableId::Table1] = 1ull << _k;
 
-         #if _DEBUG
+        #if _DEBUG
         {
             uint64 tableEntryCount = 0;
             for( uint32 i = 0; i < _numBuckets; i++ )
@@ -176,10 +180,6 @@ private:
                 _context.bucketCounts[(int)TableId::Table1][i] += elementCounts[i];
         }
         self->EndLockBlock();
-
-        // #NOTE: Somehow we're not getting synced here... So sync explicitly again
-        // #NOTE2: The issue is still happening even with this sync.
-        self->SyncThreads();
     }
 
     //-----------------------------------------------------------

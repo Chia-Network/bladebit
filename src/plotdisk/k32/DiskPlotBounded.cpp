@@ -49,11 +49,25 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
         FileSetInitData data = {};
         opts |= FileSetOptions::UseTemp2;
 
+        // if( context.cache )
+        // {
+        //     // #TODO: Divide cache evenly. For now just set it to fx0
+        //     opts |= FileSetOptions::Cachable;
+        //     data.cacheSize = context.cacheSize / 2;
+        //     data.cache     = context.cache;
+        // }
+
         _ioQueue.InitFileSet( FileId::FX0   , "y0"    , numBuckets, opts, &data );
+        // UnSetFlag( opts, FileSetOptions::Cachable );
         _ioQueue.InitFileSet( FileId::FX1   , "y1"    , numBuckets, opts, &data );
         _ioQueue.InitFileSet( FileId::INDEX0, "index0", numBuckets, opts, &data );
         _ioQueue.InitFileSet( FileId::INDEX1, "index1", numBuckets, opts, &data );
+        
+        // opts |= FileSetOptions::Cachable;
+        // data.cache = ((byte*)data.cache) + data.cacheSize;
         _ioQueue.InitFileSet( FileId::META0 , "meta0" , numBuckets, opts, &data );
+        // UnSetFlag( opts, FileSetOptions::Cachable );
+        
         _ioQueue.InitFileSet( FileId::META1 , "meta1" , numBuckets, opts, &data );
     }
 }
@@ -116,7 +130,17 @@ void K32BoundedPhase1::RunWithBuckets()
         startTable = BB_DP_P1_START_TABLE;
     }
     #else
+    // #TODO: TEST, remove
+    for( ;; )
+    {
+        Log::Line( "Running F1..." );
         RunF1<_numBuckets>();
+        _ioQueue.SeekBucket( FileId::FX0, 0, SeekOrigin::Begin );
+        _ioQueue.SeekBucket( FileId::META0, 0, SeekOrigin::Begin );
+        _ioQueue.CommitCommands();
+        memset( _context.bucketCounts[0], 0, sizeof( _context.bucketCounts[0] ) );
+        _context.entryCounts[0] = 0;
+    }
     #endif
 
     #if BB_DP_FP_MATCH_X_BUCKET

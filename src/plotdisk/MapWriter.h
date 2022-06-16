@@ -162,20 +162,23 @@ public:
             self->SyncThreads();
             if( self->IsControlThread() )
             {
-                const uint32 overflowBucket = _numBuckets;
-                const uint64 overflowCount  = totalCounts[overflowBucket];
-
-                if( overflowCount )
+                if constexpr ( _overflow )
                 {
-                    const uint64 writeOffset = pfxSum[overflowBucket];
-                    ASSERT( writeOffset * bitSize - bitsWritten == 0 );
-                    
-                    BitWriter writer = bitWriter.GetWriter( overflowBucket, 0 );
+                    const uint32 overflowBucket = _numBuckets;
+                    const uint64 overflowCount  = totalCounts[overflowBucket];
 
-                    const uint64* mapToWrite  = outMapBuckets + writeOffset;
-                    const uint64* mapWriteEnd = mapToWrite + overflowCount;
-                    while( mapToWrite < mapWriteEnd )
-                        writer.Write( *mapToWrite++, bitSize );
+                    if( overflowCount )
+                    {
+                        const uint64 writeOffset = pfxSum[overflowBucket];
+                        ASSERT( writeOffset * bitSize - bitsWritten == 0 );
+                        
+                        BitWriter writer = bitWriter.GetWriter( overflowBucket, 0 );
+
+                        const uint64* mapToWrite  = outMapBuckets + writeOffset;
+                        const uint64* mapWriteEnd = mapToWrite + overflowCount;
+                        while( mapToWrite < mapWriteEnd )
+                            writer.Write( *mapToWrite++, bitSize );
+                    }
                 }
 
                 bitWriter.Submit();

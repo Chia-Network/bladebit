@@ -106,6 +106,7 @@
         static DebugPlot _dbgPlot;
         void DbgValidatePlot( const DebugPlot& dbgPlot );
     #endif
+
 #endif
 
 
@@ -441,33 +442,16 @@ private:
             if constexpr ( rTable == TableId::Table2 )
             {
                 // #TODO: Simplify this by not making use of the block writer's buffers?
+                // Set shared x buffer for other threads
                 if( self->BeginLockBlock() )
-                    metaIn = Span<TMetaIn>( _xWriter.GetNextBuffer( _tableIOWait ), entryCount );
+                    _xWriteBuffer = Span<TMetaIn>( _xWriter.GetNextBuffer( _tableIOWait ), entryCount );
                 self->EndLockBlock();
+
+                // Grap shared buffer
+                metaIn = _xWriteBuffer;
             }
 
             WaitForFence( self, _metaReadFence, bucket );
-            #if _DEBUG
-            if constexpr ( rTable == TableId::Table2 )
-            {
-                if( self->BeginLockBlock() )
-                {
-                    uint32 zeroCount = 0;
-                    for( uint32 i = 0; i < entryCount; i++ )
-                    {
-                        if( metaTmp[i] == 0 )
-                            zeroCount++;
-                    }
-                    Log::Line( "Meta zeroes: %u, %u : %u", zeroCount, entryCount, entryCount - zeroCount );
-
-                    // std::sort( sortKey.Ptr(), sortKey.Ptr() + sortKey.Length() );
-                    // for( uint32 i = 0; i < entryCount; i++ )
-                    //     ASSERT( sortKey[i] == i );
-                    // Log::Line( "Sort key is ok." );
-                }
-                self->EndLockBlock();
-            }
-            #endif
             SortOnYKey( self, sortKey, metaTmp, metaIn );
 
             // SaveCrossBucketMetadata( self, metaIn );
@@ -482,13 +466,6 @@ private:
                         _dbgPlot.WriteYX( bucket, yInput, metaIn );
                     #endif
 
-#if _DEBUG
-                    uint32 zeroCount = 0;
-                    for( uint32 i = 0; i < entryCount; i++ )
-                        if( metaIn[i] == 0 )
-                            zeroCount++;
-                    Log::Line( "Meta zeroes: %u, %u : %u", zeroCount, entryCount, entryCount - zeroCount );
-#endif
                     _xWriter.SubmitBuffer( _ioQueue, entryCount );
                     if( bucket == _numBuckets - 1 )
                         _xWriter.SubmitFinalBlock( _ioQueue );
@@ -1212,7 +1189,8 @@ private:
     Span<TMetaOut>      _metaWriteBuffer;
     Span<uint64>        _mapWriteBuffer;
     byte*               _pairsWriteBuffer;
-    BlockWriter<uint32> _xWriter;              // Used for Table2  (there's no map, but just x.)
+    BlockWriter<uint32> _xWriter;               // Used for Table2  (there's no map, but just x.)
+    Span<uint32>        _xWriteBuffer;          // Set by the control thread for other threads to use
     
     // Working buffers
     Span<uint64>        _yTmp;
