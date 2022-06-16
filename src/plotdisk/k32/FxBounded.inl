@@ -930,6 +930,11 @@ private:
                                                                         // so we need to shift by 32 bits, instead of 26.
         const uint32 ySize       = k + kExtraBits;         // = 38
         const uint32 yShift      = 64 - (k + shiftBits);   // = 26 or 32
+        
+        const uint32 bucketBits = bblog2( _numBuckets );
+        const uint32 yBits      = k + kExtraBits - bucketBits;
+        const uint64 yMask      = ((uint64)bucket) << yBits;
+
         const size_t metaSize    = k * MetaInMulti;
         const size_t metaSizeLR  = metaSize * 2;
 
@@ -937,7 +942,6 @@ private:
 
         // const uint32 id         = self->JobId();
         const uint32 matchCount = pairs.Length();
-        const uint64 yMask      = (uint64)bucket << 32;
 
         // Hashing
         uint64 input [5]; // y + L + R

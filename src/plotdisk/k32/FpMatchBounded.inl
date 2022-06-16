@@ -162,7 +162,11 @@ public:
         Span<uint32>       groupBuffer,
         uint32&            outStartIndex )
     {
-        const uint64 yMask = bucket << 32;
+        const uint32 k          = 32;
+        const uint32 bucketBits = bblog2( _numBuckets );
+        const uint32 yBits      = k + kExtraBits - bucketBits;
+        const uint64 yMask      = ((uint64)bucket) << yBits;
+
         const uint32 id    = self->JobId();
 
         int64 _, offset;
@@ -232,8 +236,12 @@ public:
                         Span<Pair>   pairs,
                   const uint64       maxPairs )
     {
-        const uint64 lGroupMask = ((uint64)lBucket) << 32;
-        const uint64 rGroupMask = ((uint64)rBucket) << 32;
+        const uint32 k          = 32;
+        const uint32 bucketBits = bblog2( _numBuckets );
+        const uint32 yBits      = k + kExtraBits - bucketBits;
+
+        const uint64 lGroupMask = ((uint64)lBucket) << yBits;
+        const uint64 rGroupMask = ((uint64)rBucket) << yBits;
 
         const uint32 groupCount = groupBoundaries.Length() - 1; // Ignore the extra ghost group
 

@@ -470,8 +470,8 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
             const uint32 prevAlignedEntryCount = CDivT( prevEntryCount, entriesPerBlock ) * entriesPerBlock;
             const uint32 paddingFromPrevBucket = prevAlignedEntryCount - prevEntryCount;
 
-            // Calculate our next offset before updating our total count, which is the the entries
-            // our last block occupies, if its not full.
+            // Calculate our next offset before updating our total count,
+            // which is the # of entries that our last block occupies, if its not full.
             const uint32 offset            = offsets[i];
             const uint32 entryCount        = pfxSum[i] + offset;
             const uint32 alignedEntryCount = CDivT( entryCount, entriesPerBlock ) * entriesPerBlock;
