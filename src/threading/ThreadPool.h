@@ -71,3 +71,4 @@ inline void ThreadPool::RunJob( void (*TJobFunc)( T* ), T* data, uint count )
 {
     RunJob( (JobFunc)TJobFunc, data, count, sizeof( T ) );
 }
+

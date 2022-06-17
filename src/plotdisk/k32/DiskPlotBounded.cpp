@@ -131,16 +131,16 @@ void K32BoundedPhase1::RunWithBuckets()
     }
     #else
     // #TODO: TEST, remove
-    // for( ;; )
-    {
-        // Log::Line( "Running F1..." );
+    // for( uint32 i = 0; i < 0x7FFFFFFF; i++ )
+    // {
+    //     Log::Line( "Running F1 %u...", i );
         RunF1<_numBuckets>();
-        // _ioQueue.SeekBucket( FileId::FX0, 0, SeekOrigin::Begin );
-        // _ioQueue.SeekBucket( FileId::META0, 0, SeekOrigin::Begin );
-        // _ioQueue.CommitCommands();
-        // memset( _context.bucketCounts[0], 0, sizeof( _context.bucketCounts[0] ) );
-        // _context.entryCounts[0] = 0;
-    }
+    //     _ioQueue.SeekBucket( FileId::FX0  , 0, SeekOrigin::Begin );
+    //     _ioQueue.SeekBucket( FileId::META0, 0, SeekOrigin::Begin );
+    //     _ioQueue.CommitCommands();
+    //     memset( _context.bucketCounts[0], 0, sizeof( _context.bucketCounts[0] ) );
+    //     _context.entryCounts[0] = 0;
+    // }
     #endif
 
     #if BB_DP_FP_MATCH_X_BUCKET

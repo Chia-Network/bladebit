@@ -100,7 +100,6 @@ public:
         });
 
         Fence& fence = _context.fencePool->RequireFence();
-        fence.Reset( 0 );
         _ioQueue.SignalFence( fence, 1 );
         _ioQueue.CommitCommands();
         fence.Wait( 1 );
@@ -136,10 +135,8 @@ private:
         const uint32 fsBlockSize      = (uint32)_ioQueue.BlockSize( FileId::FX0 );
 
         // Distribute to buckets
-        uint32 counts            [_numBuckets] = {};
-        uint32 pfxSum            [_numBuckets];
-        uint32 totalCounts       [_numBuckets];
-        uint32 alignedTotalCounts[_numBuckets];
+        uint32  counts[_numBuckets] = {};
+        uint32  pfxSum[_numBuckets];
         
         // Count bucket entries
         for( uint32 i = 0; i < entryCount; i++ )
@@ -148,19 +145,12 @@ private:
         // Prefix sum
         Span<uint32> offsets = _offsets[self->JobId()];
         
+        // Grab next buffer
         Span<uint32> yEntries, xEntries, elementCounts, alignedElementCounts;
         GetNextBuffer( self, bucket, yEntries, xEntries, elementCounts, alignedElementCounts );
 
-        uint32* pTotalCounts        = totalCounts;
-        uint32* pAlignedTotalCounts = alignedTotalCounts;
-
-        if( self->IsControlThread() )
-        {
-            pTotalCounts        = elementCounts.Ptr();
-            pAlignedTotalCounts = alignedElementCounts.Ptr();
-        }
-
-        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, fsBlockSize, counts, pfxSum, pTotalCounts, offsets.Ptr(), pAlignedTotalCounts );
+        // Calculate prefix sum
+        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, fsBlockSize, counts, pfxSum, elementCounts.Ptr(), offsets.Ptr(), alignedElementCounts.Ptr() );
 
         // Distribute slices to buckets
         const uint32 yBits = _k + kExtraBits - bucketBits;
@@ -184,7 +174,7 @@ private:
         {
             _ioQueue.WriteBucketElementsT( FileId::FX0  , yEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
             _ioQueue.WriteBucketElementsT( FileId::META0, xEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
-            _ioQueue.SignalFence( _writeFence, bucket+1 );
+            _ioQueue.SignalFence( _writeFence, bucket+2 );
             _ioQueue.CommitCommands();
 
             for( uint32 i = 0; i < _numBuckets; i++ )
@@ -198,18 +188,29 @@ private:
                         Span<uint32>& yEntries, Span<uint32>& xEntries,
                         Span<uint32>& elementCounts, Span<uint32>& alignedElementCounts )
     {
-        if( bucket >= 2 && _writeFence.Value() < bucket-1 )
-        {
-            if( self->BeginLockBlock() )
-                _writeFence.Wait( bucket - 1, _context.p1TableWaitTime[(int)TableId::Table1] );
+        const uint32 bucketIdx = bucket & 1; // % 2
 
+        // if( bucket >= 2 && _writeFence.Value() < bucket-1 )
+        if( bucket >= 2 )
+        {
+            // #TODO: Figure out if we can avoid the lock if already signaled.
+            //        Like what's commented out above. However, we have to make sure that
+            //        the signal is properly visible to all threads
+            if( self->BeginLockBlock() )
+            {
+                _writeFence.Wait( bucket, _context.p1TableWaitTime[(int)TableId::Table1] );
+            }
             self->EndLockBlock();
         }
 
-        yEntries             = _yEntries[bucket & 1];
-        xEntries             = _xEntries[bucket & 1];
-        elementCounts        = Span<uint32>( _elementCounts[bucket & 1], _numBuckets );
-        alignedElementCounts = Span<uint32>( _alignedElementCounts[bucket & 1], _numBuckets );
+        yEntries = _yEntries[bucketIdx];
+        xEntries = _xEntries[bucketIdx];
+
+        if( self->IsControlThread() )
+        {
+            elementCounts        = Span<uint32>( _elementCounts       [bucketIdx], _numBuckets );
+            alignedElementCounts = Span<uint32>( _alignedElementCounts[bucketIdx], _numBuckets );
+        }
     }
 
 private:

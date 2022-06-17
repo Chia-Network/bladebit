@@ -23,6 +23,12 @@
         void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context );
     #endif
 
+    #define DBG_VALIDATE_INDICES 1
+    #if DBG_VALIDATE_INDICES
+        static Span<uint32> _dbgIndices;
+        static uint64       _dbgIdxCount = 0;
+    #endif
+
 
     // #define DBG_VALIDATE_TABLES 1 
 
@@ -187,8 +193,16 @@ public:
     //-----------------------------------------------------------
     void AllocateBuffers( IAllocator& allocator, const size_t t1BlockSize, const size_t t2BlockSize, const uint32 threadCount, const bool dryRun )
     {
-        const uint64 kEntryCount      = 1ull << _k;
-        const uint64 entriesPerBucket = (uint64)( kEntryCount / _numBuckets * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const uint64 kEntryCount            = 1ull << _k;
+        const uint64 yEntriesPerBlock       = t2BlockSize / sizeof( uint32 );
+        const uint64 entriesPerBucket       = (uint64)( kEntryCount / _numBuckets * BB_DP_XTRA_ENTRIES_PER_BUCKET );
+        const uint64 entriesPerSlice        = entriesPerBucket / _numBuckets;
+
+        // #TODO: Do these for meta as well, since this is for y
+        const uint64 entriesPerSliceAligned = RoundUpToNextBoundaryT( entriesPerSlice, yEntriesPerBlock ) + yEntriesPerBlock;
+        const uint64 writeEntriesPerBucket  = entriesPerSliceAligned * _numBuckets;
+
+
         _entriesPerBucket = entriesPerBucket;
 
         // Read buffers
@@ -237,9 +251,9 @@ public:
         }
 
         // Write buffers
-        _yWriteBuffer     = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
-        _indexWriteBuffer = allocator.CAllocSpan<uint32  >( entriesPerBucket, t2BlockSize );
-        _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( entriesPerBucket, t2BlockSize );
+        _yWriteBuffer     = allocator.CAllocSpan<uint32  >( writeEntriesPerBucket, t2BlockSize );
+        _indexWriteBuffer = allocator.CAllocSpan<uint32  >( writeEntriesPerBucket, t2BlockSize );
+        _metaWriteBuffer  = allocator.CAllocSpan<TMetaOut>( writeEntriesPerBucket, t2BlockSize );
 
         const size_t pairsWriteSize = CDiv( entriesPerBucket * _pairBitSize, 8 );
         _pairsWriteBuffer = allocator.AllocT<byte>( pairsWriteSize, t1BlockSize );
@@ -330,6 +344,26 @@ public:
                 tableEntryCount += _context.bucketCounts[(int)rTable][i];
 
             ASSERT( tableEntryCount == _tableEntryCount );
+
+            #if DBG_VALIDATE_INDICES
+            if constexpr ( rTable > TableId::Table2 )
+            {
+                Log::Line( "[DEBUG: Validating indices]" );
+                ASSERT( _dbgIdxCount );
+
+                uint32* tmpIndices = bbcvirtallocbounded<uint32>( _maxTableEntries );
+                RadixSort256::Sort<BB_DP_MAX_JOBS>( *_context.threadPool, _dbgIndices.Ptr(), tmpIndices, _dbgIdxCount );
+                bbvirtfreebounded( tmpIndices );
+
+                for( uint64 i = 0; i < _dbgIdxCount; i++ )
+                {
+                    ASSERT( _dbgIndices[i] == i);
+                }
+
+                _dbgIdxCount = 0;
+                Log::Line( " OK" );
+            }
+            #endif
         }
         #endif
 
@@ -386,9 +420,24 @@ private:
 
                 Span<uint32> indices = _metaTmp[1].As<uint32>().SliceSize( entryCount );
 
+                #if (_DEBUG && DBG_VALIDATE_INDICES)
+                    if( self->BeginLockBlock() )
+                    {
+                        if( _dbgIndices.Ptr() == nullptr )
+                            _dbgIndices = bbcvirtallocboundednuma_span<uint32>( _maxTableEntries );
+
+                        // indices.CopyTo( _dbgIndices.Slice( _dbgIdxCount, entryCount ) );
+                        _index[bucket].CopyTo( _dbgIndices.Slice( _dbgIdxCount, entryCount ) );
+                        
+                        _dbgIdxCount += entryCount;
+                    }
+                    self->EndLockBlock();
+                #endif
+
                 SortOnYKey( self, sortKey, _index[bucket], indices );
                 WriteMap( self, bucket, indices, _mapWriteBuffer, _mapOffset );
             }
+
 
             ///
             /// Match
@@ -406,10 +455,12 @@ private:
                 matchOffset += (uint32)_pairs[i].Length();
 
             ASSERT( totalMatches <= _entriesPerBucket );
-            // #if _DEBUG
+            #if _DEBUG
+                _dbgIndexOffsets[id] = matchOffset;
+                _dbgPairLengths[id]  = (uint32)matches.Length();
             //     if( self->IsControlThread() )
             //         Log::Line( " [%3u] : %u", bucket, totalMatches );
-            // #endif
+            #endif
 
             // Prevent overflow entries
             const uint64 tableEntryCount = _tableEntryCount;
@@ -436,13 +487,15 @@ private:
             ///
             /// Sort meta on Y
             ///
-            Span<TMetaIn> metaTmp = _meta[bucket].SliceSize( yInput.Length() );
-            Span<TMetaIn> metaIn  = _metaTmp[0].As<TMetaIn>().SliceSize( yInput.Length() ); // #NOTE: _metaTmp[0] is only used here, so we can use it for writing x values to disk
+            WaitForFence( self, _metaReadFence, bucket );
+
+            Span<TMetaIn> metaUnsorted = _meta[bucket].SliceSize( entryCount );
+            Span<TMetaIn> metaIn       = _metaTmp[0].As<TMetaIn>().SliceSize( entryCount );
 
             if constexpr ( rTable == TableId::Table2 )
             {
-                // #TODO: Simplify this by not making use of the block writer's buffers?
-                // Set shared x buffer for other threads
+                // #TODO: Simplify this, allowing BlockWriter to let the user specify a buffer, like in BitWriter
+                // Get and set shared x buffer for other threads
                 if( self->BeginLockBlock() )
                     _xWriteBuffer = Span<TMetaIn>( _xWriter.GetNextBuffer( _tableIOWait ), entryCount );
                 self->EndLockBlock();
@@ -451,10 +504,10 @@ private:
                 metaIn = _xWriteBuffer;
             }
 
-            WaitForFence( self, _metaReadFence, bucket );
-            SortOnYKey( self, sortKey, metaTmp, metaIn );
-
-            // SaveCrossBucketMetadata( self, metaIn );
+            SortOnYKey( self, sortKey, metaUnsorted, metaIn );
+            #if BB_DP_FP_MATCH_X_BUCKET
+                // SaveCrossBucketMetadata( self, metaIn );
+            #endif
             
             // On Table 2, metadata is our x values, which have to be saved as table 1
             if constexpr ( rTable == TableId::Table2 )
@@ -506,7 +559,9 @@ private:
             }
 
             // Generate fx for cross-bucket matches, and save the matches to an in-memory buffer
-            // GenCrossBucketFx( self, bucket );
+            #if BB_DP_FP_MATCH_X_BUCKET
+                // GenCrossBucketFx( self, bucket );
+            #endif
 
             if( self->IsControlThread() )
             {
@@ -632,17 +687,23 @@ private:
         auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
         _pairs[id] = matches;
 
-        self->SyncThreads();
-        if( self->IsControlThread() )
+        if( self->BeginLockBlock() )
+        {
             _matchTime += TimerEndTicks( timer );
+        }
+        self->EndLockBlock();
+        
 
         // Write cross-bucket pairs to disk
-        if( bucket > 0 )
-            WriteCrossBucketPairs( self, bucket-1 );
+        #if BB_DP_FP_MATCH_X_BUCKET
+            if( bucket > 0 )
+                WriteCrossBucketPairs( self, bucket-1 );
+        #endif
 
         return matches;
     }
     
+    #if BB_DP_FP_MATCH_X_BUCKET
     //-----------------------------------------------------------
     void SaveCrossBucketMetadata( Job* self, const Span<TMetaIn> metaIn )
     {
@@ -680,6 +741,7 @@ private:
     {
 
     }
+    #endif
 
     //-----------------------------------------------------------
     void WritePairs( Job* self, const uint32 bucket, const uint32 totalMatchCount, 
@@ -842,11 +904,12 @@ private:
         const uint32 id        = (uint32)self->JobId();
 
         // Distribute to buckets
-        const uint32 logBuckets = bblog2( _numBuckets );
-        static_assert( kExtraBits <= logBuckets );
+        const uint32 bucketBits = bblog2( _numBuckets );
+        static_assert( kExtraBits <= bucketBits );
 
-        const uint32 bucketShift = ( std::is_same<TYOut, uint32>::value ? _k : _k + kExtraBits ) - logBuckets;
-        const uint64 yMask       = ( 1ull << bucketShift ) - 1;
+        const uint32 yBits       = ( std::is_same<TYOut, uint32>::value ? _k : _k + kExtraBits );
+        const uint32 bucketShift = yBits - bucketBits;
+        const TYOut  yMask       = std::is_same<TYOut, uint32>::value ? 0xFFFFFFFF : ( 1ull << bucketShift ) - 1; // No masking-out for Table 7
 
         const int64 entryCount = (int64)yIn.Length();
 
@@ -871,7 +934,7 @@ private:
         // Distribute to buckets
         for( int64 i = 0; i < entryCount; i++ )
         {
-            const uint64 y       = yIn[i];
+            const TYOut  y       = yIn[i];
             const uint32 yBucket = (uint32)(y >> bucketShift);
             const uint32 yDst    = --pfxSum    [yBucket];
             const uint32 metaDst = --pfxSumMeta[yBucket];
@@ -884,13 +947,26 @@ private:
         // Write to disk
         if( self->BeginLockBlock() )
         {
-            // #NOTE: Should we wait per file?
+            // #TODO: Either use a spin wait or have all threads suspend here
             if( bucket > 0 )
                 _fxWriteFence.Wait( bucket, _tableIOWait ); 
 
             const FileId yId    = _yId   [1];
             const FileId metaId = _metaId[1];
             const FileId idxId  = _idxId [1];
+
+            // #TEST
+            #if _DEBUG
+            {
+                uint64 totalCounts = _dbgPairLengths[0];
+
+                for( uint32 i = 1; i < self->JobCount(); i++ )
+                {
+                    ASSERT( _dbgIndexOffsets[i] == totalCounts );
+                    totalCounts += _dbgPairLengths[i];
+                }
+            }
+            #endif
 
             ASSERT( ySliceCounts.Length() == metaSliceCounts.Length() );
 
@@ -1233,9 +1309,6 @@ private:
     Fence& _pairWriteFence;
     Fence& _mapWriteFence;
 
-    #if DBG_VALIDATE_TABLES
-        uint64 _dbgPairOffset = 0;
-    #endif
 
 public:
     // Timings
@@ -1246,7 +1319,16 @@ public:
     Duration _fxTime         = Duration::zero();
 
 private:
+
+#if _DEBUG
     
+    #if DBG_VALIDATE_TABLES
+        uint64 _dbgPairOffset = 0;
+    #endif
+    // #TEST
+    uint32 _dbgIndexOffsets[BB_DP_MAX_JOBS] = { 0 };
+    uint32 _dbgPairLengths [BB_DP_MAX_JOBS] = { 0 };
+#endif
 };
 
 

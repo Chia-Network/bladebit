@@ -101,10 +101,8 @@ public:
             auto&   bitWriter = _bucketWriter;
             uint64* bitCounts = totalBitCounts;
 
-            if( self->IsControlThread() )
+            if( self->BeginLockBlock() )
             {
-                self->LockThreads();
-
                 // Convert counts to bit sizes
                 for( uint32 i = 0; i < numBuckets; i++ )
                     bitCounts[i] = (uint64)totalCounts[i] * bitSize;
@@ -116,11 +114,8 @@ public:
                     _writeFence->Wait( bucket - 2, *_writeWaitTime );
 
                 bitWriter.BeginWriteBuckets( bitCounts, writeBuffer );
-
-                self->ReleaseThreads();
             }
-            else
-                self->WaitForRelease();
+            self->EndLockBlock();
 
 
             // Bit-compress/pack each bucket entries (except the overflow bucket)
@@ -159,8 +154,7 @@ public:
             }
 
             // Write the overflow bucket and then write to disk
-            self->SyncThreads();
-            if( self->IsControlThread() )
+            if( self->BeginLockBlock() )
             {
                 if constexpr ( _overflow )
                 {
@@ -185,6 +179,7 @@ public:
                 _ioQueue->SignalFence( *_writeFence, bucket );
                 _ioQueue->CommitCommands();
             }
+            self->EndLockBlock();
         });
 
         for( int32 b = 0; b <= (int32)_numBuckets; b++ )
