@@ -72,6 +72,8 @@
     // #define BB_DP_DBG_P3_START_TABLE Table7
 
     #define BB_DP_DBG_P3_KEEP_FILES 1
+
+    // For testing correctness: Allow cross-bucket matches.
+    #define BB_DP_FP_MATCH_X_BUCKET 1
 #endif
 
-// #define BB_DP_FP_MATCH_X_BUCKET 1

@@ -63,21 +63,27 @@ public:
         
         _groupBuffers[id] = groups;
 
-        // if( self->IsLastThread() )
-        // {
-        //     // Save last 2 group's data for this bucket (to be used during the next bucket)
-        //     if( bucket < _numBuckets )
-        //         SaveCrossBucketGroups( self, bucket, groups.Slice( groups.Length()-3 ), yEntries );
+        #if BB_DP_FP_MATCH_X_BUCKET
+            if( self->IsLastThread() )
+            {
+                // Save last 2 group's data for this bucket (to be used during the next bucket)
+                if( bucket < _numBuckets )
+                    SaveCrossBucketGroups( self, bucket, groups.Slice( groups.Length()-3 ), yEntries );
+            }
 
-        //     // Perform cross-bucket matching for the previous bucket, wwith the first 2 groups of this bucket
-        //     if( bucket > 0 )
-        //     {
-        //         auto& info = GetCrossBucketInfo( bucket-1 );
-        //         Span<Pair> pairs( info.pair, BB_DP_CROSS_BUCKET_MAX_ENTRIES );
-                
-        //         CrossBucketMatch( self, bucket-1, yEntries, groups, pairs );
-        //     }
-        // }
+            if( bucket > 0 )
+            {
+                // Perform cross-bucket matching for the previous bucket, with the first 2 groups of this bucket
+                if( self->BeginLockBlock() )
+                {
+                    auto& info = GetCrossBucketInfo( bucket-1 );
+                    Span<Pair> pairs( info.pair, BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+                    
+                    CrossBucketMatch( self, bucket-1, yEntries, groups, pairs );
+                }
+                self->EndLockBlock();
+            }
+        #endif // BB_DP_FP_MATCH_X_BUCKET
 
         // const uint32 startIndex = (uint32)(uintptr_t)(_startPositions[id] - yEntries.Ptr());
 
@@ -227,6 +233,7 @@ public:
     }
 
     //-----------------------------------------------------------
+    template<bool overrideLGroupEnd = false>
     uint32 MatchGroups( Job* self,
                   const uint32       lBucket,
                   const uint32       rBucket,
@@ -234,7 +241,8 @@ public:
                   const Span<uint32> groupBoundaries,
                   const Span<uint32> yEntries,
                         Span<Pair>   pairs,
-                  const uint64       maxPairs )
+                  const uint64       maxPairs,
+                  const uint32       groupLEndOverride = 0 )
     {
         const uint32 k          = 32;
         const uint32 bucketBits = bblog2( _numBuckets );
@@ -257,7 +265,10 @@ public:
         {
             const uint64 groupRStart = groupBoundaries[i];
             const uint64 groupR      = (rGroupMask | (uint64)yEntries[groupRStart]) / kBC;
-            const uint64 groupLEnd   = groupRStart;
+                  uint64 groupLEnd   = groupRStart;
+
+            if constexpr ( overrideLGroupEnd )
+                groupLEnd = groupLEndOverride;
 
             if( groupR - groupL == 1 )
             {
@@ -334,16 +345,67 @@ public:
     }
     
 
-private:
-    
+private:    
     //-----------------------------------------------------------
     uint32 CrossBucketMatch( Job* self, 
                        const uint32       bucket, 
-                       const Span<uint32> yEntries, 
-                             Span<uint32> groupBoundaries,
+                       const Span<uint32> curYEntries, 
+                             Span<uint32> curBucketGroupBoundaries,
                              Span<Pair>   pairs )
     {
+        ASSERT( self->JobId() == 0 );
+        ASSERT( curBucketGroupBoundaries.Length() > 2 );
+
+        auto& info = GetCrossBucketInfo( bucket );
+
+        const uint32 prevBucketLength = info.groupCount[0] + info.groupCount[1];
         
+        // Grab the first 2 groups from this bucket
+        const uint32 curBucketLengths[3] = {
+            prevBucketLength,
+            curBucketGroupBoundaries[1] - curBucketGroupBoundaries[0],
+            curBucketGroupBoundaries[2] - curBucketGroupBoundaries[1]
+        };
+
+        const Span<uint32> groupBoundaries( (uint32*)curBucketLengths, 3 );
+
+        const uint32 curBucketLength = groupBoundaries[1] + groupBoundaries[2];
+
+        bbmemcpy_t( info.savedY + prevBucketLength, curYEntries.Ptr(), curBucketLength );
+        Span<uint32> yEntries( info.savedY, prevBucketLength + curBucketLength );
+        
+        // Do matches
+        const uint32 k          = 32;
+        const uint32 bucketBits = bblog2( _numBuckets );
+        const uint32 yBits      = k + kExtraBits - bucketBits;
+
+        const uint64 lGroupMask = ((uint64)bucket)   << yBits;
+        const uint64 rGroupMask = ((uint64)bucket+1) << yBits;
+        
+        uint32 lastGrpMatchIndex = 1;
+        uint32 matchCount        = 0;
+
+        // If the first entry group is the same from the prev's bucket last group,
+        // then we can perform matches with the penultimate bucket
+        const uint64 penultimateGroup = lGroupMask | yEntries[info.groupCount[0]];
+        const uint64 firstGroup       = rGroupMask | yEntries[prevBucketLength];
+        
+        if( penultimateGroup == firstGroup )
+        {
+            matchCount = MatchGroups<true>( self, bucket, bucket+1, 0, groupBoundaries, yEntries, pairs, pairs.Length(), info.groupCount[0] );
+        }
+        else
+        {
+            // We have different groups at the bucket boundary, so update the boundaries for the next match accordingly
+            lastGrpMatchIndex = 0;
+        }   
+
+        auto remPairs = pairs.Slice( matchCount );
+        ASSERT( remPairs.Length() > 0 );
+
+        matchCount += MatchGroups( self, bucket, bucket+1, info.groupCount[0], groupBoundaries.Slice(lastGrpMatchIndex), yEntries, remPairs, remPairs.Length() );
+
+        return matchCount;
     }
 
     //-----------------------------------------------------------

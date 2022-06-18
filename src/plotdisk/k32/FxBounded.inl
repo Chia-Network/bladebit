@@ -23,94 +23,10 @@
         void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context );
     #endif
 
-    #define DBG_VALIDATE_INDICES 1
+    // #define DBG_VALIDATE_INDICES 1
     #if DBG_VALIDATE_INDICES
         static Span<uint32> _dbgIndices;
         static uint64       _dbgIdxCount = 0;
-    #endif
-
-
-    // #define DBG_VALIDATE_TABLES 1 
-
-    #if DBG_VALIDATE_TABLES
-        struct DebugPlot
-        {
-            using Job = AnonPrefixSumJob<uint32>;
-
-            Span<uint32> x;
-            Span<uint64> y;
-            Span<uint32> f7;
-            Span<Pair>   backPointers[7] = {};
-            uint64       _writeOffset[7] = {};
-            uint32       _pairOffset [7] = {};
-
-            inline void AllocTable( const TableId table )
-            {
-                const uint64 maxEntries = 1ull << 32;
-                if( table == TableId::Table2 )
-                {
-                    x = Span<uint32>( bbcvirtallocboundednuma<uint32>( maxEntries ), maxEntries );
-                    y = Span<uint64>( bbcvirtallocboundednuma<uint64>( maxEntries ), maxEntries );
-                }
-                else if( table == TableId::Table7 )
-                    f7 = Span<uint32>( bbcvirtallocboundednuma<uint32>( maxEntries ), maxEntries );
-                
-                backPointers[(int)table] = Span<Pair>( bbcvirtallocboundednuma<Pair>( maxEntries ), maxEntries );
-            }
-
-            inline void WriteYX( const uint64 bucket, const Span<uint32> ys, const Span<uint32> xs )
-            {
-                ASSERT( ys.Length() == xs.Length() );
-
-                xs.CopyTo( x.Slice( _writeOffset[0] ) );
-                
-                const uint64 yMask = bucket << 32;
-                auto yDst = y.Slice( _writeOffset[0] );
-                for( uint32 i = 0; i < ys.Length(); i++ )
-                    yDst[i] = yMask | y[i];
-                
-                _writeOffset[0] += xs.Length();
-            }
-
-            inline void WriteF7( const Span<uint32> f7s )
-            {
-                f7s.CopyTo( f7.Slice( _writeOffset[6] ) );
-            }
-
-            inline void WritePairs( Job* self, const TableId table, const uint32 threadOffset, const Span<Pair> pairs, const uint32 lBucketLength, const uint32 totalPairsLength )
-            {
-                const uint32 writeOffset = _writeOffset[(int)table] + threadOffset;
-                Span<Pair> dst = backPointers[(int)table].Slice( writeOffset );
-                
-                const uint32 offset = _pairOffset[(int)table];
-                pairs.CopyTo( dst );
-                
-                for( uint64 i = 0; i < pairs.Length(); i++ )
-                {
-                    dst[i].left  += offset;
-                    dst[i].right += offset;
-                }
-
-                if( self->BeginLockBlock() )
-                {
-                    _writeOffset[(int)table] += totalPairsLength;
-                    _pairOffset [(int)table] += lBucketLength;
-                }
-                self->EndLockBlock();
-            }
-
-            inline void FinishTable( const TableId table )
-            {
-                const uint64 tableLength = _writeOffset[(int)table];
-                backPointers[(int)table] = backPointers[(int)table].SliceSize( tableLength );
-
-                if( table == TableId::Table7 )
-                    f7 = f7.SliceSize( tableLength );
-            }
-        };
-    
-        static DebugPlot _dbgPlot;
-        void DbgValidatePlot( const DebugPlot& dbgPlot );
     #endif
 
 #endif
@@ -165,6 +81,9 @@ public:
         , _fxWriteFence  ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
         , _pairWriteFence( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
         , _mapWriteFence ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
+    #if BB_DP_FP_MATCH_X_BUCKET
+
+    #endif
     {
         const TableId lTable = rTable - 1;
         _yId   [0] = FileId::FX0    + (FileId)((int)lTable & 1);
@@ -508,8 +427,9 @@ private:
             }
 
             SortOnYKey( self, sortKey, metaUnsorted, metaIn );
+
             #if BB_DP_FP_MATCH_X_BUCKET
-                // SaveCrossBucketMetadata( self, metaIn );
+                SaveCrossBucketMetadata( self, bucket, metaIn );
             #endif
             
             // On Table 2, metadata is our x values, which have to be saved as table 1
@@ -563,7 +483,7 @@ private:
 
             // Generate fx for cross-bucket matches, and save the matches to an in-memory buffer
             #if BB_DP_FP_MATCH_X_BUCKET
-                // GenCrossBucketFx( self, bucket );
+                GenCrossBucketFx( self, bucket );
             #endif
 
             if( self->IsControlThread() )
@@ -706,17 +626,18 @@ private:
         return matches;
     }
     
-    #if BB_DP_FP_MATCH_X_BUCKET
+#if BB_DP_FP_MATCH_X_BUCKET
     //-----------------------------------------------------------
-    void SaveCrossBucketMetadata( Job* self, const Span<TMetaIn> metaIn )
+    void SaveCrossBucketMetadata( Job* self, const uint32 bucket, const Span<TMetaIn> metaIn )
     {
-
+        if( self->IsControlThread() )
+            _matcher.SaveCrossBucketMeta( bucket, metaIn );
     }
 
     //-----------------------------------------------------------
     void WriteCrossBucketPairs( Job* self, const uint32 bucket )
     {
-        auto& info = _matcher.GetCrossBucketInfo( bucket );
+        auto& info = _matcher.GetCrossBucketInfo( bucket-1 );
 
         if( info.matchCount < 1 )
             return;
@@ -744,7 +665,7 @@ private:
     {
 
     }
-    #endif
+#endif // BB_DP_FP_MATCH_X_BUCKET
 
     //-----------------------------------------------------------
     void WritePairs( Job* self, const uint32 bucket, const uint32 totalMatchCount, 
@@ -1306,6 +1227,8 @@ private:
     Fence& _pairWriteFence;
     Fence& _mapWriteFence;
 
+    #if BB_DP_FP_MATCH_X_BUCKET
+    #endif
 
 public:
     // Timings
