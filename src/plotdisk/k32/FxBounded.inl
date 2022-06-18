@@ -298,6 +298,12 @@ public:
             _dbgPlot.AllocTable( rTable );
         #endif
 
+        #if (_DEBUG && DBG_VALIDATE_INDICES)
+            if( _dbgIndices.Ptr() == nullptr )
+                _dbgIndices = bbcvirtallocboundednuma_span<uint32>( _maxTableEntries );
+            _dbgIdxCount = 0;
+        #endif
+
         // Prepare input files
         _ioQueue.SeekBucket( _yId[0], 0, SeekOrigin::Begin );
         _ioQueue.SeekBucket( _yId[1], 0, SeekOrigin::Begin );
@@ -423,9 +429,6 @@ private:
                 #if (_DEBUG && DBG_VALIDATE_INDICES)
                     if( self->BeginLockBlock() )
                     {
-                        if( _dbgIndices.Ptr() == nullptr )
-                            _dbgIndices = bbcvirtallocboundednuma_span<uint32>( _maxTableEntries );
-
                         // indices.CopyTo( _dbgIndices.Slice( _dbgIdxCount, entryCount ) );
                         _index[bucket].CopyTo( _dbgIndices.Slice( _dbgIdxCount, entryCount ) );
                         
@@ -455,9 +458,9 @@ private:
                 matchOffset += (uint32)_pairs[i].Length();
 
             ASSERT( totalMatches <= _entriesPerBucket );
+
+            // #TEST
             #if _DEBUG
-                _dbgIndexOffsets[id] = matchOffset;
-                _dbgPairLengths[id]  = (uint32)matches.Length();
             //     if( self->IsControlThread() )
             //         Log::Line( " [%3u] : %u", bucket, totalMatches );
             #endif
@@ -927,9 +930,16 @@ private:
         // Count
         for( int64 i = 0; i < entryCount; i++ )
             counts[yIn[i] >> bucketShift]++;
-
+    
         self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, ySliceCounts.Ptr(), _offsetsY[id], yAlignedSliceCount.Ptr() );
         self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedSliceCount.Ptr() );
+
+// #if _DEBUG
+//         if( self->IsLastThread() )
+//         {
+//             ASSERT( (uint64)pfxSum[_numBuckets-1] < 17200000 );
+//         }
+// #endif
 
         // Distribute to buckets
         for( int64 i = 0; i < entryCount; i++ )
@@ -954,19 +964,6 @@ private:
             const FileId yId    = _yId   [1];
             const FileId metaId = _metaId[1];
             const FileId idxId  = _idxId [1];
-
-            // #TEST
-            #if _DEBUG
-            {
-                uint64 totalCounts = _dbgPairLengths[0];
-
-                for( uint32 i = 1; i < self->JobCount(); i++ )
-                {
-                    ASSERT( _dbgIndexOffsets[i] == totalCounts );
-                    totalCounts += _dbgPairLengths[i];
-                }
-            }
-            #endif
 
             ASSERT( ySliceCounts.Length() == metaSliceCounts.Length() );
 
@@ -1325,9 +1322,6 @@ private:
     #if DBG_VALIDATE_TABLES
         uint64 _dbgPairOffset = 0;
     #endif
-    // #TEST
-    uint32 _dbgIndexOffsets[BB_DP_MAX_JOBS] = { 0 };
-    uint32 _dbgPairLengths [BB_DP_MAX_JOBS] = { 0 };
 #endif
 };
 
