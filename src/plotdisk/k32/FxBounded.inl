@@ -663,7 +663,20 @@ private:
     //-----------------------------------------------------------
     void GenCrossBucketFx( Job* self, const uint32 bucket )
     {
+        auto& info = _matcher.GetCrossBucketInfo( bucket-1 );
 
+        if( info.matchCount < 1 )
+            return;
+        
+        if( self->BeginLockBlock() )
+        {
+            const Span<Pair>   pairs( info.pair               , info.matchCount );
+            const Span<uint32> y    ( info.savedY             , info.matchCount );
+            const Span<Pair>   meta ( (TMetaIn*)info.savedMeta, info.matchCount );
+
+            GenFx( self, bucket, pairs, y, meta, yOut, metaOut );
+        }
+        self->EndLockBlock();
     }
 #endif // BB_DP_FP_MATCH_X_BUCKET
 

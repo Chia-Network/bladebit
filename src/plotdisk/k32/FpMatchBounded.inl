@@ -26,8 +26,6 @@ struct K32BoundedFpCrossBucketInfo
     Meta4   savedMeta[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
     Pair    pair     [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
 
-    uint32* y           = nullptr;
-    Meta4*  meta        = nullptr;
     uint32  matchCount  = 0;
     uint32  matchOffset = 0;
 
@@ -87,14 +85,8 @@ public:
 
         // const uint32 startIndex = (uint32)(uintptr_t)(_startPositions[id] - yEntries.Ptr());
 
-        const uint32 matchCount = MatchGroups( self,
-                                               bucket,
-                                               bucket,
-                                               startIndex,
-                                               _groupBuffers[id],
-                                               yEntries,
-                                               pairs,
-                                               pairs.Length() );
+        const uint32 matchCount = MatchGroups( self, bucket, bucket,startIndex, _groupBuffers[id],
+                                               yEntries, pairs, pairs.Length() );
 
         return pairs.Slice( 0, matchCount );
 
@@ -343,34 +335,37 @@ public:
     {
         return _xBucketInfo[bucket & 1]; // bucket % 2
     }
-    
 
 private:    
     //-----------------------------------------------------------
     uint32 CrossBucketMatch( Job* self, 
                        const uint32       bucket, 
                        const Span<uint32> curYEntries, 
-                             Span<uint32> curBucketGroupBoundaries,
-                             Span<Pair>   pairs )
+                             Span<uint32> curBucketGroupBoundaries )
     {
         ASSERT( self->JobId() == 0 );
         ASSERT( curBucketGroupBoundaries.Length() > 2 );
 
         auto& info = GetCrossBucketInfo( bucket );
 
+        Span<Pair> pairs( info.pair, BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+
         const uint32 prevBucketLength = info.groupCount[0] + info.groupCount[1];
         
         // Grab the first 2 groups from this bucket
-        const uint32 curBucketLengths[3] = {
+        const uint32 _groupBoundaries[3] = {
             prevBucketLength,
-            curBucketGroupBoundaries[1] - curBucketGroupBoundaries[0],
-            curBucketGroupBoundaries[2] - curBucketGroupBoundaries[1]
+            curBucketGroupBoundaries[0] + prevBucketLength,
+            curBucketGroupBoundaries[1] + prevBucketLength
         };
 
-        const Span<uint32> groupBoundaries( (uint32*)curBucketLengths, 3 );
+        const Span<uint32> groupBoundaries( (uint32*)_groupBoundaries, 3 );
 
         const uint32 curBucketLength = groupBoundaries[1] + groupBoundaries[2];
 
+        // Copy y from the 2 first groups of the current bucket to our existing y buffer
+        // Buffer y now looks like this:
+        // [prev_bcuket_penultimate_group][prev_bucket_last_group][cur_bucket_first_group][cur_bucket_second_group]
         bbmemcpy_t( info.savedY + prevBucketLength, curYEntries.Ptr(), curBucketLength );
         Span<uint32> yEntries( info.savedY, prevBucketLength + curBucketLength );
         
@@ -385,17 +380,20 @@ private:
         uint32 lastGrpMatchIndex = 1;
         uint32 matchCount        = 0;
 
-        // If the first entry group is the same from the prev's bucket last group,
-        // then we can perform matches with the penultimate bucket
-        const uint64 penultimateGroup = lGroupMask | yEntries[info.groupCount[0]];
-        const uint64 firstGroup       = rGroupMask | yEntries[prevBucketLength];
+        // If the cur bucket's first group is the same from the prev's bucket last group,
+        // then we can perform matches against the penultimate bucket
+        const uint64 lastGroup  = ( lGroupMask | yEntries[info.groupCount[0]] ) / kBC;
+        const uint64 firstGroup = ( rGroupMask | yEntries[prevBucketLength] ) / kBC;
         
-        if( penultimateGroup == firstGroup )
+        if( lastGroup == firstGroup )
         {
             matchCount = MatchGroups<true>( self, bucket, bucket+1, 0, groupBoundaries, yEntries, pairs, pairs.Length(), info.groupCount[0] );
         }
         else
         {
+            ASSERT( firstGroup > lastGroup );
+            ASSERT( firstGroup - lastGroup <= 4 );
+
             // We have different groups at the bucket boundary, so update the boundaries for the next match accordingly
             lastGrpMatchIndex = 0;
         }   
@@ -403,7 +401,16 @@ private:
         auto remPairs = pairs.Slice( matchCount );
         ASSERT( remPairs.Length() > 0 );
 
-        matchCount += MatchGroups( self, bucket, bucket+1, info.groupCount[0], groupBoundaries.Slice(lastGrpMatchIndex), yEntries, remPairs, remPairs.Length() );
+        matchCount += MatchGroups<true>( self, bucket, bucket+1, info.groupCount[0], groupBoundaries.Slice(lastGrpMatchIndex), yEntries, remPairs, remPairs.Length(), prevBucketLength );
+
+        info.matchCount = matchCount;
+
+        // Update offset on the pairs
+        for( uint32 i = 0; i < matchCount; i++ )
+        {
+            info.pair[i].left  += info.matchOffset;
+            info.pair[i].right += info.matchOffset;
+        }
 
         return matchCount;
     }
