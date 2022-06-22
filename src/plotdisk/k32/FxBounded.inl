@@ -213,6 +213,10 @@ public:
         #endif
     )
     {
+        #if BB_DP_FP_MATCH_X_BUCKET
+            _crossBucketEntries = crossBucketEntries;
+        #endif
+
         #if DBG_VALIDATE_TABLES
             _dbgPlot.AllocTable( rTable );
         #endif
@@ -670,11 +674,21 @@ private:
         
         if( self->BeginLockBlock() )
         {
-            const Span<Pair>   pairs( info.pair               , info.matchCount );
-            const Span<uint32> y    ( info.savedY             , info.matchCount );
-            const Span<Pair>   meta ( (TMetaIn*)info.savedMeta, info.matchCount );
+            const uint32 prevBucketLength = info.PrevBucketEntryCount();
+
+            const Span<Pair>    pairs( info.pair               , info.matchCount );
+            const Span<uint32>  y    ( info.savedY             , prevBucketLength );
+            const Span<TMetaIn> meta ( (TMetaIn*)info.savedMeta, prevBucketLength + info.curBucketMetaLength );
+
+            Span<TYOut>    yOut    = _yTmp      .As<TYOut>()   .SliceSize( info.matchCount );
+            Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().SliceSize( info.matchCount );
 
             GenFx( self, bucket, pairs, y, meta, yOut, metaOut );
+
+            // Copy values to in-memory cross-bucket cache
+
+            // Distribute to the correct bucket
+            // _crossBucketEntries;
         }
         self->EndLockBlock();
     }
@@ -1241,6 +1255,7 @@ private:
     Fence& _mapWriteFence;
 
     #if BB_DP_FP_MATCH_X_BUCKET
+        Span<K32CrossBucketEntries> _crossBucketEntries;
     #endif
 
 public:

@@ -20,16 +20,21 @@ struct K32BoundedFpCrossBucketInfo
 {
     struct Meta4{ uint32 m[4]; };
 
-    uint32  groupCount[2];  // Groups sizes for the bucket's last 2 groups
+    uint32  groupCount[2];  // Groups sizes for the prev bucket's last 2 groups, and
+                            // the current bucket's first 2 groups
 
     uint32  savedY   [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
     Meta4   savedMeta[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
     Pair    pair     [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
 
-    uint32  matchCount  = 0;
-    uint32  matchOffset = 0;
+    uint32  matchCount          = 0;
+    uint32  matchOffset         = 0;
+    uint32  curBucketMetaLength = 0;   // Number of meta entries needed to be kept from the current bucket
+                                       // (Length of first 2 groups of current bucket)
 
-    inline uint64 EntryCount() const { return (uint64)groupCount[0] + groupCount[1]; }
+
+    inline uint32 PrevBucketEntryCount() const { return groupCount[0] + groupCount[1]; }
+
 };
 
 
@@ -77,7 +82,7 @@ public:
                     auto& info = GetCrossBucketInfo( bucket-1 );
                     Span<Pair> pairs( info.pair, BB_DP_CROSS_BUCKET_MAX_ENTRIES );
                     
-                    CrossBucketMatch( self, bucket-1, yEntries, groups, pairs );
+                    CrossBucketMatch( self, bucket-1, yEntries, groups );
                 }
                 self->EndLockBlock();
             }
@@ -139,10 +144,22 @@ public:
     {
         auto& info = GetCrossBucketInfo( bucket );
 
-        const size_t copyCount = info.EntryCount();
-        ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+        if( bucket > 0 )
+        {
+            auto& prevInfo = GetCrossBucketInfo( bucket - 1 );
 
-        memcpy( info.savedMeta, meta.Ptr() + info.matchOffset, copyCount * sizeof( TMeta ) );
+            const uint32 prevEntryCount = prevInfo.PrevBucketEntryCount();
+            ASSERT( prevEntryCount + prevInfo.curBucketMetaLength <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+
+            // Copy current metadata for previous bucket fx
+            bbmemcpy_t<TMeta>( (TMeta*)prevInfo.savedMeta + prevEntryCount, meta.Ptr(), prevInfo.curBucketMetaLength  );
+        }
+
+        const size_t copyCount = info.PrevBucketEntryCount();
+        ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+        ASSERT( meta.Length() - info.matchOffset >= copyCount );
+
+        bbmemcpy_t<TMeta>( (TMeta*)info.savedMeta, meta.Ptr() + info.matchOffset, copyCount );
     }
 
     //-----------------------------------------------------------
@@ -347,6 +364,7 @@ private:
         ASSERT( curBucketGroupBoundaries.Length() > 2 );
 
         auto& info = GetCrossBucketInfo( bucket );
+        info.curBucketMetaLength = curBucketGroupBoundaries[1];
 
         Span<Pair> pairs( info.pair, BB_DP_CROSS_BUCKET_MAX_ENTRIES );
 
@@ -361,7 +379,8 @@ private:
 
         const Span<uint32> groupBoundaries( (uint32*)_groupBoundaries, 3 );
 
-        const uint32 curBucketLength = groupBoundaries[1] + groupBoundaries[2];
+        const uint32 curBucketLength = curBucketGroupBoundaries[1];
+        ASSERT( curBucketLength <= BB_DP_CROSS_BUCKET_MAX_ENTRIES - prevBucketLength );
 
         // Copy y from the 2 first groups of the current bucket to our existing y buffer
         // Buffer y now looks like this:
@@ -406,11 +425,11 @@ private:
         info.matchCount = matchCount;
 
         // Update offset on the pairs
-        for( uint32 i = 0; i < matchCount; i++ )
-        {
-            info.pair[i].left  += info.matchOffset;
-            info.pair[i].right += info.matchOffset;
-        }
+        // for( uint32 i = 0; i < matchCount; i++ )
+        // {
+        //     info.pair[i].left  += info.matchOffset;
+        //     info.pair[i].right += info.matchOffset;
+        // }
 
         return matchCount;
     }
@@ -431,9 +450,9 @@ private:
 
         info.groupCount[0] = groupIndices[1] - groupIndices[0];
         info.groupCount[1] = groupIndices[2] - groupIndices[1];
-
+        
         const size_t copyCount = info.groupCount[0] + info.groupCount[1];
-        ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+        ASSERT( copyCount < BB_DP_CROSS_BUCKET_MAX_ENTRIES );
 
         memcpy( info.savedY, yEntries.Ptr() + info.matchOffset, copyCount * sizeof( uint32 ) );
         // memcpy( info.savedMeta, meta     + groupIndices[0], copyCount * sizeof( TMeta  ) );
