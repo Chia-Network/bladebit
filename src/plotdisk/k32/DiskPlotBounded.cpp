@@ -83,6 +83,7 @@ size_t K32BoundedPhase1::GetRequiredSize( const uint32 numBuckets, const size_t 
 
     #if BB_DP_FP_MATCH_X_BUCKET
         allocator.CAlloc<K32CrossBucketEntries>( numBuckets );
+        allocator.CAlloc<K32CrossBucketEntries>( numBuckets );
     #endif
 
     switch( numBuckets )
@@ -130,7 +131,7 @@ void K32BoundedPhase1::RunWithBuckets()
         startTable = BB_DP_P1_START_TABLE;
     }
     #else
-    // #TODO: TEST, remove
+    // #TODO: TEST, removes
     // for( uint32 i = 0; i < 0x7FFFFFFF; i++ )
     // {
     //     Log::Line( "Running F1 %u...", i );
@@ -144,8 +145,10 @@ void K32BoundedPhase1::RunWithBuckets()
     #endif
 
     #if BB_DP_FP_MATCH_X_BUCKET
-        _crossBucketEntries.values = _allocator.CAlloc<K32CrossBucketEntries>( _numBuckets );
-        _crossBucketEntries.length = _numBuckets;
+        _crossBucketEntries[0].values = _allocator.CAlloc<K32CrossBucketEntries>( _numBuckets );
+        _crossBucketEntries[1].values = _allocator.CAlloc<K32CrossBucketEntries>( _numBuckets );
+        _crossBucketEntries[0].length = _numBuckets;
+        _crossBucketEntries[1].length = _numBuckets;
 
         _xBucketStackMarker = _allocator.Size();
     #endif
@@ -209,6 +212,20 @@ void K32BoundedPhase1::RunFx()
 
     #if BB_DP_FP_MATCH_X_BUCKET
         _allocator.PopToMarker( _xBucketStackMarker );
+        
+        const uint xBucketIdxIn  = (uint)(table-1) & 1;
+        const uint xBucketIdxOut = (uint)table & 1;
+        auto& crossBucketIn  = _crossBucketEntries[xBucketIdxIn];
+        auto& crossBucketOut = _crossBucketEntries[xBucketIdxOut];
+
+        for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+            crossBucketOut[bucket].length = 0;
+
+        if( table == TableId::Table2 )
+        {
+            for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+                crossBucketIn[bucket].length = 0;
+        }
     #else
         _allocator.PopToMarker( 0 );
     #endif
@@ -216,7 +233,8 @@ void K32BoundedPhase1::RunFx()
     DiskPlotFxBounded<table, _numBuckets> fx( _context );
     fx.Run( _allocator
         #if BB_DP_FP_MATCH_X_BUCKET
-            , _crossBucketEntries
+            , crossBucketIn
+            , crossBucketOut
         #endif
     );
 

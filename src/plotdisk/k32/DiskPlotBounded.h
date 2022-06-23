@@ -34,7 +34,7 @@ private:
 
 #if BB_DP_FP_MATCH_X_BUCKET
     size_t                      _xBucketStackMarker = 0;
-    Span<K32CrossBucketEntries> _crossBucketEntries;
+    Span<K32CrossBucketEntries> _crossBucketEntries[2];
 #endif
 
 };

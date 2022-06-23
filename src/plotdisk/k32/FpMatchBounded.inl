@@ -10,9 +10,34 @@ struct K32CrossBucketEntries
     struct Meta4{ uint32 m[4]; };
 
     uint32 length;
-    uint64 y    [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+    uint32 y    [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
     uint32 index[BB_DP_CROSS_BUCKET_MAX_ENTRIES];
     Meta4  meta [BB_DP_CROSS_BUCKET_MAX_ENTRIES];
+
+    inline Span<uint32> CopyYAndExtend( const Span<uint32> dst ) const
+    {
+        if( length == 0 )
+            return dst;
+        bbmemcpy_t<uint32>( dst.Ptr() + dst.Length(), y, length );
+        return Span<uint32>( dst.Ptr(), dst.Length() + length );
+    }
+
+    inline Span<uint32> CopyIndexAndExtend( const Span<uint32> dst ) const
+    {
+        if( length == 0 )
+            return dst;
+        bbmemcpy_t<uint32>( dst.Ptr() + dst.Length(), index, length );
+        return Span<uint32>( dst.Ptr(), dst.Length() + length );
+    }
+
+    template<typename TMeta>
+    inline Span<TMeta> CopyMetaAndExtend( const Span<TMeta> dst ) const
+    {
+        if( length == 0 )
+            return dst;
+        bbmemcpy_t<TMeta>( dst.Ptr() + dst.Length(), (TMeta*)meta, length );
+        return Span<TMeta>( dst.Ptr(), dst.Length() + length );
+    }
 };
 
 
@@ -155,6 +180,9 @@ public:
             bbmemcpy_t<TMeta>( (TMeta*)prevInfo.savedMeta + prevEntryCount, meta.Ptr(), prevInfo.curBucketMetaLength  );
         }
 
+        if( bucket == _numBuckets -1 )
+            return;
+        
         const size_t copyCount = info.PrevBucketEntryCount();
         ASSERT( copyCount <= BB_DP_CROSS_BUCKET_MAX_ENTRIES );
         ASSERT( meta.Length() - info.matchOffset >= copyCount );
@@ -442,7 +470,7 @@ private:
     {
         auto& info = GetCrossBucketInfo( bucket );
         
-        GetCrossBucketInfo( bucket - 1 ).matchOffset = info.matchOffset;
+        // GetCrossBucketInfo( bucket - 1 ).matchOffset = info.matchOffset;
         info.matchOffset = groupIndices[0];
 
         if( bucket == _numBuckets-1 )

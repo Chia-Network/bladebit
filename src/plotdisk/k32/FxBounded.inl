@@ -209,12 +209,14 @@ public:
     //-----------------------------------------------------------
     void Run( IAllocator& allocator
         #if BB_DP_FP_MATCH_X_BUCKET
-            , Span<K32CrossBucketEntries> crossBucketEntries
+            , Span<K32CrossBucketEntries> crossBucketEntriesIn
+            , Span<K32CrossBucketEntries> crossBucketEntriesOut
         #endif
     )
     {
         #if BB_DP_FP_MATCH_X_BUCKET
-            _crossBucketEntries = crossBucketEntries;
+            _crossBucketEntriesIn  = crossBucketEntriesIn;
+            _crossBucketEntriesOut = crossBucketEntriesOut;
         #endif
 
         #if DBG_VALIDATE_TABLES
@@ -328,14 +330,12 @@ private:
 
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
-            // if( bucket == 63 && self->JobId() == 0 ) BBDebugBreak();
-
             ReadNextBucket( self, bucket + 1 ); // Read next bucket in background
             WaitForFence( self, _yReadFence, bucket );
 
             Span<uint32> yInput     = _y[bucket];
             const uint32 entryCount = yInput.Length();
-            
+
             Span<uint32> sortKey = _sortKey.SliceSize( entryCount );
             SortY( self, entryCount, yInput.Ptr(), _yTmp.As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[1].As<uint32>().Ptr() );
 
@@ -345,22 +345,22 @@ private:
             if constexpr ( rTable > TableId::Table2 )
             {
                 WaitForFence( self, _indexReadFence, bucket );
-                ASSERT( _index[bucket].Length() == entryCount );
 
-                Span<uint32> indices = _metaTmp[1].As<uint32>().SliceSize( entryCount );
+                Span<uint32> unsortedIndices = _index[bucket];       ASSERT( unsortedIndices.Length() == entryCount );
+                Span<uint32> indices         = _metaTmp[1].As<uint32>().SliceSize( entryCount );
 
                 #if (_DEBUG && DBG_VALIDATE_INDICES)
                     if( self->BeginLockBlock() )
                     {
                         // indices.CopyTo( _dbgIndices.Slice( _dbgIdxCount, entryCount ) );
-                        _index[bucket].CopyTo( _dbgIndices.Slice( _dbgIdxCount, entryCount ) );
+                        unsortedIndices.CopyTo( _dbgIndices.Slice( _dbgIdxCount, entryCount ) );
                         
                         _dbgIdxCount += entryCount;
                     }
                     self->EndLockBlock();
                 #endif
 
-                SortOnYKey( self, sortKey, _index[bucket], indices );
+                SortOnYKey( self, sortKey, unsortedIndices, indices );
                 WriteMap( self, bucket, indices, _mapWriteBuffer, _mapOffset );
             }
 
@@ -414,8 +414,8 @@ private:
             /// Sort meta on Y
             ///
             WaitForFence( self, _metaReadFence, bucket );
-
-            Span<TMetaIn> metaUnsorted = _meta[bucket].SliceSize( entryCount );
+    
+            Span<TMetaIn> metaUnsorted = _meta[bucket].SliceSize( entryCount );                 ASSERT( metaUnsorted.Length() == entryCount );
             Span<TMetaIn> metaIn       = _metaTmp[0].As<TMetaIn>().SliceSize( entryCount );
 
             if constexpr ( rTable == TableId::Table2 )
@@ -462,6 +462,11 @@ private:
                 if( self->IsControlThread() )
                     timer = TimerBegin();
 
+                // Generate fx for cross-bucket matches, and save the matches to an in-memory buffer
+                #if BB_DP_FP_MATCH_X_BUCKET
+                    GenCrossBucketFx( self, bucket );
+                #endif
+
                 GenFx( self, bucket, matches, yInput, metaIn, yOut, metaOut );
                 self->SyncThreads();
 
@@ -485,11 +490,6 @@ private:
                 WriteEntries( self, bucket, (uint32)_tableEntryCount + matchOffset, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
             }
 
-            // Generate fx for cross-bucket matches, and save the matches to an in-memory buffer
-            #if BB_DP_FP_MATCH_X_BUCKET
-                GenCrossBucketFx( self, bucket );
-            #endif
-
             if( self->IsControlThread() )
             {
                 _tableEntryCount += totalMatches;
@@ -497,6 +497,11 @@ private:
 
                 // Save bucket length before y-sort since the pairs remain unsorted
                 _context.ptrTableBucketCounts[(int)rTable][bucket] = (uint32)totalMatches;
+
+                #if BB_DP_FP_MATCH_X_BUCKET
+                if( bucket > 0 )
+                    _context.ptrTableBucketCounts[(int)rTable][bucket-1] += _matcher.GetCrossBucketInfo( bucket - 1 ).matchCount;
+                #endif
             }
         }
     }
@@ -674,21 +679,51 @@ private:
         
         if( self->BeginLockBlock() )
         {
+            const uint32 matchCount       = info.matchCount;
             const uint32 prevBucketLength = info.PrevBucketEntryCount();
 
-            const Span<Pair>    pairs( info.pair               , info.matchCount );
+            const Span<Pair>    pairs( info.pair               , matchCount );
             const Span<uint32>  y    ( info.savedY             , prevBucketLength );
             const Span<TMetaIn> meta ( (TMetaIn*)info.savedMeta, prevBucketLength + info.curBucketMetaLength );
 
-            Span<TYOut>    yOut    = _yTmp      .As<TYOut>()   .SliceSize( info.matchCount );
-            Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().SliceSize( info.matchCount );
+            Span<TYOut>    yOut    = _yTmp      .As<TYOut>()   .SliceSize( matchCount );
+            Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().SliceSize( matchCount );
 
             GenFx( self, bucket, pairs, y, meta, yOut, metaOut );
 
-            // Copy values to in-memory cross-bucket cache
+            // Distribute new values to in-memory cross-bucket cache
+            {
+                const uint32 bucketBits = bblog2( _numBuckets );
+                static_assert( kExtraBits <= bucketBits );
 
-            // Distribute to the correct bucket
-            // _crossBucketEntries;
+                const uint32 yBits       = ( std::is_same<TYOut, uint32>::value ? _k : _k + kExtraBits );
+                const uint32 bucketShift = yBits - bucketBits;
+                const TYOut  yMask       = std::is_same<TYOut, uint32>::value ? 0xFFFFFFFF : ( 1ull << bucketShift ) - 1; // No masking-out for Table 7
+              
+                const uint32 indxeBase = _tableEntryCount.load( std::memory_order_acquire );
+                _tableEntryCount.store( indxeBase + matchCount, std::memory_order_release );
+
+                auto& crossBucketEntries = _crossBucketEntriesOut;
+
+                for( uint32 i = 0; i < matchCount; i++ )
+                {
+                    const TYOut  y       = yOut[i];
+                    const uint32 yBucket = (uint32)(y >> bucketShift);
+
+                    auto& bucketFile          = crossBucketEntries[yBucket];
+                    const uint32 bucketLength = bucketFile.length;
+
+                    Span<TMetaOut> metaDst( (TMetaOut*)bucketFile.meta, BB_DP_CROSS_BUCKET_MAX_ENTRIES );
+
+                    bucketFile.y    [bucketLength] = (uint32)(y & yMask);
+                    bucketFile.index[bucketLength] = indxeBase + i;
+                    metaDst         [bucketLength] = metaOut[i];
+
+                    bucketFile.length = bucketLength + 1;
+
+                    _context.bucketCounts[(int)rTable][yBucket]++;
+                }
+            }
         }
         self->EndLockBlock();
     }
@@ -1125,7 +1160,19 @@ private:
     void WaitForFence( Job* self, Fence& fence, const uint32 bucket )
     {
         if( self->BeginLockBlock() )
+        {
             fence.Wait( bucket+1, _tableIOWait );
+
+            #if BB_DP_FP_MATCH_X_BUCKET
+                // Add cross-bucket entries saved in the memory cache
+                if( &fence == &_yReadFence )
+                    _y[bucket] = _crossBucketEntriesIn[bucket].CopyYAndExtend( _y[bucket] );
+                else if( &fence == &_indexReadFence )
+                    _index[bucket] = _crossBucketEntriesIn[bucket].CopyIndexAndExtend( _index[bucket] );
+                else if( &fence == &_metaReadFence )
+                    _meta[bucket] = _crossBucketEntriesIn[bucket].CopyMetaAndExtend( _meta[bucket] );
+            #endif
+        }
 
         self->EndLockBlock();
     }
@@ -1255,7 +1302,8 @@ private:
     Fence& _mapWriteFence;
 
     #if BB_DP_FP_MATCH_X_BUCKET
-        Span<K32CrossBucketEntries> _crossBucketEntries;
+        Span<K32CrossBucketEntries> _crossBucketEntriesIn;
+        Span<K32CrossBucketEntries> _crossBucketEntriesOut;
     #endif
 
 public:
