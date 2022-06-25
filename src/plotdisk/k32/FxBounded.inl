@@ -12,15 +12,20 @@
 #if _DEBUG
     #include "algorithm/RadixSort.h"
     #include "plotting/PlotValidation.h"
+    #include "plotdisk/DiskPlotDebug.h"
 
     // #define _VALIDATE_Y 1
     #if _VALIDATE_Y
-        uint32       _refBucketCounts[BB_DP_MAX_BUCKET_COUNT];
-        Span<uint64> _yRef;
-        Span<uint64> _yRefWriter;
+        // uint32       _refBucketCounts[BB_DP_MAX_BUCKET_COUNT];
+        // Span<uint64> _yRef;
+        // Span<uint64> _yRefWriter;
         
         template<uint32 _numBuckets>
-        void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context );
+        void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context
+            #if BB_DP_FP_MATCH_X_BUCKET
+            ,const Span<K32CrossBucketEntries> crossBucketEntriesIn
+            #endif
+         );
     #endif
 
     // #define DBG_VALIDATE_INDICES 1
@@ -35,7 +40,7 @@
 typedef uint32 K32Meta1;
 typedef uint64 K32Meta2;
 // struct K32Meta3 { uint32 m0, m1, m2; };
-struct K32Meta3 { uint32 m0, m1; };
+struct K32Meta3 { uint64 m0, m1; };
 struct K32Meta4 { uint64 m0, m1; };
 struct K32NoMeta {};
 
@@ -315,7 +320,11 @@ public:
             // ValidateIndices();
         #endif
         #if _VALIDATE_Y
-            DbgValidateY<_numBuckets>( rTable, _yId[1], _context );
+            DbgValidateY<_numBuckets>( rTable, _yId[1], _context
+                #if BB_DP_FP_MATCH_X_BUCKET
+                , _crossBucketEntriesOut
+                #endif
+            );
         #endif
     }
 
@@ -464,7 +473,8 @@ private:
 
                 // Generate fx for cross-bucket matches, and save the matches to an in-memory buffer
                 #if BB_DP_FP_MATCH_X_BUCKET
-                    GenCrossBucketFx( self, bucket );
+                    if( bucket > 0 )
+                        GenCrossBucketFx( self, bucket-1 );
                 #endif
 
                 GenFx( self, bucket, matches, yInput, metaIn, yOut, metaOut );
@@ -474,17 +484,17 @@ private:
                     _fxTime += TimerEndTicks( timer );
 
                 #if _VALIDATE_Y
-                if( self->IsControlThread() )
-                {
-                    if( _yRef.Ptr() == nullptr )
-                    {
-                        _yRef = Span<uint64>( bbcvirtallocboundednuma<uint64>( 1ull << 32 ), 1ull << 32 );
-                        _yRefWriter = _yRef;
-                    }
+                // if( self->IsControlThread() )
+                // {
+                //     if( _yRef.Ptr() == nullptr )
+                //     {
+                //         _yRef = Span<uint64>( bbcvirtallocboundednuma<uint64>( 1ull << 32 ), 1ull << 32 );
+                //         _yRefWriter = _yRef;
+                //     }
 
-                    _yTmp.SliceSize( totalMatches ).CopyTo( _yRefWriter );
-                    _yRefWriter = _yRefWriter.Slice( totalMatches );
-                }
+                //     _yTmp.SliceSize( totalMatches ).CopyTo( _yRefWriter );
+                //     _yRefWriter = _yRefWriter.Slice( totalMatches );
+                // }
                 #endif
 
                 WriteEntries( self, bucket, (uint32)_tableEntryCount + matchOffset, yOut, metaOut, _yWriteBuffer, _metaWriteBuffer, _indexWriteBuffer );
@@ -672,7 +682,9 @@ private:
     //-----------------------------------------------------------
     void GenCrossBucketFx( Job* self, const uint32 bucket )
     {
-        auto& info = _matcher.GetCrossBucketInfo( bucket-1 );
+        ASSERT( bucket < _numBuckets );
+
+        auto& info = _matcher.GetCrossBucketInfo( bucket );
 
         if( info.matchCount < 1 )
             return;
@@ -1061,15 +1073,11 @@ private:
             }
             else if constexpr( MetaInMulti == 3 )
             {
-                // const uint64 l0 = (uint64)metaIn[left ].m0 | ( (uint64)metaIn[left ].m1 << 32 );
-                // const uint64 l1 = metaIn[left ].m2;
-                // const uint64 r0 = (uint64)metaIn[right].m0 | ( (uint64)metaIn[right].m1 << 32 );
-                // const uint64 r1 = metaIn[right].m2;
                 const uint64 l0 = metaIn[left ].m0;
                 const uint64 l1 = metaIn[left ].m1 & 0xFFFFFFFF;
                 const uint64 r0 = metaIn[right].m0;
                 const uint64 r1 = metaIn[right].m1 & 0xFFFFFFFF;
-
+            
                 input[0] = Swap64( y  << 26 | l0 >> 38 );
                 input[1] = Swap64( l0 << 26 | l1 >> 6  );
                 input[2] = Swap64( l1 << 58 | r0 >> 6  );
@@ -1077,10 +1085,6 @@ private:
             }
             else if constexpr( MetaInMulti == 4 )
             {
-                // const uint64 l0 = metaInA[left ];
-                // const uint64 l1 = metaInB[left ];
-                // const uint64 r0 = metaInA[right];
-                // const uint64 r1 = metaInB[right];
                 const K32Meta4 l = metaIn[left];
                 const K32Meta4 r = metaIn[right];
 
@@ -1114,11 +1118,6 @@ private:
 
                 mOut.m0 = h0 << ySize | h1 >> 26;
                 mOut.m1 = ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58;
-
-                // uint64 m0 = h0 << ySize | h1 >> 26;
-                // mOut.m0 = (uint32)m0;
-                // mOut.m0 = (uint32)(m0 >> 32);
-                // mOut.m2 = (uint32)( ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58 );
             }
             else if constexpr ( MetaOutMulti == 4 && MetaInMulti != 2 ) // In = 2 is calculated above with L + R
             {
@@ -1325,14 +1324,17 @@ private:
 };
 
 
-
 #if _VALIDATE_Y
 
 //-----------------------------------------------------------
 template<uint32 _numBuckets>
-void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context )
+void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& context
+    #if BB_DP_FP_MATCH_X_BUCKET
+        ,const Span<K32CrossBucketEntries> crossBucketEntriesIn
+    #endif
+ )
 {
-    if( table > TableId::Table2 )
+    if( table > TableId::Table1 && table < TableId::Table7 )
     {
         Log::Line( "[Validating table y %u]", table+1 );
 
@@ -1342,17 +1344,21 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
         ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
         ioQueue.CommitCommands();
 
-        Span<uint64> yRef    = _yRef.SliceSize( context.entryCounts[(int)table] );
-        Span<uint64> yTmp    = bbcvirtallocboundednuma_span<uint64>( yRef.Length() );
+        Span<uint64> yRef = bbcvirtallocboundednuma_span<uint64>( 1ull << 32 );// context.entryCounts[(int)table] ); //_yRef.SliceSize( context.entryCounts[(int)table] );
+        Span<uint64> yTmp = bbcvirtallocboundednuma_span<uint64>( yRef.Length() );
 
-        // Sort ref
+        // Load ref
         {
-            Log::Line( " Sorting ref" );
-            RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, yRef.Ptr(), yTmp.Ptr(), yRef.Length() );
+            Log::Line( " Loading ref" );
+            Debug::LoadYRefTable( table, yRef );
         }
 
-        // Read
+        // Read our entries
         {
+            const uint32 k          = 32;
+            const uint32 bucketBits = bblog2( _numBuckets );
+            const uint32 yBits      = k + kExtraBits - bucketBits;
+
             Span<uint64> reader = yTmp.SliceSize( yRef.Length() / 2 );
             Span<uint64> tmp    = yTmp.Slice( yRef.Length() / 2 );
 
@@ -1367,11 +1373,15 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
                 ioQueue.CommitCommands();
                 fence.Wait();
 
+                #if BB_DP_FP_MATCH_X_BUCKET
+                    bucketReader = crossBucketEntriesIn[bucket].CopyYAndExtend( bucketReader );
+                #endif
+
                 // Sort
                 RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, bucketReader.Ptr(), tmp.As<uint32>().Ptr(), bucketReader.Length() );
 
                 // Expand
-                const uint64 yMask   = ((uint64)bucket) << 32;
+                const uint64 yMask   = ((uint64)bucket) << yBits;
                 Span<uint64> yValues = tmp;
 
                 for( uint32 i = 0; i < bucketReader.Length(); i++ )
@@ -1397,7 +1407,7 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
         ioQueue.CommitCommands();
     }
 
-    _yRefWriter = _yRef;
+    // _yRefWriter = _yRef;
 }
 
 #endif

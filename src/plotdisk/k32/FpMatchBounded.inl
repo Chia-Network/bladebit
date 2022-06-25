@@ -210,7 +210,7 @@ public:
         const uint32 yBits      = k + kExtraBits - bucketBits;
         const uint64 yMask      = ((uint64)bucket) << yBits;
 
-        const uint32 id    = self->JobId();
+        const uint32 id         = self->JobId();
 
         int64 _, offset;
         GetThreadOffsets( self, (int64)yEntries.Length(), _, offset, _ );

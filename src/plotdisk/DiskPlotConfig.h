@@ -20,7 +20,7 @@
 // How many extra entries to load from the next bucket to ensure we have enough to hold the 2 groups's
 // worth of entries. This is so that we can besure that we can complete matches from groups from the previous
 // bucket that continue on to the next bucket. There's around 280-320 entries per group on k32. This should be enough
-#define BB_DP_CROSS_BUCKET_MAX_ENTRIES 768
+#define BB_DP_CROSS_BUCKET_MAX_ENTRIES 1024
 
 // Pretty big right now, but when buckets == 1024 it is needed.
 // Might change it to dynamic.
@@ -74,6 +74,6 @@
     #define BB_DP_DBG_P3_KEEP_FILES 1
 
     // For testing correctness: Allow cross-bucket matches.
-    #define BB_DP_FP_MATCH_X_BUCKET 1
+    // #define BB_DP_FP_MATCH_X_BUCKET 1
 #endif
 

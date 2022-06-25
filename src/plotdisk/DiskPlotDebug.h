@@ -41,6 +41,8 @@ namespace Debug
     template<typename T>
     bool LoadRefTableByName( const char* fileName, Span<T>& buffer );
 
+    void LoadYRefTable( const TableId table, Span<uint64>& buffer );
+
     void LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount );
 
     void LoadRefLPIndexTable( const TableId table, uint32*& buffer, uint64& outEntryCount );
@@ -273,6 +275,18 @@ inline bool Debug::LoadRefTable( const char* path, T*& buffer, uint64& outEntryC
 
     bbvirtfree( block );
     return success;
+}
+
+//-----------------------------------------------------------
+inline void Debug::LoadYRefTable( const TableId table, Span<uint64>& buffer )
+{
+    ASSERT( table < TableId::Table7 && table > TableId::Table1 );
+
+    char path[1024];
+    sprintf( path, "%st%d.y.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
+    Log::Line( " Loading reference Y table '%s'.", path );
+
+    FatalIf( !Debug::LoadRefTable( path, buffer.values, buffer.length ), "Failed to load reference Y table." );
 }
 
 //-----------------------------------------------------------

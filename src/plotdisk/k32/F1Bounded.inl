@@ -135,8 +135,8 @@ private:
         const uint32 fsBlockSize      = (uint32)_ioQueue.BlockSize( FileId::FX0 );
 
         // Distribute to buckets
-        uint32  counts[_numBuckets] = {};
-        uint32  pfxSum[_numBuckets];
+        uint32 counts[_numBuckets] = {};
+        uint32 pfxSum[_numBuckets];
         
         // Count bucket entries
         for( uint32 i = 0; i < entryCount; i++ )
@@ -163,9 +163,7 @@ private:
             const uint32 x   = xStart + i;
             ASSERT( dst < _maxEntriesPerIOBucket );
 
-            y = ( ( y << kExtraBits ) | ( x >> kMinusKExtraBits ) ) & yMask;
-
-            yEntries[dst] = y;
+            yEntries[dst] = ( ( (uint64)y << kExtraBits ) | ( x >> kMinusKExtraBits ) ) & yMask;
             xEntries[dst] = x;
         }
 
