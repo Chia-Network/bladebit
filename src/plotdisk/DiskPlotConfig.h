@@ -74,6 +74,24 @@
     #define BB_DP_DBG_P3_KEEP_FILES 1
 
     // For testing correctness: Allow cross-bucket matches.
-    // #define BB_DP_FP_MATCH_X_BUCKET 1
+    #define BB_DP_FP_MATCH_X_BUCKET 1
+
+    // Dump pairs written raw and in global form to a file
+    #define BB_DP_DBG_DUMP_PAIRS 1
+    #if BB_DP_DBG_DUMP_PAIRS
+        #define BB_DBG_DumpPairs( numBuckets, table, context ) Debug::DumpPairs<numBuckets>( table, context )
+    #else
+        #define BB_DBG_DumpPairs( numBuckets, table, context )
+    #endif
+
+    // Validate table pairs against dumped pairs
+    #define BB_DP_DBG_VALIDATE_BOUNDED_PAIRS 1
+    #if BB_DP_DBG_VALIDATE_BOUNDED_PAIRS
+        #define BB_DBG_ValidateBoundedPairs( numBuckets, table, context ) Debug::ValidateK32Pairs<numBuckets>( table, context )
+    #else
+        #define BB_DBG_ValidateBoundedPairs( numBuckets, table, context )
+    #endif
+
+
 #endif
 

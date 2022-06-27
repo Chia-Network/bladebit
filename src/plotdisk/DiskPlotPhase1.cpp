@@ -402,6 +402,8 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
         Debug::ValidateYForTable<table, _numBuckets, TYOut>( _fxOut, *_cx.ioQueue, *_cx.threadPool, _cx.bucketCounts[(int)table] );
         Debug::ValidatePairs<256>( _cx, table );
     #endif
+
+    BB_DBG_DumpPairs( _numBuckets, table, _cx );
 }
 
 //-----------------------------------------------------------

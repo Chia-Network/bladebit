@@ -318,14 +318,17 @@ public:
 
         #if _DEBUG
             // ValidateIndices();
-        #endif
-        #if _VALIDATE_Y
-            DbgValidateY<_numBuckets>( rTable, _yId[1], _context
-                #if BB_DP_FP_MATCH_X_BUCKET
-                , _crossBucketEntriesOut
-                #endif
-            );
-        #endif
+        
+            #if _VALIDATE_Y
+                DbgValidateY<_numBuckets>( rTable, _yId[1], _context
+                    #if BB_DP_FP_MATCH_X_BUCKET
+                    , _crossBucketEntriesOut
+                    #endif
+                );
+            #endif
+
+            BB_DBG_ValidateBoundedPairs( _numBuckets, rTable, _context );
+        #endif // _DEBUG
     }
 
 private:
@@ -1312,15 +1315,6 @@ public:
     Duration _distributeTime = Duration::zero();
     Duration _matchTime      = Duration::zero();
     Duration _fxTime         = Duration::zero();
-
-private:
-
-#if _DEBUG
-    
-    #if DBG_VALIDATE_TABLES
-        uint64 _dbgPairOffset = 0;
-    #endif
-#endif
 };
 
 
@@ -1336,7 +1330,7 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
 {
     if( table > TableId::Table1 && table < TableId::Table7 )
     {
-        Log::Line( "[Validating table y %u]", table+1 );
+        Log::Line( "[DEBUG: Validating table y %u]", table+1 );
 
         DiskBufferQueue& ioQueue = *context.ioQueue;
         Fence fence;
@@ -1408,95 +1402,6 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
     }
 
     // _yRefWriter = _yRef;
-}
-
-#endif
-
-//-----------------------------------------------------------
-template<typename TMeta>
-void DbgValidatePairs( const TableId table, const uint32 bucket, 
-                       const Span<Pair> pairs, const Span<uint32> yIn, const Span<TMeta> metas, 
-                       const Span<uint64> yOut )
-{
-    for( size_t i = 0; i < pairs.Length(); i++ )
-    {
-        // const Pair   pair  = pairs[i];
-        // const uint64 y     = ys   [pair.left];
-        // const TMeta  metaL = metas[pair.left];
-        // const TMeta  metaR = metas[pair.right];
-
-
-
-        // 
-        // ASSERT( )
-    }
-}
-
-#if DBG_VALIDATE_TABLES
-
-//-----------------------------------------------------------
-template<typename TMetaIn, typename TMetaOut>
-inline void DbgValidatePlotTable( const Span<Pair> pairs, const Span<uint64> yIn )
-{
-
-}
-
-//-----------------------------------------------------------
-template<TableId rTable>
-inline void DbgValidatePlotTable( const Span<Pair> pairs, const Span<uint64> yIn )
-{
-    using TMetaIn  = typename K32MetaType<rTable>::In;
-    using TMetaOut = typename K32MetaType<rTable>::Out;
-}
-
-//-----------------------------------------------------------
-inline void DbgValidatePlot( DiskPlotContext& context, const DebugPlot& dbgPlot )
-{
-    // Span<uint32> _f7s = dbgPlot.f7;
-
-    // AnonMTJob::Run( *context.threadPool, [=]( AnonMTJob* self ){
-        
-    //     uint64 count, offset, end;
-    //     GetThreadOffsets( self, (uint64)_f7s.Length(), count, offset, end );
-
-    //     // Span<uint32> f7s = _f7s.Slice( offset, count );
-
-    //     uint64 fullProof[PROOF_X_COUNT];
-    //     Pair   backPtrs [PROOF_X_COUNT/2];
-
-    //     for( uint64 i = offset; i < end; i++ )
-    //     {
-    //         const uint32 f7 = _f7s[i];
-
-    //         // Pull full proof from back points
-    //         uint32 ptrCount = 1;
-    //         backPtrs[0] = ;
-    //         for( TableId table = TableId::Table7; table > TableId::Table1; table-- )
-    //         {
-    //             uint32 dst = 0;
-    //             for( uint32 p = 0; p < ptrCount; p++ )
-    //             {
-    //                 dbgPlot.backPointers[6][p]
-
-    //                 dst += 2;
-    //             }
-    //             ptrCount <<= 1;
-    //         }
-
-    //     }
-    // });
-
-    // Span<uint64> yIn;
-    // Span<uint64> yOut;
-    // Span<uint32> metaIn;
-    // Span<uint32> metaOut;
-
-    // DbgValidatePlotTable<TableId::Table2>( dbgPlot );
-    
-    // for( TableId rTable = TableId::Table2; rTable <= TableId::Table7; rTable++ )
-    // {
-
-    // }
 }
 
 #endif
