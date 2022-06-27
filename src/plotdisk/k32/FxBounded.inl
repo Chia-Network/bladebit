@@ -208,6 +208,13 @@ public:
         
         // _pairsL = allocator.CAllocSpan<uint32>( entriesPerBucket );
         // _pairsR = allocator.CAllocSpan<uint16>( entriesPerBucket );
+
+        #if BB_DP_FP_MATCH_X_BUCKET
+        {
+            const size_t crossBucketPairAllocSize = (size_t)_pairBitSize * BB_DP_CROSS_BUCKET_MAX_ENTRIES;
+            _crossBucketWriteBuffer = allocator.AllocT<byte>( crossBucketPairAllocSize, t1BlockSize );
+        }
+        #endif
     }
 
     // Generate fx for a whole table
@@ -417,10 +424,6 @@ private:
             }
 
             WritePairs( self, bucket, totalMatches, matches, matchOffset );
-
-            #if DBG_VALIDATE_TABLES
-                _dbgPlot.WritePairs( self, rTable, matchOffset, matches, _mapOffset, totalMatches );
-            #endif
 
             ///
             /// Sort meta on Y
@@ -637,13 +640,6 @@ private:
             _matchTime += TimerEndTicks( timer );
         }
         self->EndLockBlock();
-        
-
-        // Write cross-bucket pairs to disk
-        #if BB_DP_FP_MATCH_X_BUCKET
-            if( bucket > 0 )
-                WriteCrossBucketPairs( self, bucket-1 );
-        #endif
 
         return matches;
     }
@@ -659,27 +655,34 @@ private:
     //-----------------------------------------------------------
     void WriteCrossBucketPairs( Job* self, const uint32 bucket )
     {
-        auto& info = _matcher.GetCrossBucketInfo( bucket-1 );
+        ASSERT( bucket < _numBuckets );
+        ASSERT( self->JobId() == 0 );       // Only to be called by the control thread
 
+        auto& info = _matcher.GetCrossBucketInfo( bucket );
         if( info.matchCount < 1 )
             return;
+        
+        const Span<Pair> pairs( info.pair, info.matchCount );
+        const uint32     offset = _context.bucketCounts[(int)rTable-1][bucket];
+        
+        // Apply pair offset
+        for( uint32 i = 0; i < info.matchCount; i++ )
+            pairs[i].AddOffset( offset );
 
-        if( self->BeginLockBlock() )
-        {
-            const uint32     offset = _tableEntryCount;
-            const Span<Pair> pairs( info.pair, info.matchCount );
+        // Bit-serialize
+        uint64 bitBucketSizes = pairs.Length() * _pairBitSize;
+        _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _crossBucketWriteBuffer );
 
-            // _tableEntryCount += info.matchCount;
-            // #TODO: How do we handle this? We need to wait on a fence, but how?
-            // _pairWriteFence.Wait( bucket );
-            // _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer );
-            // BitWriter writer = _pairBitWriter.GetWriter( 0, dstOffset * _pairBitSize );
-            // PackPairs( self, pairs, writer );
-            // _pairBitWriter.Submit();
-            // _ioQueue.SignalFence( _pairWriteFence, bucket + 1 );
-            // _ioQueue.CommitCommands();
-        }
-        self->EndLockBlock();
+        BitWriter writer = _pairBitWriter.GetWriter( 0, 0 );
+        PackPairs( self, pairs, writer );
+
+        // #TODO: Keep a different buffer? But for now, we have to remove the offsets, as we
+        //        still have to perform cross-bucket fx with them
+        for( uint32 i = 0; i < info.matchCount; i++ )
+            pairs[i].SubstractOffset( offset );
+
+        // Submit to disk
+        _pairBitWriter.Submit();
     }
 
     //-----------------------------------------------------------
@@ -749,23 +752,24 @@ private:
                      const Span<Pair> matches, const uint64 dstOffset )
     {
         ASSERT( dstOffset + matches.length <= totalMatchCount );
-
-        // Need to wait for our write buffer to be ready to use again
+        
         if( self->BeginLockBlock() )
         {
+            // Wait for our write buffer to be ready to use again
             if( bucket > 0 )
             {
-                // Write crosss-bucket values pairs first, which belong to the previous bucket
-
                 _pairWriteFence.Wait( bucket );
+
+                #if BB_DP_FP_MATCH_X_BUCKET
+                    WriteCrossBucketPairs( self, bucket - 1 );
+                #endif
             }
 
+            // Ready the bit-writer for serialization
             uint64 bitBucketSizes = totalMatchCount * _pairBitSize;
             _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer );
         }
         self->EndLockBlock();
-
-        // #TOOD: Write pairs raw? Or bucket-relative? Maybe raw for now
 
         // #NOTE: For now we write compressed as in standard FP.        
         BitWriter writer = _pairBitWriter.GetWriter( 0, dstOffset * _pairBitSize );
@@ -1306,6 +1310,8 @@ private:
     #if BB_DP_FP_MATCH_X_BUCKET
         Span<K32CrossBucketEntries> _crossBucketEntriesIn;
         Span<K32CrossBucketEntries> _crossBucketEntriesOut;
+
+        byte* _crossBucketWriteBuffer = nullptr;
     #endif
 
 public:

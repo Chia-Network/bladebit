@@ -473,10 +473,14 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
 template<uint32 _numBuckets>
 void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
 {
-    Log::Line( "[DEBUG: Validating pairs for table %u]", table+1 );
+    Log::Line( "[DEBUG] Validating pairs for table %u", table+1 );
 
     const uint32 _k                   = 32;
     const uint32 _maxEntriesPerBucket = ( ( 1ull << _k ) / _numBuckets ) * 2;
+
+    const FileId fileId = FileId::T1 + (FileId)table;
+    context.ioQueue->SeekFile( fileId, 0, 0, SeekOrigin::Begin );
+    context.ioQueue->CommitCommands();
 
     const uint64 entryCount  = context.entryCounts[(int)table];
     Span<Pair>   reference   = bbcvirtallocboundednuma_span<Pair>( entryCount );
@@ -485,10 +489,10 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
     Log::Line( " Reading reference table." );
     {
         char path[1024];
-        sprintf( path, "%st%d.pairs.tmp", BB_DP_DBG_REF_DIR, (int32)table );
+        sprintf( path, "%st%d.pairs.tmp", BB_DP_DBG_REF_DIR, (int32)table+1 );
 
         FileStream dbgDir;
-        FatalIf( !dbgDir.Open( path, FileMode::Open, FileAccess::Read ), 
+        FatalIf( !dbgDir.Open( BB_DP_DBG_REF_DIR, FileMode::Open, FileAccess::Read ), 
             "Failed to open debug directory at '%s'.", BB_DP_DBG_REF_DIR );
 
         void*        block    = bbvirtallocbounded( dbgDir.BlockSize() );
@@ -496,20 +500,20 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
 
         int err;
         FatalIf( !IOJob::ReadFromFile( path, reference.Ptr(), readSize, block, dbgDir.BlockSize(), err ),
-            "Failed to read from refeerence pairs file at '%' with error: %d", path, err );
+            "Failed to read from refeerence pairs file at '%s' with error: %d", path, err );
 
         bbvirtfreebounded( block );
     }
 
     Log::Line( " Validating..." );
     const size_t heapSize = 41ull GB;
-    const byte*  heap     = bbvirtallocboundednuma( heapSize );
+    void*        heap     = bbvirtallocboundednuma( heapSize );
 
     Fence fence;
     StackAllocator allocator( heap, heapSize );
     DiskPairAndMapReader<_numBuckets, true> reader( context, context.fpThreadCount, fence, table, allocator, true );
 
-    Span<Pair> const refPairs = reference;
+    Span<Pair> refPairs = reference;
 
     const int32 lTable = (int32)table-1;
 
@@ -524,7 +528,7 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
 
         Duration _;
         reader.LoadNextBucket();
-        pairs.length = reader.UnpackBucket( bucket, pairs.Length(), nullptr, _ );
+        pairs.length = reader.UnpackBucket( bucket, pairs.Ptr(), nullptr, _ );
 
         // Validate
         for( uint64 i = 0; i < pairs.Length(); i++ )
@@ -532,7 +536,7 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
             const Pair ref   = reference[i];
             const Pair entry = pairs[i];
 
-            ASSERT( ref.left == ref.left && ref.right == entry.right );
+            ASSERT( ref.left == entry.left && ref.right == entry.right );
         }
 
         // Apply offset & go to next bucket
@@ -547,14 +551,14 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
     bbvirtfreebounded( reference.Ptr() );
     bbvirtfreebounded( bucketPairs.Ptr() );
 
-    Log::Line( "[DEBUG: Completed]" );
+    Log::Line( "[DEBUG] Completed" );
 }
 
 //-----------------------------------------------------------
 template<uint32 _numBuckets, bool _bounded>
 void Debug::DumpPairs( const TableId table, DiskPlotContext& context )
 {
-    Log::Line( "[DEBUG: Dumping pairs for table %u]", table+1 );
+    Log::Line( "[DEBUG] Dumping pairs for table %u", table+1 );
 
     char pairsPath[1024];
     sprintf( pairsPath, "%st%d.pairs.tmp", BB_DP_DBG_REF_DIR, (int32)table+1 );
