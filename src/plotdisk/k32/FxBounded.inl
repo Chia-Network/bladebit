@@ -70,7 +70,7 @@ class DiskPlotFxBounded
     static constexpr uint64 _maxTableEntries = (1ull << _k) - 1;
     static constexpr uint32 _bucketBits      = bblog2( _numBuckets );
     static constexpr uint32 _pairsMaxDelta   = 512;
-    static constexpr uint32 _pairsLeftBits   = _k - _bucketBits;
+    static constexpr uint32 _pairsLeftBits   = _k - _bucketBits + 1;    // Buckets may overflow, so need an extra bit
     static constexpr uint32 _pairsRightBits  = bblog2( _pairsMaxDelta );
     static constexpr uint32 _pairBitSize     = _pairsLeftBits + _pairsRightBits;
 
@@ -629,7 +629,7 @@ private:
         // // Match this bucket's matches
         // _matcher.Match( self, bucket, yEntries, _pairs[id] );
 
-        const uint32 maxMatchesPerThread =_entriesPerBucket / threadCount;
+        const uint32 maxMatchesPerThread = _entriesPerBucket / threadCount;
         _pairs[id] = _pairBuffer.Slice( maxMatchesPerThread * id, maxMatchesPerThread );
    
         auto matches = _matcher.Match( self, bucket, yEntries, groupIndices, _pairs[id] );
@@ -663,7 +663,7 @@ private:
             return;
         
         const Span<Pair> pairs( info.pair, info.matchCount );
-        const uint32     offset = _context.bucketCounts[(int)rTable-1][bucket];
+        const uint32     offset = info.matchOffset;
         
         // Apply pair offset
         for( uint32 i = 0; i < info.matchCount; i++ )
@@ -745,6 +745,7 @@ private:
         }
         self->EndLockBlock();
     }
+
 #endif // BB_DP_FP_MATCH_X_BUCKET
 
     //-----------------------------------------------------------
@@ -766,7 +767,7 @@ private:
             }
 
             // Ready the bit-writer for serialization
-            uint64 bitBucketSizes = totalMatchCount * _pairBitSize;
+            uint64 bitBucketSizes = (uint64)totalMatchCount * _pairBitSize;
             _pairBitWriter.BeginWriteBuckets( &bitBucketSizes, _pairsWriteBuffer );
         }
         self->EndLockBlock();
@@ -775,7 +776,7 @@ private:
         BitWriter writer = _pairBitWriter.GetWriter( 0, dstOffset * _pairBitSize );
 
         ASSERT( matches.Length() > 2 );
-        PackPairs( self, matches.Slice( 0, 2 ), writer );
+        PackPairs( self, matches.SliceSize( 2 ), writer );
         self->SyncThreads();
         PackPairs( self, matches.Slice( 2 ), writer );
 

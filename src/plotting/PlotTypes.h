@@ -12,16 +12,20 @@ struct Pair
     uint32 left;
     uint32 right;
 
-    inline void AddOffset( const uint32 offset )
+    inline Pair& AddOffset( const uint32 offset )
     {
         left  += offset;
         right += offset;
+
+        return *this;
     }
 
-    inline void SubstractOffset( const uint32 offset )
+    inline Pair& SubstractOffset( const uint32 offset )
     {
         left  -= offset;
         right -= offset;
+
+        return *this;
     }
 };
 static_assert( sizeof( Pair ) == 8, "Invalid Pair struct." );

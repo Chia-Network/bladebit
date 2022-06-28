@@ -232,7 +232,6 @@ inline void Debug::ValidateYForTable( const FileId fileId, DiskBufferQueue& queu
     bbvirtfree( tmp     );
 }
 
-
 //-----------------------------------------------------------
 template<typename T>
 inline bool Debug::LoadRefTableByName( const char* fileName, T*& buffer, uint64& outEntryCount )
@@ -505,7 +504,6 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
         bbvirtfreebounded( block );
     }
 
-    Log::Line( " Validating..." );
     const size_t heapSize = 41ull GB;
     void*        heap     = bbvirtallocboundednuma( heapSize );
 
@@ -522,7 +520,7 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
 
     for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
     {
-        Log::Line( "  Bucket %u", bucket );
+        Log::Line( " Validating Bucket %u", bucket );
 
         Span<Pair> pairs = bucketPairs;
 
@@ -533,8 +531,8 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
         // Validate
         for( uint64 i = 0; i < pairs.Length(); i++ )
         {
-            const Pair ref   = reference[i];
-            const Pair entry = pairs[i];
+            const Pair ref   = refPairs[i];
+            const Pair entry = pairs[i].AddOffset( offset );
 
             ASSERT( ref.left == entry.left && ref.right == entry.right );
         }

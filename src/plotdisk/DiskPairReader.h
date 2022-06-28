@@ -243,7 +243,7 @@ struct DiskPairAndMapReader
     static constexpr uint32 _extraBuckets = _bounded ? 0 : 1;
     static constexpr uint32 _k            = _K;
     static constexpr uint32 _savedBits    = bblog2( _numBuckets );
-    static constexpr uint32 _lBits        = ( _bounded ? _k : _k + 1 ) - _savedBits;
+    static constexpr uint32 _lBits        = _k + 1 - _savedBits;
     static constexpr uint32 _rBits        = 9;
     static constexpr uint32 _pairBits     = _lBits + _rBits;
     
