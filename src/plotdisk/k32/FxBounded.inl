@@ -1335,7 +1335,7 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
     #endif
  )
 {
-    if( table > TableId::Table1 && table < TableId::Table7 )
+    if( table > TableId::Table2 && table < TableId::Table7 )
     {
         Log::Line( "[DEBUG: Validating table y %u]", table+1 );
 

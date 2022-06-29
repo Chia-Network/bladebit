@@ -73,6 +73,9 @@ class DiskBufferQueue
             SignalFence,
             WaitForFence,
             TruncateBucket,
+
+            DBG_WriteSliceSizes,    // Read/Write slice sizes to disk. Used for skipping tables
+            DBG_ReadSliceSizes
         };
 
         CommandType type;
@@ -133,6 +136,14 @@ class DiskBufferQueue
                 FileId  fileId;
                 ssize_t position;
             } truncateBucket;
+
+            #if _DEBUG
+                struct
+                {
+                    TableId table;
+                    FileId  fileId;
+                } dbgSliceSizes;
+            #endif
         };
     };
 
@@ -230,6 +241,11 @@ public:
         const Span<Span<size_t>> SliceSizes( const FileId fileId ) const { return _files[(int)fileId].sliceSizes; }
     #endif
 
+    #if _DEBUG
+        void DebugWriteSliceSizes( const TableId table, const FileId fileId );
+        void DebugReadSliceSizes( const TableId table, const FileId fileId );
+    #endif
+
     // byte* GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer = true );
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
@@ -318,6 +334,11 @@ private:
     void DeleteBucketNow( const FileId fileId );
 
     static const char* DbgGetCommandName( Command::CommandType type );
+
+    #if _DEBUG
+        void CmdDbgWriteSliceSizes( const Command& cmd );
+        void CmdDbgReadSliceSizes( const Command& cmd );
+    #endif
 
 
 private:

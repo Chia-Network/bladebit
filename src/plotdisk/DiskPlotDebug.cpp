@@ -8,6 +8,7 @@
 #include "jobs/IOJob.h"
 #include "DiskPlotContext.h"
 #include "DiskBufferQueue.h"
+#include "plotdisk/k32/FpMatchBounded.inl"
 
 #define BB_DBG_WRITE_LP_BUCKET_COUNTS 1
 
@@ -697,8 +698,6 @@ bool Debug::ReadTableCounts( DiskPlotContext& cx )
         return false;
     #endif
 }
-
-
 
 
 

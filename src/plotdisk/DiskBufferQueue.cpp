@@ -469,6 +469,24 @@ void DiskBufferQueue::CompletePendingReleases()
     _workHeap.CompletePendingReleases();
 }
 
+#if _DEBUG
+//-----------------------------------------------------------
+void DiskBufferQueue::DebugWriteSliceSizes( const TableId table, const FileId fileId )
+{
+    Command* cmd = GetCommandObject( Command::DBG_WriteSliceSizes );
+    cmd->dbgSliceSizes.table  = table;
+    cmd->dbgSliceSizes.fileId = fileId;
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::DebugReadSliceSizes( const TableId table, const FileId fileId )
+{
+    Command* cmd = GetCommandObject( Command::DBG_ReadSliceSizes );
+    cmd->dbgSliceSizes.table  = table;
+    cmd->dbgSliceSizes.fileId = fileId;
+}
+#endif
+
 //-----------------------------------------------------------
 inline DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject( Command::CommandType type )
 {
@@ -671,6 +689,15 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             CmdTruncateBucket( cmd );
         break;
 
+    #if _DEBUG
+        case Command::DBG_WriteSliceSizes:
+            CmdDbgWriteSliceSizes( cmd );
+        break;
+
+        case Command::DBG_ReadSliceSizes:
+        CmdDbgReadSliceSizes( cmd );
+        break;
+    #endif
 
         default:
             ASSERT( 0 );
@@ -1071,6 +1098,61 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
     }
 }
 
+#if _DEBUG
+//-----------------------------------------------------------
+void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
+{
+    const FileId fileId = cmd.dbgSliceSizes.fileId;;
+    const char*  fName  = ( fileId == FileId::FX0   || fileId == FileId::FX1   ) ? "y"     :
+                          ( fileId == FileId::META0 || fileId == FileId::META1 ) ?  "meta" : "index";
+
+    char path[1024];
+    sprintf( path, "%st%d.%s.slices.tmp", BB_DP_DBG_TEST_DIR, (int)cmd.dbgSliceSizes.table+1, fName );
+
+    FileStream file;
+    FatalIf( !file.Open( path, FileMode::Create, FileAccess::Write ), "Failed to open '%s' for writing.", path );
+
+    FileSet& fileSet        = _files[(int)cmd.dbgSliceSizes.fileId];
+    const uint32 numBuckets = (uint32)fileSet.files.Length();
+
+    for( uint32 i = 0; i < numBuckets; i++ )
+    {
+              auto   slices    = fileSet.sliceSizes[i];
+        const size_t sizeWrite = sizeof( size_t ) * numBuckets;
+
+        FatalIf( file.Write( slices.Ptr(), sizeWrite ) != sizeWrite,
+            "Failed to write slice size for table %d", (int)cmd.dbgSliceSizes.table+1  );
+    }
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::CmdDbgReadSliceSizes( const Command& cmd )
+{
+    const FileId fileId = cmd.dbgSliceSizes.fileId;;
+    const char*  fName  = ( fileId == FileId::FX0   || fileId == FileId::FX1   ) ? "y"     :
+                          ( fileId == FileId::META0 || fileId == FileId::META1 ) ?  "meta" : "index";
+
+    char path[1024];
+    sprintf( path, "%st%d.%s.slices.tmp", BB_DP_DBG_TEST_DIR, (int)cmd.dbgSliceSizes.table+1, fName );
+
+    FileStream file;
+    FatalIf( !file.Open( path, FileMode::Open, FileAccess::Read ), "Failed to open '%s' for reading.", path );
+
+    FileSet& fileSet        = _files[(int)cmd.dbgSliceSizes.fileId];
+    const uint32 numBuckets = (uint32)fileSet.files.Length();
+
+    for( uint32 i = 0; i < numBuckets; i++ )
+    {
+              auto   slices   = fileSet.sliceSizes[i];
+        const size_t sizeRead = sizeof( size_t ) * numBuckets;
+
+        FatalIf( file.Read( slices.Ptr(), sizeRead ) != sizeRead,
+            "Failed to read slice size for table %d", (int)cmd.dbgSliceSizes.table+1  );
+    }
+}
+
+
+#endif
 
 ///
 /// File-Deleter Thread

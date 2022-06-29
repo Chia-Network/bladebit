@@ -42,9 +42,9 @@
 
 // #define BB_DP_DBG_DONT_DELETE_TMP_FILES_PHASE 3
 
-#define BB_DP_DBG_READ_BUCKET_COUNT_FNAME "bucket_count.tmp"
-#define BB_DP_TABLE_COUNTS_FNAME          "table_counts.tmp"
-#define BB_DP_DBG_PTR_BUCKET_COUNT_FNAME  "ptr_bucket_count.tmp"
+#define BB_DP_DBG_READ_BUCKET_COUNT_FNAME    "bucket_count.tmp"
+#define BB_DP_TABLE_COUNTS_FNAME             "table_counts.tmp"
+#define BB_DP_DBG_PTR_BUCKET_COUNT_FNAME     "ptr_bucket_count.tmp"
 
 #define BB_DP_DBG_TEST_DIR      "/home/harold/plot/dbg/"
 #define BB_DP_DBG_REF_DIR       "/home/harold/plot/ref/"
@@ -56,8 +56,8 @@
 // #NOTE: BB_DP_DBG_SKIP_PHASE_1 Must be defined
 // #define BB_DP_DBG_SKIP_TO_C_TABLES 1
 
-// #define BB_DP_P1_SKIP_TO_TABLE 1
-// #define BB_DP_P1_START_TABLE TableId::Table3
+#define BB_DP_P1_SKIP_TO_TABLE 1
+#define BB_DP_P1_START_TABLE TableId::Table3
 
 // Tmp file deletion (useful to keep around when developing)
 #if _DEBUG
@@ -77,7 +77,7 @@
     #define BB_DP_FP_MATCH_X_BUCKET 1
 
     // Dump pairs written raw and in global form to a file
-    #define BB_DP_DBG_DUMP_PAIRS 1
+    // #define BB_DP_DBG_DUMP_PAIRS 1
     #if BB_DP_DBG_DUMP_PAIRS
         #define BB_DBG_DumpPairs( numBuckets, table, context ) Debug::DumpPairs<numBuckets>( table, context )
     #else
@@ -85,7 +85,7 @@
     #endif
 
     // Validate table pairs against dumped pairs
-    #define BB_DP_DBG_VALIDATE_BOUNDED_PAIRS 1
+    // #define BB_DP_DBG_VALIDATE_BOUNDED_PAIRS 1
     #if BB_DP_DBG_VALIDATE_BOUNDED_PAIRS
         #define BB_DBG_ValidateBoundedPairs( numBuckets, table, context ) Debug::ValidateK32Pairs<numBuckets>( table, context )
     #else

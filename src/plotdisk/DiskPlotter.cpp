@@ -155,7 +155,7 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
     _cx.ioQueue->OpenPlotFile( req.plotFileName, req.plotId, req.plotMemo, req.plotMemoSize );
 
-    #if ( _DEBUG && BB_DP_DBG_SKIP_PHASE_1 )
+    #if ( _DEBUG && ( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE ) )
         BB_DP_DBG_ReadTableCounts( _cx );
     #endif
 

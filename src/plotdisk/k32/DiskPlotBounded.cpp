@@ -126,22 +126,22 @@ void K32BoundedPhase1::RunWithBuckets()
 
     #if defined( _DEBUG ) && defined( BB_DP_P1_SKIP_TO_TABLE ) 
     {
-        _context.entryCounts[0] = 1ull << 32;
+        ASSERT( _context.entryCounts[0] == 1ull << 32 );
         ASSERT( BB_DP_P1_START_TABLE > TableId::Table2 );
         startTable = BB_DP_P1_START_TABLE;
+
+        {
+            Fence fence;
+            _ioQueue.DebugReadSliceSizes( startTable-1, (uint)(startTable-1) %2 == 0 ? FileId::FX0    : FileId::FX1    );
+            _ioQueue.DebugReadSliceSizes( startTable-1, (uint)(startTable-1) %2 == 0 ? FileId::INDEX0 : FileId::INDEX1 );
+            _ioQueue.DebugReadSliceSizes( startTable-1, (uint)(startTable-1) %2 == 0 ? FileId::META0  : FileId::META1  );
+            _ioQueue.SignalFence( fence );
+            _ioQueue.CommitCommands();
+            fence.Wait();
+        }
     }
     #else
-    // #TODO: TEST, removes
-    // for( uint32 i = 0; i < 0x7FFFFFFF; i++ )
-    // {
-    //     Log::Line( "Running F1 %u...", i );
         RunF1<_numBuckets>();
-    //     _ioQueue.SeekBucket( FileId::FX0  , 0, SeekOrigin::Begin );
-    //     _ioQueue.SeekBucket( FileId::META0, 0, SeekOrigin::Begin );
-    //     _ioQueue.CommitCommands();
-    //     memset( _context.bucketCounts[0], 0, sizeof( _context.bucketCounts[0] ) );
-    //     _context.entryCounts[0] = 0;
-    // }
     #endif
 
     #if BB_DP_FP_MATCH_X_BUCKET
@@ -241,7 +241,13 @@ void K32BoundedPhase1::RunFx()
     Log::Line( "Completed table %u in %.2lf seconds with %.llu entries.", table+1, TimerEnd( timer ), _context.entryCounts[(int)table] );
     Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( fx._tableIOWait ) );
 
+    #if _DEBUG
+        BB_DP_DBG_WriteTableCounts( _context );
 
-    BB_DP_DBG_WriteTableCounts( _context );
+        _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::FX0    : FileId::FX1    );
+        _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::INDEX0 : FileId::INDEX1 );
+        _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::META0  : FileId::META1  );
+        _ioQueue.CommitCommands();
+    #endif
 }
 
