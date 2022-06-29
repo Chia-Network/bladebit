@@ -14,7 +14,7 @@
     #include "plotting/PlotValidation.h"
     #include "plotdisk/DiskPlotDebug.h"
 
-    // #define _VALIDATE_Y 1
+    #define _VALIDATE_Y 1
     #if _VALIDATE_Y
         // uint32       _refBucketCounts[BB_DP_MAX_BUCKET_COUNT];
         // Span<uint64> _yRef;

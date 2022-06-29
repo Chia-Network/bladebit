@@ -614,7 +614,89 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
 // void ValidatePark7( DiskBufferQueue& ioQueue, uint64 park7Size )
 
 
+//-----------------------------------------------------------
+void Debug::WriteTableCounts( const DiskPlotContext& cx )
+{
+    // Write bucket counts
+    FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 
+    if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
+    {
+        if( bucketCounts.Write( cx.bucketCounts, sizeof( cx.bucketCounts ) ) != sizeof( cx.bucketCounts ) )
+            Log::Error( "Failed to write to bucket counts file." );
+    }
+    else
+        Log::Error( "Failed to open bucket counts file." );
+
+    if( tableCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_TABLE_COUNTS_FNAME, FileMode::Create, FileAccess::Write ) )
+    {
+        if( tableCounts.Write( cx.entryCounts, sizeof( cx.entryCounts ) ) != sizeof( cx.entryCounts ) )
+            Log::Error( "Failed to write to table counts file." );
+    }
+    else
+        Log::Error( "Failed to open table counts file." );
+
+    if( backPtrBucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_PTR_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
+    {
+        if( backPtrBucketCounts.Write( cx.ptrTableBucketCounts, sizeof( cx.ptrTableBucketCounts ) ) != sizeof( cx.ptrTableBucketCounts ) )
+            Log::Error( "Failed to write to back pointer bucket counts file." );
+    }
+    else
+        Log::Error( "Failed to open back pointer bucket counts file." );
+}
+
+//-----------------------------------------------------------
+bool Debug::ReadTableCounts( DiskPlotContext& cx )
+{
+    #if( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE )
+
+        FileStream bucketCounts, tableCounts, backPtrBucketCounts;
+
+        if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( bucketCounts.Read( cx.bucketCounts, sizeof( cx.bucketCounts ) ) != sizeof( cx.bucketCounts ) )
+            {
+                Log::Error( "Failed to read from bucket counts file." );
+                return false;
+            }
+        }
+        else
+        {
+            Log::Error( "Failed to open bucket counts file." );
+            return false;
+        }
+
+        if( tableCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_TABLE_COUNTS_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( tableCounts.Read( cx.entryCounts, sizeof( cx.entryCounts ) ) != sizeof( cx.entryCounts ) )
+            {
+                Log::Error( "Failed to read from table counts file." );
+                return false;
+            }
+        }
+        else
+        {
+            Log::Error( "Failed to open table counts file." );
+            return false;
+        }
+
+        if( backPtrBucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_PTR_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( backPtrBucketCounts.Read( cx.ptrTableBucketCounts, sizeof( cx.ptrTableBucketCounts ) ) != sizeof( cx.ptrTableBucketCounts ) )
+            {
+                Fatal( "Failed to read from pointer bucket counts file." );
+            }
+        }
+        else
+        {
+            Fatal( "Failed to open pointer bucket counts file." );
+        }
+
+        return true;
+    #else
+        return false;
+    #endif
+}
 
 
 

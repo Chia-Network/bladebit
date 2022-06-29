@@ -240,5 +240,8 @@ void K32BoundedPhase1::RunFx()
 
     Log::Line( "Completed table %u in %.2lf seconds with %.llu entries.", table+1, TimerEnd( timer ), _context.entryCounts[(int)table] );
     Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( fx._tableIOWait ) );
+
+
+    BB_DP_DBG_WriteTableCounts( _context );
 }
 

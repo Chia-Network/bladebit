@@ -57,7 +57,7 @@
 // #define BB_DP_DBG_SKIP_TO_C_TABLES 1
 
 // #define BB_DP_P1_SKIP_TO_TABLE 1
-// #define BB_DP_P1_START_TABLE TableId::Table4
+// #define BB_DP_P1_START_TABLE TableId::Table3
 
 // Tmp file deletion (useful to keep around when developing)
 #if _DEBUG
@@ -92,6 +92,16 @@
         #define BB_DBG_ValidateBoundedPairs( numBuckets, table, context )
     #endif
 
+    #define BB_DP_DBG_WriteTableCounts( context ) Debug::WriteTableCounts( context )
+    #define BB_DP_DBG_ReadTableCounts( context )  Debug::ReadTableCounts( context )
 
+#else
+    #define BB_DP_DBG_WriteTableCounts( context )
+    #define BB_DP_DBG_ReadTableCounts( context )
 #endif
+
+
+
+
+
 

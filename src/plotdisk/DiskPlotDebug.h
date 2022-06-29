@@ -57,6 +57,9 @@ namespace Debug
 
     template<uint32 _numBuckets, bool _bounded = false>
     void DumpPairs( const TableId table, DiskPlotContext& context );
+
+    void WriteTableCounts( const DiskPlotContext& context );
+    bool ReadTableCounts( DiskPlotContext& context );
 }
 
 template<TableId table, uint32 numBuckets, typename TYOut>
