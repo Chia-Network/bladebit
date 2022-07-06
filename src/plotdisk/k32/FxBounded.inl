@@ -930,6 +930,7 @@ private:
         Span<uint32> yAlignedSliceCount    = _alignedSliceCountY[sliceIdx];
         Span<uint32> metaAlignedSliceCount = _alignedsliceCountMeta[sliceIdx];
 
+
         // Count
         for( int64 i = 0; i < entryCount; i++ )
             counts[yIn[i] >> bucketShift]++;
@@ -937,12 +938,12 @@ private:
         self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, ySliceCounts.Ptr(), _offsetsY[id], yAlignedSliceCount.Ptr() );
         self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedSliceCount.Ptr() );
 
-// #if _DEBUG
-//         if( self->IsLastThread() )
-//         {
-//             ASSERT( (uint64)pfxSum[_numBuckets-1] < 17200000 );
-//         }
-// #endif
+        if( bucket > 0 )
+        {
+            if( self->BeginLockBlock() )
+                _fxWriteFence.Wait( bucket, _tableIOWait );     // #TODO: Double-buffer to avoid waiting here // #TODO: Either use a spin wait or have all threads suspend here
+            self->EndLockBlock();
+        }
 
         // Distribute to buckets
         for( int64 i = 0; i < entryCount; i++ )
@@ -960,10 +961,6 @@ private:
         // Write to disk
         if( self->BeginLockBlock() )
         {
-            // #TODO: Either use a spin wait or have all threads suspend here
-            if( bucket > 0 )
-                _fxWriteFence.Wait( bucket, _tableIOWait ); 
-
             const FileId yId    = _yId   [1];
             const FileId metaId = _metaId[1];
             const FileId idxId  = _idxId [1];
@@ -972,7 +969,7 @@ private:
 
             _ioQueue.WriteBucketElementsT<uint32>  ( yId   , yOut   .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
             _ioQueue.WriteBucketElementsT<uint32>  ( idxId , idxOut .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
-            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedSliceCount.Ptr(), metaSliceCounts.Ptr() );  // #TODO: Can use ySliceCounts here...
+            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );  // #TODO: Can use ySliceCounts here...
             _ioQueue.SignalFence( _fxWriteFence, bucket+1 );
             _ioQueue.CommitCommands();
 
@@ -1345,14 +1342,17 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
         ioQueue.SeekBucket( fileId, 0, SeekOrigin::Begin );
         ioQueue.CommitCommands();
 
-        Span<uint64> yRef = bbcvirtallocboundednuma_span<uint64>( 1ull << 32 );// context.entryCounts[(int)table] ); //_yRef.SliceSize( context.entryCounts[(int)table] );
-        Span<uint64> yTmp = bbcvirtallocboundednuma_span<uint64>( yRef.Length() );
-
+        Span<uint64> yRef;
         // Load ref
         {
             Log::Line( " Loading ref" );
-            Debug::LoadYRefTable( table, yRef );
+            // Debug::LoadRefTableByName( table, "t%d.y-dp-unbounded.tmp", yRef );
+            Debug::LoadDPUnboundedY( table, yRef );
         }
+
+        Span<uint64> yTmp = bbcvirtallocboundednuma_span<uint64>( yRef.Length() );
+
+        // Read our entries
 
         // Read our entries
         {

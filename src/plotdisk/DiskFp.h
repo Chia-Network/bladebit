@@ -297,6 +297,8 @@ public:
 
         WriteMap( bucket, inEntryCount, map, (uint64*)_meta[1] );
 
+        BB_DBG_DP_DumpUnboundedY( table-1, bucket, _context, Span<uint64>( y, inEntryCount ) );
+
         const TMetaIn* inMeta = ( table == TableId::Table2 ) ? (TMetaIn*)map : meta;
 
         TYOut*    outY    = (TYOut*)_y[1];
@@ -305,16 +307,22 @@ public:
         // Match
         const int64 outEntryCount = MatchEntries( bucket, inEntryCount, y, inMeta, pairs );
 
-        const int64 crossMatchCount  = _crossBucketInfo.matchCount;
+        #if !BB_DP_DBG_UNBOUNDED_DISABLE_CROSS_BUCKET
+            const int64 crossMatchCount  = _crossBucketInfo.matchCount;
+        #else
+            const int64 crossMatchCount  = 0;
+        #endif
         const int64 writeEntrtyCount = outEntryCount + crossMatchCount;
 
-        if( bucket > 0 )
-        {
-            ProcessCrossBucketEntries( bucket - 1, pairs - crossMatchCount, outY, outMeta );
-            ASSERT( crossMatchCount <= std::numeric_limits<uint32>::max() );
+        #if !BB_DP_DBG_UNBOUNDED_DISABLE_CROSS_BUCKET
+            if( bucket > 0 )
+            {
+                ProcessCrossBucketEntries( bucket - 1, pairs - crossMatchCount, outY, outMeta );
+                ASSERT( crossMatchCount <= std::numeric_limits<uint32>::max() );
 
-            _context.ptrTableBucketCounts[(int)table][bucket-1] += (uint32)crossMatchCount;
-        }
+                _context.ptrTableBucketCounts[(int)table][bucket-1] += (uint32)crossMatchCount;
+            }
+        #endif
         
         WritePairsToDisk( bucket, writeEntrtyCount, pairs - crossMatchCount );
 

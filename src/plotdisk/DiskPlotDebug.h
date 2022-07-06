@@ -43,6 +43,9 @@ namespace Debug
     template<typename T>
     bool LoadRefTableByName( const char* fileName, Span<T>& buffer );
 
+    template<typename T>
+    bool LoadRefTableByName( const TableId table, const char* fileName, Span<T>& buffer );
+
     void LoadYRefTable( const TableId table, Span<uint64>& buffer );
 
     void LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount );
@@ -60,6 +63,9 @@ namespace Debug
 
     void WriteTableCounts( const DiskPlotContext& context );
     bool ReadTableCounts( DiskPlotContext& context );
+
+    void DumpDPUnboundedY( const TableId table, const uint32 bucket, const DiskPlotContext& context, const Span<uint64> y );
+    void LoadDPUnboundedY( const TableId table, Span<uint64>& y );
 }
 
 template<TableId table, uint32 numBuckets, typename TYOut>
@@ -252,6 +258,18 @@ template<typename T>
 inline bool Debug::LoadRefTableByName( const char* fileName, Span<T>& buffer )
 {
     return LoadRefTableByName( fileName, buffer.values, buffer.length );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline bool Debug::LoadRefTableByName( const TableId table, const char* fileName, Span<T>& buffer )
+{
+    ASSERT( fileName );
+
+    char fname[1024];
+    sprintf( fname, fileName, (int32)table+1 );
+    
+    return LoadRefTableByName( fname, buffer.values, buffer.length );
 }
 
 //-----------------------------------------------------------

@@ -111,9 +111,11 @@ struct FpGroupMatcher
             }
 
             // Cross-bucket matching
-            // Perform cross-bucket matches with the previous bucket
-            if( self->IsControlThread() && !crossBucketInfo->IsFirstBucket() )
-                this->CrossBucketMatch<TMeta>( *crossBucketInfo, yEntries, meta, groupIndices );
+            #if !BB_DP_DBG_UNBOUNDED_DISABLE_CROSS_BUCKET
+                // Perform cross-bucket matches with the previous bucket
+                if( self->IsControlThread() && !crossBucketInfo->IsFirstBucket() )
+                    this->CrossBucketMatch<TMeta>( *crossBucketInfo, yEntries, meta, groupIndices );
+            #endif
 
             // Now perform matches
             _matchCounts[id] = MatchGroups( startIndex, groupCount, groupIndices, yEntries, _pairs[id], _maxMatches, id );
@@ -129,9 +131,11 @@ struct FpGroupMatcher
 
             memcpy( _outPairs + copyOffset, _pairs[id], sizeof( Pair ) * _matchCounts[id] );
 
-            // Save the last 2 groups for cross-bucket matching
-            if( self->IsLastThread()  )
-                SaveCrossBucketInfo( *crossBucketInfo, groupIndices + groupCount - 2, yEntries, meta );
+            #if !BB_DP_DBG_UNBOUNDED_DISABLE_CROSS_BUCKET
+                // Save the last 2 groups for cross-bucket matching
+                if( self->IsLastThread()  )
+                    SaveCrossBucketInfo( *crossBucketInfo, groupIndices + groupCount - 2, yEntries, meta );
+            #endif
         });
 
         const uint64* allMatches = _matchCounts;
