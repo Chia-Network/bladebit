@@ -14,7 +14,7 @@
     #include "plotting/PlotValidation.h"
     #include "plotdisk/DiskPlotDebug.h"
 
-    #define _VALIDATE_Y 1
+    // #define _VALIDATE_Y 1
     #if _VALIDATE_Y
         // uint32       _refBucketCounts[BB_DP_MAX_BUCKET_COUNT];
         // Span<uint64> _yRef;
@@ -334,7 +334,12 @@ public:
                 );
             #endif
 
+            #if BB_DP_DBG_VALIDATE_BOUNDED_PAIRS
+                if( rTable > TableId::Table2 )
+                    BB_DBG_ValidateBoundedPairs( _numBuckets, rTable-1, _context );
+                if( rTable == TableId::Table7 )
             BB_DBG_ValidateBoundedPairs( _numBuckets, rTable, _context );
+            #endif
         #endif // _DEBUG
     }
 
@@ -400,6 +405,7 @@ private:
                 matchOffset += (uint32)_pairs[i].Length();
 
             ASSERT( totalMatches <= _entriesPerBucket );
+            ASSERT( matchOffset < totalMatches );
 
             // #TEST
             #if _DEBUG
@@ -1332,7 +1338,7 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
     #endif
  )
 {
-    if( table > TableId::Table2 && table < TableId::Table7 )
+    if( table >= TableId::Table2 && table < TableId::Table7 )
     {
         Log::Line( "[DEBUG: Validating table y %u]", table+1 );
 

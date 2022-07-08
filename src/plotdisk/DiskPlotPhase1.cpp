@@ -403,7 +403,13 @@ void DiskPlotPhase1::ForwardPropagateBuckets()
         Debug::ValidatePairs<256>( _cx, table );
     #endif
 
-    BB_DBG_DumpPairs( _numBuckets, table, _cx );
+    #if BB_DP_DBG_DUMP_PAIRS
+        if( table > TableId::Table2 )
+            BB_DBG_DumpPairs( _numBuckets, table-1, _cx );
+
+        if( table == TableId::Table7 )
+            BB_DBG_DumpPairs( _numBuckets, table, _cx );
+    #endif
 }
 
 //-----------------------------------------------------------
