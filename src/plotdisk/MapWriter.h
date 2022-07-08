@@ -188,7 +188,7 @@ public:
 
     //-----------------------------------------------------------
     template<typename TMapIn>
-    void WriteJob( Job* self, const uint32 bucket, const uint64 tableOffset,
+    void WriteJob( Job* self, const uint32 bucket, const uint64 mapOffset,
         const Span<TMapIn> indices,
               Span<uint64> mapOut, 
               uint64       outMapBucketCounts  [_numBuckets+ExtraBucket],
@@ -218,17 +218,19 @@ public:
 
         self->CalculatePrefixSum( numBuckets, counts, pfxSum, totalCounts );
 
+        const uint64 tableOffset = mapOffset + (uint64)offset;
+
         // Convert entries from source index to reverse map
         for( size_t i = 0; i < inIdx.Length(); i++ )
         {
             const uint64 origin = inIdx[i];               ASSERT( origin < 0x100000000 + (1ull<<_k) / _numBuckets );
             const uint64 b      = origin >> bucketShift;  ASSERT( b < numBuckets );
             const uint32 dstIdx = --pfxSum[b];            ASSERT( dstIdx < indices.Length() );
-
             const uint64 finalIdx = tableOffset + (uint64)i;
-            ASSERT( finalIdx < ( 1ull << encodeShift ) );
-
+            
             mapOut[dstIdx] = (origin << encodeShift) | finalIdx;
+
+            ASSERT( finalIdx < ( 1ull << encodeShift ) );
         }
 
         // Write 
