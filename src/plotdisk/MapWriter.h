@@ -1,6 +1,7 @@
 #pragma once
 #include "threading/Fence.h"
 #include "util/StackAllocator.h"
+#include "plotdisk/BitBucketWriter.h"
 
 template<uint32 _numBuckets, bool _overflow>
 class MapWriter

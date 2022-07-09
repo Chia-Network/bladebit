@@ -157,7 +157,7 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
         fileSet.files[i] = file;
 
         const FileMode fileMode =
-        #if _DEBUG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE )
+        #if _DEBUG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE || BB_DP_DBG_SKIP_TO_C_TABLES )
             !isPlotFile ? FileMode::OpenOrCreate : FileMode::Create;
         #else
             FileMode::Create;

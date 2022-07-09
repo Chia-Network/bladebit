@@ -649,7 +649,7 @@ void Debug::WriteTableCounts( const DiskPlotContext& cx )
 //-----------------------------------------------------------
 bool Debug::ReadTableCounts( DiskPlotContext& cx )
 {
-    #if( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE )
+    #if( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE || BB_DP_DBG_SKIP_TO_C_TABLES )
 
         FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 

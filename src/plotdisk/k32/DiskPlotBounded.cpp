@@ -5,6 +5,7 @@
 #include "plotdisk/DiskPlotContext.h"
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotdisk/DiskBufferQueue.h"
+#include "CTableWriterBounded.h"
 #include "plotting/PlotTools.h"
 
 #include "F1Bounded.inl"
@@ -124,17 +125,31 @@ void K32BoundedPhase1::RunWithBuckets()
 {
     TableId startTable = TableId::Table2;
 
-    #if defined( _DEBUG ) && defined( BB_DP_P1_SKIP_TO_TABLE ) 
+    #if defined( _DEBUG ) && ( defined( BB_DP_P1_SKIP_TO_TABLE ) || defined( BB_DP_DBG_SKIP_TO_C_TABLES ) )
     {
         ASSERT( _context.entryCounts[0] == 1ull << 32 );
-        ASSERT( BB_DP_P1_START_TABLE > TableId::Table2 );
-        startTable = BB_DP_P1_START_TABLE;
+
+        #if BB_DP_P1_SKIP_TO_TABLE
+            ASSERT( BB_DP_P1_START_TABLE > TableId::Table2 );
+            startTable = BB_DP_P1_START_TABLE;
+        #endif
 
         {
+            #if BB_DP_DBG_SKIP_TO_C_TABLES
+                const FileId fxId   = FileId::FX0;
+                const FileId idxId  = FileId::INDEX0;
+                const FileId metaId = FileId::META0;
+                startTable = TableId::Table7;
+            #else
+                const FileId fxId   = (uint)(startTable-1) %2 == 0 ? FileId::FX0    : FileId::FX1;
+                const FileId idxId  = (uint)(startTable-1) %2 == 0 ? FileId::INDEX0 : FileId::INDEX1;
+                const FileId metaId = (uint)(startTable-1) %2 == 0 ? FileId::META0  : FileId::META1;
+            #endif
+
             Fence fence;
-            _ioQueue.DebugReadSliceSizes( startTable-1, (uint)(startTable-1) %2 == 0 ? FileId::FX0    : FileId::FX1    );
-            _ioQueue.DebugReadSliceSizes( startTable-1, (uint)(startTable-1) %2 == 0 ? FileId::INDEX0 : FileId::INDEX1 );
-            _ioQueue.DebugReadSliceSizes( startTable-1, (uint)(startTable-1) %2 == 0 ? FileId::META0  : FileId::META1  );
+            _ioQueue.DebugReadSliceSizes( startTable, fxId   );
+            _ioQueue.DebugReadSliceSizes( startTable, idxId  );
+            _ioQueue.DebugReadSliceSizes( startTable, metaId );
             _ioQueue.SignalFence( fence );
             _ioQueue.CommitCommands();
             fence.Wait();
@@ -153,6 +168,7 @@ void K32BoundedPhase1::RunWithBuckets()
         _xBucketStackMarker = _allocator.Size();
     #endif
 
+#if !( defined( _DEBUG ) && defined( BB_DP_DBG_SKIP_TO_C_TABLES ) )
     for( TableId table = startTable; table <= TableId::Table7; table++ )
     {
         switch( table )
@@ -168,6 +184,16 @@ void K32BoundedPhase1::RunWithBuckets()
                 PanicExit();
                 break;
         }
+    }
+#endif
+
+    // Process F7 and write C tables to plot
+    {
+        _allocator.PopToMarker( 0 );
+
+        Log::Line( "Sorting F7 & Writing C Tables" );
+        CTableWriterBounded<_numBuckets> cWriter( _context );
+        cWriter.Run( _allocator );
     }
 }
 
@@ -213,10 +239,10 @@ void K32BoundedPhase1::RunFx()
     #if BB_DP_FP_MATCH_X_BUCKET
         _allocator.PopToMarker( _xBucketStackMarker );
         
-        const uint xBucketIdxIn  = (uint)(table-1) & 1;
-        const uint xBucketIdxOut = (uint)table & 1;
-        auto& crossBucketIn  = _crossBucketEntries[xBucketIdxIn];
-        auto& crossBucketOut = _crossBucketEntries[xBucketIdxOut];
+        const uint  xBucketIdxIn   = (uint)(table-1) & 1;
+        const uint  xBucketIdxOut  = (uint)table & 1;
+              auto& crossBucketIn  = _crossBucketEntries[xBucketIdxIn];
+              auto& crossBucketOut = _crossBucketEntries[xBucketIdxOut];
 
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
             crossBucketOut[bucket].length = 0;
@@ -250,4 +276,3 @@ void K32BoundedPhase1::RunFx()
         _ioQueue.CommitCommands();
     #endif
 }
-
