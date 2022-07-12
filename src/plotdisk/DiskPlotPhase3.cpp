@@ -935,7 +935,7 @@ void DiskPlotPhase3::GetCacheSizes( size_t& outCacheSizeLP, size_t& outCacheSize
 {
     switch( _context.numBuckets )
     {
-        case 64  : GetCacheSizesForBuckets<128 >( outCacheSizeLP, outCacheSizeMap ); break;
+        case 64  : GetCacheSizesForBuckets<64  >( outCacheSizeLP, outCacheSizeMap ); break;
         case 128 : GetCacheSizesForBuckets<128 >( outCacheSizeLP, outCacheSizeMap ); break;
         case 256 : GetCacheSizesForBuckets<256 >( outCacheSizeLP, outCacheSizeMap ); break;
         case 512 : GetCacheSizesForBuckets<512 >( outCacheSizeLP, outCacheSizeMap ); break;

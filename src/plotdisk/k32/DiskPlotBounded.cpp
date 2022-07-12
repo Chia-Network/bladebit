@@ -42,7 +42,7 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
 
     // Temp2
     {
-        FileSetOptions opts = FileSetOptions::None | FileSetOptions::Interleaved;
+        FileSetOptions opts = FileSetOptions::Interleaved;
         
         if( !context.cfg->noTmp2DirectIO )
             opts |= FileSetOptions::DirectIO;
@@ -50,26 +50,47 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
         FileSetInitData data = {};
         opts |= FileSetOptions::UseTemp2;
 
-        // if( context.cache )
-        // {
-        //     // #TODO: Divide cache evenly. For now just set it to fx0
-        //     opts |= FileSetOptions::Cachable;
-        //     data.cacheSize = context.cacheSize / 2;
-        //     data.cache     = context.cache;
-        // }
+        size_t metaCacheSize = 0;
 
-        _ioQueue.InitFileSet( FileId::FX0   , "y0"    , numBuckets, opts, &data );
-        // UnSetFlag( opts, FileSetOptions::Cachable );
-        _ioQueue.InitFileSet( FileId::FX1   , "y1"    , numBuckets, opts, &data );
-        _ioQueue.InitFileSet( FileId::INDEX0, "index0", numBuckets, opts, &data );
-        _ioQueue.InitFileSet( FileId::INDEX1, "index1", numBuckets, opts, &data );
-        
-        // opts |= FileSetOptions::Cachable;
-        // data.cache = ((byte*)data.cache) + data.cacheSize;
-        _ioQueue.InitFileSet( FileId::META0 , "meta0" , numBuckets, opts, &data );
-        // UnSetFlag( opts, FileSetOptions::Cachable );
-        
-        _ioQueue.InitFileSet( FileId::META1 , "meta1" , numBuckets, opts, &data );
+        if( context.cache )
+        {
+            // In fully interleaved mode (bigger writes chunks), we need 192GiB for k=32
+            // In alternating mode, we need 96 GiB.
+            // #TODO: Support alternating mode
+            
+            opts |= FileSetOptions::Cachable;
+            data.cache = context.cache;
+
+            // Proportion out the size required per file:
+            //  A single y or index file requires at maximum 16GiB
+            //  A asingle meta file at its maximum will require 64GiB
+            // Divide the whole cache into 12 equal parts, where each meta file represent 4 parts.
+            // Ex: 192 / 12 = 16.  This gives us 4 files of 16GiB and 2 files of 64GiB
+            size_t singleFileCacheSize = context.cacheSize / 12;
+
+            // Align to block size
+            singleFileCacheSize = numBuckets * RoundUpToNextBoundaryT( singleFileCacheSize / numBuckets - context.tmp2BlockSize, context.tmp2BlockSize );
+
+            data.cacheSize = singleFileCacheSize;
+            metaCacheSize  = data.cacheSize * 4;     // Meta needs 4 times as much as y and index
+
+            ASSERT( data.cacheSize && metaCacheSize );
+        }
+
+        auto InitCachableFileSet = [=]( FileId fileId, const char* fileName, uint32 numBuckets, FileSetOptions opts, FileSetInitData& data ) {
+                
+            _ioQueue.InitFileSet( fileId, fileName, numBuckets, opts, &data );
+            data.cache = (byte*)data.cache + data.cacheSize;
+        };
+
+        InitCachableFileSet( FileId::FX0   , "y0"    , numBuckets, opts, data );
+        InitCachableFileSet( FileId::FX1   , "y1"    , numBuckets, opts, data );
+        InitCachableFileSet( FileId::INDEX0, "index0", numBuckets, opts, data );
+        InitCachableFileSet( FileId::INDEX1, "index1", numBuckets, opts, data );
+
+        data.cacheSize = metaCacheSize;
+        InitCachableFileSet( FileId::META0, "meta0", numBuckets, opts, data );
+        InitCachableFileSet( FileId::META1, "meta1", numBuckets, opts, data );
     }
 }
 
