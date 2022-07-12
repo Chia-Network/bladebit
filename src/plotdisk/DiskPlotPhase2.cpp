@@ -57,7 +57,7 @@ DiskPlotPhase2::~DiskPlotPhase2() {}
 //-----------------------------------------------------------
 void DiskPlotPhase2::Run()
 {
-#if BB_DP_DBG_SKIP_PHASE_2
+#if _DEBUG && BB_DP_DBG_SKIP_PHASE_2
     return;
 #endif
 
