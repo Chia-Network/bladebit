@@ -38,6 +38,17 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
         "Failed to obtain temp paths block size from t1: '%s' or %s t2: '%s'.", cfg.tmpPath, cfg.tmpPath2 );
 
+    // #TODO: Remove when fixed
+    {
+        FatalIf( cfg.numBuckets == 128, "128 Buckets is currently not serializing plots correctly. Please select a differnt bucket count." );
+        
+        if( gCfg.plotCount != 1 )
+        {
+            Log::Line( "[WARNING] Consecutive plots are currently not supported. Forcing plot count to 1." );
+            gCfg.plotCount = 1;
+        }
+    }
+
     FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
 
     const uint  sysLogicalCoreCount = SysHost::GetLogicalCPUCount();

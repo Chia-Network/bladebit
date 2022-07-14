@@ -24,9 +24,9 @@ struct PlotHeader
 {
     byte   id  [BB_PLOT_ID_LEN]        = { 0 };
     byte   memo[BB_PLOT_MEMO_MAX_SIZE] = { 0 };
-    uint   memoLength     = 0;
-    uint32 k              = 0;
-    uint64 tablePtrs[10]  = { 0 };
+    uint   memoLength                  = 0;
+    uint32 k                           = 0;
+    uint64 tablePtrs[10]               = { 0 };
 };
 
 // Base Abstract class for read-only plot files
