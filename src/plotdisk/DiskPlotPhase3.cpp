@@ -129,7 +129,22 @@ public:
     static constexpr uint32 _idxBits       = _k + 1;
     static constexpr uint32 _entrySizeBits = _lpBits + _idxBits; // LP, origin index
 
+    using PMReader = DiskPairAndMapReader<_numBuckets, _bounded>;
+    using L1Reader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
+    using LNReader = DiskMapReader<uint32, _numBuckets, _k>;
+
 public:
+
+    // Dummy for size calculation
+    //-----------------------------------------------------------
+    P3StepOne()
+        : _context   ( *(DiskPlotContext*)nullptr )
+        , _ioQueue   ( *(DiskBufferQueue*)nullptr )
+        , _mapReadId ( (FileId)0  )
+        , _readFence ( *(Fence*)nullptr )
+        , _writeFence( *(Fence*)nullptr )
+    {}
+
     //-----------------------------------------------------------
     P3StepOne( DiskPlotContext& context, const FileId mapReadId, Fence& readFence, Fence& writeFence )
         : _context    ( context )
@@ -147,6 +162,64 @@ public:
     inline Duration GetIOWaitTime() const { return _ioWaitTime; }
 
     //-----------------------------------------------------------
+    void Allocate( const bool dryRun, IAllocator& allocator, const size_t tmp1BlockSize, const size_t tmp2BlockSize, const uint64* inLMapBucketCounts,
+        void*&                  rMarks,
+        PMReader&               rTableReader,
+        IP3LMapReader<uint32>*& lReader,
+        L1Reader&               lTable1Reader,
+        LNReader&               lTableNReader,
+        uint32*&                lTableNEntries,
+        Pair*&                  pairs,
+        uint64*&                map
+        )
+    {
+        const TableId lTable           = rTable - 1;
+        const uint64  maxBucketEntries = (uint64)( ( (1ull << _k) / _numBuckets ) * P3_BUCKET_MULTIPLER );
+        const size_t  rMarksSize       =  RoundUpToNextBoundary( maxBucketEntries * _numBuckets  / 8, (int)tmp1BlockSize );
+        //RoundUpToNextBoundary( _context.entryCounts[(int)rTable] / 8, (int)context.tmp1BlockSize );
+
+
+        rMarks       = allocator.Alloc( rMarksSize, tmp1BlockSize );
+        rTableReader = dryRun ? PMReader( allocator, tmp1BlockSize )
+                              : PMReader( _context, _threadCount, _readFence, rTable, allocator, false );
+
+        lReader        = nullptr;
+        lTableNEntries = nullptr;
+        
+        if constexpr ( lTable == TableId::Table1 )
+        {
+            lTable1Reader = dryRun ? L1Reader( allocator, tmp1BlockSize, maxBucketEntries )
+                                   : L1Reader( FileId::T1, _context.ioQueue, allocator, maxBucketEntries, tmp2BlockSize, _context.bucketCounts[(int)TableId::Table1] ); 
+            lReader       = &lTable1Reader;
+        }
+        else
+        {
+            lTableNReader  = dryRun ? LNReader( allocator, tmp2BlockSize )
+                                    : LNReader( _context, _context.p3ThreadCount, lTable, _mapReadId, allocator, inLMapBucketCounts );
+            lTableNEntries = allocator.CAlloc<uint32>( maxBucketEntries + P3_EXTRA_L_ENTRIES_TO_LOAD );
+        }
+
+        {
+            const size_t perBucketWriteSize   = CDiv( maxBucketEntries * _entrySizeBits / _numBuckets, (int)tmp2BlockSize * 8 ) * tmp2BlockSize;
+            const size_t writeBufferAllocSize = RoundUpToNextBoundary( perBucketWriteSize * _numBuckets, (int)tmp2BlockSize );
+
+            _lpWriteBuffer[0] = allocator.AllocT<byte>( writeBufferAllocSize, tmp2BlockSize );
+            _lpWriteBuffer[1] = allocator.AllocT<byte>( writeBufferAllocSize, tmp2BlockSize );
+
+            byte* blockBuffers = (byte*)allocator.CAlloc( _numBuckets, tmp2BlockSize, tmp2BlockSize );
+
+            if( !dryRun )
+                _lpWriter = BitBucketWriter<_numBuckets>( *_context.ioQueue, FileId::LP, blockBuffers );
+        }
+
+        pairs              = allocator.CAlloc<Pair>  ( maxBucketEntries );
+        map                = allocator.CAlloc<uint64>( maxBucketEntries );
+        _rPrunedLinePoints = allocator.CAlloc<uint64>( maxBucketEntries );
+        _rPrunedMap        = allocator.CAlloc<uint64>( maxBucketEntries );
+    }
+
+
+    //-----------------------------------------------------------
     uint64 Run( const uint64 inLMapBucketCounts[_numBuckets+1], uint64 outLPBucketCounts[_numBuckets+1] )
     {
         DiskPlotContext& context = _context;
@@ -155,54 +228,37 @@ public:
         ioQueue.SeekBucket( FileId::LP, 0, SeekOrigin::Begin );
         ioQueue.CommitCommands();
 
-        const TableId lTable           = rTable - 1;
-        const uint64  maxBucketEntries = (uint64)( ( (1ull << _k) / _numBuckets ) * P3_BUCKET_MULTIPLER );
-        const size_t  rMarksSize       = RoundUpToNextBoundary( context.entryCounts[(int)rTable] / 8, (int)context.tmp1BlockSize );
+        #if _DEBUG
+            const uint64  maxBucketEntries = (uint64)( ( (1ull << _k) / _numBuckets ) * P3_BUCKET_MULTIPLER );
+        #endif
+
+        const TableId lTable     = rTable - 1;
+        const size_t  rMarksSize = RoundUpToNextBoundary( context.entryCounts[(int)rTable] / 8, (int)context.tmp1BlockSize );
 
         // Allocate buffers
         StackAllocator allocator( context.heapBuffer, context.heapSize );
-        
-        void* rMarks = allocator.Alloc( rMarksSize, context.tmp1BlockSize );
 
-        DiskPairAndMapReader<_numBuckets, _bounded> rTableReader( context, _threadCount, _readFence, rTable, allocator, false );
+        void*                  rMarks;
+        PMReader               rTableReader;
+        IP3LMapReader<uint32>* lReader;
+        L1Reader               lTable1Reader;
+        LNReader               lTableNReader;
+        uint32*                lTableNEntries;
+        Pair*                  pairs;
+        uint64*                map;
 
-        using L1Reader = SingleFileMapReader<_numBuckets, P3_EXTRA_L_ENTRIES_TO_LOAD, uint32>;
-        using LNReader = DiskMapReader<uint32, _numBuckets, _k>;
+        Allocate( false, allocator, context.tmp1BlockSize, context.tmp2BlockSize, inLMapBucketCounts,
+            rMarks,
+            rTableReader,
+            lReader,
+            lTable1Reader,
+            lTableNReader,
+            lTableNEntries,
+            pairs,
+            map );
 
+        Log::Line( "Step 1 Allocated %.2lf / %.2lf MiB", (double)allocator.Size() BtoMB, (double)allocator.Capacity() BtoMB );
 
-        IP3LMapReader<uint32>* lReader = nullptr;
-        
-        L1Reader lTable1Reader;
-        LNReader lTableNReader;
-        uint32*  lTableNEntries = nullptr;
-        
-        if constexpr ( lTable == TableId::Table1 )
-        {
-            lTable1Reader = L1Reader( FileId::T1, &ioQueue, allocator, maxBucketEntries, context.tmp1BlockSize, context.bucketCounts[(int)TableId::Table1] ); 
-            lReader       = &lTable1Reader;
-        }
-        else
-        {
-            lTableNReader  = LNReader( _context, _context.p3ThreadCount, lTable, _mapReadId, allocator, inLMapBucketCounts );
-            lTableNEntries = allocator.CAlloc<uint32>( maxBucketEntries + P3_EXTRA_L_ENTRIES_TO_LOAD );
-        }
-
-        {
-            const size_t perBucketWriteSize   = CDiv( maxBucketEntries * _entrySizeBits / _numBuckets, (int)context.tmp2BlockSize * 8 ) * context.tmp2BlockSize;
-            const size_t writeBufferAllocSize = RoundUpToNextBoundary( perBucketWriteSize * _numBuckets, (int)context.tmp2BlockSize );
-
-            _lpWriteBuffer[0] = allocator.AllocT<byte>( writeBufferAllocSize, context.tmp2BlockSize );
-            _lpWriteBuffer[1] = allocator.AllocT<byte>( writeBufferAllocSize, context.tmp2BlockSize );
-
-            byte* blockBuffers = (byte*)allocator.CAlloc( _numBuckets, context.tmp2BlockSize, context.tmp2BlockSize );
-            _lpWriter = BitBucketWriter<_numBuckets>( ioQueue, FileId::LP, blockBuffers );
-        }
-
-        Pair*   pairs = allocator.CAlloc<Pair>  ( maxBucketEntries );
-        uint64* map   = allocator.CAlloc<uint64>( maxBucketEntries );
-
-        _rPrunedLinePoints = allocator.CAlloc<uint64>( maxBucketEntries );
-        _rPrunedMap        = allocator.CAlloc<uint64>( maxBucketEntries );
 
         auto GetLLoadCount = [=]( const uint32 bucket ) { 
             
@@ -232,8 +288,6 @@ public:
             ioQueue.ReadFile( FileId::MARKED_ENTRIES_2 + (FileId)rTable - 1, 0, rMarks, rMarksSize );
 
         LoadBucket( 0 );
-
-        Log::Line( "Allocated %.2lf / %.2lf MiB", (double)allocator.Size() BtoMB, (double)allocator.Capacity() BtoMB );
 
         for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
         {
@@ -284,6 +338,34 @@ public:
         _lpWriter.SubmitLeftOvers();
 
         return _prunedEntryCount;
+    }
+
+    //-----------------------------------------------------------
+    inline static size_t GetRequiredHeapSize( const size_t tmp1BlockSize, const size_t tmp2BlockSize )
+    {
+        void*                  rMarks;
+        PMReader               rTableReader;
+        IP3LMapReader<uint32>* lReader;
+        L1Reader               lTable1Reader;
+        LNReader               lTableNReader;
+        uint32*                lTableNEntries;
+        Pair*                  pairs;
+        uint64*                map;
+
+        DummyAllocator allocator;
+        
+        P3StepOne<rTable, _numBuckets, _bounded> instance;
+        instance.Allocate( true, allocator, tmp1BlockSize, tmp2BlockSize, nullptr,
+            rMarks,
+            rTableReader,
+            lReader,
+            lTable1Reader,
+            lTableNReader,
+            lTableNEntries,
+            pairs,
+            map );
+
+        return allocator.Size();
     }
 
 private:
@@ -570,8 +652,23 @@ public:
     static constexpr uint32 _lpBits        = _k * 2 - ( _bucketBits + 1 );  // LPs have at most 2*k-1. Because we ommit the bucket bits, we substract those too.
     static constexpr uint32 _idxBits       = _k + 1;
     static constexpr uint32 _entrySizeBits = _lpBits + _idxBits; // LP, origin index
+    static constexpr bool    _overflow     = rTable == TableId::Table7;
+
+    using S2MapWriter = MapWriter<_numBuckets, _overflow>;
 
 public:
+    // Dummy constructor: Used simply to run allocation (yes, ugly/hacky-looking )
+    //-----------------------------------------------------------
+    P3StepTwo()
+        : _context     ( *(DiskPlotContext*)nullptr )
+        , _ioQueue     ( *(DiskBufferQueue*)nullptr )
+        , _readFence   ( *(Fence*)nullptr )
+        , _writeFence  ( *(Fence*)nullptr )
+        , _lpWriteFence( *(Fence*)nullptr )
+        , _readId      ( (FileId)0 )
+        , _writeId     ( (FileId)0 )
+    {}
+
     //-----------------------------------------------------------
     P3StepTwo( DiskPlotContext& context, Fence& readFence, Fence& writeFence, Fence& lpWriteFence, const FileId readId, const FileId writeId )
         : _context     ( context )
@@ -592,39 +689,77 @@ public:
     inline Duration GetIOWaitTime() const { return _ioWaitTime; }
 
     //-----------------------------------------------------------
-    void Run( const uint64 inLPBucketCounts[_numBuckets+1], uint64 outLMapBucketCounts[_numBuckets+1] )
+    inline static size_t GetRequiredHeapSize( const size_t tmp1BlockSize, const size_t tmp2BlockSize )
     {
-        constexpr bool _overflow = rTable == TableId::Table7;
+        DummyAllocator allocator;
+        S2MapWriter    mapWriter;
+        byte*          readBuffers[2];
+        uint64*        linePoints;
+        uint64*        tmpLinePoints;
+        uint64*        indices;
+        uint64*        tmpIndices;
 
-        _ioQueue.SeekBucket( FileId::LP, 0, SeekOrigin::Begin );
-        _ioQueue.CommitCommands();
+        P3StepTwo<rTable, _numBuckets> instance;
+        instance.Allocate( true, allocator, tmp1BlockSize, tmp2BlockSize,
+                           mapWriter, readBuffers, linePoints, tmpLinePoints, indices, tmpIndices );
 
+        return allocator.Size();
+    }
+
+    //-----------------------------------------------------------
+    inline void Allocate( bool dryRun, IAllocator& allocator, const size_t tmp1BlockSize, const size_t tmp2BlockSize, 
+                          S2MapWriter& outMapWriter, byte* readBuffers[2], uint64*& linePoints, uint64*& tmpLinePoints, uint64*& indices, uint64*& tmpIndices )
+    {
         const TableId lTable           = rTable - 1;
         const uint64  maxBucketEntries = (uint64)( ( (1ull << _k) / _numBuckets ) * P3_BUCKET_MULTIPLER );
 
-        // Allocate buffers and needed structures
-        StackAllocator allocator( _context.heapBuffer, _context.heapSize );
+        const size_t readBufferSize = RoundUpToNextBoundary( CDiv( maxBucketEntries * _entrySizeBits, 8 ), (int)tmp2BlockSize );
 
-        const size_t readBufferSize = RoundUpToNextBoundary( CDiv( maxBucketEntries * _entrySizeBits, 8 ), (int)_context.tmp2BlockSize );
-        byte* readBuffers[2] = {
-            allocator.AllocT<byte>( readBufferSize, _context.tmp2BlockSize ),
-            allocator.AllocT<byte>( readBufferSize, _context.tmp2BlockSize ),
-        };
+        readBuffers[0] = allocator.AllocT<byte>( readBufferSize, tmp2BlockSize );
+        readBuffers[1] = allocator.AllocT<byte>( readBufferSize, tmp2BlockSize ),
 
-        uint64* linePoints    = allocator.CAlloc<uint64>( maxBucketEntries + kEntriesPerPark ); // Need to add kEntriesPerPark so we can copy
-        uint64* tmpLinePoints = allocator.CAlloc<uint64>( maxBucketEntries + kEntriesPerPark ); //  the park overflows from the previous bucket.
-        uint64* indices       = allocator.CAlloc<uint64>( maxBucketEntries );
-        uint64* tmpIndices    = allocator.CAlloc<uint64>( maxBucketEntries );
+        linePoints    = allocator.CAlloc<uint64>( maxBucketEntries + kEntriesPerPark ); // Need to add kEntriesPerPark so we can copy
+        tmpLinePoints = allocator.CAlloc<uint64>( maxBucketEntries + kEntriesPerPark ); //  the park overflows from the previous bucket.
+        indices       = allocator.CAlloc<uint64>( maxBucketEntries );
+        tmpIndices    = allocator.CAlloc<uint64>( maxBucketEntries );
 
-        MapWriter<_numBuckets, _overflow> mapWriter( _ioQueue, _writeId, allocator, maxBucketEntries, _context.tmp2BlockSize, _writeFence, _ioWaitTime );
+        if( dryRun )
+            outMapWriter = S2MapWriter( maxBucketEntries, allocator, tmp2BlockSize );
+        else
+            outMapWriter = S2MapWriter( _ioQueue, _writeId, allocator, maxBucketEntries, tmp2BlockSize, _writeFence, _ioWaitTime );
 
         const size_t parkSize = CalculateParkSize( lTable );
+
         _maxParkCount     = maxBucketEntries / kEntriesPerPark;
         _lpLeftOverBuffer = allocator.CAlloc<uint64>( kEntriesPerPark );
         _parkBuffers[0]   = allocator.AllocT<byte>( parkSize * _maxParkCount );
         _parkBuffers[1]   = allocator.AllocT<byte>( parkSize * _maxParkCount );
+        _finalPark        = allocator.AllocT<byte>( parkSize );
+    }
+
+    //-----------------------------------------------------------
+    void Run( const uint64 inLPBucketCounts[_numBuckets+1], uint64 outLMapBucketCounts[_numBuckets+1] )
+    {
+        _ioQueue.SeekBucket( FileId::LP, 0, SeekOrigin::Begin );
+        _ioQueue.CommitCommands();
+
+        // const TableId lTable           = rTable - 1;
+        const uint64  maxBucketEntries = (uint64)( ( (1ull << _k) / _numBuckets ) * P3_BUCKET_MULTIPLER );
+
+        // Allocate buffers and needed structures
+        S2MapWriter mapWriter;
+        byte*       readBuffers[2];
+        uint64*     linePoints;
+        uint64*     tmpLinePoints;
+        uint64*     indices;
+        uint64*     tmpIndices;
+        
+        StackAllocator allocator( _context.heapBuffer, _context.heapSize );
+        Allocate( false, allocator, _context.tmp1BlockSize, _context.tmp2BlockSize, 
+                  mapWriter, readBuffers, linePoints, tmpLinePoints, indices, tmpIndices );
         
         Log::Line( "Step 2 using %.2lf / %.2lf GiB.", (double)allocator.Size() BtoGB, (double)allocator.Capacity() BtoGB );
+
 
         // Start processing buckets
         auto LoadBucket = [=]( uint32 bucket ) {
@@ -697,7 +832,7 @@ public:
             }
 
             // #NOTE: sortedLinePoints get mutated here
-            WriteLinePointsToPlot( allocator, bucket, (uint64)entryCount, sortedLinePoints, hasNextBucket );
+            WriteLinePointsToPlot( bucket, (uint64)entryCount, sortedLinePoints, hasNextBucket );
 
             mapOffset += (uint64)entryCount;
         }
@@ -742,7 +877,7 @@ private:
     }
 
     //-----------------------------------------------------------
-    void WriteLinePointsToPlot( IAllocator& allocator, const uint32 bucket, const uint64 entryCount, uint64* inLinePoints, const bool hasNextBucket )
+    void WriteLinePointsToPlot( const uint32 bucket, const uint64 entryCount, uint64* inLinePoints, const bool hasNextBucket )
     {
         ASSERT( entryCount );
         ASSERT( inLinePoints );
@@ -802,11 +937,10 @@ private:
             if( overflowEntries )
             {
                 // #NOTE: This functions mutates inLinePoints
-                byte* finalPark = allocator.AllocT<byte>( parkSize );
-                WritePark( parkSize, overflowEntries, lpOverflowStart, finalPark, lTable );
+                WritePark( parkSize, overflowEntries, lpOverflowStart, _finalPark, lTable );
 
                 _context.plotTableSizes[(int)lTable] += parkSize;
-                ioQueue.WriteFile( FileId::PLOT, 0, finalPark, parkSize );
+                ioQueue.WriteFile( FileId::PLOT, 0, _finalPark, parkSize );
                 ioQueue.CommitCommands();
             }
 
@@ -837,6 +971,7 @@ private:
     uint64           _lpParkLeftOvers  = 0;
     uint64           _maxParkCount     = 0;
     byte*            _parkBuffers[2]   = { nullptr };
+    byte*            _finalPark        = nullptr;
 };
 
 
@@ -931,6 +1066,34 @@ void DiskPlotPhase3::Run()
 }
 
 //-----------------------------------------------------------
+size_t DiskPlotPhase3::GetRequiredHeapSize( const uint32 numBuckets, const bool bounded, const size_t t1BlockSize, const size_t t2BlockSize )
+{
+    switch( numBuckets )
+    {
+        case 128 : return bounded ? GetRequiredHeapSizeForBuckets<128 , true>( t1BlockSize, t2BlockSize ) : GetRequiredHeapSizeForBuckets<128 , false>( t1BlockSize, t2BlockSize );
+        case 64  : return bounded ? GetRequiredHeapSizeForBuckets<64  , true>( t1BlockSize, t2BlockSize ) : GetRequiredHeapSizeForBuckets<64  , false>( t1BlockSize, t2BlockSize );
+        case 256 : return bounded ? GetRequiredHeapSizeForBuckets<256 , true>( t1BlockSize, t2BlockSize ) : GetRequiredHeapSizeForBuckets<256 , false>( t1BlockSize, t2BlockSize );
+        case 512 : return bounded ? GetRequiredHeapSizeForBuckets<512 , true>( t1BlockSize, t2BlockSize ) : GetRequiredHeapSizeForBuckets<512 , false>( t1BlockSize, t2BlockSize );
+        case 1024: return bounded ? GetRequiredHeapSizeForBuckets<1024, true>( t1BlockSize, t2BlockSize ) : GetRequiredHeapSizeForBuckets<1024, false>( t1BlockSize, t2BlockSize );
+    
+    default:
+        break;
+    }
+
+    Fatal( "Unexpected bucket size %u.", numBuckets );
+}
+
+//-----------------------------------------------------------
+template<uint32 _numBuckets, const bool _bounded>
+size_t DiskPlotPhase3::GetRequiredHeapSizeForBuckets( const size_t t1BlockSize, const size_t t2BlockSize )
+{
+    const size_t s1Size = P3StepOne<TableId::Table3, _numBuckets, _bounded>::GetRequiredHeapSize( t1BlockSize, t2BlockSize );
+    const size_t s2Size = P3StepTwo<TableId::Table2, _numBuckets>::GetRequiredHeapSize( t1BlockSize, t2BlockSize );
+        
+    return std::max( s1Size, s2Size );
+}
+
+//-----------------------------------------------------------
 void DiskPlotPhase3::GetCacheSizes( size_t& outCacheSizeLP, size_t& outCacheSizeMap )
 {
     switch( _context.numBuckets )
@@ -968,6 +1131,8 @@ void DiskPlotPhase3::GetCacheSizesForBuckets( size_t& outCacheSizeLP, size_t& ou
 
     ASSERT( outCacheSizeMap + outCacheSizeLP <= fullCache );
 }
+
+
 
 //-----------------------------------------------------------
 template<uint32 _numBuckets>

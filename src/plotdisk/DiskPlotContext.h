@@ -20,7 +20,8 @@ struct DiskPlotConfig
     uint32            ioBufferCount            = 0;
     size_t            cacheSize                = 0;
 
-    bool              bounded                  = false; // Do not overflow entries
+    bool              bounded                  = true;  // Do not overflow entries
+    bool              alternateBuckets         = false; // Alternate bucket writing method between interleaved and not
     bool              noTmp1DirectIO           = false; // Disable direct I/O on tmp 1
     bool              noTmp2DirectIO           = false; // Disable direct I/O on tmp 1
 

@@ -32,11 +32,8 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     LoadLTargets();
     
     ZeroMem( &_cx );
-
+    
     GlobalPlotConfig& gCfg = *cfg.globalCfg;
-
-    FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
-        "Failed to obtain temp paths block size from t1: '%s' or %s t2: '%s'.", cfg.tmpPath, cfg.tmpPath2 );
 
     // #TODO: Remove when fixed
     {
@@ -48,6 +45,9 @@ DiskPlotter::DiskPlotter( const Config& cfg )
             gCfg.plotCount = 1;
         }
     }
+
+    FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
+        "Failed to obtain temp paths block size from t1: '%s' or %s t2: '%s'.", cfg.tmpPath, cfg.tmpPath2 );
 
     FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
 
@@ -62,10 +62,7 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     _cx.p2ThreadCount = cfg.p2ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p2ThreadCount, sysLogicalCoreCount );
     _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
 
-    const size_t heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize, _cx.fpThreadCount )
-    // #TODO: Remove, testing for now
-        + 6ull GB
-    ;
+    const size_t heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize, _cx.fpThreadCount );
     ASSERT( heapSize );
 
     _cfg            = cfg;
@@ -292,7 +289,9 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
     {
         if( cli.ReadU32( cfg.numBuckets,  "-b", "--buckets" ) ) 
             continue;
-        if( cli.ReadSwitch( cfg.bounded, "--k32-bounded" ) )
+        if( cli.ReadUnswitch( cfg.bounded, "--unbounded" ) )
+            continue;
+        if( cli.ReadSwitch( cfg.alternateBuckets, "-a", "--alternate" ) )
             continue;
         if( cli.ReadStr( cfg.tmpPath, "-t1", "--temp1" ) )
             continue;
@@ -316,8 +315,6 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
             continue;
         if( cli.ArgConsume( "-s", "--sizes" ) )
         {
-            // #TODO: Get sizes for bounded
-
             FatalIf( cfg.numBuckets < BB_DP_MIN_BUCKET_COUNT || cfg.numBuckets > BB_DP_MAX_BUCKET_COUNT,
                 "Buckets must be between %u and %u, inclusive.", (uint)BB_DP_MIN_BUCKET_COUNT, (uint)BB_DP_MAX_BUCKET_COUNT );
             FatalIf( ( cfg.numBuckets & ( cfg.numBuckets - 1 ) ) != 0, "Buckets must be power of 2." );
@@ -395,83 +392,19 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
 //-----------------------------------------------------------
 bool DiskPlotter::GetTmpPathsBlockSizes( const char* tmpPath1, const char* tmpPath2, size_t& tmpPath1Size, size_t& tmpPath2Size )
 {
-    ASSERT( tmpPath1 );
-    ASSERT( tmpPath2 );
+    ASSERT( tmpPath1 && *tmpPath1 );
+    ASSERT( tmpPath2 && *tmpPath2 );
 
-    bool success = false;
+    FileStream tmp1Dir, tmp2Dir;
 
-    const char*  paths[2]  = { tmpPath1, tmpPath2 };
-    const size_t lengths[2] = { 
-        strlen( tmpPath1 ),
-        strlen( tmpPath2 ),
-    };
+    if( !tmp1Dir.Open( tmpPath1, FileMode::Open, FileAccess::Read ) )
+        return false;
+    if( !tmp2Dir.Open( tmpPath2, FileMode::Open, FileAccess::Read ) )
+        return false;
 
-    const size_t RAND_PART      =  16;
-    const size_t RAND_FILE_SIZE = RAND_PART + 4;    // 5 = '.' + ".tmp"
-    const size_t MAX_LENGTH     = 1024 + RAND_FILE_SIZE + 1;
-    char stackPath[MAX_LENGTH+1];
-
-    const size_t pathLength = std::max( lengths[0], lengths[1] ) + RAND_FILE_SIZE + 1;
-
-    char* path = nullptr;
-    if( pathLength > MAX_LENGTH )
-        path = bbmalloc<char>( pathLength + RAND_FILE_SIZE + 2 ); // +2 = '/' + '\0'
-    else
-        path = stackPath;
-
-    size_t blockSizes[2] = { 0 };
-
-    // #TODO: Don't do this. We can just use the dir to get block size
-    for( int32 i = 0; i < 2; i++ )
-    {
-        size_t len = lengths[i];
-        memcpy( path, paths[i], len );
-
-        if( path[len-1] != '/' && path[len-1] != '\\' )
-            path[len++] = '/';
-    
-        path[len++] = '.';
-
-        byte filename[RAND_PART/2];
-        SysHost::Random( filename, sizeof( filename ) );
-
-        size_t encoded;
-        if( BytesToHexStr( filename, sizeof( filename ), path+len, RAND_PART, encoded ) != 0 )
-        {
-            Log::Error( "GetTmpPathsBlockSizes: Hex conversion failed." );
-            goto EXIT;
-        }
-
-        len += RAND_PART;
-        memcpy( path+len, ".tmp", sizeof( ".tmp" ) );
-
-        #if _DEBUG
-            if( path == stackPath )
-                ASSERT( path+len+ sizeof( ".tmp" ) <= stackPath + sizeof( stackPath ) );
-        #endif
-
-        FileStream file;
-        if( !file.Open( path, FileMode::Create, FileAccess::ReadWrite ) )
-        {
-            Log::Error( "GetTmpPathsBlockSizes: Failed to open temp file '%s'.", path );
-            goto EXIT;
-        }
-
-        blockSizes[i] = file.BlockSize();
-        file.Close();
-
-        remove( path );
-    }
-
-    tmpPath1Size = blockSizes[0];
-    tmpPath2Size = blockSizes[1];
-    success = true;
-
-EXIT:
-    if( path && path != stackPath )
-        free( path );
-
-    return success;
+    tmpPath1Size = tmp1Dir.BlockSize();
+    tmpPath2Size = tmp2Dir.BlockSize();
+    return true;
 }
 
 //-----------------------------------------------------------
@@ -489,11 +422,16 @@ size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 
 size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize, const uint32 threadCount )
 {
     if( bounded )
-        return K32BoundedPhase1::GetRequiredSize( numBuckets, pairsBlockSize, fxBlockSize, threadCount );
+    {
+        const size_t p1HeapSize = K32BoundedPhase1::GetRequiredSize( numBuckets, pairsBlockSize, fxBlockSize, threadCount );
+        const size_t p3HeapSize = DiskPlotPhase3::GetRequiredHeapSize( numBuckets, bounded, pairsBlockSize, fxBlockSize );
+
+        return std::max( p1HeapSize, p3HeapSize );
+    }
 
     switch( numBuckets )
     {
-        case 128 : return DiskFp<TableId::Table4, 128>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
+        case 128 : return DiskFp<TableId::Table4, 128 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 256 : return DiskFp<TableId::Table4, 256 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 512 : return DiskFp<TableId::Table4, 512 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 1024:
@@ -573,8 +511,11 @@ Creates plots by making use of a disk to temporarily store and read values.
                       You may specify one of: 128, 256, 512, 1024 and 64 for if --k32-bounded is enabled.
                       1024 is not available for plots of k < 33.
 
- --k32-bounded      : Create a bounded k32 plot. That is a plot that does not overflow entries
-                      over 2^32;
+ --ubounded         : Create an unbounded k32 plot. That is a plot that does not cut-off entries that 
+                      overflow 2^32;
+ 
+ -a, --alternate    : Halves the temp2 cache size requirements by alternating bucket writing methods
+                      between tables.
 
  -t1, --temp1 <dir> : The temporary directory to use when plotting.
                       *REQUIRED*

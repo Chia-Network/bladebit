@@ -1099,6 +1099,7 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
 }
 
 #if _DEBUG
+
 //-----------------------------------------------------------
 void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
 {
@@ -1150,7 +1151,6 @@ void DiskBufferQueue::CmdDbgReadSliceSizes( const Command& cmd )
             "Failed to read slice size for table %d", (int)cmd.dbgSliceSizes.table+1  );
     }
 }
-
 
 #endif
 

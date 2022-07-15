@@ -76,6 +76,21 @@ public:
         return false;
     }
 
+    // Same as ReadSwitch but set's the value to false if
+    // this parameter is matched.
+    //-----------------------------------------------------------
+    inline bool ReadUnswitch( bool& value, const char* paramA, const char* paramB = nullptr )
+    {
+        if( ArgMatch( paramA, paramB ) )
+        {
+            NextArg();
+            value = false;
+            return true;
+        }
+
+        return false;
+    }
+
     //-----------------------------------------------------------
     inline bool ReadStr( const char*& value, const char* paramA, const char* paramB = nullptr )
     {
