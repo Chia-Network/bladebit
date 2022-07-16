@@ -265,8 +265,9 @@ void K32BoundedPhase1::RunF1()
 
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
-    Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _context.ioWaitTime );
-
+    Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _context.p1TableWaitTime[(int)TableId::Table1] );
+    
+    _context.ioWaitTime += _context.p1TableWaitTime[(int)TableId::Table1];
     _context.ioQueue->DumpWriteMetrics( TableId::Table1 );
 }
 
@@ -309,6 +310,7 @@ void K32BoundedPhase1::RunFx()
     Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( fx._tableIOWait ) );
     
     _context.ioQueue->DumpDiskMetrics( table );
+    _context.p1TableWaitTime[(int)table] = fx._tableIOWait;
     _context.ioWaitTime += fx._tableIOWait;
 
     #if _DEBUG

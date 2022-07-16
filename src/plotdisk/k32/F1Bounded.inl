@@ -196,7 +196,7 @@ private:
             //        the signal is properly visible to all threads
             if( self->BeginLockBlock() )
             {
-                _writeFence.Wait( bucket, _context.p1TableWaitTime[(int)TableId::Table1], _context.ioWaitTime );
+                _writeFence.Wait( bucket, _context.p1TableWaitTime[(int)TableId::Table1] );
             }
             self->EndLockBlock();
         }
