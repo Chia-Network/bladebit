@@ -153,7 +153,7 @@ class DiskBufferQueue
         int64  bucket;  // If < 0, delete all buckets
     };
 
-#if BB_IO_METRICS_ON
+#if _DEBUG || BB_IO_METRICS_ON
 public:
     struct IOMetric
     {
@@ -269,7 +269,7 @@ public:
     inline void ResetIOBufferWaitCounter() { _ioBufferWaitTime = Duration::zero(); }
 
 
-    #if BB_IO_METRICS_ON
+    #if _DEBUG || BB_IO_METRICS_ON
     //-----------------------------------------------------------
     inline const IOMetric& GetReadMetrics() const { return _readMetrics; }
     inline const IOMetric& GetWriteMetrics() const { return _writeMetrics;}
@@ -291,6 +291,68 @@ public:
     }
 
     //-----------------------------------------------------------
+    inline void DumpDiskMetrics( const TableId table )
+    {
+        const double readThroughput  = GetAverageReadThroughput();
+        const auto&  reads           = GetReadMetrics();
+        const double writeThroughput = GetAverageWriteThroughput();
+        const auto&  writes          = GetWriteMetrics();
+
+        Log::Line( " Table %u I/O Metrics:", (uint32)table+1 );
+        
+        Log::Line( "  Average read throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            readThroughput BtoMB, readThroughput / 1000000.0, readThroughput BtoGB, readThroughput / 1000000000.0 );
+        Log::Line( "  Total size read: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)reads.size BtoMB, (double)reads.size / 1000000.0, (double)reads.size BtoGB, (double)reads.size / 1000000000.0 );
+        Log::Line( "  Total read commands: %llu.", (llu)reads.count );
+        
+        Log::Line( "  Average write throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            writeThroughput BtoMB, writeThroughput / 1000000.0, writeThroughput BtoGB, writeThroughput / 1000000000.0 );
+        Log::Line( "  Total size written: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)writes.size BtoMB, (double)writes.size / 1000000.0, (double)writes.size BtoGB, (double)writes.size / 1000000000.0 );
+        Log::Line( "  Total write commands: %llu.", (llu)writes.count );
+        Log::Line( "" );
+
+        ClearReadMetrics();
+        ClearWriteMetrics();
+    }
+    
+    //-----------------------------------------------------------
+    inline void DumpReadMetrics( const TableId table )
+    {
+        const double readThroughput  = GetAverageReadThroughput();
+        const auto&  reads           = GetReadMetrics();
+
+        Log::Line( " Table %u Disk Read Metrics:", (uint32)table+1 );
+        
+        Log::Line( "  Average read throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            readThroughput BtoMB, readThroughput / 1000000.0, readThroughput BtoGB, readThroughput / 1000000000.0 );
+        Log::Line( "  Total size read: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)reads.size BtoMB, (double)reads.size / 1000000.0, (double)reads.size BtoGB, (double)reads.size / 1000000000.0 );
+        Log::Line( "  Total read commands: %llu.", (llu)reads.count );
+
+        ClearReadMetrics();
+    }
+
+    //-----------------------------------------------------------
+    inline void DumpWriteMetrics(  const TableId table )
+    {
+        const double writeThroughput = GetAverageWriteThroughput();
+        const auto&  writes          = GetWriteMetrics();
+
+        Log::Line( " Table %u Disk Write Metrics:", (uint32)table+1 );
+        
+        Log::Line( "  Average write throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            writeThroughput BtoMB, writeThroughput / 1000000.0, writeThroughput BtoGB, writeThroughput / 1000000000.0 );
+        Log::Line( "  Total size written: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)writes.size BtoMB, (double)writes.size / 1000000.0, (double)writes.size BtoGB, (double)writes.size / 1000000000.0 );
+        Log::Line( "  Total write commands: %llu.", (llu)writes.count );
+        Log::Line( "" );
+        
+        ClearWriteMetrics();
+    }
+
+    //-----------------------------------------------------------
     inline void ClearReadMetrics()
     {
         _readMetrics = {};
@@ -301,6 +363,10 @@ public:
     {
         _writeMetrics = {};
     }
+    #else
+    inline void DumpDiskMetrics(){}
+    inline void ClearWriteMetrics(){}
+    inline void ClearReadMetrics(){}
     #endif
     
 private:
@@ -381,7 +447,7 @@ private:
     bool              _deleterExit       = false;
     int32             _threadBindId;
 
-#if BB_IO_METRICS_ON
+#if _DEBUG || BB_IO_METRICS_ON
     IOMetric _readMetrics  = {};
     IOMetric _writeMetrics = {};
 #endif

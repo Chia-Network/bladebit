@@ -878,7 +878,7 @@ inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte
 {
     // if( !_useDirectIO )
     // {
-        #if BB_IO_METRICS_ON
+        #if _DEBUG || BB_IO_METRICS_ON
             _writeMetrics.size += size;
             _writeMetrics.count++;
             const auto timer = TimerBegin();
@@ -898,7 +898,7 @@ inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte
             buffer += sizeWritten;
         }
 
-        #if BB_IO_METRICS_ON
+        #if _DEBUG || BB_IO_METRICS_ON
             _writeMetrics.time += TimerEndTicks( timer );
         #endif
     // }
@@ -946,7 +946,7 @@ inline void DiskBufferQueue::WriteToFile( IStream& file, size_t size, const byte
 //-----------------------------------------------------------
 inline void DiskBufferQueue::ReadFromFile( IStream& file, size_t size, byte* buffer, byte* blockBuffer, const size_t blockSize, const bool directIO, const char* fileName, const uint bucket )
 {
-    #if BB_IO_METRICS_ON
+    #if _DEBUG || BB_IO_METRICS_ON
         _readMetrics.size += size;
         _readMetrics.count++;
         const auto timer = TimerBegin();
@@ -999,7 +999,7 @@ inline void DiskBufferQueue::ReadFromFile( IStream& file, size_t size, byte* buf
     //     }
     }
 
-    #if BB_IO_METRICS_ON
+    #if _DEBUG || BB_IO_METRICS_ON
         _readMetrics.time += TimerEndTicks( timer );
     #endif
 

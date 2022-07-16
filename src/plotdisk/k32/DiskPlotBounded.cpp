@@ -260,20 +260,7 @@ void K32BoundedPhase1::RunF1()
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
     Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _context.ioQueue->IOBufferWaitTime() );
 
-    #if BB_IO_METRICS_ON
-        const double writeThroughput = _context.ioQueue->GetAverageWriteThroughput();
-        const auto&  writes          = _context.ioQueue->GetWriteMetrics();
-
-        Log::Line( " Table 1 I/O Metrics:" );
-        Log::Line( "  Average write throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
-            writeThroughput BtoMB, writeThroughput / 1000000.0, writeThroughput BtoGB, writeThroughput / 1000000000.0 );
-        Log::Line( "  Total size written: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
-            (double)writes.size BtoMB, (double)writes.size / 1000000.0, (double)writes.size BtoGB, (double)writes.size / 1000000000.0 );
-        Log::Line( "  Total write commands: %llu.", (llu)writes.count );
-        Log::Line( "" );
-
-        _context.ioQueue->ClearWriteMetrics();
-    #endif
+    _context.ioQueue->DumpWriteMetrics( TableId::Table1 );
 }
 
 //-----------------------------------------------------------
@@ -313,6 +300,7 @@ void K32BoundedPhase1::RunFx()
 
     Log::Line( "Completed table %u in %.2lf seconds with %.llu entries.", table+1, TimerEnd( timer ), _context.entryCounts[(int)table] );
     Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( fx._tableIOWait ) );
+    _context.ioQueue->DumpDiskMetrics( table );
 
     #if _DEBUG
         BB_DP_DBG_WriteTableCounts( _context );
