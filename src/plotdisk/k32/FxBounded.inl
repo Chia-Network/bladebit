@@ -245,14 +245,16 @@ public:
         _ioQueue.SeekBucket( _yId[0], 0, SeekOrigin::Begin );
         _ioQueue.SeekBucket( _yId[1], 0, SeekOrigin::Begin );
 
-        if constexpr( rTable > TableId::Table2 )
+        if( rTable > TableId::Table2 )
         {
             _ioQueue.SeekBucket( _idxId[0], 0, SeekOrigin::Begin );    
             _ioQueue.SeekBucket( _idxId[1], 0, SeekOrigin::Begin );    
         }
 
         _ioQueue.SeekBucket( _metaId[0], 0, SeekOrigin::Begin );
-        _ioQueue.SeekBucket( _metaId[1], 0, SeekOrigin::Begin );
+        if( rTable < TableId::Table7 )
+            _ioQueue.SeekBucket( _metaId[1], 0, SeekOrigin::Begin );
+
         _ioQueue.CommitCommands();
         
         // Allocate buffers
@@ -942,7 +944,9 @@ private:
             counts[yIn[i] >> bucketShift]++;
     
         self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, ySliceCounts.Ptr(), _offsetsY[id], yAlignedSliceCount.Ptr() );
-        self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedSliceCount.Ptr() );
+
+        if constexpr ( rTable < TableId::Table7 )
+            self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedSliceCount.Ptr() );
 
         if( bucket > 0 )
         {
@@ -957,11 +961,15 @@ private:
             const TYOut  y       = yIn[i];
             const uint32 yBucket = (uint32)(y >> bucketShift);
             const uint32 yDst    = --pfxSum    [yBucket];
-            const uint32 metaDst = --pfxSumMeta[yBucket];
 
             yOut   [yDst]    = (uint32)(y & yMask);
             idxOut [yDst]    = idxOffset + (uint32)i;   ASSERT( (uint64)idxOffset + (uint64)i < (1ull << _k) );
-            metaOut[metaDst] = metaIn[i];
+
+            if constexpr ( rTable < TableId::Table7 )
+            {
+                const uint32 metaDst = --pfxSumMeta[yBucket];
+                metaOut[metaDst] = metaIn[i];
+            }
         }
 
         // Write to disk
@@ -975,7 +983,10 @@ private:
 
             _ioQueue.WriteBucketElementsT<uint32>  ( yId   , yOut   .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
             _ioQueue.WriteBucketElementsT<uint32>  ( idxId , idxOut .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
-            _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );  // #TODO: Can use ySliceCounts here...
+            
+            if( rTable < TableId::Table7 )
+                _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );  // #TODO: Can use ySliceCounts here...
+
             _ioQueue.SignalFence( _fxWriteFence, bucket+1 );
             _ioQueue.CommitCommands();
 

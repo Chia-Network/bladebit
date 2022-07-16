@@ -205,6 +205,23 @@ void K32BoundedPhase1::RunWithBuckets()
                 PanicExit();
                 break;
         }
+
+        #if !BB_DP_P1_KEEP_FILES
+            if( table == TableId::Table6 )
+            {
+                // #TODO: Support alternating mode (only 1 metadata file)
+                _ioQueue.DeleteBucket( FileId::META0 );
+                _ioQueue.CommitCommands();
+            }
+            else if( table == TableId::Table7 )
+            {
+                // #TODO: Support alternating mode (only 1 metadata file)
+                _ioQueue.DeleteBucket( FileId::FX1    );
+                _ioQueue.DeleteBucket( FileId::INDEX1 );
+                _ioQueue.DeleteBucket( FileId::META1  );
+                _ioQueue.CommitCommands();
+            }
+        #endif
     }
 #endif
 
@@ -216,6 +233,15 @@ void K32BoundedPhase1::RunWithBuckets()
         CTableWriterBounded<_numBuckets> cWriter( _context );
         cWriter.Run( _allocator );
     }
+
+     #if !BB_DP_P1_KEEP_FILES
+        // #TODO: Support alternating mode (only 1 metadata file)
+        _ioQueue.DeleteBucket( FileId::FX0    );
+        _ioQueue.DeleteBucket( FileId::INDEX0 );
+        _ioQueue.CommitCommands();
+
+        // # TODO: Wait for deletion?
+    #endif
 }
 
 //-----------------------------------------------------------

@@ -437,6 +437,7 @@ void DiskBufferQueue::WaitForFence( Fence& fence )
 void DiskBufferQueue::DeleteFile( FileId id, uint bucket )
 {
     // Log::Line( "DeleteFile( %u : %u )", id, bucket );
+    // #TODO: See DeleteBucket
     Command* cmd = GetCommandObject( Command::DeleteFile );
     cmd->deleteFile.fileId = id;
     cmd->deleteFile.bucket = bucket;
