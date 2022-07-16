@@ -102,7 +102,7 @@ public:
         Fence& fence = _context.fencePool->RequireFence();
         _ioQueue.SignalFence( fence, 1 );
         _ioQueue.CommitCommands();
-        fence.Wait( 1 );
+        fence.Wait( 1, _context.ioWaitTime );
 
         _context.entryCounts[(int)TableId::Table1] = 1ull << _k;
 
@@ -196,7 +196,7 @@ private:
             //        the signal is properly visible to all threads
             if( self->BeginLockBlock() )
             {
-                _writeFence.Wait( bucket, _context.p1TableWaitTime[(int)TableId::Table1] );
+                _writeFence.Wait( bucket, _context.p1TableWaitTime[(int)TableId::Table1], _context.ioWaitTime );
             }
             self->EndLockBlock();
         }

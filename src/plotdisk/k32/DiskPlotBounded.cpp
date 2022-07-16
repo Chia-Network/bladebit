@@ -237,6 +237,7 @@ void K32BoundedPhase1::RunWithBuckets()
 
         Log::Line( "Completed F7 tables in %.2lf seconds.", TimerEnd( timer ) );
         Log::Line( "F7/C Tables I/O wait time: %.2lf seconds.",  TicksToSeconds( cWriter.IOWait() ) );
+        _context.ioWaitTime += cWriter.IOWait();
     }
 
      #if !BB_DP_P1_KEEP_FILES
@@ -253,9 +254,10 @@ void K32BoundedPhase1::RunWithBuckets()
 template<uint32 _numBuckets>
 void K32BoundedPhase1::RunF1()
 {
+    _context.ioWaitTime = Duration::zero();
+
     Log::Line( "Generating f1..." );
     auto timer = TimerBegin();
-
 
     StackAllocator allocator( _context.heapBuffer, _context.heapSize );
     K32BoundedF1<_numBuckets> f1( _context, allocator );
@@ -263,7 +265,7 @@ void K32BoundedPhase1::RunF1()
 
     double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
-    Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _context.ioQueue->IOBufferWaitTime() );
+    Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _context.ioWaitTime );
 
     _context.ioQueue->DumpWriteMetrics( TableId::Table1 );
 }
@@ -305,7 +307,9 @@ void K32BoundedPhase1::RunFx()
 
     Log::Line( "Completed table %u in %.2lf seconds with %.llu entries.", table+1, TimerEnd( timer ), _context.entryCounts[(int)table] );
     Log::Line( "Table %u I/O wait time: %.2lf seconds.",  table+1, TicksToSeconds( fx._tableIOWait ) );
+    
     _context.ioQueue->DumpDiskMetrics( table );
+    _context.ioWaitTime += fx._tableIOWait;
 
     #if _DEBUG
         BB_DP_DBG_WriteTableCounts( _context );
