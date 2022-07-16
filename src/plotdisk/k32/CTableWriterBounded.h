@@ -250,6 +250,8 @@ public:
         // Wait for all commands to finish
         _readFence.Wait( 1 );
     }
+
+    inline Duration IOWait() const { return _tableIOWait; }
     
 private:
 

@@ -230,8 +230,13 @@ void K32BoundedPhase1::RunWithBuckets()
         _allocator.PopToMarker( 0 );
 
         Log::Line( "Sorting F7 & Writing C Tables" );
+        auto timer = TimerBegin();
         CTableWriterBounded<_numBuckets> cWriter( _context );
+
         cWriter.Run( _allocator );
+
+        Log::Line( "Completed F7 tables in %.2lf seconds.", TimerEnd( timer ) );
+        Log::Line( "F7/C Tables I/O wait time: %.2lf seconds.",  TicksToSeconds( cWriter.IOWait() ) );
     }
 
      #if !BB_DP_P1_KEEP_FILES
