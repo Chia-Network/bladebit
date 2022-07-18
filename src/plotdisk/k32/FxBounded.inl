@@ -360,7 +360,7 @@ private:
             WaitForFence( self, _yReadFence, bucket );
 
             Span<uint32> yInput     = _y[bucket];
-            const uint32 entryCount = yInput.Length();
+            const uint32 entryCount = (uint32)yInput.Length();
 
             Span<uint32> sortKey = _sortKey.SliceSize( entryCount );
             SortY( self, entryCount, yInput.Ptr(), _yTmp.template As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[1].template As<uint32>().Ptr() );
