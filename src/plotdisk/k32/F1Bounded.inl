@@ -25,7 +25,7 @@ class K32BoundedF1
     static constexpr uint32 _entriesPerBucket       = (uint32)( _kEntryCount / _numBuckets );
     static constexpr uint32 _entriesPerBlock        = kF1BlockSize / sizeof( uint32 );
     static constexpr uint32 _blocksPerBucket        = _entriesPerBucket * sizeof( uint32 ) / kF1BlockSize;
-    static constexpr uint32 _maxEntriesPerSlice     = ((uint32)(_entriesPerBucket / _numBuckets) * BB_DP_ENTRY_SLICE_MULTIPLIER);
+    static constexpr uint32 _maxEntriesPerSlice     = (uint32)((_entriesPerBucket / _numBuckets) * BB_DP_ENTRY_SLICE_MULTIPLIER);
     
 public:
     //-----------------------------------------------------------
@@ -274,7 +274,7 @@ void DbgValidateF1( DiskPlotContext& context )
         const uint32 numBuckets = context.numBuckets;
         for( uint32 bucket = 0; bucket < numBuckets; bucket++ )
         {
-            Span<uint32> yBucket = tmpBuffer.As<uint32>();
+            Span<uint32> yBucket = tmpBuffer.template As<uint32>();
             Span<uint32> xBucket = tmpBuffer2;
 
             ioQueue.ReadBucketElementsT( FileId::FX0  , yBucket );
