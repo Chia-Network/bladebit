@@ -348,7 +348,7 @@ void DiskBufferQueue::WriteBucketElements( const FileId id, const void* buckets,
     cmd->buckets.writeSizes  = writeCounts;
     cmd->buckets.sliceSizes  = sliceCounts != nullptr ? sliceCounts : writeCounts;
     cmd->buckets.buffers     = (byte*)buckets;
-    cmd->buckets.elementSize = elementSize;
+    cmd->buckets.elementSize = (uint32)elementSize;
     cmd->buckets.fileId      = id;
 }
 

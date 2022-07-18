@@ -235,7 +235,7 @@ public:
         const uint32* end = self->IsLastThread() ? yEntries.Ptr() + yEntries.Length() : _startPositions[id+1];
 
         // Now scan for all groups
-        const uint32 maxGroups    = groupBuffer.Length();
+        const uint32 maxGroups    = (uint32)groupBuffer.Length();
         Span<uint32> groupIndices = groupBuffer;
         uint32       groupCount   = 0;
         while( ++entries < end )
@@ -288,7 +288,7 @@ public:
         const uint64 lGroupMask = ((uint64)lBucket) << yBits;
         const uint64 rGroupMask = ((uint64)rBucket) << yBits;
 
-        const uint32 groupCount = groupBoundaries.Length() - 1; // Ignore the extra ghost group
+        const uint32 groupCount = (uint32)(groupBoundaries.Length() - 1); // Ignore the extra ghost group
 
         uint32 pairCount = 0;
 
