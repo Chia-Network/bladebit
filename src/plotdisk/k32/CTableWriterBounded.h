@@ -69,8 +69,8 @@ public:
         Span<uint64> _mapOut = allocator.CAllocSpan<uint64>( _entriesPerBucket );
 
         // Use same buffers as map tmp
-        uint32* f7Tmp         = _mapOut.As<uint32>().SliceSize( _entriesPerBucket ).Ptr();
-        uint32* idxTmp        = _mapOut.As<uint32>().Slice( _entriesPerBucket ).Ptr();
+        uint32* f7Tmp         = _mapOut.template As<uint32>().SliceSize( _entriesPerBucket ).Ptr();
+        uint32* idxTmp        = _mapOut.template As<uint32>().Slice( _entriesPerBucket ).Ptr();
 
         Span<uint32> c1Buffer = allocator.CAllocSpan<uint32>( c1TotalEntries );
         Span<uint32> c2Buffer = allocator.CAllocSpan<uint32>( c2TotalEntries );

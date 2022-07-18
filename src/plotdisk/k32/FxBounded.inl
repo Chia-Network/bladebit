@@ -268,7 +268,7 @@ public:
             const uint32 bufIdx = i & 1; // % 2
             _y    [i] = _yBuffers    [bufIdx];
             _index[i] = _indexBuffers[bufIdx];
-            _meta [i] = _metaBuffers [bufIdx].As<TMetaIn>();
+            _meta [i] = _metaBuffers [bufIdx].template As<TMetaIn>();
         }
         
 
@@ -363,7 +363,7 @@ private:
             const uint32 entryCount = yInput.Length();
 
             Span<uint32> sortKey = _sortKey.SliceSize( entryCount );
-            SortY( self, entryCount, yInput.Ptr(), _yTmp.As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[1].As<uint32>().Ptr() );
+            SortY( self, entryCount, yInput.Ptr(), _yTmp.template As<uint32>().Ptr(), sortKey.Ptr(), _metaTmp[1].template As<uint32>().Ptr() );
 
             ///
             /// Write reverse map, given the previous table's y origin indices
@@ -373,7 +373,7 @@ private:
                 WaitForFence( self, _indexReadFence, bucket );
 
                 Span<uint32> unsortedIndices = _index[bucket];       ASSERT( unsortedIndices.Length() == entryCount );
-                Span<uint32> indices         = _metaTmp[1].As<uint32>().SliceSize( entryCount );
+                Span<uint32> indices         = _metaTmp[1].template As<uint32>().SliceSize( entryCount );
 
                 #if (_DEBUG && DBG_VALIDATE_INDICES)
                     if( self->BeginLockBlock() )
@@ -439,7 +439,7 @@ private:
             WaitForFence( self, _metaReadFence, bucket );
     
             Span<TMetaIn> metaUnsorted = _meta[bucket].SliceSize( entryCount );                 ASSERT( metaUnsorted.Length() == entryCount );
-            Span<TMetaIn> metaIn       = _metaTmp[0].As<TMetaIn>().SliceSize( entryCount );
+            Span<TMetaIn> metaIn       = _metaTmp[0].template As<TMetaIn>().SliceSize( entryCount );
 
             if constexpr ( rTable == TableId::Table2 )
             {
@@ -478,8 +478,8 @@ private:
 
             /// Gen fx & write
             {
-                Span<TYOut>    yOut    = _yTmp.As<TYOut>().Slice( matchOffset, matches.Length() );
-                Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().Slice( matchOffset, matches.Length() );  //( (TMetaOut*)metaTmp.Ptr(), matches.Length() );
+                Span<TYOut>    yOut    = _yTmp.template As<TYOut>().Slice( matchOffset, matches.Length() );
+                Span<TMetaOut> metaOut = _metaTmp[1].template As<TMetaOut>().Slice( matchOffset, matches.Length() );  //( (TMetaOut*)metaTmp.Ptr(), matches.Length() );
 
                 TimePoint timer;
                 if( self->IsControlThread() )
@@ -623,7 +623,7 @@ private:
         const uint32 threadCount = self->JobCount();
 
         // use metaTmp as a buffer for group boundaries
-        Span<uint32> groupBuffer  = _metaTmp[1].As<uint32>();
+        Span<uint32> groupBuffer  = _metaTmp[1].template As<uint32>();
         const uint32 maxGroups    = (uint32)( groupBuffer.Length() / threadCount );
         Span<uint32> groupIndices = groupBuffer.Slice( maxGroups * id, maxGroups );
 
@@ -712,8 +712,8 @@ private:
             const Span<uint32>  y    ( info.savedY             , prevBucketLength );
             const Span<TMetaIn> meta ( (TMetaIn*)info.savedMeta, prevBucketLength + info.curBucketMetaLength );
 
-            Span<TYOut>    yOut    = _yTmp      .As<TYOut>()   .SliceSize( matchCount );
-            Span<TMetaOut> metaOut = _metaTmp[1].As<TMetaOut>().SliceSize( matchCount );
+            Span<TYOut>    yOut    = _yTmp      .template As<TYOut>()   .SliceSize( matchCount );
+            Span<TMetaOut> metaOut = _metaTmp[1].template As<TMetaOut>().SliceSize( matchCount );
 
             GenFx( self, bucket, pairs, y, meta, yOut, metaOut );
 
@@ -1384,7 +1384,7 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
             {
                 Log::Line( " Validating %u", bucket );
 
-                Span<uint32> bucketReader = reader.As<uint32>();
+                Span<uint32> bucketReader = reader.template As<uint32>();
 
                 ioQueue.ReadBucketElementsT( fileId, bucketReader );
                 ioQueue.SignalFence( fence );
@@ -1396,7 +1396,7 @@ void DbgValidateY( const TableId table, const FileId fileId, DiskPlotContext& co
                 #endif
 
                 // Sort
-                RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, bucketReader.Ptr(), tmp.As<uint32>().Ptr(), bucketReader.Length() );
+                RadixSort256::Sort<BB_MAX_JOBS>( *context.threadPool, bucketReader.Ptr(), tmp.template As<uint32>().Ptr(), bucketReader.Length() );
 
                 // Expand
                 const uint64 yMask   = ((uint64)bucket) << yBits;

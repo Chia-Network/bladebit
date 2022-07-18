@@ -46,7 +46,6 @@ struct Span
         return this->values[index];
     }
 
-
 // size_t not the same as uint64 on clang.
 #ifdef __clang__
     inline T& operator[]( uint64 index ) const
@@ -88,6 +87,9 @@ struct Span
         return Slice( 0, size );
     }
 
+#ifdef __clang__
+    inline Span<T> Slice( const uint64 index ) const { return Slice( (size_t)index ); }
+#endif
     inline Span<T> Slice( const uint32 index ) const { return Slice( (size_t)index ); }
     inline Span<T> Slice( const int64 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
     inline Span<T> Slice( const int32 index ) const { ASSERT( index >= 0); return Slice( (size_t)index ); }
