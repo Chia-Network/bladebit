@@ -367,7 +367,7 @@ void DiskBufferQueue::ReadBucketElements( const FileId id, Span<byte>& buffer, c
 {
     Command* cmd = GetCommandObject( Command::ReadBucket );
     cmd->readBucket.buffer      = &buffer;
-    cmd->readBucket.elementSize = elementSize;
+    cmd->readBucket.elementSize = (uint32)elementSize;
     cmd->readBucket.fileId      = id;
 }
 

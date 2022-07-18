@@ -107,7 +107,7 @@ public:
             ASSERT( f7.Length() == indices.Length() );
             ASSERT( f7.Length() == context.bucketCounts[(int)TableId::Table7][bucket] );
 
-            const uint32 bucketLength = f7.Length();
+            const uint32 bucketLength = (uint32)f7.Length();
 
             // Sort on f7
             RadixSort256::SortWithKey<BB_DP_MAX_JOBS>( *context.threadPool, _threadCount, f7.Ptr(), f7Tmp, indices.Ptr(), idxTmp, bucketLength );
