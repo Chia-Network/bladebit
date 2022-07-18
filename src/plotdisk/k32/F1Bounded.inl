@@ -39,7 +39,7 @@ public:
         const uint32 threadCount = context.f1ThreadCount;
 
         // We need to pad our slices to block size
-        const uint32 blockSize               = _ioQueue.BlockSize( FileId::FX0 );
+        const uint32 blockSize               = (uint32)_ioQueue.BlockSize( FileId::FX0 );
         const uint32 entriesPerSliceAligned  = RoundUpToNextBoundaryT( _maxEntriesPerSlice, blockSize ) + blockSize / sizeof( uint32 ); // Need an extra block for when we offset the entries
         const uint32 entriesPerBucketAligned = entriesPerSliceAligned * _numBuckets;                                                    // in subsequent slices
         ASSERT( entriesPerBucketAligned >= _entriesPerBucket );
