@@ -1031,7 +1031,7 @@ private:
         const size_t bufferSize  = CDiv( ySize + metaSizeLR, 8 );
 
         // const uint32 id         = self->JobId();
-        const uint32 matchCount = pairs.Length();
+        const uint32 matchCount = (uint32)pairs.Length();
 
         // Hashing
         uint64 input [5]; // y + L + R
