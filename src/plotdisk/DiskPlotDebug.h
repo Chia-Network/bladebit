@@ -311,7 +311,7 @@ inline void Debug::LoadYRefTable( const TableId table, Span<uint64>& buffer )
     sprintf( path, "%st%d.y.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
     Log::Line( " Loading reference Y table '%s'.", path );
 
-    FatalIf( !Debug::LoadRefTable<uint64>( path, buffer.values, buffer.length ), "Failed to load reference Y table." );
+    FatalIf( !Debug::LoadRefTable<uint64>( path, buffer.values, (uint64&)buffer.length ), "Failed to load reference Y table." );
 }
 
 //-----------------------------------------------------------
