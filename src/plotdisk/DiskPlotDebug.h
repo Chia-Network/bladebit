@@ -311,7 +311,7 @@ inline void Debug::LoadYRefTable( const TableId table, Span<uint64>& buffer )
     sprintf( path, "%st%d.y.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
     Log::Line( " Loading reference Y table '%s'.", path );
 
-    FatalIf( !Debug::LoadRefTable( path, buffer.values, buffer.length ), "Failed to load reference Y table." );
+    FatalIf( !Debug::LoadRefTable<uint64>( path, buffer.values, buffer.length ), "Failed to load reference Y table." );
 }
 
 //-----------------------------------------------------------
@@ -323,7 +323,7 @@ inline void Debug::LoadRefLinePointTable( const TableId table, uint64*& buffer, 
     sprintf( path, "%slp.t%d.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
     Log::Line( " Loading reference line point table '%s'.", path );
 
-    FatalIf( !Debug::LoadRefTable( path, buffer, outEntryCount ), "Failed to load reference line point table." );
+    FatalIf( !Debug::LoadRefTable<uint64>( path, buffer, outEntryCount ), "Failed to load reference line point table." );
 }
 
 //-----------------------------------------------------------

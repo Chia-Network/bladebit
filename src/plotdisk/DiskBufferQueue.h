@@ -364,6 +364,8 @@ public:
         _writeMetrics = {};
     }
     #else
+    inline void DumpWriteMetrics() {}
+    inline void DumpReadMetrics() {}
     inline void DumpDiskMetrics(){}
     inline void ClearWriteMetrics(){}
     inline void ClearReadMetrics(){}

@@ -100,7 +100,8 @@
         "ios": "cpp",
         "locale": "cpp",
         "stack": "cpp",
-        "*.include": "cpp"
+        "*.include": "cpp",
+        "relic_core.h": "c"
     },
     "cSpell.words": [
         "Ryzen"
