@@ -364,9 +364,9 @@ public:
         _writeMetrics = {};
     }
     #else
-    inline void DumpWriteMetrics() {}
-    inline void DumpReadMetrics() {}
-    inline void DumpDiskMetrics(){}
+    inline void DumpWriteMetrics( const TableId table ) {}
+    inline void DumpReadMetrics( const TableId table  ) {}
+    inline void DumpDiskMetrics( const TableId table  ){}
     inline void ClearWriteMetrics(){}
     inline void ClearReadMetrics(){}
     #endif
