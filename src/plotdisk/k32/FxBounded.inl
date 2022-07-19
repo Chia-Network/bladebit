@@ -419,16 +419,18 @@ private:
             const uint64 tableEntryCount = _tableEntryCount;
             if( bucket == _numBuckets-1 && (tableEntryCount + totalMatches) > _maxTableEntries )
             {
+                const uint32 overflowEntries = (uint32)( (tableEntryCount + totalMatches) - _maxTableEntries );
+
                 // Prevent calculating fx for overflow matches
                 if( self->IsLastThread() )
                 {
-                    const uint32 overflowEntries = (uint32)( (tableEntryCount + totalMatches) - _maxTableEntries );
                     ASSERT( overflowEntries < matches.Length() );
 
                     matches = matches.SliceSize( matches.Length() - overflowEntries );
                 }
 
-                totalMatches = _maxTableEntries;
+                totalMatches -= overflowEntries;
+                ASSERT( tableEntryCount + totalMatches == _maxTableEntries );
             }
 
             WritePairs( self, bucket, totalMatches, matches, matchOffset );
