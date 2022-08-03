@@ -1,6 +1,7 @@
 #pragma once
 #include "DiskBufferQueue.h"
 #include "util/StackAllocator.h"
+#include "util/Span.h"
 
 template<typename T>
 class BlockWriter
@@ -11,8 +12,9 @@ public:
 
     //-----------------------------------------------------------
     inline BlockWriter( IAllocator& allocator, const FileId fileId, Fence& fence, const size_t blockSize, const size_t elementCount )
-        : _fileId( fileId )
-        , _fence( &fence )
+        : _fileId   ( fileId )
+        , _fence    ( &fence )
+        , _blockSize( _blockSize )
     {
         static_assert( sizeof( T ) == 1 || ( sizeof( T ) & 1) == 0 );
 
@@ -31,6 +33,8 @@ public:
     //-----------------------------------------------------------
     inline T* GetNextBuffer( Duration& writeWaitTime )
     {
+        ASSERT( _buffers[0] );
+
         if( _bufferIdx > 1 )
             _fence->Wait( _bufferIdx - 2, writeWaitTime );
 
@@ -42,7 +46,7 @@ public:
     {
         ASSERT( elementCount );
 
-        const size_t blockSize        = queue.BlockSize( _fileId );
+        const size_t blockSize        = _blockSize;
         const size_t elementsPerBlock = blockSize / sizeof( T );
 
         T* buf = _buffers[_bufferIdx & 1];
@@ -65,13 +69,20 @@ public:
     //-----------------------------------------------------------
     inline void SubmitFinalBlock( DiskBufferQueue& queue )
     {
+        SubmitFinalBlock( queue, _fileId  );
+        queue.SignalFence( *_fence, _bufferIdx );
+        queue.CommitCommands();
+    }
+
+    //-----------------------------------------------------------
+    inline void SubmitFinalBlock( DiskBufferQueue& queue, const FileId fileId )
+    {
         if( _remainderCount )
         {
-            queue.WriteFile( _fileId, 0, _remainder, queue.BlockSize( _fileId ) );
+            queue.WriteFile( fileId, 0, _remainder, _blockSize );
             _remainderCount = 0;
         }
 
-        queue.SignalFence( *_fence, _bufferIdx );
         queue.CommitCommands();
     }
 
@@ -84,6 +95,7 @@ public:
 private:
     FileId _fileId         = FileId::None;
     int32  _bufferIdx      = 0;
+    uint32 _blockSize      = 0;
     T*     _buffers[2]     = { nullptr };
     T*     _remainder      = nullptr; 
     size_t _remainderCount = 0;             // Number of elements saved in our remainder buffer

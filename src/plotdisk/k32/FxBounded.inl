@@ -86,6 +86,7 @@ public:
         , _fxWriteFence  ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
         , _pairWriteFence( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
         , _mapWriteFence ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
+        , _alternating   ( context.cfg ? context.cfg->alternateBuckets : false )
     #if BB_DP_FP_MATCH_X_BUCKET
 
     #endif
@@ -916,8 +917,9 @@ private:
         if( self->IsControlThread() )
             timer = TimerBegin();
 
-        const uint32 blockSize = (uint32)_ioQueue.BlockSize( _yId[1] );
-        const uint32 id        = (uint32)self->JobId();
+        const bool   alternating = _context.cfg->alternateBuckets;
+        const uint32 blockSize   = (uint32)_ioQueue.BlockSize( _yId[1] );
+        const uint32 id          = (uint32)self->JobId();
 
         // Distribute to buckets
         const uint32 bucketBits = bblog2( _numBuckets );
@@ -947,7 +949,7 @@ private:
     
         self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, ySliceCounts.Ptr(), _offsetsY[id], yAlignedSliceCount.Ptr() );
 
-        if constexpr ( rTable < TableId::Table7 )
+        if ( rTable < TableId::Table7 && !alternating)
             self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedSliceCount.Ptr() );
 
         if( bucket > 0 )
@@ -981,13 +983,124 @@ private:
             const FileId metaId = _metaId[1];
             const FileId idxId  = _idxId [1];
 
-            ASSERT( ySliceCounts.Length() == metaSliceCounts.Length() );
+            if( alternating )
+            {
+                _yWriter.SubmitBuffer( _queue, sizeof( uint32 ) );
+            }
+            else
+            {
+                ASSERT( ySliceCounts.Length() == metaSliceCounts.Length() );
 
-            _ioQueue.WriteBucketElementsT<uint32>  ( yId   , yOut   .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
-            _ioQueue.WriteBucketElementsT<uint32>  ( idxId , idxOut .Ptr(),  yAlignedSliceCount.Ptr()   , ySliceCounts.Ptr() );
-            
-            if( rTable < TableId::Table7 )
-                _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );  // #TODO: Can use ySliceCounts here...
+                _ioQueue.WriteBucketElementsT<uint32>( yId   , yOut   .Ptr(),  yAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );
+                _ioQueue.WriteBucketElementsT<uint32>( idxId , idxOut .Ptr(),  yAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );
+                
+                if( rTable < TableId::Table7 )
+                    _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );  // #TODO: Can use ySliceCounts here...
+            }
+
+            _ioQueue.SignalFence( _fxWriteFence, bucket+1 );
+            _ioQueue.CommitCommands();
+
+            // Save bucket counts
+            for( uint32 i = 0; i < _numBuckets; i++ )
+                _context.bucketCounts[(int)rTable][i] += ySliceCounts[i];
+        }
+        self->EndLockBlock();
+
+
+        if( self->IsControlThread() )
+            _distributeTime += TimerEndTicks( timer );
+    }
+
+    //-----------------------------------------------------------
+    void WriteEntriesAlternating( Job* self,
+                       const uint32         bucket,
+                       const uint32         idxOffset,
+                       const Span<TYOut>    yIn,
+                       const Span<TMetaOut> metaIn,
+                             Span<uint32>   yOut,
+                             Span<TMetaOut> metaOut,
+                             Span<uint32>   idxOut )
+    {
+        TimePoint timer;
+        if( self->IsControlThread() )
+            timer = TimerBegin();
+
+        const uint32 id = (uint32)self->JobId();
+
+        // Distribute to buckets
+        const uint32 bucketBits = bblog2( _numBuckets );
+        static_assert( kExtraBits <= bucketBits );
+
+        const uint32 yBits       = ( std::is_same<TYOut, uint32>::value ? _k : _k + kExtraBits );
+        const uint32 bucketShift = yBits - bucketBits;
+        const TYOut  yMask       = std::is_same<TYOut, uint32>::value ? 0xFFFFFFFF : ( 1ull << bucketShift ) - 1; // No masking-out for Table 7
+
+        const int64 entryCount = (int64)yIn.Length();
+
+        uint32 counts     [_numBuckets] = {};
+        uint32 pfxSum     [_numBuckets];
+        uint32 totalCounts[_numBuckets];
+        
+        const uint32 sliceIdx = bucket & 1; // % 2
+
+        Span<uint32> ySliceCounts = _sliceCountY[sliceIdx];
+
+
+        // Count
+        for( int64 i = 0; i < entryCount; i++ )
+            counts[yIn[i] >> bucketShift]++;
+    
+        self->CalculateBlockAlignedPrefixSum<uint32>( _numBuckets, blockSize, counts, pfxSum, ySliceCounts.Ptr(), _offsetsY[id], yAlignedSliceCount.Ptr() );
+
+        if ( rTable < TableId::Table7 && !alternating)
+            self->CalculateBlockAlignedPrefixSum<TMetaOut>( _numBuckets, blockSize, counts, pfxSumMeta, metaSliceCounts.Ptr(), _offsetsMeta[id], metaAlignedSliceCount.Ptr() );
+
+        if( bucket > 0 )
+        {
+            if( self->BeginLockBlock() )
+                _fxWriteFence.Wait( bucket, _tableIOWait );     // #TODO: Double-buffer to avoid waiting here // #TODO: Either use a spin wait or have all threads suspend here
+            self->EndLockBlock();
+        }
+
+        // Distribute to buckets
+        for( int64 i = 0; i < entryCount; i++ )
+        {
+            const TYOut  y       = yIn[i];
+            const uint32 yBucket = (uint32)(y >> bucketShift);
+            const uint32 yDst    = --pfxSum    [yBucket];
+
+            yOut   [yDst]    = (uint32)(y & yMask);
+            idxOut [yDst]    = idxOffset + (uint32)i;   ASSERT( (uint64)idxOffset + (uint64)i < (1ull << _k) );
+
+            if constexpr ( rTable < TableId::Table7 )
+            {
+                const uint32 metaDst = --pfxSumMeta[yBucket];
+                metaOut[metaDst] = metaIn[i];
+            }
+        }
+
+        // Write to disk
+        if( self->BeginLockBlock() )
+        {
+            const FileId yId    = _yId   [1];
+            const FileId metaId = _metaId[1];
+            const FileId idxId  = _idxId [1];
+
+            if( alternating )
+            {
+                _yWriter.SubmitBuffer( _queue, sizeof( uint32 ) );
+            }
+            else
+            {
+                ASSERT( ySliceCounts.Length() == metaSliceCounts.Length() );
+
+                _ioQueue.WriteBucketElementsT<uint32>( yId   , yOut   .Ptr(),  yAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );
+                _ioQueue.WriteBucketElementsT<uint32>( idxId , idxOut .Ptr(),  yAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );
+                
+                if( rTable < TableId::Table7 )
+                    _ioQueue.WriteBucketElementsT<TMetaOut>( metaId, metaOut.Ptr(),  metaAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );  // #TODO: Can use ySliceCounts here...
+            }
 
             _ioQueue.SignalFence( _fxWriteFence, bucket+1 );
             _ioQueue.CommitCommands();
@@ -1286,6 +1399,12 @@ private:
     byte*               _pairsWriteBuffer;
     BlockWriter<uint32> _xWriter;               // Used for Table2  (there's no map, but just x.)
     Span<uint32>        _xWriteBuffer;          // Set by the control thread for other threads to use
+
+    // Writers for when using alternating mode
+    bool                _alternating;
+    BlockWriter<uint32> _yWriter;
+    BlockWriter<uint32> _indexWriter;
+    BlockWriter<uint32> _metaWriter;
     
     // Working buffers
     Span<uint64>        _yTmp;
