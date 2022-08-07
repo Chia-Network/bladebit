@@ -76,13 +76,14 @@
 
                 "--show-memo",
                 "diskplot",
+                "-a",
                 "-t1", "~/plot/tmp",
                 "--f1-threads", "24",
                 // "--fp-threads", "62",
                 "--c-threads", "28",
                 "--p2-threads", "24",
 
-                "--cache", "196G",
+                "--cache", "197G",
                 // "--cache", "96G",
                 // "--cache", "200G",
                 // "--cache", "64G",

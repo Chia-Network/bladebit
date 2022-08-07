@@ -511,7 +511,7 @@ Creates plots by making use of a disk to temporarily store and read values.
                       You may specify one of: 128, 256, 512, 1024 and 64 for if --k32-bounded is enabled.
                       1024 is not available for plots of k < 33.
 
- --ubounded         : Create an unbounded k32 plot. That is a plot that does not cut-off entries that 
+ --unbounded        : Create an unbounded k32 plot. That is a plot that does not cut-off entries that 
                       overflow 2^32;
  
  -a, --alternate    : Halves the temp2 cache size requirements by alternating bucket writing methods

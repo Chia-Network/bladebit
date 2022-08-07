@@ -318,8 +318,8 @@ private:
         if( bucket >= _numBuckets )
             return;
 
-        _ioQueue.ReadBucketElementsT( FileId::FX0   , _f7ReadBuffer [bucket] );
-        _ioQueue.ReadBucketElementsT( FileId::INDEX0, _idxReadBuffer[bucket] );
+        _ioQueue.ReadBucketElementsT( FileId::FX0   , true, _f7ReadBuffer [bucket] );
+        _ioQueue.ReadBucketElementsT( FileId::INDEX0, true, _idxReadBuffer[bucket] );
         _ioQueue.SignalFence( _readFence, bucket + 1 );
         _ioQueue.CommitCommands();
     }

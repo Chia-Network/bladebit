@@ -75,7 +75,6 @@ DiskBufferQueue::~DiskBufferQueue()
     _deleterThread.WaitForExit();
 
     // #TODO: Wait for command thread
-
     // #TODO: Delete our file sets
 
     free( _filePathBuffer    );
@@ -127,11 +126,17 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     fileSet.blockBuffer  = nullptr;
     fileSet.options      = options;
 
-    if( IsFlagSet( options, FileSetOptions::Interleaved ) )
+    if( IsFlagSet( options, FileSetOptions::Interleaved ) || IsFlagSet( options, FileSetOptions::Alternating ) )
     {
         fileSet.sliceSizes.SetTo( new Span<size_t>[bucketCount], bucketCount );
         for( uint32 i = 0; i < bucketCount; i++ )
             fileSet.sliceSizes[i].SetTo( new size_t[bucketCount]{}, bucketCount );
+    }
+
+    if( IsFlagSet( options, FileSetOptions::Alternating ) )
+    {
+        fileSet.maxSliceElements = optsData->maxSliceElements;
+        ASSERT( fileSet.maxSliceElements );
     }
 
     const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable ) && optsData->cacheSize > 0;
@@ -337,7 +342,7 @@ void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* 
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint* writeCounts, const uint32* sliceCounts )
+void DiskBufferQueue::WriteBucketElements( const FileId id, const bool interleaved, const void* buckets, const size_t elementSize, const uint* writeCounts, const uint32* sliceCounts )
 {
     ASSERT( buckets );
     ASSERT( elementSize );
@@ -350,6 +355,7 @@ void DiskBufferQueue::WriteBucketElements( const FileId id, const void* buckets,
     cmd->buckets.buffers     = (byte*)buckets;
     cmd->buckets.elementSize = (uint32)elementSize;
     cmd->buckets.fileId      = id;
+    cmd->buckets.interleaved = interleaved;
 }
 
 //-----------------------------------------------------------
@@ -363,12 +369,13 @@ void DiskBufferQueue::WriteFile( FileId id, uint bucket, const void* buffer, siz
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::ReadBucketElements( const FileId id, Span<byte>& buffer, const size_t elementSize )
+void DiskBufferQueue::ReadBucketElements( const FileId id, const bool interleaved, Span<byte>& buffer, const size_t elementSize )
 {
     Command* cmd = GetCommandObject( Command::ReadBucket );
     cmd->readBucket.buffer      = &buffer;
     cmd->readBucket.elementSize = (uint32)elementSize;
     cmd->readBucket.fileId      = id;
+    cmd->readBucket.interleaved = interleaved;
 }
 
 //-----------------------------------------------------------
@@ -722,12 +729,10 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
     const size_t blockSize = fileSet.files[0]->BlockSize();
-    // #if _DEBUG
-    // #endif
     
     const byte* buffer = buffers;
 
-    if( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) )
+    if( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) || IsFlagSet( fileSet.options, FileSetOptions::Alternating ) )
     {
         const uint32* sliceSizes = cmd.buckets.sliceSizes;
 
@@ -747,11 +752,40 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
 
         // #TODO: Do we have to round-up the size to block boundary?
         ASSERT( writeSize / blockSize * blockSize == writeSize );
-
         ASSERT( fileSet.bucket < fileSet.files.Length() );
-        WriteToFile( *fileSet.files[fileSet.bucket], writeSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, fileSet.bucket );
 
-        fileSet.bucket++;
+        if( IsFlagSet( fileSet.options, FileSetOptions::Alternating ) )
+        {
+            // When in alternating mode, and this write is NOT interleaved, we write each slice to their respective buckets.
+
+            const uint64 maxSliceSize             = fileSet.maxSliceElements * elementSize;
+                  uint64 alternatingSliceBoundary = maxSliceSize;
+
+            for( uint i = 0; i < bucketCount; i++ )
+            {
+                ASSERT( sizes[i] <= fileSet.maxSliceElements );
+
+                const size_t sliceWriteSize = sizes[i] * elementSize;
+                WriteToFile( *fileSet.files[i], sliceWriteSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, i );
+
+                // Seek to the start of the next pre-defined slice 
+                if( sliceWriteSize < maxSliceSize && (i+1) < bucketCount )
+                {
+                    FatalIf( !fileSet.files[i]->Seek( (int64)alternatingSliceBoundary, SeekOrigin::Begin ),
+                        "Failed to seek file %s.%u.tmp to slice boundary.", fileSet.name, i );
+                }
+
+                alternatingSliceBoundary += maxSliceSize;
+
+                buffer += sliceWriteSize;
+            }
+        }
+        else
+        {
+            WriteToFile( *fileSet.files[fileSet.bucket], writeSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, fileSet.bucket );
+        }
+
+        fileSet.bucket++;                           ASSERT( fileSet.bucket <= fileSet.files.Length() );
         fileSet.bucket %= fileSet.files.Length();
     }
     else
@@ -783,13 +817,36 @@ void DiskBufferQueue::CmdReadBucket( const Command& cmd )
     const FileId fileId      = cmd.readBucket.fileId;
     const size_t elementSize = cmd.readBucket.elementSize;
     FileSet&     fileSet     = _files[(int)fileId];
+    const uint32 bucketCount = (uint32)fileSet.files.Length();
+
+    const bool alternating               = IsFlagSet( fileSet.options, FileSetOptions::Alternating );
+    const bool alternatingNonInterleaved = alternating && !cmd.readBucket.interleaved;
+
+    // #NOTE: Not implemented in the single-read method for code simplicity.
+    // if( IsFlagSet( fileSet.options, FileSetOptions::Alternating ) && !cmd.readBucket.interleaved )
+    // {
+    //     // Read a single file instead
+    //     Command readCmd;
+    //     readCmd.file.buffer = cmd.readBucket.buffer->Ptr();                               ASSERT( readCmd.file.buffer );
+    //     readCmd.file.fileId = fileId;
+    //     readCmd.file.bucket = fileSet.bucket;
+    //     readCmd.file.size   = fileSet.sliceSizes[fileSet.bucket][0] * elementSize;        ASSERT( readCmd.file.size );
+
+    //     CmdReadFile( cmd );
+        
+    //     // Update user buffer length
+    //     auto userBuffer = const_cast<Span<byte>*>( cmd.readBucket.buffer );
+    //     userBuffer->length = readCmd.file.size; //readCmd.file.size / elementSize;
+
+    //     fileSet.bucket = (fileSet.bucket + 1) % fileSet.files.Length();
+    //     return;
+    // }
     
-    ASSERT( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) );    // #TODO: Read bucket is just a single file read without this flag
+    ASSERT( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) || IsFlagSet( fileSet.options, FileSetOptions::Alternating ) );    // #TODO: Read bucket is just a single file read without this flag
     ASSERT( fileSet.sliceSizes.Ptr() );
     // ASSERT( fileSet.bucket == 0 );      // Should be in bucket 0 at this point // #NOTE: Perhaps have the user specify the bucket to read instead?
     
     const bool   directIO    = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
-    const uint32 bucketCount = (uint32)fileSet.files.Length();
     const auto   sliceSizes  = fileSet.sliceSizes;
     const size_t blockSize   = fileSet.files[0]->BlockSize();
 
@@ -798,13 +855,27 @@ void DiskBufferQueue::CmdReadBucket( const Command& cmd )
 
     Span<byte> tempBlock;
 
+    const uint64 maxSliceSize             = fileSet.maxSliceElements * elementSize;
+          uint64 alternatingSliceBoundary = maxSliceSize;
+
     for( uint32 slice = 0; slice < bucketCount; slice++ )
     {
-        const size_t sliceSize   = sliceSizes[slice][fileSet.bucket];
-        const size_t readSize    = sliceSize + tempBlock.Length();
-        const size_t alignedSize = CDivT( readSize, blockSize ) * blockSize;   // Sizes are written aligned, and must also be read aligned
+        const size_t sliceSize     = sliceSizes[slice][fileSet.bucket];
+        const size_t readSize      = sliceSize + tempBlock.Length();
+        const size_t alignedSize   = CDivT( readSize, blockSize ) * blockSize;   // Sizes are written aligned, and must also be read aligned
 
-        ReadFromFile( *fileSet.files[slice], alignedSize, readBuffer.Ptr(), nullptr, blockSize, directIO, fileSet.name, fileSet.bucket );
+        const uint32 fileBucketIdx = alternatingNonInterleaved ? fileSet.bucket : slice;
+
+        IStream& stream = *fileSet.files[fileBucketIdx];
+        ReadFromFile( stream, alignedSize, readBuffer.Ptr(), nullptr, blockSize, directIO, fileSet.name, fileSet.bucket );
+
+        // When alternating, we need to seek to the start of the next slice boundary
+        if( alternating && alignedSize < maxSliceSize && (slice+1) < bucketCount )
+        {
+            FatalIf( !stream.Seek( (int64)alternatingSliceBoundary, SeekOrigin::Begin ), 
+                "Failed to seek while reading alternating bucket %s.%u.tmp.", fileSet.name, fileBucketIdx );
+        }
+        alternatingSliceBoundary += maxSliceSize;
 
         // Replace the temp block we just overwrote, if we have one
         if( tempBlock.Length() )
@@ -1100,7 +1171,6 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
 }
 
 #if _DEBUG
-
 //-----------------------------------------------------------
 void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
 {
@@ -1152,6 +1222,7 @@ void DiskBufferQueue::CmdDbgReadSliceSizes( const Command& cmd )
             "Failed to read slice size for table %d", (int)cmd.dbgSliceSizes.table+1  );
     }
 }
+
 
 #endif
 

@@ -170,8 +170,8 @@ private:
         // Write to disk (and synchronize threads)
         if( self->BeginLockBlock() )
         {
-            _ioQueue.WriteBucketElementsT( FileId::FX0  , yEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
-            _ioQueue.WriteBucketElementsT( FileId::META0, xEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT( FileId::FX0  , true, yEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT( FileId::META0, true, xEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
             _ioQueue.SignalFence( _writeFence, bucket+2 );
             _ioQueue.CommitCommands();
 
@@ -277,8 +277,8 @@ void DbgValidateF1( DiskPlotContext& context )
             Span<uint32> yBucket = tmpBuffer.template As<uint32>();
             Span<uint32> xBucket = tmpBuffer2;
 
-            ioQueue.ReadBucketElementsT( FileId::FX0  , yBucket );
-            ioQueue.ReadBucketElementsT( FileId::META0, xBucket );
+            ioQueue.ReadBucketElementsT( FileId::FX0  , true, yBucket );
+            ioQueue.ReadBucketElementsT( FileId::META0, true, xBucket );
             ioQueue.SignalFence( fence );
             ioQueue.CommitCommands();
             fence.Wait();

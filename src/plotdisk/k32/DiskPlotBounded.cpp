@@ -42,12 +42,12 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
 
     // Temp2
     {
-        FileSetOptions opts = FileSetOptions::Interleaved;
+        FileSetInitData data = {};
+        FileSetOptions  opts = context.cfg->alternateBuckets ? FileSetOptions::Alternating : FileSetOptions::Interleaved;
         
         if( !context.cfg->noTmp2DirectIO )
             opts |= FileSetOptions::DirectIO;
 
-        FileSetInitData data = {};
         opts |= FileSetOptions::UseTemp2;
 
         size_t metaCacheSize = 0;
@@ -56,7 +56,6 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
         {
             // In fully interleaved mode (bigger writes chunks), we need 192GiB for k=32
             // In alternating mode, we need 96 GiB.
-            // #TODO: Support alternating mode
             
             opts |= FileSetOptions::Cachable;
             data.cache = context.cache;
@@ -64,9 +63,9 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
             // Proportion out the size required per file:
             //  A single y or index file requires at maximum 16GiB
             //  A asingle meta file at its maximum will require 64GiB
-            // Divide the whole cache into 12 equal parts, where each meta file represent 4 parts.
+            // Divide the whole cache into 12 (6 for alternating mode) equal parts, where each meta file represent 4 parts.
             // Ex: 192 / 12 = 16.  This gives us 4 files of 16GiB and 2 files of 64GiB
-            size_t singleFileCacheSize = context.cacheSize / 12;
+            size_t singleFileCacheSize = context.cacheSize / ( context.cfg->alternateBuckets ? 6 : 12 );
 
             // Align to block size
             singleFileCacheSize = numBuckets * RoundUpToNextBoundaryT( singleFileCacheSize / numBuckets - context.tmp2BlockSize, context.tmp2BlockSize );
@@ -83,14 +82,38 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
             data.cache = (byte*)data.cache + data.cacheSize;
         };
 
-        InitCachableFileSet( FileId::FX0   , "y0"    , numBuckets, opts, data );
-        InitCachableFileSet( FileId::FX1   , "y1"    , numBuckets, opts, data );
-        InitCachableFileSet( FileId::INDEX0, "index0", numBuckets, opts, data );
-        InitCachableFileSet( FileId::INDEX1, "index1", numBuckets, opts, data );
+        if( _context.cfg->alternateBuckets )
+        {
+            const uint64 blockSize       = context.tmp2BlockSize;
+            const uint64 tableEntries    = 1ull << 32;
+            const uint64 bucketEntries   = tableEntries / numBuckets;
+            const uint64 sliceEntries    = bucketEntries / numBuckets;
 
-        data.cacheSize = metaCacheSize;
-        InitCachableFileSet( FileId::META0, "meta0", numBuckets, opts, data );
-        InitCachableFileSet( FileId::META1, "meta1", numBuckets, opts, data );
+            const uint64 ysPerBlock      = blockSize / sizeof( uint32 );
+            const uint64 metasPerBlock   = blockSize / (sizeof( uint32 ) * 4);
+
+            const uint64 sliceEntriesY    = RoundUpToNextBoundaryT( (uint64)(sliceEntries * BB_DP_XTRA_ENTRIES_PER_BUCKET), ysPerBlock    );
+            const uint64 sliceEntriesMeta = RoundUpToNextBoundaryT( (uint64)(sliceEntries * BB_DP_XTRA_ENTRIES_PER_BUCKET), metasPerBlock );
+            
+            data.maxSliceElements = sliceEntriesY;
+            InitCachableFileSet( FileId::FX0   , "y0"    , numBuckets, opts, data );
+            InitCachableFileSet( FileId::INDEX0, "index0", numBuckets, opts, data );
+
+            data.maxSliceElements = sliceEntriesMeta;
+            data.cacheSize        = metaCacheSize;
+            InitCachableFileSet( FileId::META0, "meta0", numBuckets, opts, data );
+        }
+        else
+        {
+            InitCachableFileSet( FileId::FX0   , "y0"    , numBuckets, opts, data );
+            InitCachableFileSet( FileId::FX1   , "y1"    , numBuckets, opts, data );
+            InitCachableFileSet( FileId::INDEX0, "index0", numBuckets, opts, data );
+            InitCachableFileSet( FileId::INDEX1, "index1", numBuckets, opts, data );
+
+            data.cacheSize = metaCacheSize;
+            InitCachableFileSet( FileId::META0, "meta0", numBuckets, opts, data );
+            InitCachableFileSet( FileId::META1, "meta1", numBuckets, opts, data );
+        }
     }
 }
 
@@ -315,7 +338,7 @@ void K32BoundedPhase1::RunFx()
 
     #if _DEBUG
         BB_DP_DBG_WriteTableCounts( _context );
-
+         // #TODO: Update this for alternating mode
         _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::FX0    : FileId::FX1    );
         _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::INDEX0 : FileId::INDEX1 );
         _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::META0  : FileId::META1  );
