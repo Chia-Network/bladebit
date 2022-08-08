@@ -449,7 +449,7 @@ private:
                 ASSERT( tableEntryCount + totalMatches == _maxTableEntries );
             }
 
-            // WritePairs( self, bucket, totalMatches, matches, matchOffset );
+            WritePairs( self, bucket, totalMatches, matches, matchOffset );
 
             ///
             /// Sort meta on Y
