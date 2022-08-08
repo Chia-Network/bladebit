@@ -68,6 +68,9 @@ class DiskPlotFxBounded
 
     static constexpr uint32 _k               = 32;
     static constexpr uint64 _maxTableEntries = (1ull << _k) - 1;
+    static constexpr uint64 _maxSliceEntries = (uint64)((_maxTableEntries / _numBuckets / _numBuckets ) * BB_DP_ENTRY_SLICE_MULTIPLIER);
+
+
     static constexpr uint32 _bucketBits      = bblog2( _numBuckets );
     static constexpr uint32 _pairsMaxDelta   = 512;
     static constexpr uint32 _pairsLeftBits   = _k - _bucketBits + 1;    // Buckets may overflow, so need an extra bit
@@ -86,7 +89,6 @@ public:
         , _fxWriteFence  ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
         , _pairWriteFence( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
         , _mapWriteFence ( context.fencePool ? context.fencePool->RequireFence() : *(Fence*)nullptr )
-        , _interleaved   ( (context.cfg && !context.cfg->alternateBuckets) && (( int)rTable & 1 ) == 0 )                 // Only even tables have interleaved writes,  when alternating mode is enabled
     #if BB_DP_FP_MATCH_X_BUCKET
 
     #endif
@@ -103,6 +105,8 @@ public:
 
         if( context.cfg && context.cfg->alternateBuckets )
         {
+            _interleaved = ((uint)rTable & 1) == 0; // Only even tables have interleaved writes when alternating mode is enabled
+    
             _yId   [0] = FileId::FX0;
             _idxId [0] = FileId::INDEX0;
             _metaId[0] = FileId::META0;
@@ -445,7 +449,7 @@ private:
                 ASSERT( tableEntryCount + totalMatches == _maxTableEntries );
             }
 
-            WritePairs( self, bucket, totalMatches, matches, matchOffset );
+            // WritePairs( self, bucket, totalMatches, matches, matchOffset );
 
             ///
             /// Sort meta on Y
@@ -995,6 +999,17 @@ private:
 
             ASSERT( ySliceCounts.Length() == metaSliceCounts.Length() );
 
+            #if _DEBUG
+            {
+                const uint64 maxSliceEntries = _maxSliceEntries;
+                for( uint32 i = 0; i < _numBuckets; i++ )
+                {
+                    ASSERT( yAlignedSliceCount[i] <= maxSliceEntries );
+                    ASSERT( metaAlignedSliceCount[i] <= maxSliceEntries );
+                } 
+            }
+            #endif
+
             _ioQueue.WriteBucketElementsT<uint32>( yId  , _interleaved, yOut   .Ptr(),  yAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );
             _ioQueue.WriteBucketElementsT<uint32>( idxId, _interleaved, idxOut .Ptr(),  yAlignedSliceCount.Ptr(), ySliceCounts.Ptr() );
                 
@@ -1303,7 +1318,7 @@ private:
     Span<uint32>        _xWriteBuffer;          // Set by the control thread for other threads to use
 
     // Writers for when using alternating mode, for non-interleaved writes
-    bool                _interleaved;
+    bool                _interleaved = true;
     
     // Working buffers
     Span<uint64>        _yTmp;

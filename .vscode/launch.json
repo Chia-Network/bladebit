@@ -83,8 +83,8 @@
                 "--c-threads", "28",
                 "--p2-threads", "24",
 
-                "--cache", "197G",
-                // "--cache", "96G",
+                // "--cache", "196G",
+                "--cache", "99G",
                 // "--cache", "200G",
                 // "--cache", "64G",
                 // "-s",

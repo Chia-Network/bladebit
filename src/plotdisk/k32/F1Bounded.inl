@@ -353,5 +353,6 @@ void DbgValidateF1( DiskPlotContext& context )
     bbvirtfreebounded( tmpBuffer.Ptr() );
     bbvirtfreebounded( tmpBuffer2.Ptr() );
 }
+
 #endif
 

@@ -92,14 +92,14 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
             const uint64 ysPerBlock      = blockSize / sizeof( uint32 );
             const uint64 metasPerBlock   = blockSize / (sizeof( uint32 ) * 4);
 
-            const uint64 sliceEntriesY    = RoundUpToNextBoundaryT( (uint64)(sliceEntries * BB_DP_XTRA_ENTRIES_PER_BUCKET), ysPerBlock    );
-            const uint64 sliceEntriesMeta = RoundUpToNextBoundaryT( (uint64)(sliceEntries * BB_DP_XTRA_ENTRIES_PER_BUCKET), metasPerBlock );
+            const uint64 sliceSizeY    = RoundUpToNextBoundaryT( (uint64)(sliceEntries * BB_DP_ENTRY_SLICE_MULTIPLIER), ysPerBlock    ) * sizeof( uint32 );
+            const uint64 sliceSizeMeta = RoundUpToNextBoundaryT( (uint64)(sliceEntries * BB_DP_ENTRY_SLICE_MULTIPLIER), metasPerBlock ) * sizeof( uint32 ) * 4;
             
-            data.maxSliceElements = sliceEntriesY;
+            data.maxSliceSize = sliceSizeY;
             InitCachableFileSet( FileId::FX0   , "y0"    , numBuckets, opts, data );
             InitCachableFileSet( FileId::INDEX0, "index0", numBuckets, opts, data );
 
-            data.maxSliceElements = sliceEntriesMeta;
+            data.maxSliceSize = sliceSizeMeta;
             data.cacheSize        = metaCacheSize;
             InitCachableFileSet( FileId::META0, "meta0", numBuckets, opts, data );
         }

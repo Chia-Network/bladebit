@@ -37,19 +37,21 @@ struct FileSetInitData
     size_t cacheSize        = 0;        // Cache size in bytes
 
     // For alternating mode
-    uint64 maxSliceElements = 0;        // Maximum element count of a bucket slice
+    uint64 maxSliceSize = 0;        // Maximum size (in bytes) of a bucket slice
 };
 
 struct FileSet
 {
-    const char*        name             = nullptr;
+    const char*        name         = nullptr;
     Span<IStream*>     files;
-    Span<IStream*>     readFiles;                                // When FileSetOptions::Alternating is enabled, we have to keep separate read streams
-    void*              blockBuffer      = nullptr;               // For FileSetOptions::BlockAlign
-    uint64             maxSliceElements = 0;                     // Maximum element count of a bucket slice, for FileSetOptions::Alternating
-    Span<Span<size_t>> sliceSizes;
-    uint32             bucket           = 0;                     // Current bucket that generated slices. Valid when writing in interleaved mode and alternating mode
-    FileSetOptions     options          = FileSetOptions::None;
+    Span<IStream*>     readFiles;                            // When FileSetOptions::Alternating is enabled, we have to keep separate read streams
+    void*              blockBuffer  = nullptr;               // For FileSetOptions::BlockAlign
+    uint64             maxSliceSize = 0;                     // Maximum size (in bytes) of a bucket slice, for FileSetOptions::Alternating
+    Span<Span<size_t>> readSliceSizes ;
+    Span<Span<size_t>> writeSliceSizes;
+    uint32             readBucket   = 0;                     // Current read/write bucket that generated slices. Valid when writing in interleaved mode and alternating mode
+    uint32             writeBucket  = 0;
+    FileSetOptions     options      = FileSetOptions::None;
 
 };
 
@@ -240,7 +242,7 @@ public:
     }
 
     #if _DEBUG || BB_TEST_MODE
-        const Span<Span<size_t>> SliceSizes( const FileId fileId ) const { return _files[(int)fileId].sliceSizes; }
+        // const Span<Span<size_t>> SliceSizes( const FileId fileId ) const { return _files[(int)fileId].sliceSizes; }
     #endif
 
     #if _DEBUG
