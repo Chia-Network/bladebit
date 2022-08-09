@@ -77,6 +77,7 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     Log::Line( " Heap size      : %.2lf GiB ( %.2lf MiB )", (double)_cx.heapSize BtoGB, (double)_cx.heapSize BtoMB );
     Log::Line( " Cache size     : %.2lf GiB ( %.2lf MiB )", (double)_cx.cacheSize BtoGB, (double)_cx.cacheSize BtoMB );
     Log::Line( " Bucket count   : %u"       , _cx.numBuckets    );
+    Log::Line( " Alternating I/O: %s"       , cfg.alternateBuckets ? "true" : "false" );
     Log::Line( " F1  threads    : %u"       , _cx.f1ThreadCount );
     Log::Line( " FP  threads    : %u"       , _cx.fpThreadCount );
     Log::Line( " C   threads    : %u"       , _cx.cThreadCount  );
