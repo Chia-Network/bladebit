@@ -55,7 +55,7 @@ K32BoundedPhase1::K32BoundedPhase1( DiskPlotContext& context )
         if( context.cache )
         {
             // In fully interleaved mode (bigger writes chunks), we need 192GiB for k=32
-            // In alternating mode, we need 96 GiB.
+            // In alternating mode, we need 96 GiB (around 99GiB if we account for disk block-alignment requirements).
             
             opts |= FileSetOptions::Cachable;
             data.cache = context.cache;
@@ -349,3 +349,4 @@ void K32BoundedPhase1::RunFx()
         _ioQueue.CommitCommands();
     #endif
 }
+

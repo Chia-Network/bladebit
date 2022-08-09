@@ -1081,6 +1081,7 @@ size_t DiskPlotPhase3::GetRequiredHeapSize( const uint32 numBuckets, const bool 
     }
 
     Fatal( "Unexpected bucket size %u.", numBuckets );
+    return 0;
 }
 
 //-----------------------------------------------------------

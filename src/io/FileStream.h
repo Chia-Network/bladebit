@@ -81,6 +81,8 @@ public:
 
     inline intptr_t Id() { return (intptr_t)_fd; }
 
+    static size_t GetBlockSizeForPath( const char* pathU8 );
+
 private:
     inline bool HasValidFD() const
     {

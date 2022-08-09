@@ -13,7 +13,7 @@ public:
     inline BlockWriter( IAllocator& allocator, const FileId fileId, Fence& fence, const size_t blockSize, const size_t elementCount )
         : _fileId   ( fileId )
         , _fence    ( &fence )
-        , _blockSize( blockSize )
+        , _blockSize( (uint32)blockSize )
     {
         static_assert( sizeof( T ) == 1 || ( sizeof( T ) & 1) == 0 );
 

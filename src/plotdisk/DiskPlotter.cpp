@@ -395,16 +395,10 @@ bool DiskPlotter::GetTmpPathsBlockSizes( const char* tmpPath1, const char* tmpPa
     ASSERT( tmpPath1 && *tmpPath1 );
     ASSERT( tmpPath2 && *tmpPath2 );
 
-    FileStream tmp1Dir, tmp2Dir;
+    tmpPath1Size = FileStream::GetBlockSizeForPath( tmpPath1 );
+    tmpPath2Size = FileStream::GetBlockSizeForPath( tmpPath2 );
 
-    if( !tmp1Dir.Open( tmpPath1, FileMode::Open, FileAccess::Read ) )
-        return false;
-    if( !tmp2Dir.Open( tmpPath2, FileMode::Open, FileAccess::Read ) )
-        return false;
-
-    tmpPath1Size = tmp1Dir.BlockSize();
-    tmpPath2Size = tmp2Dir.BlockSize();
-    return true;
+    return tmpPath1Size && tmpPath2Size;
 }
 
 //-----------------------------------------------------------

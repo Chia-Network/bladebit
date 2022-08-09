@@ -42,7 +42,7 @@ struct Span
 
     inline T& operator[]( int64 index ) const
     {
-        ASSERT( index < length );
+        ASSERT( index < (int64)length );
         return this->values[index];
     }
 
