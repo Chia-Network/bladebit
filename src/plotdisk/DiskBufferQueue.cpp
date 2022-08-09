@@ -313,17 +313,22 @@ void DiskBufferQueue::FinishPlot( Fence& fence )
     const uint32 RETRY_COUNT  = 10;
     const long   MS_WAIT_TIME = 1000;
 
+    Log::Line( "Renaming plot to '%s'", _plotFullName.c_str() );
+
+    int32 error = 0;
+
     for( uint32 i = 0; i < RETRY_COUNT; i++ )
     {
-        int r = rename( plotPath, _plotFullName.c_str() );
-        if( !r )
+        const bool success = FileStream::Move( plotPath, _plotFullName.c_str(), &error );
+
+        if( success )
             break;
         
-        Log::Line( "Error: Could not rename plot file with error: %d.", (int32)errno );
+        Log::Line( "Error: Could not rename plot file with error: %d.", error );
 
         if( i+1 == RETRY_COUNT)
         {
-            Log::Line( "Error:: Failed to to rename plot file after %u retries. Please rename manually." );
+            Log::Line( "Error:: Failed to to rename plot file after %u retries. Please rename manually.", RETRY_COUNT );
             break;
         }
 

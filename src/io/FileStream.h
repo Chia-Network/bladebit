@@ -83,6 +83,9 @@ public:
 
     static size_t GetBlockSizeForPath( const char* pathU8 );
 
+    // Change name or location of file
+    static bool   Move( const char* oldPathU8, const char* newPathU8, int32* outError = nullptr );
+
 private:
     inline bool HasValidFD() const
     {

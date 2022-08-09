@@ -324,3 +324,15 @@ size_t FileStream::GetBlockSizeForPath( const char* pathU8 )
     
     return file.BlockSize();
 }
+
+//-----------------------------------------------------------
+bool FileStream::Move( const char* oldPathU8, const char* newPathU8, int32* outError )
+{
+    const bool moved = rename( oldPathU8, newPathU8 ) == 0;
+
+    if( !moved && outError )
+        *outError = (int32)errno;
+
+    return moved;
+}
+

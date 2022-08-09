@@ -447,6 +447,38 @@ size_t FileStream::GetBlockSizeForPath( const char* pathU8 )
 }
 
 //-----------------------------------------------------------
+bool FileStream::Move( const char* oldPathU8, const char* newPathU8, int32* outError )
+{
+    wchar_t oldPathU16Stack[BUF16_STACK_LEN];
+    wchar_t newPathU16Stack[BUF16_STACK_LEN];
+
+    wchar_t* oldPath16 = Utf8ToUtf16( oldPathU8, oldPathU16Stack, BUF16_STACK_LEN );
+    if( !oldPath16 )
+        return false;
+
+    wchar_t* newPath16 = Utf8ToUtf16( newPathU8, newPathU16Stack, BUF16_STACK_LEN );
+    if( !newPath16 )
+    {
+        if( oldPath16 != oldPathU16Stack )
+            free( oldPath16 );
+        return false;
+    }
+
+    const BOOL moved = ::MoveFileW( oldPath16, newPath16 );
+
+    if( !moved && outError )
+        *outError = (int32)::GetLastError();
+
+    if( oldPath16 != oldPathU16Stack )
+        free( oldPath16 );
+
+    if( newPath16 != newPathU16Stack )
+        free( newPath16 );
+
+    return (bool)moved;
+}
+
+//-----------------------------------------------------------
 //bool GetFileClusterSize( wchar_t* filePath, size_t& outClusterSize )
 bool GetFileClusterSize( HANDLE hFile, size_t& outClusterSize )
 {
