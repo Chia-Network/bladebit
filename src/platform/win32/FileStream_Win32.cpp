@@ -400,6 +400,8 @@ size_t FileStream::GetBlockSizeForPath( const char* pathU8 )
     {
         if( !GetFileClusterSize( fd, blockSize ) )
             blockSize = 0;
+
+        ::CloseHandle( fd );
     }
 
     if( path16 != path16Stack )
