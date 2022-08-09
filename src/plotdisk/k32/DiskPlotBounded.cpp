@@ -149,8 +149,6 @@ size_t K32BoundedPhase1::GetRequiredSize( const uint32 numBuckets, const size_t 
 //-----------------------------------------------------------
 void K32BoundedPhase1::Run()
 {
-    Log::Line( "Table 1: F1 generation" );
-
     switch( _context.numBuckets )
     {
         case 64 : RunWithBuckets<64 >(); break;
@@ -283,14 +281,15 @@ void K32BoundedPhase1::RunF1()
 {
     _context.ioWaitTime = Duration::zero();
 
+    Log::Line( "Table 1: F1 generation" );
     Log::Line( "Generating f1..." );
-    auto timer = TimerBegin();
 
+    const auto timer = TimerBegin();
     StackAllocator allocator( _context.heapBuffer, _context.heapSize );
     K32BoundedF1<_numBuckets> f1( _context, allocator );
     f1.Run();
+    const double elapsed = TimerEnd( timer );
 
-    double elapsed = TimerEnd( timer );
     Log::Line( "Finished f1 generation in %.2lf seconds. ", elapsed );
     Log::Line( "Table 1 I/O wait time: %.2lf seconds.", _context.p1TableWaitTime[(int)TableId::Table1] );
     

@@ -102,7 +102,7 @@ public:
         Fence& fence = _context.fencePool->RequireFence();
         _ioQueue.SignalFence( fence, 1 );
         _ioQueue.CommitCommands();
-        fence.Wait( 1, _context.ioWaitTime );
+        fence.Wait( 1, _context.p1TableWaitTime[(int)TableId::Table1] );
 
         _context.entryCounts[(int)TableId::Table1] = 1ull << _k;
 
