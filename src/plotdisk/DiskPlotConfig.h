@@ -112,7 +112,15 @@
 #endif
 
 
+// Beta-mode
+// (Force for now)
+#define BB_BETA_MODE 1
+#if BB_BETA_MODE
+    #ifdef BB_IO_METRICS_ON
+        #undef BB_IO_METRICS_ON
+    #endif
 
-
+    #define BB_IO_METRICS_ON 1
+#endif
 
 
