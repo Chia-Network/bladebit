@@ -395,16 +395,10 @@ bool DiskPlotter::GetTmpPathsBlockSizes( const char* tmpPath1, const char* tmpPa
     ASSERT( tmpPath1 && *tmpPath1 );
     ASSERT( tmpPath2 && *tmpPath2 );
 
-    FileStream tmp1Dir, tmp2Dir;
+    tmpPath1Size = FileStream::GetBlockSizeForPath( tmpPath1 );
+    tmpPath2Size = FileStream::GetBlockSizeForPath( tmpPath2 );
 
-    if( !tmp1Dir.Open( tmpPath1, FileMode::Open, FileAccess::Read ) )
-        return false;
-    if( !tmp2Dir.Open( tmpPath2, FileMode::Open, FileAccess::Read ) )
-        return false;
-
-    tmpPath1Size = tmp1Dir.BlockSize();
-    tmpPath2Size = tmp2Dir.BlockSize();
-    return true;
+    return tmpPath1Size && tmpPath2Size;
 }
 
 //-----------------------------------------------------------
@@ -511,7 +505,7 @@ Creates plots by making use of a disk to temporarily store and read values.
                       You may specify one of: 128, 256, 512, 1024 and 64 for if --k32-bounded is enabled.
                       1024 is not available for plots of k < 33.
 
- --ubounded         : Create an unbounded k32 plot. That is a plot that does not cut-off entries that 
+ --unbounded        : Create an unbounded k32 plot. That is a plot that does not cut-off entries that 
                       overflow 2^32;
  
  -a, --alternate    : Halves the temp2 cache size requirements by alternating bucket writing methods
@@ -555,20 +549,22 @@ Creates plots by making use of a disk to temporarily store and read values.
 
 [NOTES]
 If you don't specify any thread count overrides, the default thread count
-specified in the global options will be used.
+specified in the global options will be used
+(specified as -t <thread_count> before the diskplot command).
 
 Phases 2 and 3 are typically more I/O bound than Phase 1 as these
 phases perform less computational work than Phase 1 and thus the CPU
 finishes the currently loaded workload quicker and will proceed to
-grab another buffer from disk with a shorter frequency. Because of this
+grab another buffer from the disk within a shorter time frame. Because of this
 you would typically lower the thread count for these phases if you are
-incurring I/O waits.
+incurring high I/O waits.
 
 [EXAMPLES]
-bladebit -t 24 -f ... -c ... diskplot --b 128 --cache 32G -t1 /my/temporary/plot/dir
- --f1-threads 3 --fp-threads 16 --c-threads 8 --p2-threads 12 --p3-threads 8 /my/output/dir
+# Simple config:
+bladebit -t 24 -f <farmer_pub_key> -c <contract_address> diskplot --t1 /my/temporary/plot/dir /my/output/dir
 
-bladebit -t 8 -f ... -c ... diskplot -t2 /my/temporary/plot/dir -t2 /my/other/tmp/dir /my/output/dir
+# With fine-grained control over threads per phase/section (see bladebit -h diskplot):
+bladebit -t 30 -f <farmer_pub_key> -c <contract_address> diskplot --f1-threads 16 --c-threads 16 --p2-threads 8 --t1 /my/temporary/plot/dir /my/output/dir
 )";
 
 //-----------------------------------------------------------

@@ -18,38 +18,40 @@ enum FileSetOptions
     Cachable    = 1 << 1,   // Use a in-memory cache for the file
     UseTemp2    = 1 << 2,   // Open the file set the high-frequency temp directory
 
+    Interleaved = 1 << 3,   // Write in interleaved mode. That is all slices written to a single bucket.
     
-    // BatchedSlices = 1 << 3, // Write bucket slices in a batch, instead of a slice per each bucket.
-    Interleaved   = 1 << 3,   // Write in interleaved mode. That is all slices written to a single bucket.
+    Alternating = 1 << 4,   // Alternate between bucket writing/reading modes. This allows for lower cache size.
 
-    BlockAlign  = 1 << 4,   // Only write in block-aligned segments. Keeping a block-sized buffer for left overs.
+    BlockAlign  = 1 << 5,   // Only write in block-aligned segments. Keeping a block-sized buffer for left overs.
                             // The last write flushes the whole block.
                             // This can be very memory-costly on file systems with large block sizes
                             // as interleaved buckets will need many block buffers.
                             // This must be used with DirectIO.
-
 };
 ImplementFlagOps( FileSetOptions );
 
 struct FileSetInitData
 {
     // Cachable
-    void*  cache     = nullptr; // Cache buffer
-    size_t cacheSize = 0;       // Cache size in bytes
+    void*  cache            = nullptr;  // Cache buffer
+    size_t cacheSize        = 0;        // Cache size in bytes
 
-    // Interleaved
-    // size_t sliceSize = 0;       // Maximum size of a bucket slice
+    // For alternating mode
+    uint64 maxSliceSize = 0;        // Maximum size (in bytes) of a bucket slice
 };
 
 struct FileSet
 {
-    const char*        name            = nullptr;
+    const char*        name         = nullptr;
     Span<IStream*>     files;
-    void*              blockBuffer     = nullptr;               // For FileSetOptions::BlockAlign
-    // size_t          sliceCapacity   = 0;                     // (in bytes) For FileSetOptions::Interleaved
-    Span<Span<size_t>> sliceSizes;
-    uint32             bucket          = 0; // Current bucket. Valid when writing in interleaved mode
-    FileSetOptions     options         = FileSetOptions::None;
+    Span<IStream*>     readFiles;                            // When FileSetOptions::Alternating is enabled, we have to keep separate read streams
+    void*              blockBuffer  = nullptr;               // For FileSetOptions::BlockAlign
+    uint64             maxSliceSize = 0;                     // Maximum size (in bytes) of a bucket slice, for FileSetOptions::Alternating
+    Span<Span<size_t>> readSliceSizes ;
+    Span<Span<size_t>> writeSliceSizes;
+    uint32             readBucket   = 0;                     // Current read/write bucket that generated slices. Valid when writing in interleaved mode and alternating mode
+    uint32             writeBucket  = 0;
+    FileSetOptions     options      = FileSetOptions::None;
 
 };
 
@@ -92,17 +94,19 @@ class DiskBufferQueue
 
             struct
             {
-                const uint* writeSizes;  // Size that will actually be written to disk (usually padded and block-aligned)
-                const uint* sliceSizes;  // Actual number of slices that we have per-bucket. This used to store it for reading-back buckets.
+                const uint* writeSizes;     // Size that will actually be written to disk (usually padded and block-aligned)
+                const uint* sliceSizes;     // Actual number of slices that we have per-bucket. This used to store it for reading-back buckets.
                 const byte* buffers;
                 FileId      fileId;
-                uint32      elementSize; // Size of each element in the buffer
+                uint32      elementSize;    // Size of each element in the buffer
+                bool        interleaved;    // Write interleaved or not?
             } buckets;
 
             struct {
                 Span<byte>* buffer;
                 FileId      fileId;
                 uint32      elementSize;
+                bool        interleaved;    // Read in interleaved mode
             } readBucket;
 
             struct
@@ -185,17 +189,17 @@ public:
 
     void WriteBuckets( FileId id, const void* buckets, const uint* writeSizes, const uint32* sliceSizes = nullptr );
 
-    void WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint32* writeCounts, const uint32* sliceCounts = nullptr );
+    void WriteBucketElements( const FileId id, const bool interleaved, const void* buckets, const size_t elementSize, const uint32* writeCounts, const uint32* sliceCounts = nullptr );
 
     template<typename T>
-    void WriteBucketElementsT( const FileId id, const T* buckets, const uint32* writeCounts, const uint32* sliceCounts = nullptr );
+    void WriteBucketElementsT( const FileId id, const bool interleaved, const T* buckets, const uint32* writeCounts, const uint32* sliceCounts = nullptr );
 
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
 
-    void ReadBucketElements( const FileId id, Span<byte>& buffer, const size_t elementSize );
+    void ReadBucketElements( const FileId id, const bool interleaved, Span<byte>& buffer, const size_t elementSize );
 
     template<typename T>
-    void ReadBucketElementsT( const FileId id, Span<T>& buffer );
+    void ReadBucketElementsT( const FileId id, const bool interleaved, Span<T>& buffer );
 
     void ReadFile( FileId id, uint bucket, void* dstBuffer, size_t readSize );
 
@@ -238,7 +242,7 @@ public:
     }
 
     #if _DEBUG || BB_TEST_MODE
-        const Span<Span<size_t>> SliceSizes( const FileId fileId ) const { return _files[(int)fileId].sliceSizes; }
+        // const Span<Span<size_t>> SliceSizes( const FileId fileId ) const { return _files[(int)fileId].sliceSizes; }
     #endif
 
     #if _DEBUG
@@ -458,14 +462,14 @@ private:
 
 //-----------------------------------------------------------
 template<typename T>
-inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const T* buckets, const uint32* writeCounts, const uint32* sliceCounts  )
+inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const bool interleaved, const T* buckets, const uint32* writeCounts, const uint32* sliceCounts  )
 {
-    WriteBucketElements( id, (byte*)buckets, sizeof( T ), writeCounts, sliceCounts );
+    WriteBucketElements( id, interleaved, (byte*)buckets, sizeof( T ), writeCounts, sliceCounts );
 }
 
 //-----------------------------------------------------------
 template<typename T>
-inline void DiskBufferQueue::ReadBucketElementsT( const FileId id, Span<T>& buffer )
+inline void DiskBufferQueue::ReadBucketElementsT( const FileId id, const bool interleaved, Span<T>& buffer )
 {
-    ReadBucketElements( id, reinterpret_cast<Span<byte>&>( buffer ), sizeof( T ) );
+    ReadBucketElements( id, interleaved, reinterpret_cast<Span<byte>&>( buffer ), sizeof( T ) );
 }

@@ -115,7 +115,7 @@ public:
 
         // const uint32 startIndex = (uint32)(uintptr_t)(_startPositions[id] - yEntries.Ptr());
 
-        const uint32 matchCount = MatchGroups( self, bucket, bucket,startIndex, _groupBuffers[id],
+        const uint32 matchCount = MatchGroups( self, bucket, bucket, startIndex, _groupBuffers[id],
                                                yEntries, pairs, pairs.Length() );
 
         return pairs.Slice( 0, matchCount );

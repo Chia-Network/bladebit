@@ -2,6 +2,7 @@
 #include "util/Util.h"
 #include "util/Log.h"
 #include <Windows.h>
+#include <stringapiset.h>
 //#include <winioctl.h>
 //#include <shlwapi.h>
 //#pragma comment( lib, "Shlwapi.lib" )
@@ -373,6 +374,108 @@ wchar_t* Utf8ToUtf16( const char* utf8Str, wchar_t* stackBuffer16, const size_t 
     str16[numEncoded] = 0;
 
     return str16;
+}
+
+//-----------------------------------------------------------
+size_t FileStream::GetBlockSizeForPath( const char* pathU8 )
+{
+    wchar_t path16Stack[BUF16_STACK_LEN];
+
+    wchar_t* path16 = Utf8ToUtf16( pathU8, path16Stack, BUF16_STACK_LEN );
+    if( !path16 )
+        return 0;
+
+
+    const DWORD dwShareMode           = FILE_SHARE_READ;
+    const DWORD dwCreationDisposition = OPEN_EXISTING;
+
+    DWORD dwFlags  = FILE_FLAG_BACKUP_SEMANTICS ;
+    DWORD dwAccess = GENERIC_READ;
+
+    HANDLE fd = CreateFile( path16, dwAccess, dwShareMode, NULL,
+                            dwCreationDisposition, dwFlags, NULL );
+
+    size_t blockSize = 0;
+    if( fd != INVALID_HANDLE_VALUE )
+    {
+        if( !GetFileClusterSize( fd, blockSize ) )
+            blockSize = 0;
+    }
+
+    if( path16 != path16Stack )
+        free( path16 );
+
+    return blockSize;
+//    ASSERT( pathU8 );
+//
+//    const int path16Len = ::MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, pathU8, -1, nullptr, 0 );
+//
+//    if( !path16Len )
+//    {
+//        Log::Error( "[Warning] MultiByteToWideChar() failed with error %d", (int)::GetLastError() );
+//        ASSERT( 0 );
+//        return 0;
+//    }
+//
+//    wchar_t* pathU16 = bbcalloc<wchar_t>( path16Len );
+//    const int written = ::MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, pathU8, -1, pathU16, path16Len );
+//    ASSERT( written == path16Len);
+//
+//    if( !written )
+//    {
+//        free( pathU16 );
+//        Log::Error( "[Warning] MultiByteToWideChar() failed with error %d", (int)::GetLastError() );
+//        ASSERT( 0 );
+//        return 0;
+//    }
+//
+//    DWORD sectorsPerCluster, bytesPerSector, numberOfFreeClusters, totalNumberOfClusters;
+//
+//    const BOOL r = GetDiskFreeSpaceW(
+//                    pathU16,
+//                    &sectorsPerCluster,
+//                    &bytesPerSector,
+//                    &numberOfFreeClusters,
+//                    &totalNumberOfClusters );
+//    ASSERT( r );
+//    free( pathU16 );
+//
+//    if( !r )
+//        return 0;
+//
+//    return bytesPerSector * sectorsPerCluster;
+}
+
+//-----------------------------------------------------------
+bool FileStream::Move( const char* oldPathU8, const char* newPathU8, int32* outError )
+{
+    wchar_t oldPathU16Stack[BUF16_STACK_LEN];
+    wchar_t newPathU16Stack[BUF16_STACK_LEN];
+
+    wchar_t* oldPath16 = Utf8ToUtf16( oldPathU8, oldPathU16Stack, BUF16_STACK_LEN );
+    if( !oldPath16 )
+        return false;
+
+    wchar_t* newPath16 = Utf8ToUtf16( newPathU8, newPathU16Stack, BUF16_STACK_LEN );
+    if( !newPath16 )
+    {
+        if( oldPath16 != oldPathU16Stack )
+            free( oldPath16 );
+        return false;
+    }
+
+    const BOOL moved = ::MoveFileW( oldPath16, newPath16 );
+
+    if( !moved && outError )
+        *outError = (int32)::GetLastError();
+
+    if( oldPath16 != oldPathU16Stack )
+        free( oldPath16 );
+
+    if( newPath16 != newPathU16Stack )
+        free( newPath16 );
+
+    return (bool)moved;
 }
 
 //-----------------------------------------------------------

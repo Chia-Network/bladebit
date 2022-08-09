@@ -102,7 +102,7 @@ public:
         Fence& fence = _context.fencePool->RequireFence();
         _ioQueue.SignalFence( fence, 1 );
         _ioQueue.CommitCommands();
-        fence.Wait( 1, _context.ioWaitTime );
+        fence.Wait( 1, _context.p1TableWaitTime[(int)TableId::Table1] );
 
         _context.entryCounts[(int)TableId::Table1] = 1ull << _k;
 
@@ -170,8 +170,8 @@ private:
         // Write to disk (and synchronize threads)
         if( self->BeginLockBlock() )
         {
-            _ioQueue.WriteBucketElementsT( FileId::FX0  , yEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
-            _ioQueue.WriteBucketElementsT( FileId::META0, xEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT( FileId::FX0  , true, yEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
+            _ioQueue.WriteBucketElementsT( FileId::META0, true, xEntries.Ptr(), alignedElementCounts.Ptr(), elementCounts.Ptr() );
             _ioQueue.SignalFence( _writeFence, bucket+2 );
             _ioQueue.CommitCommands();
 
@@ -277,8 +277,8 @@ void DbgValidateF1( DiskPlotContext& context )
             Span<uint32> yBucket = tmpBuffer.template As<uint32>();
             Span<uint32> xBucket = tmpBuffer2;
 
-            ioQueue.ReadBucketElementsT( FileId::FX0  , yBucket );
-            ioQueue.ReadBucketElementsT( FileId::META0, xBucket );
+            ioQueue.ReadBucketElementsT( FileId::FX0  , true, yBucket );
+            ioQueue.ReadBucketElementsT( FileId::META0, true, xBucket );
             ioQueue.SignalFence( fence );
             ioQueue.CommitCommands();
             fence.Wait();
@@ -353,5 +353,6 @@ void DbgValidateF1( DiskPlotContext& context )
     bbvirtfreebounded( tmpBuffer.Ptr() );
     bbvirtfreebounded( tmpBuffer2.Ptr() );
 }
+
 #endif
 

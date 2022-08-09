@@ -75,7 +75,6 @@ DiskBufferQueue::~DiskBufferQueue()
     _deleterThread.WaitForExit();
 
     // #TODO: Wait for command thread
-
     // #TODO: Delete our file sets
 
     free( _filePathBuffer    );
@@ -127,11 +126,21 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     fileSet.blockBuffer  = nullptr;
     fileSet.options      = options;
 
-    if( IsFlagSet( options, FileSetOptions::Interleaved ) )
+    if( IsFlagSet( options, FileSetOptions::Interleaved ) || IsFlagSet( options, FileSetOptions::Alternating ) )
     {
-        fileSet.sliceSizes.SetTo( new Span<size_t>[bucketCount], bucketCount );
+        fileSet.readSliceSizes.SetTo( new Span<size_t>[bucketCount], bucketCount );
+        fileSet.writeSliceSizes.SetTo( new Span<size_t>[bucketCount], bucketCount );
         for( uint32 i = 0; i < bucketCount; i++ )
-            fileSet.sliceSizes[i].SetTo( new size_t[bucketCount]{}, bucketCount );
+        {
+            fileSet.readSliceSizes[i].SetTo( new size_t[bucketCount]{}, bucketCount );
+            fileSet.writeSliceSizes[i].SetTo( new size_t[bucketCount]{}, bucketCount );
+        }
+    }
+
+    if( IsFlagSet( options, FileSetOptions::Alternating ) )
+    {
+        fileSet.maxSliceSize = optsData->maxSliceSize;
+        ASSERT( fileSet.maxSliceSize );
     }
 
     const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable ) && optsData->cacheSize > 0;
@@ -304,17 +313,22 @@ void DiskBufferQueue::FinishPlot( Fence& fence )
     const uint32 RETRY_COUNT  = 10;
     const long   MS_WAIT_TIME = 1000;
 
+    Log::Line( "Renaming plot to '%s'", _plotFullName.c_str() );
+
+    int32 error = 0;
+
     for( uint32 i = 0; i < RETRY_COUNT; i++ )
     {
-        int r = rename( plotPath, _plotFullName.c_str() );
-        if( !r )
+        const bool success = FileStream::Move( plotPath, _plotFullName.c_str(), &error );
+
+        if( success )
             break;
         
-        Log::Line( "Error: Could not rename plot file with error: %d.", (int32)errno );
+        Log::Line( "Error: Could not rename plot file with error: %d.", error );
 
         if( i+1 == RETRY_COUNT)
         {
-            Log::Line( "Error:: Failed to to rename plot file after %u retries. Please rename manually." );
+            Log::Line( "Error:: Failed to to rename plot file after %u retries. Please rename manually.", RETRY_COUNT );
             break;
         }
 
@@ -337,7 +351,7 @@ void DiskBufferQueue::WriteBuckets( FileId id, const void* buckets, const uint* 
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint* writeCounts, const uint32* sliceCounts )
+void DiskBufferQueue::WriteBucketElements( const FileId id, const bool interleaved, const void* buckets, const size_t elementSize, const uint* writeCounts, const uint32* sliceCounts )
 {
     ASSERT( buckets );
     ASSERT( elementSize );
@@ -350,6 +364,7 @@ void DiskBufferQueue::WriteBucketElements( const FileId id, const void* buckets,
     cmd->buckets.buffers     = (byte*)buckets;
     cmd->buckets.elementSize = (uint32)elementSize;
     cmd->buckets.fileId      = id;
+    cmd->buckets.interleaved = interleaved;
 }
 
 //-----------------------------------------------------------
@@ -363,12 +378,13 @@ void DiskBufferQueue::WriteFile( FileId id, uint bucket, const void* buffer, siz
 }
 
 //-----------------------------------------------------------
-void DiskBufferQueue::ReadBucketElements( const FileId id, Span<byte>& buffer, const size_t elementSize )
+void DiskBufferQueue::ReadBucketElements( const FileId id, const bool interleaved, Span<byte>& buffer, const size_t elementSize )
 {
     Command* cmd = GetCommandObject( Command::ReadBucket );
     cmd->readBucket.buffer      = &buffer;
     cmd->readBucket.elementSize = (uint32)elementSize;
     cmd->readBucket.fileId      = id;
+    cmd->readBucket.interleaved = interleaved;
 }
 
 //-----------------------------------------------------------
@@ -722,12 +738,10 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
 
     // Single-threaded for now... We don't have file handles for all the threads yet!
     const size_t blockSize = fileSet.files[0]->BlockSize();
-    // #if _DEBUG
-    // #endif
     
     const byte* buffer = buffers;
 
-    if( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) )
+    if( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) || IsFlagSet( fileSet.options, FileSetOptions::Alternating ) )
     {
         const uint32* sliceSizes = cmd.buckets.sliceSizes;
 
@@ -740,19 +754,59 @@ void DiskBufferQueue::CmdWriteBuckets( const Command& cmd, const size_t elementS
             ASSERT( sliceWriteSize / blockSize * blockSize == sliceWriteSize );
             
             // Save slice sizes for reading-back the bucket
-            fileSet.sliceSizes[fileSet.bucket][i] = sliceSizes[i] * elementSize;    // #TODO: Should we not do element size here?
+            fileSet.writeSliceSizes[fileSet.writeBucket][i] = sliceSizes[i] * elementSize;    // #TODO: Should we not apply element size here?
 
             writeSize += sliceWriteSize;
         }
 
         // #TODO: Do we have to round-up the size to block boundary?
         ASSERT( writeSize / blockSize * blockSize == writeSize );
+        ASSERT( fileSet.writeBucket < fileSet.files.Length() );
 
-        ASSERT( fileSet.bucket < fileSet.files.Length() );
-        WriteToFile( *fileSet.files[fileSet.bucket], writeSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, fileSet.bucket );
+        if( IsFlagSet( fileSet.options, FileSetOptions::Alternating ) )
+        {
+            const bool interleaved = cmd.buckets.interleaved;
 
-        fileSet.bucket++;
-        fileSet.bucket %= fileSet.files.Length();
+            // When in alternating mode we have to issue bucketCount writes per bucket as we need t o ensure
+            // they are all offset to the bucket slice boundary.
+            // #NOTE: We can avoid this on interleaved writes if we add that said offset to the prefix um offset.
+            const uint64 maxSliceSize = fileSet.maxSliceSize;
+
+            for( uint slice = 0; slice < bucketCount; slice++ )
+            {
+                ASSERT( sizes[slice] <= maxSliceSize / elementSize );
+
+                const size_t   sliceWriteSize = sizes[slice] * elementSize;
+                const uint32   fileBucketIdx  = interleaved ? fileSet.writeBucket : slice;
+                      IStream& file           = *fileSet.files[fileBucketIdx];
+
+                // Seek to the start of the (fixed-size) slice boundary
+                {
+                    const uint32 sliceSeekIdx = interleaved ? slice : fileSet.writeBucket;
+                    const int64  sliceOffset  = (int64)( sliceSeekIdx * maxSliceSize );
+
+                    FatalIf( !file.Seek( sliceOffset, SeekOrigin::Begin ),
+                        "Failed to seek file %s.%u.tmp to slice boundary.", fileSet.name, fileBucketIdx );
+                }
+
+                WriteToFile( file, sliceWriteSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, fileBucketIdx );
+
+                buffer += sliceWriteSize;
+            }
+        }
+        else
+        {
+            WriteToFile( *fileSet.files[fileSet.writeBucket], writeSize, buffer, (byte*)fileSet.blockBuffer, fileSet.name, fileSet.writeBucket );
+        }
+
+        if( ++fileSet.writeBucket >= bucketCount )
+        {
+            ASSERT( fileSet.writeBucket <= fileSet.files.Length() );
+
+            // When the last bucket was written, reset the write bucket and swap file slices
+            fileSet.writeBucket = 0;
+            std::swap( fileSet.writeSliceSizes, fileSet.readSliceSizes );
+        }
     }
     else
     {
@@ -783,14 +837,37 @@ void DiskBufferQueue::CmdReadBucket( const Command& cmd )
     const FileId fileId      = cmd.readBucket.fileId;
     const size_t elementSize = cmd.readBucket.elementSize;
     FileSet&     fileSet     = _files[(int)fileId];
+    const uint32 bucketCount = (uint32)fileSet.files.Length();
+
+    const bool alternating               = IsFlagSet( fileSet.options, FileSetOptions::Alternating );
+    const bool alternatingNonInterleaved = alternating && !cmd.readBucket.interleaved;
+
+    // #NOTE: Not implemented in the single-read method for code simplicity.
+    // if( IsFlagSet( fileSet.options, FileSetOptions::Alternating ) && !cmd.readBucket.interleaved )
+    // {
+    //     // Read a single file instead
+    //     Command readCmd;
+    //     readCmd.file.buffer = cmd.readBucket.buffer->Ptr();                               ASSERT( readCmd.file.buffer );
+    //     readCmd.file.fileId = fileId;
+    //     readCmd.file.bucket = fileSet.readBucket;
+    //     readCmd.file.size   = fileSet.sliceSizes[fileSet.readBucket][0] * elementSize;        ASSERT( readCmd.file.size );
+
+    //     CmdReadFile( cmd );
+        
+    //     // Update user buffer length
+    //     auto userBuffer = const_cast<Span<byte>*>( cmd.readBucket.buffer );
+    //     userBuffer->length = readCmd.file.size; //readCmd.file.size / elementSize;
+
+    //     fileSet.readBucket = (fileSet.readBucket + 1) % fileSet.files.Length();
+    //     return;
+    // }
     
-    ASSERT( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) );    // #TODO: Read bucket is just a single file read without this flag
-    ASSERT( fileSet.sliceSizes.Ptr() );
-    // ASSERT( fileSet.bucket == 0 );      // Should be in bucket 0 at this point // #NOTE: Perhaps have the user specify the bucket to read instead?
+    ASSERT( IsFlagSet( fileSet.options, FileSetOptions::Interleaved ) || IsFlagSet( fileSet.options, FileSetOptions::Alternating ) );    // #TODO: Read bucket is just a single file read without this flag
+    ASSERT( fileSet.readSliceSizes.Ptr() );
+    // ASSERT( fileSet.readBucket == 0 );      // Should be in bucket 0 at this point // #NOTE: Perhaps have the user specify the bucket to read instead?
     
     const bool   directIO    = IsFlagSet( fileSet.options, FileSetOptions::DirectIO );
-    const uint32 bucketCount = (uint32)fileSet.files.Length();
-    const auto   sliceSizes  = fileSet.sliceSizes;
+    const auto   sliceSizes  = fileSet.readSliceSizes;
     const size_t blockSize   = fileSet.files[0]->BlockSize();
 
     auto readBuffer  = Span<byte>( cmd.readBucket.buffer->Ptr(), cmd.readBucket.buffer->Length() * elementSize );
@@ -798,13 +875,28 @@ void DiskBufferQueue::CmdReadBucket( const Command& cmd )
 
     Span<byte> tempBlock;
 
+    const uint64 maxSliceSize = fileSet.maxSliceSize;
+
     for( uint32 slice = 0; slice < bucketCount; slice++ )
     {
-        const size_t sliceSize   = sliceSizes[slice][fileSet.bucket];
-        const size_t readSize    = sliceSize + tempBlock.Length();
-        const size_t alignedSize = CDivT( readSize, blockSize ) * blockSize;   // Sizes are written aligned, and must also be read aligned
+        const size_t   sliceSize     = sliceSizes[slice][fileSet.readBucket];
+        const size_t   readSize      = sliceSize + tempBlock.Length();
+        const size_t   alignedSize   = CDivT( readSize, blockSize ) * blockSize;   // Sizes are written aligned, and must also be read aligned
 
-        ReadFromFile( *fileSet.files[slice], alignedSize, readBuffer.Ptr(), nullptr, blockSize, directIO, fileSet.name, fileSet.bucket );
+        const uint32   fileBucketIdx = alternatingNonInterleaved ? fileSet.readBucket : slice;
+              IStream& stream        = *fileSet.files[fileBucketIdx];
+
+        // When alternating, we need to seek to the start of the slice boundary
+        if( alternating )
+        {
+            const uint32 sliceOffsetIdx = alternatingNonInterleaved ? slice : fileSet.readBucket;
+            const int64  sliceOffset    = (int64)( sliceOffsetIdx * maxSliceSize );
+
+            FatalIf( !stream.Seek( sliceOffset, SeekOrigin::Begin ), 
+                "Failed to seek while reading alternating bucket %s.%u.tmp.", fileSet.name, fileBucketIdx );
+        }
+
+        ReadFromFile( stream, alignedSize, readBuffer.Ptr(), nullptr, blockSize, directIO, fileSet.name, fileBucketIdx );
 
         // Replace the temp block we just overwrote, if we have one
         if( tempBlock.Length() )
@@ -832,9 +924,9 @@ void DiskBufferQueue::CmdReadBucket( const Command& cmd )
 
     size_t elementCount = 0;
     for( uint32 slice = 0; slice < bucketCount; slice++ )
-        elementCount += sliceSizes[slice][fileSet.bucket];
+        elementCount += sliceSizes[slice][fileSet.readBucket];
 
-    fileSet.bucket = (fileSet.bucket + 1) % fileSet.files.Length();
+    fileSet.readBucket = (fileSet.readBucket + 1) % fileSet.files.Length();
 
     // Revert buffer length from bytes to element size
     auto userBuffer = const_cast<Span<byte>*>( cmd.readBucket.buffer );
@@ -1100,7 +1192,6 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
 }
 
 #if _DEBUG
-
 //-----------------------------------------------------------
 void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
 {
@@ -1119,7 +1210,7 @@ void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
 
     for( uint32 i = 0; i < numBuckets; i++ )
     {
-              auto   slices    = fileSet.sliceSizes[i];
+              auto   slices    = fileSet.writeSliceSizes[i];
         const size_t sizeWrite = sizeof( size_t ) * numBuckets;
 
         FatalIf( file.Write( slices.Ptr(), sizeWrite ) != sizeWrite,
@@ -1145,13 +1236,14 @@ void DiskBufferQueue::CmdDbgReadSliceSizes( const Command& cmd )
 
     for( uint32 i = 0; i < numBuckets; i++ )
     {
-              auto   slices   = fileSet.sliceSizes[i];
+              auto   slices   = fileSet.readSliceSizes[i];
         const size_t sizeRead = sizeof( size_t ) * numBuckets;
 
         FatalIf( file.Read( slices.Ptr(), sizeRead ) != sizeRead,
             "Failed to read slice size for table %d", (int)cmd.dbgSliceSizes.table+1  );
     }
 }
+
 
 #endif
 

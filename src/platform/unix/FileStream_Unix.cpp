@@ -311,3 +311,28 @@ bool FileStream::Exists( const char* path )
 
     return false;
 }
+
+//-----------------------------------------------------------
+size_t FileStream::GetBlockSizeForPath( const char* pathU8 )
+{
+    FileStream file;
+    if( !file.Open( pathU8, FileMode::Open, FileAccess::Read ) )
+    {
+        Log::Error( "GetBlockSizeForPath() failed with error %d.", (int32)file.GetError() );
+        return 0;
+    }
+    
+    return file.BlockSize();
+}
+
+//-----------------------------------------------------------
+bool FileStream::Move( const char* oldPathU8, const char* newPathU8, int32* outError )
+{
+    const bool moved = rename( oldPathU8, newPathU8 ) == 0;
+
+    if( !moved && outError )
+        *outError = (int32)errno;
+
+    return moved;
+}
+

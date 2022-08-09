@@ -273,13 +273,13 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             {
                 if( cli.ArgMatch( "diskplot" ) )
                     DiskPlotter::PrintUsage();
-                if( cli.ArgMatch( "iotest" ) )
+                else if( cli.ArgMatch( "iotest" ) )
                     IOTestPrintUsage();
-                if( cli.ArgMatch( "memtest" ) )
+                else if( cli.ArgMatch( "memtest" ) )
                     MemTestPrintUsage();
-                if( cli.ArgMatch( "validate" ) )
+                else if( cli.ArgMatch( "validate" ) )
                     PlotValidatorPrintUsage();
-                if( cli.ArgMatch( "plotcmp" ) )
+                else if( cli.ArgMatch( "plotcmp" ) )
                     PlotCompareMainPrintUsage();
                 else
                     Fatal( "Unknown command '%s'.", cli.Arg() );
@@ -456,12 +456,13 @@ R"(
 [EXAMPLES]
 bladebit --help
 
-bladebiy help diskplot
+bladebit help diskplot
 
-bladebit -t 24 -f ... -c ... diskplot --f1 256MB --fx 256MB -t /my/temporary/plot/dir
- --f1-threads 3 --c-threads 8 --p2-threads 12 --p3-threads 8 /my/output/dir
+# Simple config:
+bladebit -t 24 -f <farmer_pub_key> -c <contract_address> diskplot --t1 /my/temporary/plot/dir /my/output/dir
 
-bladebit -t 8 -f ... -c ... diskplot --f1 64MB --fx 128MB -t /my/temporary/plot/dir /my/output/dir
+# With fine-grained control over threads per phase/section (see bladebit -h diskplot):
+bladebit -t 30 -f <farmer_pub_key> -c <contract_address> diskplot --f1-threads 16 --c-threads 16 --p2-threads 8 --t1 /my/temporary/plot/dir /my/output/dir
 )";
 
 //-----------------------------------------------------------
