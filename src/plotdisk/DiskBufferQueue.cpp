@@ -206,7 +206,8 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
             Fatal( "Failed to open temp work file @ %s with error: %d.", pathBuffer, file->GetError() );
         }
 
-        if( i == 0 && IsFlagSet( options, FileSetOptions::DirectIO ) )
+        // Always align for now.
+        if( i == 0 )//&& IsFlagSet( options, FileSetOptions::DirectIO ) )
         {
             // const size_t totalBlockSize = file->BlockSize() * bucketCount;
             fileSet.blockBuffer = bbvirtalloc<void>( file->BlockSize() );   // #TODO: This should be removed, and we should use
