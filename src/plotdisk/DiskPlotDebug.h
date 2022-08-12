@@ -7,6 +7,8 @@
 #include "threading/MTJob.h"
 #include "plotdisk/DiskPlotInfo.h"
 #include "plotdisk/DiskPlotContext.h"
+#include "plotdisk/DiskPairReader.h"
+#include "plotdisk/BlockWriter.h"
 #include "plotdisk/jobs/IOJob.h"
 #include "io/FileStream.h"
 #include "util/BitView.h"
@@ -38,12 +40,32 @@ namespace Debug
     template<typename T>
     bool LoadRefTableByName( const char* fileName, T*& buffer, uint64& outEntryCount );
 
+    template<typename T>
+    bool LoadRefTableByName( const char* fileName, Span<T>& buffer );
+
+    template<typename T>
+    bool LoadRefTableByName( const TableId table, const char* fileName, Span<T>& buffer );
+
+    void LoadYRefTable( const TableId table, Span<uint64>& buffer );
+
     void LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount );
 
     void LoadRefLPIndexTable( const TableId table, uint32*& buffer, uint64& outEntryCount );
 
     template<uint32 _numBuckets>
-    void ValidatePairs(  DiskPlotContext& context, const TableId table );
+    void ValidatePairs( DiskPlotContext& context, const TableId table );
+
+    template<uint32 _numBuckets>
+    void ValidateK32Pairs( const TableId table, DiskPlotContext& context );
+
+    template<uint32 _numBuckets, bool _bounded = false>
+    void DumpPairs( const TableId table, DiskPlotContext& context );
+
+    void WriteTableCounts( const DiskPlotContext& context );
+    bool ReadTableCounts( DiskPlotContext& context );
+
+    void DumpDPUnboundedY( const TableId table, const uint32 bucket, const DiskPlotContext& context, const Span<uint64> y );
+    void LoadDPUnboundedY( const TableId table, Span<uint64>& y );
 }
 
 template<TableId table, uint32 numBuckets, typename TYOut>
@@ -219,15 +241,35 @@ inline void Debug::ValidateYForTable( const FileId fileId, DiskBufferQueue& queu
     bbvirtfree( tmp     );
 }
 
-
 //-----------------------------------------------------------
 template<typename T>
 inline bool Debug::LoadRefTableByName( const char* fileName, T*& buffer, uint64& outEntryCount )
 {
+    ASSERT( fileName );
+
     char path[1024];
     sprintf( path, "%s%s", BB_DP_DBG_REF_DIR, fileName );
-    Log::Line( " Loading reference line point table '%s'.", path );
+    Log::Line( " Loading reference table '%s'.", path );
     return LoadRefTable( path, buffer, outEntryCount );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline bool Debug::LoadRefTableByName( const char* fileName, Span<T>& buffer )
+{
+    return LoadRefTableByName( fileName, buffer.values, buffer.length );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline bool Debug::LoadRefTableByName( const TableId table, const char* fileName, Span<T>& buffer )
+{
+    ASSERT( fileName );
+
+    char fname[1024];
+    sprintf( fname, fileName, (int32)table+1 );
+    
+    return LoadRefTableByName( fname, buffer.values, buffer.length );
 }
 
 //-----------------------------------------------------------
@@ -261,6 +303,18 @@ inline bool Debug::LoadRefTable( const char* path, T*& buffer, uint64& outEntryC
 }
 
 //-----------------------------------------------------------
+inline void Debug::LoadYRefTable( const TableId table, Span<uint64>& buffer )
+{
+    ASSERT( table < TableId::Table7 && table > TableId::Table1 );
+
+    char path[1024];
+    sprintf( path, "%st%d.y.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
+    Log::Line( " Loading reference Y table '%s'.", path );
+
+    FatalIf( !Debug::LoadRefTable<uint64>( path, buffer.values, (uint64&)buffer.length ), "Failed to load reference Y table." );
+}
+
+//-----------------------------------------------------------
 inline void Debug::LoadRefLinePointTable( const TableId table, uint64*& buffer, uint64& outEntryCount )
 {
     ASSERT( table < TableId::Table7 );
@@ -269,7 +323,7 @@ inline void Debug::LoadRefLinePointTable( const TableId table, uint64*& buffer, 
     sprintf( path, "%slp.t%d.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
     Log::Line( " Loading reference line point table '%s'.", path );
 
-    FatalIf( !Debug::LoadRefTable( path, buffer, outEntryCount ), "Failed to load reference line point table." );
+    FatalIf( !Debug::LoadRefTable<uint64>( path, buffer, outEntryCount ), "Failed to load reference line point table." );
 }
 
 //-----------------------------------------------------------
@@ -290,7 +344,6 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
 {
     uint64 refCount = 0;
     Pair*  refPairs = nullptr;
-
 
     {
         char path[1024];
@@ -434,5 +487,245 @@ inline void Debug::ValidatePairs( DiskPlotContext& context, const TableId table 
     bbvirtfree( refPairs );
     bbvirtfree( pairs    );
     bbvirtfree( tmpPairs );
+}
+
+//-----------------------------------------------------------
+template<uint32 _numBuckets>
+void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
+{
+    Log::Line( "[DEBUG] Validating pairs for table %u", table+1 );
+
+    const uint32 _k                   = 32;
+    const uint32 _maxEntriesPerBucket = ( ( 1ull << _k ) / _numBuckets ) * 2;
+    const bool   hasMap               = table < TableId::Table7;
+
+    const FileId pairsId = FileId::T1 + (FileId)table;
+    const FileId mapId   = FileId::MAP2 + (FileId)table-1;
+    context.ioQueue->SeekFile( pairsId, 0, 0, SeekOrigin::Begin );
+    context.ioQueue->SeekBucket( mapId, 0, SeekOrigin::Begin );
+    context.ioQueue->CommitCommands();
+
+    const uint64 entryCount   = context.entryCounts[(int)table];
+    Span<Pair>   reference    = bbcvirtallocboundednuma_span<Pair>( entryCount );
+    Span<Pair>   bucketPairs  = bbcvirtallocboundednuma_span<Pair>( _maxEntriesPerBucket );
+    Span<uint64> referenceMap;
+    Span<uint64> bucketMap;
+
+    if( hasMap )
+    {
+        referenceMap = bbcvirtallocboundednuma_span<uint64>( entryCount );
+        bucketMap    = bbcvirtallocboundednuma_span<uint64>( _maxEntriesPerBucket );
+    }
+
+    Log::Line( " Reading reference table." );
+    {
+        void* block      = nullptr;
+        size_t blockSize = 0;
+
+        {
+        FileStream dbgDir;
+        FatalIf( !dbgDir.Open( BB_DP_DBG_REF_DIR, FileMode::Open, FileAccess::Read ), 
+            "Failed to open debug directory at '%s'.", BB_DP_DBG_REF_DIR );
+
+            blockSize = dbgDir.BlockSize();
+            block     = bbvirtallocbounded( blockSize );
+        }
+        
+        {
+            char path[1024];
+            sprintf( path, "%st%d.pairs.tmp", BB_DP_DBG_REF_DIR, (int32)table+1 );
+
+        const size_t readSize = sizeof( Pair ) * entryCount;
+
+        int err;
+            FatalIf( !IOJob::ReadFromFile( path, reference.Ptr(), readSize, block, blockSize, err ),
+                "Failed to read from reference pairs file at '%s' with error: %d", path, err );
+        }
+
+        if( hasMap )
+        {
+            char path[1024];
+            sprintf( path, "%st%d.map.tmp", BB_DP_DBG_REF_DIR, (int32)table+1 );
+
+            const size_t readSize = sizeof( uint64 ) * entryCount;
+
+            int err;
+            FatalIf( !IOJob::ReadFromFile( path, referenceMap.Ptr(), readSize, block, blockSize, err ),
+                "Failed to read from reference map file at '%s' with error: %d", path, err );
+        }
+
+        bbvirtfreebounded( block );
+    }
+
+    const size_t heapSize = 41ull GB;
+    void*        heap     = bbvirtallocboundednuma( heapSize );
+
+    Fence fence;
+    StackAllocator allocator( heap, heapSize );
+    DiskPairAndMapReader<_numBuckets, true> reader( context, context.fpThreadCount, fence, table, allocator, !hasMap );
+
+    Span<Pair>   refPairs = reference;
+    Span<uint64> refMap   = referenceMap;
+
+    const int32 lTable = (int32)table-1;
+
+    uint32 offset  = 0;
+    uint64 iGlobal = 0;
+
+    for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+    {
+        Log::Line( " Validating Bucket %u", bucket );
+
+        Span<Pair>   pairs = bucketPairs;
+        Span<uint64> map   = bucketMap;
+
+        Duration _;
+        reader.LoadNextBucket();
+        pairs.length = reader.UnpackBucket( bucket, pairs.Ptr(), map.Ptr(), _ );
+
+        // Validate
+        for( uint64 i = 0; i < pairs.Length(); i++ )
+        {
+            const Pair ref   = refPairs[i];
+            const Pair entry = pairs   [i].AddOffset( offset );
+
+            ASSERT( ref.left == entry.left && ref.right == entry.right );
+        }
+
+        // Apply offset & go to next bucket
+        offset += context.bucketCounts[lTable][bucket];
+
+        refPairs = refPairs.Slice( pairs.Length() );
+        iGlobal += pairs.Length();
+
+        if( hasMap )
+            refMap = refMap.Slice( pairs.Length() );
+    }
+
+    // Cleanup
+    bbvirtfreebounded( heap );
+    bbvirtfreebounded( reference.Ptr() );
+    bbvirtfreebounded( bucketPairs.Ptr() );
+
+    Log::Line( "[DEBUG] Completed" );
+}
+
+//-----------------------------------------------------------
+template<uint32 _numBuckets, bool _bounded>
+void Debug::DumpPairs( const TableId table, DiskPlotContext& context )
+{
+    ASSERT( table > TableId::Table1 );
+
+    Log::Line( "[DEBUG] Dumping pairs for table %u", table+1 );
+
+    const bool hasMap = table < TableId::Table7;
+
+    const FileId pairsId = FileId::T1   + (FileId)table;
+    const FileId mapId   = FileId::MAP2 + (FileId)table-1;
+
+    char pairsPath[1024];
+    char mapPath  [1024];
+    FileStream pairsFile, mapFile;
+
+    sprintf( pairsPath, "%st%d.pairs.tmp", BB_DP_DBG_REF_DIR, (int32)table+1 );
+    FatalIf( !pairsFile.Open( pairsPath, FileMode::OpenOrCreate, FileAccess::Write, FileFlags::NoBuffering | FileFlags::LargeFile ),
+        "Failed to open pairs file at '%s'.", pairsPath );
+
+    void*        block     = bbvirtallocbounded( pairsFile.BlockSize() );
+    Span<Pair>   pairTable = bbcvirtallocboundednuma_span<Pair>( context.entryCounts[(int)table] );
+    Span<uint64> mapTable;
+
+    context.ioQueue->SeekFile( pairsId, 0, 0, SeekOrigin::Begin );
+
+    if( hasMap )
+    {
+        sprintf( mapPath, "%st%d.map.tmp", BB_DP_DBG_REF_DIR, (int32)table+1 );
+        
+        FatalIf( !mapFile.Open( mapPath, FileMode::OpenOrCreate, FileAccess::Write, FileFlags::NoBuffering | FileFlags::LargeFile ),
+            "Failed to open map file at '%s'.", mapPath );
+
+        context.ioQueue->SeekBucket( mapId, 0, SeekOrigin::Begin );
+
+        mapTable = bbcvirtallocboundednuma_span<uint64>( context.entryCounts[(int)table] );
+    }
+
+    // Submit seek commands
+    context.ioQueue->CommitCommands();
+    
+
+    const size_t heapSize = 4ull GB;
+    byte*        heap     = bbvirtallocboundednuma<byte>( heapSize );
+
+    Fence fence;
+    StackAllocator allocator( heap, heapSize );
+    
+    uint64 pairCount = 0;
+
+    // Read from disk
+    {
+        Span<Pair>   pairs = pairTable;
+        Span<uint64> map   = mapTable;
+
+        DiskPairAndMapReader<_numBuckets, _bounded> reader( context, context.fpThreadCount, fence, table, allocator, !hasMap );
+        
+        const int lTable = (int)table-1;
+        uint32 offset = 0;
+        for( uint32 bucket = 0; bucket < _numBuckets; bucket++ )
+        {
+            reader.LoadNextBucket();
+            
+            Duration _;
+            const uint64 pairsRead = reader.UnpackBucket( bucket, pairs.Ptr(), map.Ptr(), _ );
+            ASSERT( pairsRead <= pairs.Length() );
+            
+            // Offset pairs globally
+            Span<Pair> bucketPairs = pairs.SliceSize( pairsRead );
+
+            for( uint64 i = 0; i < bucketPairs.Length(); i++ )
+            {
+                auto p = bucketPairs[i];
+                p.left  += offset;
+                p.right += offset;
+
+                bucketPairs[i] = p;
+            }
+
+            pairCount += pairsRead;
+            pairs = pairs.Slice( pairsRead );
+
+            if( hasMap )
+                map = map.Slice( pairsRead);
+
+            offset += context.bucketCounts[lTable][bucket];
+        }
+
+        ASSERT( pairs.Length() == 0 );
+        ASSERT( map.Length() == 0 );
+    }
+
+    // Write unpacked
+    {
+        int err;
+        const size_t sizeWrite = sizeof( Pair ) * pairTable.Length();
+        
+        FatalIf( !IOJob::WriteToFile( pairsFile, pairTable.Ptr(), sizeWrite, block, pairsFile.BlockSize(), err ),
+            "Failed to write to pairs file '%s' with error: %d", pairsPath, err );
+
+        if( hasMap )
+        {
+            const size_t mapSizeWrite = sizeof( uint64 ) * mapTable.Length();
+            FatalIf( !IOJob::WriteToFile( mapFile, mapTable.Ptr(), mapSizeWrite, block, mapFile.BlockSize(), err ),
+                "Failed to write to map file '%s' with error: %d", mapPath, err );
+        }
+    }
+
+    // Cleanup
+    bbvirtfreebounded( block );
+    bbvirtfreebounded( pairTable.Ptr() );
+    bbvirtfreebounded( heap );
+    if( hasMap ) 
+        bbvirtfreebounded( mapTable.Ptr() );
+
+    Log::Line( "[DEBUG] Completed." );
 }
 

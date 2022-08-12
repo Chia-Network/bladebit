@@ -8,6 +8,7 @@
 #include "jobs/IOJob.h"
 #include "DiskPlotContext.h"
 #include "DiskBufferQueue.h"
+#include "plotdisk/k32/FpMatchBounded.inl"
 
 #define BB_DBG_WRITE_LP_BUCKET_COUNTS 1
 
@@ -614,9 +615,149 @@ void Debug::ValidateLinePoints( DiskPlotContext& context, TableId table, uint32 
 // void ValidatePark7( DiskBufferQueue& ioQueue, uint64 park7Size )
 
 
+//-----------------------------------------------------------
+void Debug::WriteTableCounts( const DiskPlotContext& cx )
+{
+    // Write bucket counts
+    FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 
+    if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
+    {
+        if( bucketCounts.Write( cx.bucketCounts, sizeof( cx.bucketCounts ) ) != sizeof( cx.bucketCounts ) )
+            Log::Error( "Failed to write to bucket counts file." );
+    }
+    else
+        Log::Error( "Failed to open bucket counts file." );
 
+    if( tableCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_TABLE_COUNTS_FNAME, FileMode::Create, FileAccess::Write ) )
+    {
+        if( tableCounts.Write( cx.entryCounts, sizeof( cx.entryCounts ) ) != sizeof( cx.entryCounts ) )
+            Log::Error( "Failed to write to table counts file." );
+    }
+    else
+        Log::Error( "Failed to open table counts file." );
 
+    if( backPtrBucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_PTR_BUCKET_COUNT_FNAME, FileMode::Create, FileAccess::Write ) )
+    {
+        if( backPtrBucketCounts.Write( cx.ptrTableBucketCounts, sizeof( cx.ptrTableBucketCounts ) ) != sizeof( cx.ptrTableBucketCounts ) )
+            Log::Error( "Failed to write to back pointer bucket counts file." );
+    }
+    else
+        Log::Error( "Failed to open back pointer bucket counts file." );
+}
 
+//-----------------------------------------------------------
+bool Debug::ReadTableCounts( DiskPlotContext& cx )
+{
+    #if( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE || BB_DP_DBG_SKIP_TO_C_TABLES )
 
+        FileStream bucketCounts, tableCounts, backPtrBucketCounts;
 
+        if( bucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_READ_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( bucketCounts.Read( cx.bucketCounts, sizeof( cx.bucketCounts ) ) != sizeof( cx.bucketCounts ) )
+            {
+                Log::Error( "Failed to read from bucket counts file." );
+                return false;
+            }
+        }
+        else
+        {
+            Log::Error( "Failed to open bucket counts file." );
+            return false;
+        }
+
+        if( tableCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_TABLE_COUNTS_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( tableCounts.Read( cx.entryCounts, sizeof( cx.entryCounts ) ) != sizeof( cx.entryCounts ) )
+            {
+                Log::Error( "Failed to read from table counts file." );
+                return false;
+            }
+        }
+        else
+        {
+            Log::Error( "Failed to open table counts file." );
+            return false;
+        }
+
+        if( backPtrBucketCounts.Open( BB_DP_DBG_TEST_DIR BB_DP_DBG_PTR_BUCKET_COUNT_FNAME, FileMode::Open, FileAccess::Read ) )
+        {
+            if( backPtrBucketCounts.Read( cx.ptrTableBucketCounts, sizeof( cx.ptrTableBucketCounts ) ) != sizeof( cx.ptrTableBucketCounts ) )
+            {
+                Fatal( "Failed to read from pointer bucket counts file." );
+            }
+        }
+        else
+        {
+            Fatal( "Failed to open pointer bucket counts file." );
+        }
+
+        return true;
+    #else
+        return false;
+    #endif
+}
+
+//-----------------------------------------------------------
+void Debug::DumpDPUnboundedY( const TableId table, const uint32 bucket, const DiskPlotContext& context, const Span<uint64> y )
+{
+    if( y.Length() < 1 || table < TableId::Table2 )
+        return;
+
+    char path[1024];
+    sprintf( path, "%st%d.y-dp-unbounded.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
+    
+    const FileMode mode = bucket > 0 ? FileMode::Open : FileMode::Create;
+    
+    FileStream file;
+    FatalIf( !file.Open( path, mode, FileAccess::Write ),
+        "Failed to open '%s' for writing.", path );
+
+    FatalIf( !file.Seek( (int64)file.Size(), SeekOrigin::Begin ), "Failed to seek file '%s'.", path );
+    
+    size_t sizeWrite = y.Length() * sizeof( uint64 );
+
+    Span<uint64> yWrite = y;
+    while( sizeWrite )
+    {
+        const ssize_t written = file.Write( yWrite.Ptr(), sizeWrite );
+        FatalIf( written <= 0, "Failed to write with eerror %d to file '%s'.", file.GetError(), path );
+
+        sizeWrite -= (size_t)written;
+
+        yWrite = yWrite.Slice( (size_t)written/sizeof( uint64 ) );
+    }
+}
+
+//-----------------------------------------------------------
+void Debug::LoadDPUnboundedY( const TableId table, Span<uint64>& inOutY )
+{
+    // It's written unaligned for now, so we can determine the length by its size
+    char path[1024];
+    sprintf( path, "%st%d.y-dp-unbounded.tmp", BB_DP_DBG_REF_DIR, (int)table+1 );
+    
+    Log::Line( " Loading reference disk-plot Y table at '%s'.", path );
+
+    FileStream file;
+    FatalIf( !file.Open( path, FileMode::Open, FileAccess::Read ), 
+        "Failed to open file '%s'.", path );
+
+    const uint64 entryCount = file.Size() / sizeof( uint64 );
+    ASSERT( entryCount > 0 );
+
+    if( inOutY.values == nullptr )
+        inOutY = bbcvirtallocboundednuma_span<uint64>( entryCount );
+    else
+    {
+        FatalIf( entryCount > inOutY.Length(), "Y buffer too small." );
+    }
+
+    void* block = bbvirtallocbounded( file.BlockSize() );
+
+    int err;
+    FatalIf( !IOJob::ReadFromFile( file, inOutY.Ptr(), file.Size(), block, file.BlockSize(), err ),
+        "Error %d when reading from file '%s'.", err, path );
+
+    bbvirtfreebounded( block );
+}

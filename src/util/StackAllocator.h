@@ -65,7 +65,7 @@ class StackAllocator : public IAllocator
 public:
 
     //-----------------------------------------------------------
-    inline StackAllocator( void* buffer, size_t capacity )
+    inline StackAllocator( void* buffer, const size_t capacity )
         : _buffer  ( (byte*)buffer )
         , _capacity( capacity )
     {}
@@ -78,7 +78,7 @@ public:
         
         ASSERT( size > 0 );
         ASSERT( _size < _capacity ); 
-        // ASSERT( _capacity - paddedSize >= size );
+        ASSERT( paddedSize <= _capacity );
         FatalIf( !(_capacity - paddedSize >= size), "Allocation buffer overrun." );
 
         void* ptr = reinterpret_cast<void*>( _buffer + paddedSize );

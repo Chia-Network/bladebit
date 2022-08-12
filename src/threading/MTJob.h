@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "threading/ThreadPool.h"
+#include "util/Util.h"
 #include <cstring>
 #if _DEBUG
     #include "util/Log.h"
@@ -46,7 +47,7 @@ struct MTJobSyncT
 
     // Locks the threads if this is the control thread and returns true.
     // otherwise, waits for release from the control thread and returns false.
-    inline bool LockOrWait();
+    // inline bool LockOrWait();
 
     // Utility functions to simplify control-thread locking
     // and releasing code. This helps keep code the same for all threads
@@ -126,7 +127,6 @@ private:
     TJob        _jobs[MaxJobs];
     ThreadPool& _pool;
 };
-
 
 struct AnonMTJob : public MTJob<AnonMTJob>
 {
@@ -282,27 +282,33 @@ inline void MTJobSyncT<TJob>::WaitForRelease()
 
 
 //-----------------------------------------------------------
+// template<typename TJob>
+// inline bool MTJobSyncT<TJob>::LockOrWait()
+// {
+//     if( this->IsControlThread() )
+//     {
+//         this->LockThreads();
+//         return true;
+//     }
+//     else
+//     {
+//         this->WaitForRelease();
+//     }
+
+//     return false;
+// }
+
+//-----------------------------------------------------------
 template<typename TJob>
-inline bool MTJobSyncT<TJob>::LockOrWait()
+inline bool MTJobSyncT<TJob>::BeginLockBlock()
 {
     if( this->IsControlThread() )
     {
         this->LockThreads();
         return true;
     }
-    else
-    {
-        this->WaitForRelease();
-    }
 
     return false;
-}
-
-//-----------------------------------------------------------
-template<typename TJob>
-inline bool MTJobSyncT<TJob>::BeginLockBlock()
-{
-    return LockOrWait();
 }
 
 //-----------------------------------------------------------
@@ -311,6 +317,8 @@ inline void MTJobSyncT<TJob>::EndLockBlock()
 {
     if( this->IsControlThread() )
         this->ReleaseThreads();
+    else
+        this->WaitForRelease();
 }
 
 //-----------------------------------------------------------
@@ -365,22 +373,60 @@ struct PrefixSumJob : public MTJob<TJob>
 {
     inline virtual ~PrefixSumJob() {}
 
-    TCount* counts;
+    const TCount* counts;
 
     inline void CalculatePrefixSum(
-        uint32  bucketSize,
-        TCount* counts,
-        TCount* pfxSum,
-        TCount* bucketCounts );
+        uint32        bucketSize,
+        const TCount* counts,
+        TCount*       pfxSum,
+        TCount*       bucketCounts )
+    {
+        CalculatePrefixSumImpl<0>( bucketSize, counts, pfxSum, bucketCounts );
+    }
+
+    template<typename EntryType1>
+    inline void CalculateBlockAlignedPrefixSum(
+              uint32  bucketSize,
+              uint32  blockSize,
+        const TCount* counts,
+              TCount* pfxSum,
+              TCount* bucketCounts,
+              TCount* offsets,
+              TCount* alignedTotalCounts )
+    {
+        const uint32 entrySize       = (uint32)sizeof( EntryType1 );
+        const uint32 entriesPerBlock = blockSize / entrySize;
+        ASSERT( entriesPerBlock * entrySize == blockSize );
+
+        CalculatePrefixSumImpl<1>( bucketSize, counts, pfxSum, bucketCounts, &entriesPerBlock, offsets, alignedTotalCounts );
+    }
+
+private:
+    template<uint32 AlignEntryCount=0>
+    inline void CalculatePrefixSumImpl(
+              uint32  bucketSize,
+        const TCount* counts,
+              TCount* pfxSum,
+              TCount* bucketCounts,
+        const uint32* entriesPerBlocks   = nullptr,
+              TCount* offsets            = nullptr,
+              TCount* alignedTotalCounts = nullptr,
+              TCount* pfxSum2            = nullptr
+    );
 };
 
 //-----------------------------------------------------------
 template<typename TJob, typename TCount>
-inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
+template<uint32 AlignEntryCount>
+inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSumImpl(
         uint32  bucketSize,
-        TCount* counts,
+  const TCount* counts,
         TCount* pfxSum,
-        TCount* bucketCounts )
+        TCount* bucketCounts,
+  const uint32* entriesPerBlocks,
+        TCount* offsets,
+        TCount* alignedTotalCounts,
+        TCount* pfxSum2 )
 {
     const uint32 jobId    = this->JobId();
     const uint32 jobCount = this->JobCount();
@@ -389,8 +435,9 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
     this->SyncThreads();
 
     // Add up all of the jobs counts
+    // Add-up all thread's bucket counts
     memset( pfxSum, 0, sizeof( TCount ) * bucketSize );
-
+    
     for( uint32 i = 0; i < jobCount; i++ )
     {
         const TCount* tCounts = this->GetJob( i ).counts;
@@ -400,11 +447,53 @@ inline void PrefixSumJob<TJob,TCount>::CalculatePrefixSum(
     }
 
     // If we're the control thread, retain the total bucket count
-    if( this->IsControlThread() )
+    if( this->IsControlThread() && bucketCounts != nullptr )
     {
         memcpy( bucketCounts, pfxSum, sizeof( TCount ) * bucketSize );
     }
 
+    uint32 alignedEntryIndex = 0;
+
+    if constexpr ( AlignEntryCount > 0 )
+    {
+        // We now need to add padding to the total counts to ensure the starting
+        // location of each slice is block aligned.
+        const uint32 entriesPerBlock    = entriesPerBlocks[alignedEntryIndex++];
+        const uint32 modEntriesPerBlock = entriesPerBlock - 1;
+
+        for( uint32 i = bucketSize-1; i > 0; i-- )
+        {
+            // Round-up the previous bucket's entry count to be block aligned,
+            // then we can add that as padding to this bucket's prefix count
+            // ensuring the first entry of the slice falls onto the start of a block.
+            const uint32 prevEntryCount        = pfxSum[i-1] + offsets[i-1];
+            const uint32 prevAlignedEntryCount = CDivT( prevEntryCount, entriesPerBlock ) * entriesPerBlock;
+            const uint32 paddingFromPrevBucket = prevAlignedEntryCount - prevEntryCount;
+
+            // Calculate our next offset before updating our total count,
+            // which is the # of entries that our last block occupies, if its not full.
+            const uint32 offset            = offsets[i];
+            const uint32 entryCount        = pfxSum[i] + offset;
+            const uint32 alignedEntryCount = CDivT( entryCount, entriesPerBlock ) * entriesPerBlock;
+            
+            offsets[i] = ( entryCount - (alignedEntryCount - entriesPerBlock) ) & modEntriesPerBlock;  // Update our offset for the next round
+            pfxSum[i] += paddingFromPrevBucket + offset;
+            
+            if( this->IsControlThread() )
+                alignedTotalCounts[i] = alignedEntryCount;                                             // Set number of entries that have to be written to disk (always starts and ends at a block boundary)
+        }
+
+        // Add the offset to the first bucket slice as well
+        pfxSum[0] += offsets[0];
+
+        const uint32 b0AlignedCount = CDivT( pfxSum[0], entriesPerBlock ) * entriesPerBlock;
+
+        offsets[0] = ( pfxSum[0] - (b0AlignedCount - entriesPerBlock) ) & modEntriesPerBlock;
+
+        if( this->IsControlThread() )
+            alignedTotalCounts[0] = b0AlignedCount;
+    }
+    
     // Calculate the prefix sum
     for( uint32 i = 1; i < bucketSize; i++ )
         pfxSum[i] += pfxSum[i-1];

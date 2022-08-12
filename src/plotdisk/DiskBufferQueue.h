@@ -13,13 +13,16 @@ class IIOTransform;
 
 enum FileSetOptions
 {
-    None       = 0,
-    DirectIO   = 1 << 0,    // Use direct IO/unbuffered file IO
-    Cachable   = 1 << 1,    // Use a in-memory cache for the file
-    UseTemp2   = 1 << 2,    // Open the file set the high-frequency temp directory
+    None        = 0,
+    DirectIO    = 1 << 0,   // Use direct IO/unbuffered file IO
+    Cachable    = 1 << 1,   // Use a in-memory cache for the file
+    UseTemp2    = 1 << 2,   // Open the file set the high-frequency temp directory
 
-    Interleaved = 1 << 3,   // Alternate bucket slices between interleaved and non-interleaved
-    BlockAlign  = 1 << 4,   // Only write in block-aligned segments. Keeping a block-sized buffer for left overs.
+    Interleaved = 1 << 3,   // Write in interleaved mode. That is all slices written to a single bucket.
+    
+    Alternating = 1 << 4,   // Alternate between bucket writing/reading modes. This allows for lower cache size.
+
+    BlockAlign  = 1 << 5,   // Only write in block-aligned segments. Keeping a block-sized buffer for left overs.
                             // The last write flushes the whole block.
                             // This can be very memory-costly on file systems with large block sizes
                             // as interleaved buckets will need many block buffers.
@@ -30,20 +33,26 @@ ImplementFlagOps( FileSetOptions );
 struct FileSetInitData
 {
     // Cachable
-    void*  cache     = nullptr; // Cache buffer
-    size_t cacheSize = 0;       // Cache size in bytes
+    void*  cache            = nullptr;  // Cache buffer
+    size_t cacheSize        = 0;        // Cache size in bytes
 
-    // Interleaved
-    size_t sliceSize = 0;       // Maximum size of a bucket slice
+    // For alternating mode
+    uint64 maxSliceSize = 0;        // Maximum size (in bytes) of a bucket slice
 };
 
 struct FileSet
 {
-    const char*    name            = nullptr;
-    Span<IStream*> files;
-    void*          blockBuffer     = nullptr;               // For FileSetOptions::BlockAlign
-    size_t         sliceCapacity   = 0;                     // (in bytes) For FileSetOptions::Interleaved
-    FileSetOptions options         = FileSetOptions::None;
+    const char*        name         = nullptr;
+    Span<IStream*>     files;
+    Span<IStream*>     readFiles;                            // When FileSetOptions::Alternating is enabled, we have to keep separate read streams
+    void*              blockBuffer  = nullptr;               // For FileSetOptions::BlockAlign
+    uint64             maxSliceSize = 0;                     // Maximum size (in bytes) of a bucket slice, for FileSetOptions::Alternating
+    Span<Span<size_t>> readSliceSizes ;
+    Span<Span<size_t>> writeSliceSizes;
+    uint32             readBucket   = 0;                     // Current read/write bucket that generated slices. Valid when writing in interleaved mode and alternating mode
+    uint32             writeBucket  = 0;
+    FileSetOptions     options      = FileSetOptions::None;
+
 };
 
 class DiskBufferQueue
@@ -56,6 +65,7 @@ class DiskBufferQueue
             WriteFile,
             WriteBuckets,
             WriteBucketElements,
+            ReadBucket,
             ReadFile,
             SeekFile,
             SeekBucket,
@@ -65,6 +75,9 @@ class DiskBufferQueue
             SignalFence,
             WaitForFence,
             TruncateBucket,
+
+            DBG_WriteSliceSizes,    // Read/Write slice sizes to disk. Used for skipping tables
+            DBG_ReadSliceSizes
         };
 
         CommandType type;
@@ -81,19 +94,20 @@ class DiskBufferQueue
 
             struct
             {
-                const uint* sizes;
+                const uint* writeSizes;     // Size that will actually be written to disk (usually padded and block-aligned)
+                const uint* sliceSizes;     // Actual number of slices that we have per-bucket. This used to store it for reading-back buckets.
                 const byte* buffers;
                 FileId      fileId;
+                uint32      elementSize;    // Size of each element in the buffer
+                bool        interleaved;    // Write interleaved or not?
             } buckets;
 
-            // Same as buckets, but written with element sizes instead
-            struct
-            {
-                const uint* counts;
-                const byte* buffers;
+            struct {
+                Span<byte>* buffer;
                 FileId      fileId;
                 uint32      elementSize;
-            } bucketElements;
+                bool        interleaved;    // Read in interleaved mode
+            } readBucket;
 
             struct
             {
@@ -126,6 +140,14 @@ class DiskBufferQueue
                 FileId  fileId;
                 ssize_t position;
             } truncateBucket;
+
+            #if _DEBUG
+                struct
+                {
+                    TableId table;
+                    FileId  fileId;
+                } dbgSliceSizes;
+            #endif
         };
     };
 
@@ -135,7 +157,7 @@ class DiskBufferQueue
         int64  bucket;  // If < 0, delete all buckets
     };
 
-#if BB_IO_METRICS_ON
+#if _DEBUG || BB_IO_METRICS_ON
 public:
     struct IOMetric
     {
@@ -165,14 +187,19 @@ public:
 
     void ResetHeap( const size_t heapSize, void* heapBuffer );
 
-    void WriteBuckets( FileId id, const void* buckets, const uint* sizes );
+    void WriteBuckets( FileId id, const void* buckets, const uint* writeSizes, const uint32* sliceSizes = nullptr );
 
-    void WriteBucketElements( const FileId id, const void* buckets, const size_t elementSize, const uint32* counts );
+    void WriteBucketElements( const FileId id, const bool interleaved, const void* buckets, const size_t elementSize, const uint32* writeCounts, const uint32* sliceCounts = nullptr );
 
     template<typename T>
-    void WriteBucketElementsT( const FileId id, const T* buckets, const uint32* counts );
+    void WriteBucketElementsT( const FileId id, const bool interleaved, const T* buckets, const uint32* writeCounts, const uint32* sliceCounts = nullptr );
 
     void WriteFile( FileId id, uint bucket, const void* buffer, size_t size );
+
+    void ReadBucketElements( const FileId id, const bool interleaved, Span<byte>& buffer, const size_t elementSize );
+
+    template<typename T>
+    void ReadBucketElementsT( const FileId id, const bool interleaved, Span<T>& buffer );
 
     void ReadFile( FileId id, uint bucket, void* dstBuffer, size_t readSize );
 
@@ -214,6 +241,15 @@ public:
         return _workHeap.Alloc( size, alignment, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
     }
 
+    #if _DEBUG || BB_TEST_MODE
+        // const Span<Span<size_t>> SliceSizes( const FileId fileId ) const { return _files[(int)fileId].sliceSizes; }
+    #endif
+
+    #if _DEBUG
+        void DebugWriteSliceSizes( const TableId table, const FileId fileId );
+        void DebugReadSliceSizes( const TableId table, const FileId fileId );
+    #endif
+
     // byte* GetBufferForId( const FileId fileId, const uint32 bucket, const size_t size, bool blockUntilFreeBuffer = true );
 
     // Release/return a chunk buffer that was in use, gotten by GetBuffer()
@@ -237,7 +273,7 @@ public:
     inline void ResetIOBufferWaitCounter() { _ioBufferWaitTime = Duration::zero(); }
 
 
-    #if BB_IO_METRICS_ON
+    #if _DEBUG || BB_IO_METRICS_ON
     //-----------------------------------------------------------
     inline const IOMetric& GetReadMetrics() const { return _readMetrics; }
     inline const IOMetric& GetWriteMetrics() const { return _writeMetrics;}
@@ -259,6 +295,68 @@ public:
     }
 
     //-----------------------------------------------------------
+    inline void DumpDiskMetrics( const TableId table )
+    {
+        const double readThroughput  = GetAverageReadThroughput();
+        const auto&  reads           = GetReadMetrics();
+        const double writeThroughput = GetAverageWriteThroughput();
+        const auto&  writes          = GetWriteMetrics();
+
+        Log::Line( " Table %u I/O Metrics:", (uint32)table+1 );
+        
+        Log::Line( "  Average read throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            readThroughput BtoMB, readThroughput / 1000000.0, readThroughput BtoGB, readThroughput / 1000000000.0 );
+        Log::Line( "  Total size read: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)reads.size BtoMB, (double)reads.size / 1000000.0, (double)reads.size BtoGB, (double)reads.size / 1000000000.0 );
+        Log::Line( "  Total read commands: %llu.", (llu)reads.count );
+        
+        Log::Line( "  Average write throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            writeThroughput BtoMB, writeThroughput / 1000000.0, writeThroughput BtoGB, writeThroughput / 1000000000.0 );
+        Log::Line( "  Total size written: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)writes.size BtoMB, (double)writes.size / 1000000.0, (double)writes.size BtoGB, (double)writes.size / 1000000000.0 );
+        Log::Line( "  Total write commands: %llu.", (llu)writes.count );
+        Log::Line( "" );
+
+        ClearReadMetrics();
+        ClearWriteMetrics();
+    }
+    
+    //-----------------------------------------------------------
+    inline void DumpReadMetrics( const TableId table )
+    {
+        const double readThroughput  = GetAverageReadThroughput();
+        const auto&  reads           = GetReadMetrics();
+
+        Log::Line( " Table %u Disk Read Metrics:", (uint32)table+1 );
+        
+        Log::Line( "  Average read throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            readThroughput BtoMB, readThroughput / 1000000.0, readThroughput BtoGB, readThroughput / 1000000000.0 );
+        Log::Line( "  Total size read: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)reads.size BtoMB, (double)reads.size / 1000000.0, (double)reads.size BtoGB, (double)reads.size / 1000000000.0 );
+        Log::Line( "  Total read commands: %llu.", (llu)reads.count );
+
+        ClearReadMetrics();
+    }
+
+    //-----------------------------------------------------------
+    inline void DumpWriteMetrics(  const TableId table )
+    {
+        const double writeThroughput = GetAverageWriteThroughput();
+        const auto&  writes          = GetWriteMetrics();
+
+        Log::Line( " Table %u Disk Write Metrics:", (uint32)table+1 );
+        
+        Log::Line( "  Average write throughput %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).", 
+            writeThroughput BtoMB, writeThroughput / 1000000.0, writeThroughput BtoGB, writeThroughput / 1000000000.0 );
+        Log::Line( "  Total size written: %.2lf MiB ( %.2lf MB ) or %.2lf GiB ( %.2lf GB ).",
+            (double)writes.size BtoMB, (double)writes.size / 1000000.0, (double)writes.size BtoGB, (double)writes.size / 1000000000.0 );
+        Log::Line( "  Total write commands: %llu.", (llu)writes.count );
+        Log::Line( "" );
+        
+        ClearWriteMetrics();
+    }
+
+    //-----------------------------------------------------------
     inline void ClearReadMetrics()
     {
         _readMetrics = {};
@@ -269,6 +367,12 @@ public:
     {
         _writeMetrics = {};
     }
+    #else
+    inline void DumpWriteMetrics( const TableId table ) {}
+    inline void DumpReadMetrics( const TableId table  ) {}
+    inline void DumpDiskMetrics( const TableId table  ){}
+    inline void ClearWriteMetrics(){}
+    inline void ClearReadMetrics(){}
     #endif
     
 private:
@@ -283,8 +387,9 @@ private:
 
     void ExecuteCommand( Command& cmd );
 
-    void CmdWriteBuckets( const Command& cmd );
+    void CmdWriteBuckets( const Command& cmd, const size_t elementSize );
     void CndWriteFile( const Command& cmd );
+    void CmdReadBucket( const Command& cmd );
     void CmdReadFile( const Command& cmd );
     void CmdSeekBucket( const Command& cmd );
 
@@ -302,6 +407,11 @@ private:
 
     static const char* DbgGetCommandName( Command::CommandType type );
 
+    #if _DEBUG
+        void CmdDbgWriteSliceSizes( const Command& cmd );
+        void CmdDbgReadSliceSizes( const Command& cmd );
+    #endif
+
 
 private:
     std::string      _workDir1;     // Temporary 1 directory in which we will store our long-lived temporary files
@@ -314,6 +424,8 @@ private:
     // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];
     size_t           _blockSize          = 0;
+    byte*            _t1BlockBuffer      = nullptr;         // Temporary temp1 dir block buffer user for slice reading
+    byte*            _t2BlockBuffer      = nullptr;         // Temporary temp2 dir block buffer user for slice reading
     
     char*            _filePathBuffer     = nullptr;         // For creating file sets
 
@@ -341,7 +453,7 @@ private:
     bool              _deleterExit       = false;
     int32             _threadBindId;
 
-#if BB_IO_METRICS_ON
+#if _DEBUG || BB_IO_METRICS_ON
     IOMetric _readMetrics  = {};
     IOMetric _writeMetrics = {};
 #endif
@@ -350,8 +462,14 @@ private:
 
 //-----------------------------------------------------------
 template<typename T>
-inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const T* buckets, const uint32* counts )
+inline void DiskBufferQueue::WriteBucketElementsT( const FileId id, const bool interleaved, const T* buckets, const uint32* writeCounts, const uint32* sliceCounts  )
 {
-    WriteBucketElements( id, (void*)buckets, sizeof( T ), counts );
+    WriteBucketElements( id, interleaved, (byte*)buckets, sizeof( T ), writeCounts, sliceCounts );
 }
 
+//-----------------------------------------------------------
+template<typename T>
+inline void DiskBufferQueue::ReadBucketElementsT( const FileId id, const bool interleaved, Span<T>& buffer )
+{
+    ReadBucketElements( id, interleaved, reinterpret_cast<Span<byte>&>( buffer ), sizeof( T ) );
+}

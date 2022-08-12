@@ -20,24 +20,18 @@ struct DiskMapReader
     DiskMapReader() {}
 
     //-----------------------------------------------------------
-    DiskMapReader( DiskPlotContext& context, const uint32 threadCount, const TableId table, const FileId fileId, IAllocator& allocator, const uint64* realBucketLengths = nullptr )
+    DiskMapReader( DiskPlotContext& context, const uint32 threadCount, const TableId table, const FileId fileId, 
+                   IAllocator& allocator, const uint64* realBucketLengths = nullptr )
         : _context    ( &context    )
         , _table      ( table       )
         , _fileId     ( fileId      )
         , _threadCount( threadCount )
     {
+        const size_t blockSize        = context.ioQueue->BlockSize( fileId );
         const uint64 maxKEntries      = ( 1ull << _k );
         const uint64 maxBucketEntries = maxKEntries / _numBuckets;
-        const size_t blockSize        = context.ioQueue->BlockSize( fileId );
-        const size_t bufferSize       = CDivT( (size_t)maxBucketEntries * _mapBits, blockSize * 8 ) * blockSize;
-
-        _loadBuffers[0] = allocator.Alloc( bufferSize, blockSize );
-        _loadBuffers[1] = allocator.Alloc( bufferSize, blockSize );
-        _loadBuffers[2] = allocator.Alloc( bufferSize, blockSize );
-        _loadBuffers[3] = allocator.Alloc( bufferSize, blockSize );
-
-        _unpackdMaps[0] = allocator.CAlloc<TMap>( maxBucketEntries );
-        _unpackdMaps[1] = allocator.CAlloc<TMap>( maxBucketEntries );
+        
+        Allocate(  allocator, blockSize );
 
         if( realBucketLengths )
             memcpy( _bucketLengths, realBucketLengths, sizeof( _bucketLengths ) );
@@ -51,6 +45,13 @@ struct DiskMapReader
         }
 
         ASSERT( _numBuckets == context.numBuckets );
+    }
+
+    // Allocation-checker dummy
+    //-----------------------------------------------------------
+    DiskMapReader( IAllocator& allocator, const size_t blockSize ) 
+    {
+        Allocate( allocator, blockSize );
     }
 
     //-----------------------------------------------------------
@@ -210,6 +211,22 @@ struct DiskMapReader
 
 private:
     //-----------------------------------------------------------
+    inline void Allocate( IAllocator& allocator, const size_t blockSize )
+    {
+        const uint64 maxKEntries      = ( 1ull << _k );
+        const uint64 maxBucketEntries = maxKEntries / _numBuckets;
+        const size_t bufferSize       = CDivT( (size_t)maxBucketEntries * _mapBits, blockSize * 8 ) * blockSize;
+
+        _loadBuffers[0] = allocator.Alloc( bufferSize, blockSize );
+        _loadBuffers[1] = allocator.Alloc( bufferSize, blockSize );
+        _loadBuffers[2] = allocator.Alloc( bufferSize, blockSize );
+        _loadBuffers[3] = allocator.Alloc( bufferSize, blockSize );
+
+        _unpackdMaps[0] = allocator.CAlloc<TMap>( maxBucketEntries );
+        _unpackdMaps[1] = allocator.CAlloc<TMap>( maxBucketEntries );
+    }    
+
+    //-----------------------------------------------------------
     inline void* GetBucketBuffer( const uint32 bucket )
     {
         return _loadBuffers[bucket & 3];
@@ -236,36 +253,41 @@ private:
 // maps, have assymetric bucket counts (or not synchronized with each other),
 // as the maps have been sorted on y and written back to their original buckets,
 // and pairs were never sorted on y.
-template<uint32 _numBuckets>
+template<uint32 _numBuckets, bool _bounded = false>
 struct DiskPairAndMapReader
 {
-    static constexpr uint32 _k         = _K;
-    static constexpr uint32 _savedBits = bblog2( _numBuckets );
-    static constexpr uint32 _pairBits  = _k + 1 - _savedBits + 9;
+    static constexpr uint32 _extraBuckets = _bounded ? 0 : 1;
+    static constexpr uint32 _k            = _K;
+    static constexpr uint32 _savedBits    = bblog2( _numBuckets );
+    static constexpr uint32 _lBits        = _k + 1 - _savedBits;
+    static constexpr uint32 _rBits        = 9;
+    static constexpr uint32 _pairBits     = _lBits + _rBits;
+    
+    using MapReader = DiskMapReader<uint64, _numBuckets, _k + _extraBuckets>;
+
+    // #TODO: Don't do this nonesense, just forget about not having nullables and just use pointers...
+    //-----------------------------------------------------------
+    DiskPairAndMapReader() {}
 
     //-----------------------------------------------------------
     DiskPairAndMapReader( DiskPlotContext& context, const uint32 threadCount, Fence& fence, const TableId table, IAllocator& allocator, bool noMap )
-        : _context    ( context )
-        , _fence      ( fence   )
+        : _context    ( &context )
+        , _fence      ( &fence   )
         , _table      ( table   )
         , _threadCount( threadCount )
         , _mapReader  ( context, threadCount, table, FileId::MAP2 + (FileId)table - 1, allocator )
         , _noMap      ( noMap )
     {
-        DiskBufferQueue& ioQueue = *_context.ioQueue;
+        DiskBufferQueue& ioQueue = *_context->ioQueue;
 
-        const uint64 maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
-        const size_t blockSize        = ioQueue.BlockSize( FileId::T1 + (FileId)table );
+        const size_t blockSize = ioQueue.BlockSize( FileId::T1 + (FileId)table );
 
-        const size_t bufferSize       = blockSize + CDivT( (size_t)maxBucketEntries * _pairBits, blockSize * 8 ) * blockSize;
-
-        _pairBuffers[0] = allocator.Alloc( bufferSize, blockSize );
-        _pairBuffers[1] = allocator.Alloc( bufferSize, blockSize );
+        Allocate( allocator, blockSize );
 
         size_t prevOverflowBits = 0;
         for( uint32 i = 0; i < _numBuckets; i++ )
         {
-            const size_t bucketLength           = _context.ptrTableBucketCounts[(int)_table][i];
+            const size_t bucketLength           = _context->ptrTableBucketCounts[(int)_table][i];
             const size_t bucketBitSize          = bucketLength * _pairBits - prevOverflowBits;
             const size_t bucketByteSize         = CDiv( bucketBitSize, 8 );
             const size_t bucketBlockAlignedSize = CDivT( bucketByteSize, blockSize ) * blockSize;
@@ -280,15 +302,25 @@ struct DiskPairAndMapReader
         }
     }
 
+    // Allocation size-check dummy
+    //-----------------------------------------------------------
+    DiskPairAndMapReader( IAllocator& allocator, const size_t blockSize )
+    {
+        Allocate( allocator, blockSize );
+        MapReader reader( allocator, blockSize );
+    }
+
     //-----------------------------------------------------------
     void LoadNextBucket()
     {
         if( _bucketsLoaded >= _numBuckets )
+        {
             return;
+        }
 
         ASSERT( _table > TableId::Table1 );
 
-        DiskBufferQueue& ioQueue = *_context.ioQueue;
+        DiskBufferQueue& ioQueue = *_context->ioQueue;
         
         const FileId fileId    = FileId::T1 + (FileId)_table;
         const size_t blockSize = ioQueue.BlockSize( FileId::T1 + (FileId)_table);
@@ -303,22 +335,22 @@ struct DiskPairAndMapReader
 
         // Load accompanying map entries
         if( !_noMap )
-            _mapReader.LoadNextEntries( _context.ptrTableBucketCounts[(int)_table][bucket] );
+            _mapReader.LoadNextEntries( _context->ptrTableBucketCounts[(int)_table][bucket] );
 
-        ioQueue.SignalFence( _fence, bucket+1 );
+        ioQueue.SignalFence( *_fence, bucket+1 );
         ioQueue.CommitCommands();
     }
 
     //-----------------------------------------------------------
     uint64 UnpackBucket( const uint32 bucket, Pair* outPairs, uint64* outMap, Duration& ioWait )
     {
-        DiskBufferQueue& ioQueue = *_context.ioQueue;
+        DiskBufferQueue& ioQueue = *_context->ioQueue;
 
         const uint32 loadIdx      = bucket & 1; // Same as % 2
         const size_t blockSize    = ioQueue.BlockSize( FileId::T1 + (FileId)_table );
         const size_t blockBitSize = blockSize * 8;
 
-        _fence.Wait( bucket + 1, ioWait );
+        _fence->Wait( bucket + 1, ioWait );
 
         const byte* pairBuffer = (byte*)_pairBuffers[loadIdx];
 
@@ -336,10 +368,11 @@ struct DiskPairAndMapReader
 
         const size_t fullBitSize = _pairBucketLoadSize[bucket] * 8 + blockBitSize - startBit;
         
-        const int64 bucketLength = (int64)_context.ptrTableBucketCounts[(int)_table][bucket];
+        const int64 bucketLength = (int64)_context->ptrTableBucketCounts[(int)_table][bucket];
 
-        AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
+        AnonMTJob::Run( *_context->threadPool, _threadCount, [=]( AnonMTJob* self ) {
             
+            Pair* pairs = outPairs;
 
             int64 count, offset, end;
             GetThreadOffsets( self, bucketLength, count, offset, end );
@@ -347,17 +380,13 @@ struct DiskPairAndMapReader
             const size_t bitOffset = startBit + (size_t)offset * _pairBits;
             BitReader reader( (uint64*)pairBuffer, fullBitSize, bitOffset );
 
-            // const uint64 pairOffset = _entriesLoaded;
-            const uint32 lBits  = _k - _savedBits + 1;
-            const uint32 rBits  = 9;
-
             for( int64 i = offset; i < end; i++ )
             {
                 Pair pair;
-                pair.left  = (uint32)reader.ReadBits64( lBits );
-                pair.right = pair.left +  (uint32)reader.ReadBits64( rBits );
+                pair.left  = (uint32)reader.ReadBits64( _lBits );
+                pair.right = pair.left +  (uint32)reader.ReadBits64( _rBits );
 
-                outPairs[i] = pair;
+                pairs[i] = pair;
             }
         });
 
@@ -369,10 +398,21 @@ struct DiskPairAndMapReader
     }
 
 private:
-    DiskPlotContext& _context;
-    Fence&           _fence;
+    //-----------------------------------------------------------
+    inline void Allocate( IAllocator& allocator, const size_t blockSize )
+    {
+        const uint64 maxBucketEntries = (uint64)DiskPlotInfo<TableId::Table1, _numBuckets>::MaxBucketEntries;
+        const size_t bufferSize       = blockSize + CDivT( (size_t)maxBucketEntries * _pairBits, blockSize * 8 ) * blockSize;
 
-    DiskMapReader<uint64, _numBuckets, _k+1> _mapReader;
+        _pairBuffers[0] = allocator.Alloc( bufferSize, blockSize );
+        _pairBuffers[1] = allocator.Alloc( bufferSize, blockSize );        
+    }
+
+private:
+    DiskPlotContext*  _context = nullptr;
+    Fence*            _fence   = nullptr;
+
+    MapReader         _mapReader;
 
     void*            _pairBuffers       [2];
     uint32           _pairOverflowBits  [_numBuckets];
@@ -380,8 +420,8 @@ private:
 
     uint64           _entriesLoaded = 0;
     uint32           _bucketsLoaded = 0;
-    uint32           _threadCount;
-    TableId          _table;
+    uint32           _threadCount   = 0;
+    TableId          _table         = (TableId)0;
     bool             _noMap;
 };
 
@@ -396,29 +436,29 @@ template<typename T>
 class BlockReader
 {
 public:
-    
+
+    //-----------------------------------------------------------
+    BlockReader() {}
+
     //-----------------------------------------------------------
     BlockReader( const FileId fileId, DiskBufferQueue* ioQueue, const uint64 maxLength, 
                  IAllocator& allocator, const size_t blockSize, const uint64 retainOffset )
-        : _fileId( fileId )
+        : _fileId         ( fileId )
         , _entriesPerBlock( blockSize / sizeof( T ) )
-        , _ioQueue( ioQueue )
+        , _ioQueue        ( ioQueue )
     {
         // #TODO: Check that sizeof( T ) is power of 2
         ASSERT( _entriesPerBlock * sizeof( T ) == blockSize );
-
-        const size_t prefixZoneCount = RoundUpToNextBoundaryT( retainOffset, _entriesPerBlock );
-
-        // Add another retain offset here because we space for retained entries at the start and at the end
-        const size_t allocCount = prefixZoneCount + RoundUpToNextBoundaryT( _entriesPerBlock + maxLength + retainOffset, _entriesPerBlock );
-
-        _loadBuffer[0] = allocator.CAlloc<T>( allocCount, blockSize ) + prefixZoneCount;
-        _loadBuffer[1] = allocator.CAlloc<T>( allocCount, blockSize ) + prefixZoneCount;
+        Allocate( allocator, blockSize, maxLength, retainOffset );
     }
 
+    // Size-check dummy
     //-----------------------------------------------------------
-    BlockReader()
-    {}
+    BlockReader( IAllocator& allocator, const size_t blockSize, const uint64 maxLength, const uint64 retainOffset )
+        : _entriesPerBlock( blockSize / sizeof( T ) )
+    {
+        Allocate( allocator, blockSize, maxLength, retainOffset );
+    }
 
     // #NOTE: User is responsible for using a Fence after this call
     //-----------------------------------------------------------
@@ -492,6 +532,18 @@ public:
 
 private:
     //-----------------------------------------------------------
+    inline void Allocate( IAllocator& allocator, const size_t blockSize, const uint64 maxLength, const uint64 retainOffset )
+    {
+        const size_t prefixZoneCount = RoundUpToNextBoundaryT( retainOffset, _entriesPerBlock );
+
+        // Add another retain offset here because we space for retained entries at the start and at the end
+        const size_t allocCount = prefixZoneCount + RoundUpToNextBoundaryT( _entriesPerBlock + maxLength + retainOffset, _entriesPerBlock );
+
+        _loadBuffer[0] = allocator.CAlloc<T>( allocCount, blockSize ) + prefixZoneCount;
+        _loadBuffer[1] = allocator.CAlloc<T>( allocCount, blockSize ) + prefixZoneCount;
+    }
+
+    //-----------------------------------------------------------
     inline uint64 GetPreloadedEntryCount()
     {
         return _preloadedEntries[_readIdx & 3];  // % 4
@@ -538,6 +590,12 @@ public:
     {
         memcpy( _bucketCounts, bucketCounts, sizeof( _bucketCounts ) );
     }
+
+    // Size-check dummy
+    //-----------------------------------------------------------
+    SingleFileMapReader( IAllocator& allocator, const size_t blockSize, const uint64 maxLength )
+        : _reader( allocator, blockSize, maxLength, _retainCount )
+    {}
 
     //-----------------------------------------------------------
     void LoadNextBucket() override

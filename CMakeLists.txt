@@ -156,6 +156,8 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /D_HAS_EXCEPTIONS=0
         ${c_opts})
     
+    set(tests_c_opts /DBB_TEST_MODE=1 ${tests_c_opts})
+    
     set(link_opts 
         /SUBSYSTEM:CONSOLE
         /STACK:33554432,1048576
@@ -209,6 +211,8 @@ else()
 
     # *Nix
     set(c_opts --include=pch.h -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
+
+    set(tests_c_opts -DBB_TEST_MODE=1 ${tests_c_opts})
 
     set(release_c_opts 
         -O3 #-flto
@@ -377,7 +381,7 @@ set(bb_include_dirs
 # endmacro()
 
 # BladeBit
-add_library(lib_bladebit ${bb_sources} ${bb_headers})
+add_library(lib_bladebit ${bb_sources} ${bb_headers} src/plotdisk/k32/FpMatchBounded.inl src/plotdisk/k32/F1Bounded.inl)
 
 set_target_properties(lib_bladebit PROPERTIES
         OUTPUT_NAME bladebit
@@ -391,7 +395,7 @@ target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c
 target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
 target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
 
-add_executable(bladebit ${bb_headers} src/main.cpp)
+add_executable(bladebit ${bb_headers} src/main.cpp src/plotdisk/k32/FxBounded.inl)
 target_link_libraries(bladebit PRIVATE lib_bladebit)
 
 add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/sandbox/sandbox_main.cpp ${src_dev} ${bb_headers})
@@ -412,6 +416,8 @@ target_link_libraries(fsegen PRIVATE lib_bladebit)
 
 # Tests
 add_executable(tests ${src_tests} ${bb_headers})
+target_compile_options(tests PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
+target_compile_options(tests PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
 set_target_properties(tests PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 

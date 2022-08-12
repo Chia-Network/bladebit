@@ -20,6 +20,8 @@ struct DiskPlotConfig
     uint32            ioBufferCount            = 0;
     size_t            cacheSize                = 0;
 
+    bool              bounded                  = true;  // Do not overflow entries
+    bool              alternateBuckets         = false; // Alternate bucket writing method between interleaved and not
     bool              noTmp1DirectIO           = false; // Disable direct I/O on tmp 1
     bool              noTmp2DirectIO           = false; // Disable direct I/O on tmp 1
 
@@ -65,6 +67,9 @@ struct DiskPlotContext
 
     uint32       bucketCounts[(uint)TableId::_Count][BB_DP_MAX_BUCKET_COUNT+1];
     uint64       entryCounts [(uint)TableId::_Count];
+
+    uint32       bucketSlices[2][BB_DP_MAX_BUCKET_COUNT];
+
 
     // Since back pointer table entries are not sorted along with y,
     // (instead we use a mapping table), and since their values are stored

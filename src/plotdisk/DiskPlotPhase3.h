@@ -12,19 +12,14 @@ public:
 
     void Run();
 
+    static size_t GetRequiredHeapSize( const uint32 numBuckets, const bool bounded, const size_t t1BlockSize, const size_t t2BlockSize );
 private:
     
     template<uint32 _numBuckets>
     void RunBuckets();
 
-    template<TableId rTable, uint32 _numBuckets>
+    template<TableId rTable, uint32 _numBuckets, bool _bounded>
     void ProcessTable();
-
-    template<TableId rTable, uint32 _numBuckets>
-    void TableFirstStep();
-
-    template<TableId rTable, uint32 _numBuckets>
-    void TableSecondStep();
 
     template<TableId rTable>
     void ConvertToLinePoints( 
@@ -71,6 +66,9 @@ private:
 
     template<uint32 _numBuckets>
     void GetCacheSizesForBuckets( size_t& outCacheSizeLP, size_t& outCacheSizeMap );
+    
+    template<uint32 _numBuckets, const bool _bounded>
+    static size_t GetRequiredHeapSizeForBuckets( const size_t t1BlockSize, const size_t t2BlockSize );
 
 private:
     DiskPlotContext& _context;

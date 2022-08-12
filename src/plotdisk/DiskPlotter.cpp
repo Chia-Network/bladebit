@@ -11,6 +11,8 @@
 #include "DiskPlotPhase3.h"
 #include "SysHost.h"
 
+#include "k32/DiskPlotBounded.h"
+
 
 size_t ValidateTmpPathAndGetBlockSize( DiskPlotter::Config& cfg );
 
@@ -29,24 +31,25 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     // Initialize tables for matching
     LoadLTargets();
     
-    GlobalPlotConfig& gCfg = *cfg.globalCfg;
-
     ZeroMem( &_cx );
     
+    GlobalPlotConfig& gCfg = *cfg.globalCfg;
+
+    // #TODO: Remove when fixed
+    {
+        FatalIf( cfg.numBuckets == 128, "128 Buckets is currently not serializing plots correctly. Please select a differnt bucket count." );
+        
+        if( gCfg.plotCount != 1 )
+        {
+            Log::Line( "[WARNING] Consecutive plots are currently not supported. Forcing plot count to 1." );
+            gCfg.plotCount = 1;
+        }
+    }
+
     FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
         "Failed to obtain temp paths block size from t1: '%s' or %s t2: '%s'.", cfg.tmpPath, cfg.tmpPath2 );
 
     FatalIf( _cx.tmp1BlockSize < 8 || _cx.tmp2BlockSize < 8,"File system block size is too small.." );
-
-    const size_t heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize );
-
-    _cfg            = cfg;
-    _cx.cfg         = &_cfg;
-    _cx.tmpPath     = cfg.tmpPath;
-    _cx.tmpPath2    = cfg.tmpPath2;
-    _cx.numBuckets  = cfg.numBuckets;
-    _cx.heapSize    = heapSize;
-    _cx.cacheSize   = cfg.cacheSize;
 
     const uint  sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
     const auto* numa                = SysHost::GetNUMAInfo();
@@ -59,10 +62,22 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     _cx.p2ThreadCount = cfg.p2ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p2ThreadCount, sysLogicalCoreCount );
     _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
 
+    const size_t heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize, _cx.fpThreadCount );
+    ASSERT( heapSize );
+
+    _cfg            = cfg;
+    _cx.cfg         = &_cfg;
+    _cx.tmpPath     = cfg.tmpPath;
+    _cx.tmpPath2    = cfg.tmpPath2;
+    _cx.numBuckets  = cfg.numBuckets;
+    _cx.heapSize    = heapSize;
+    _cx.cacheSize   = cfg.cacheSize;
+
     Log::Line( "[Bladebit Disk Plotter]" );
     Log::Line( " Heap size      : %.2lf GiB ( %.2lf MiB )", (double)_cx.heapSize BtoGB, (double)_cx.heapSize BtoMB );
     Log::Line( " Cache size     : %.2lf GiB ( %.2lf MiB )", (double)_cx.cacheSize BtoGB, (double)_cx.cacheSize BtoMB );
     Log::Line( " Bucket count   : %u"       , _cx.numBuckets    );
+    Log::Line( " Alternating I/O: %s"       , cfg.alternateBuckets ? "true" : "false" );
     Log::Line( " F1  threads    : %u"       , _cx.f1ThreadCount );
     Log::Line( " FP  threads    : %u"       , _cx.fpThreadCount );
     Log::Line( " C   threads    : %u"       , _cx.cThreadCount  );
@@ -99,18 +114,19 @@ DiskPlotter::DiskPlotter( const Config& cfg )
             _cx.cacheSize = alignedCacheSize;
         }
 
-        _cx.cache = bbvirtallocnuma<byte>( _cx.cacheSize );
+        _cx.cache = bbvirtalloc<byte>( _cx.cacheSize );
         if( numa && !gCfg.disableNuma )
         {
             if( !SysHost::NumaSetMemoryInterleavedMode( _cx.cache, _cx.cacheSize  ) )
                 Log::Error( "WARNING: Failed to bind NUMA memory on the cache." );
         }
     }
-  
+
     // Initialize our Thread Pool and IO Queue
-    const int32 ioThreadId = -1;    // Force unbounded IO thread for now. We should bind it to the last used thread, of the max threads used...
+    const int32 ioThreadId = -1;    // Force unpinned IO thread for now. We should bind it to the last used thread, of the max threads used...
     _cx.threadPool = new ThreadPool( sysLogicalCoreCount, ThreadPool::Mode::Fixed, gCfg.disableCpuAffinity );
     _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.tmpPath2, gCfg.outputFolder, _cx.heapBuffer, _cx.heapSize, _cx.ioThreadCount, ioThreadId );
+    _cx.fencePool  = new FencePool( 8 );
 
     // if( cfg.globalCfg->warmStart )
     // #TODO: IMPORTANT: Remove this after testing
@@ -139,11 +155,10 @@ void DiskPlotter::Plot( const PlotRequest& req )
     memset( _cx.bucketCounts        , 0, sizeof( _cx.bucketCounts ) );
     memset( _cx.entryCounts         , 0, sizeof( _cx.entryCounts ) );
     memset( _cx.ptrTableBucketCounts, 0, sizeof( _cx.ptrTableBucketCounts ) );
+    memset( _cx.bucketSlices        , 0, sizeof( _cx.bucketSlices ) );
     // #TODO: Reset the rest of the state, including the heap & the ioQueue
 
-
-    Log::Line( "Started plot." );
-    auto plotTimer = TimerBegin();
+    const bool bounded = _cx.cfg->bounded;
 
     _cx.plotId       = req.plotId;
     _cx.plotMemo     = req.plotMemo;
@@ -151,12 +166,35 @@ void DiskPlotter::Plot( const PlotRequest& req )
 
     _cx.ioQueue->OpenPlotFile( req.plotFileName, req.plotId, req.plotMemo, req.plotMemoSize );
 
+    #if ( _DEBUG && ( BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE || BB_DP_DBG_SKIP_TO_C_TABLES ) )
+        BB_DP_DBG_ReadTableCounts( _cx );
+    #endif
+
+    Log::Line( "Started plot." );
+    auto plotTimer = TimerBegin();
+
     {
         Log::Line( "Running Phase 1" );
         const auto timer = TimerBegin();
 
-        DiskPlotPhase1 phase1( _cx );
-        phase1.Run();
+        if( bounded )
+        {
+            K32BoundedPhase1 phase1( _cx );
+            #if !( _DEBUG && BB_DP_DBG_SKIP_PHASE_1 )
+                phase1.Run();
+            #endif
+        }
+        else
+        {
+            DiskPlotPhase1 phase1( _cx );
+            #if !( _DEBUG && BB_DP_DBG_SKIP_PHASE_1 )
+                phase1.Run();
+            #endif
+        }
+
+        #if ( _DEBUG && !BB_DP_DBG_SKIP_PHASE_1 )
+            BB_DP_DBG_WriteTableCounts( _cx );
+        #endif
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished Phase 1 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
@@ -166,8 +204,15 @@ void DiskPlotter::Plot( const PlotRequest& req )
         Log::Line( "Running Phase 2" );
         const auto timer = TimerBegin();
 
-        DiskPlotPhase2 phase2( _cx );
-        phase2.Run();
+        // if( bounded )
+        // {
+        //     Fatal( "Phase 2 bounded not implemented." );
+        // }
+        // else
+        {
+            DiskPlotPhase2 phase2( _cx );
+            phase2.Run();
+        }
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished Phase 2 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
@@ -177,8 +222,15 @@ void DiskPlotter::Plot( const PlotRequest& req )
         Log::Line( "Running Phase 3" );
         const auto timer = TimerBegin();
 
-        DiskPlotPhase3 phase3( _cx );
-        phase3.Run();
+        // if( bounded )
+        // {
+        //     Fatal( "Phase 3 bounded not implemented." );
+        // }
+        // else
+        {
+            DiskPlotPhase3 phase3( _cx );
+            phase3.Run();
+        }
 
         const double elapsed = TimerEnd( timer );
         Log::Line( "Finished Phase 3 in %.2lf seconds ( %.1lf minutes ).", elapsed, elapsed / 60 );
@@ -240,6 +292,10 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
     {
         if( cli.ReadU32( cfg.numBuckets,  "-b", "--buckets" ) ) 
             continue;
+        if( cli.ReadUnswitch( cfg.bounded, "--unbounded" ) )
+            continue;
+        if( cli.ReadSwitch( cfg.alternateBuckets, "-a", "--alternate" ) )
+            continue;
         if( cli.ReadStr( cfg.tmpPath, "-t1", "--temp1" ) )
             continue;
         if( cli.ReadStr( cfg.tmpPath2, "-t2", "--temp2" ) )
@@ -270,10 +326,10 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
             if( cfg.tmpPath )
             {
                 cfg.tmpPath2 = cfg.tmpPath2 ? cfg.tmpPath2 : cfg.tmpPath;
-                heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, cfg.tmpPath2, cfg.tmpPath );
+                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, cfg.tmpPath2, cfg.tmpPath, BB_DP_MAX_JOBS );
             }
             else
-                heapSize = GetRequiredSizeForBuckets( cfg.numBuckets, 1, 1 );
+                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, 1, 1, BB_DP_MAX_JOBS );
                 
             Log::Line( "Buckets: %u | Heap Sizes: %.2lf GiB", cfg.numBuckets, (double)heapSize BtoGB );
             exit( 0 );
@@ -309,6 +365,9 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
 
     FatalIf( ( cfg.numBuckets & ( cfg.numBuckets - 1 ) ) != 0, "Buckets must be power of 2." );
 
+    FatalIf( cfg.numBuckets >= 1024, "1024 buckets are not allowed for plots < k33." );
+    FatalIf( cfg.numBuckets < 128 && !cfg.bounded, "64 buckets is only allowed for bounded k=32 plots." );
+
     const uint32 sysLogicalCoreCount = SysHost::GetLogicalCPUCount();
 
     if( cfg.ioThreadCount == 0 )
@@ -336,113 +395,54 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
 //-----------------------------------------------------------
 bool DiskPlotter::GetTmpPathsBlockSizes( const char* tmpPath1, const char* tmpPath2, size_t& tmpPath1Size, size_t& tmpPath2Size )
 {
-    ASSERT( tmpPath1 );
-    ASSERT( tmpPath2 );
+    ASSERT( tmpPath1 && *tmpPath1 );
+    ASSERT( tmpPath2 && *tmpPath2 );
 
-    bool success = false;
+    tmpPath1Size = FileStream::GetBlockSizeForPath( tmpPath1 );
+    tmpPath2Size = FileStream::GetBlockSizeForPath( tmpPath2 );
 
-    const char*  paths[2]  = { tmpPath1, tmpPath2 };
-    const size_t lengths[2] = { 
-        strlen( tmpPath1 ),
-        strlen( tmpPath2 ),
-    };
-
-    const size_t RAND_PART     =  16;
-    const size_t RAND_FILE_SIZE = RAND_PART + 4;    // 5 = '.' + ".tmp"
-    const size_t MAX_LENGTH     = 1024 + RAND_FILE_SIZE + 1;
-    char stackPath[MAX_LENGTH+1];
-
-    const size_t pathLength = std::max( lengths[0], lengths[1] ) + RAND_FILE_SIZE + 1;
-
-    char* path = nullptr;
-    if( pathLength > MAX_LENGTH )
-        path = bbmalloc<char>( pathLength + RAND_FILE_SIZE + 2 ); // +2 = '/' + '\0'
-    else
-        path = stackPath;
-
-    size_t blockSizes[2] = { 0 };
-
-    for( int32 i = 0; i < 2; i++ )
-    {
-        size_t len = lengths[i];
-        memcpy( path, paths[i], len );
-
-        if( path[len-1] != '/' && path[len-1] != '\\' )
-            path[len++] = '/';
-    
-        path[len++] = '.';
-
-        byte filename[RAND_PART/2];
-        SysHost::Random( filename, sizeof( filename ) );
-
-        size_t encoded;
-        if( BytesToHexStr( filename, sizeof( filename ), path+len, RAND_PART, encoded ) != 0 )
-        {
-            Log::Error( "GetTmpPathsBlockSizes: Hex conversion failed." );
-            goto EXIT;
-        }
-
-        len += RAND_PART;
-        memcpy( path+len, ".tmp", sizeof( ".tmp" ) );
-
-        #if _DEBUG
-            if( path == stackPath )
-                ASSERT( path+len+ sizeof( ".tmp" ) <= stackPath + sizeof( stackPath ) );
-        #endif
-
-        FileStream file;
-        if( !file.Open( path, FileMode::Create, FileAccess::ReadWrite ) )
-        {
-            Log::Error( "GetTmpPathsBlockSizes: Failed to open temp file '%s'.", path );
-            goto EXIT;
-        }
-
-        blockSizes[i] = file.BlockSize();
-        file.Close();
-
-        remove( path );
-    }
-
-    tmpPath1Size = blockSizes[0];
-    tmpPath2Size = blockSizes[1];
-    success = true;
-
-EXIT:
-    if( path && path != stackPath )
-        free( path );
-
-    return success;
+    return tmpPath1Size && tmpPath2Size;
 }
 
 //-----------------------------------------------------------
-size_t DiskPlotter::GetRequiredSizeForBuckets( const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2 )
+size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const char* tmpPath1, const char* tmpPath2, const uint32 threadCount )
 {
     size_t blockSizes[2] = { 0 };
 
     if( !GetTmpPathsBlockSizes( tmpPath1, tmpPath2, blockSizes[0], blockSizes[1] ) )
         return 0;
 
-    return GetRequiredSizeForBuckets( numBuckets, blockSizes[0], blockSizes[1] );
+    return GetRequiredSizeForBuckets( bounded, numBuckets, blockSizes[0], blockSizes[1], threadCount );
 }
 
 //-----------------------------------------------------------
-size_t DiskPlotter::GetRequiredSizeForBuckets( const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize )
+size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 numBuckets, const size_t fxBlockSize, const size_t pairsBlockSize, const uint32 threadCount )
 {
+    if( bounded )
+    {
+        const size_t p1HeapSize = K32BoundedPhase1::GetRequiredSize( numBuckets, pairsBlockSize, fxBlockSize, threadCount );
+        const size_t p3HeapSize = DiskPlotPhase3::GetRequiredHeapSize( numBuckets, bounded, pairsBlockSize, fxBlockSize );
+
+        return std::max( p1HeapSize, p3HeapSize );
+    }
+
     switch( numBuckets )
     {
         case 128 : return DiskFp<TableId::Table4, 128 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 256 : return DiskFp<TableId::Table4, 256 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 512 : return DiskFp<TableId::Table4, 512 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
         case 1024:
+            Fatal( "1024 buckets are currently unsupported." );
+            return 0;
             // We need to add a bit more here (at least 1GiB) to have enough space for P2, which keeps
             // 2 marking table bitfields in-memory: k^32 / 8 = 0.5GiB
-            return 1032ull MB + DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
-    
+//            return 1032ull MB + DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
+
     default:
-        Fatal( "Invalid bucket size: %u.", numBuckets );
         break;
     }
 
+    Fatal( "Invalid bucket size: %u.", numBuckets );
     return 0;
 }
 
@@ -505,7 +505,14 @@ Creates plots by making use of a disk to temporarily store and read values.
 
 [OPTIONS]
  -b, --buckets <n>  : The number of buckets to use. The default is 256.
-                      You may specify one of: 128, 256, 512, 1024.
+                      You may specify one of: 128, 256, 512, 1024 and 64 for if --k32-bounded is enabled.
+                      1024 is not available for plots of k < 33.
+
+ --unbounded        : Create an unbounded k32 plot. That is a plot that does not cut-off entries that 
+                      overflow 2^32;
+ 
+ -a, --alternate    : Halves the temp2 cache size requirements by alternating bucket writing methods
+                      between tables.
 
  -t1, --temp1 <dir> : The temporary directory to use when plotting.
                       *REQUIRED*
@@ -545,20 +552,22 @@ Creates plots by making use of a disk to temporarily store and read values.
 
 [NOTES]
 If you don't specify any thread count overrides, the default thread count
-specified in the global options will be used.
+specified in the global options will be used
+(specified as -t <thread_count> before the diskplot command).
 
 Phases 2 and 3 are typically more I/O bound than Phase 1 as these
 phases perform less computational work than Phase 1 and thus the CPU
 finishes the currently loaded workload quicker and will proceed to
-grab another buffer from disk with a shorter frequency. Because of this
+grab another buffer from the disk within a shorter time frame. Because of this
 you would typically lower the thread count for these phases if you are
-incurring I/O waits.
+incurring high I/O waits.
 
 [EXAMPLES]
-bladebit -t 24 -f ... -c ... diskplot --b 128 --cache 32G -t1 /my/temporary/plot/dir
- --f1-threads 3 --fp-threads 16 --c-threads 8 --p2-threads 12 --p3-threads 8 /my/output/dir
+# Simple config:
+bladebit -t 24 -f <farmer_pub_key> -c <contract_address> diskplot --t1 /my/temporary/plot/dir /my/output/dir
 
-bladebit -t 8 -f ... -c ... diskplot -t2 /my/temporary/plot/dir -t2 /my/other/tmp/dir /my/output/dir
+# With fine-grained control over threads per phase/section (see bladebit -h diskplot):
+bladebit -t 30 -f <farmer_pub_key> -c <contract_address> diskplot --f1-threads 16 --c-threads 16 --p2-threads 8 --t1 /my/temporary/plot/dir /my/output/dir
 )";
 
 //-----------------------------------------------------------
@@ -566,3 +575,4 @@ void DiskPlotter::PrintUsage()
 {
     Log::Line( USAGE );
 }
+

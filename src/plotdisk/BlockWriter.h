@@ -11,15 +11,16 @@ public:
 
     //-----------------------------------------------------------
     inline BlockWriter( IAllocator& allocator, const FileId fileId, Fence& fence, const size_t blockSize, const size_t elementCount )
-        : _fileId( fileId )
-        , _fence( &fence )
+        : _fileId   ( fileId )
+        , _fence    ( &fence )
+        , _blockSize( (uint32)blockSize )
     {
         static_assert( sizeof( T ) == 1 || ( sizeof( T ) & 1) == 0 );
 
         const size_t allocSize = blockSize + RoundUpToNextBoundaryT( elementCount * sizeof( T ), blockSize );
 
         // Sanity check, should never happen as block sizes are power of 2 and
-        // we don't expect to use this with non Po2 elements.
+        // we don't expect to use this with non Pow2 elements.
         FatalIf( blockSize / sizeof( T ) * sizeof( T ) != blockSize, "Unexpected block size." );
 
         _buffers[0] = allocator.AllocT<T>( allocSize, blockSize );
@@ -31,6 +32,8 @@ public:
     //-----------------------------------------------------------
     inline T* GetNextBuffer( Duration& writeWaitTime )
     {
+        ASSERT( _buffers[0] );
+
         if( _bufferIdx > 1 )
             _fence->Wait( _bufferIdx - 2, writeWaitTime );
 
@@ -42,7 +45,7 @@ public:
     {
         ASSERT( elementCount );
 
-        const size_t blockSize        = queue.BlockSize( _fileId );
+        const size_t blockSize        = _blockSize;
         const size_t elementsPerBlock = blockSize / sizeof( T );
 
         T* buf = _buffers[_bufferIdx & 1];
@@ -84,6 +87,7 @@ public:
 private:
     FileId _fileId         = FileId::None;
     int32  _bufferIdx      = 0;
+    uint32 _blockSize      = 1;
     T*     _buffers[2]     = { nullptr };
     T*     _remainder      = nullptr; 
     size_t _remainderCount = 0;             // Number of elements saved in our remainder buffer
