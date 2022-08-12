@@ -118,30 +118,39 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
         flags |= FileFlags::NoBuffering;
 
     FileSet& fileSet = _files[(uint)fileId];
-    ASSERT( !fileSet.files.values );
 
-    fileSet.name         = name;
-    fileSet.files.values = new IStream*[bucketCount];
-    fileSet.files.length = bucketCount;
-    fileSet.blockBuffer  = nullptr;
-    fileSet.options      = options;
-
-    if( IsFlagSet( options, FileSetOptions::Interleaved ) || IsFlagSet( options, FileSetOptions::Alternating ) )
+    if( !fileSet.name )
     {
-        fileSet.readSliceSizes.SetTo( new Span<size_t>[bucketCount], bucketCount );
-        fileSet.writeSliceSizes.SetTo( new Span<size_t>[bucketCount], bucketCount );
-        for( uint32 i = 0; i < bucketCount; i++ )
+        ASSERT( !fileSet.files.values );
+
+        fileSet.name         = name;
+        fileSet.files.values = new IStream*[bucketCount];
+        fileSet.files.length = bucketCount;
+        fileSet.blockBuffer  = nullptr;
+        fileSet.options      = options;
+
+        memset( fileSet.files.values, 0, sizeof( uintptr_t ) * bucketCount );
+
+        if( IsFlagSet( options, FileSetOptions::Interleaved ) || IsFlagSet( options, FileSetOptions::Alternating ) )
         {
-            fileSet.readSliceSizes[i].SetTo( new size_t[bucketCount]{}, bucketCount );
-            fileSet.writeSliceSizes[i].SetTo( new size_t[bucketCount]{}, bucketCount );
+            fileSet.readSliceSizes .SetTo( new Span<size_t>[bucketCount], bucketCount );
+            fileSet.writeSliceSizes.SetTo( new Span<size_t>[bucketCount], bucketCount );
+
+            for( uint32 i = 0; i < bucketCount; i++ )
+            {
+                fileSet.readSliceSizes [i].SetTo( new size_t[bucketCount]{}, bucketCount );
+                fileSet.writeSliceSizes[i].SetTo( new size_t[bucketCount]{}, bucketCount );
+            }
+        }
+
+        if( IsFlagSet( options, FileSetOptions::Alternating ) )
+        {
+            fileSet.maxSliceSize = optsData->maxSliceSize;
+            ASSERT( fileSet.maxSliceSize );
         }
     }
-
-    if( IsFlagSet( options, FileSetOptions::Alternating ) )
-    {
-        fileSet.maxSliceSize = optsData->maxSliceSize;
-        ASSERT( fileSet.maxSliceSize );
-    }
+    else if( isPlotFile )
+        fileSet.name = name;
 
     const bool isCachable = IsFlagSet( options, FileSetOptions::Cachable ) && optsData->cacheSize > 0;
     ASSERT( !isCachable || optsData );
@@ -156,14 +165,25 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
     // #TODO: Try using a single file and opening multiple handles to that file as buckets...
     for( uint i = 0; i < bucketCount; i++ )
     {
-        IStream* file = nullptr;
-        
-        if( isCachable )
-            file = new HybridStream();
-        else 
-            file = new FileStream();
+        IStream* file = fileSet.files[i];
 
-        fileSet.files[i] = file;
+        if( !file )
+        {
+            if( isCachable )
+                file = new HybridStream();
+            else 
+                file = new FileStream();
+
+            fileSet.files[i] = file;            
+
+            // Always align for now.
+            if( i == 0 )//&& IsFlagSet( options, FileSetOptions::DirectIO ) )
+            {
+                // const size_t totalBlockSize = file->BlockSize() * bucketCount;
+                fileSet.blockBuffer = bbvirtalloc<void>( file->BlockSize() );   // #TODO: This should be removed, and we should use
+                                                                                //        a shared one per temp dir.
+            }
+        }
 
         const FileMode fileMode =
         #if _DEBUG && ( BB_DP_DBG_READ_EXISTING_F1 || BB_DP_DBG_SKIP_PHASE_1 || BB_DP_P1_SKIP_TO_TABLE || BB_DP_DBG_SKIP_TO_C_TABLES )
@@ -204,14 +224,6 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
             }
             
             Fatal( "Failed to open temp work file @ %s with error: %d.", pathBuffer, file->GetError() );
-        }
-
-        // Always align for now.
-        if( i == 0 )//&& IsFlagSet( options, FileSetOptions::DirectIO ) )
-        {
-            // const size_t totalBlockSize = file->BlockSize() * bucketCount;
-            fileSet.blockBuffer = bbvirtalloc<void>( file->BlockSize() );   // #TODO: This should be removed, and we should use
-                                                                            //        a shared one per temp dir.
         }
     }
 
@@ -259,7 +271,7 @@ void DiskBufferQueue::OpenPlotFile( const char* fileName, const byte* plotId, co
 
     byte* header = _plotHeaderbuffer;
 
-    // Encode the headers
+    // Encode the header
     {
         // Magic
         byte* headerWriter = header;
