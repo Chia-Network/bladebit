@@ -54,12 +54,12 @@ jobs:
 
     # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
     # If this step fails, then you should remove it and run the build manually (see below)
-    - name: Autobuild
-      uses: github/codeql-action/autobuild@v2
+    - name: Build
+      # uses: github/codeql-action/autobuild@v2
       run: |
         sudo apt update
-        sudo apt-get install numactl
-        /opt/hostedtoolcache/CodeQL/0.0.0-20220728/x64/codeql/cpp/tools/autobuild.sh
+        sudo apt-get install numactl build-essential
+        ./.github/actions/build-asset-linux.sh
         
     # ℹ️ Command-line programs to run using the OS shell.
     # 📚 See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsrun
