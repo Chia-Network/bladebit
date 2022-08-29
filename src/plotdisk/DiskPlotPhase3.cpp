@@ -809,7 +809,7 @@ public:
 
             // If our iteration count is not even, it means the final
             // output of the sort is saved in the tmp buffers.
-            constexpr int32 maxSortIter = (int)CDiv( 64 - _bucketBits, 8 );
+            constexpr int32 maxSortIter = (int)CDiv( _lpBits, 8 );
 
             if( ( maxSortIter & 1 ) != 0)
             {
