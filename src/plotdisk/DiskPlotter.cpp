@@ -35,17 +35,6 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     
     GlobalPlotConfig& gCfg = *cfg.globalCfg;
 
-    // #TODO: Remove when fixed
-    {
-        FatalIf( cfg.numBuckets == 128, "128 Buckets is currently not serializing plots correctly. Please select a differnt bucket count." );
-        
-        if( gCfg.plotCount != 1 )
-        {
-            Log::Line( "[WARNING] Consecutive plots are currently not supported. Forcing plot count to 1." );
-            gCfg.plotCount = 1;
-        }
-    }
-
     FatalIf( !GetTmpPathsBlockSizes( cfg.tmpPath, cfg.tmpPath2, _cx.tmp1BlockSize, _cx.tmp2BlockSize ),
         "Failed to obtain temp paths block size from t1: '%s' or %s t2: '%s'.", cfg.tmpPath, cfg.tmpPath2 );
 
@@ -154,7 +143,10 @@ void DiskPlotter::Plot( const PlotRequest& req )
     memset( _cx.entryCounts         , 0, sizeof( _cx.entryCounts ) );
     memset( _cx.ptrTableBucketCounts, 0, sizeof( _cx.ptrTableBucketCounts ) );
     memset( _cx.bucketSlices        , 0, sizeof( _cx.bucketSlices ) );
-    // #TODO: Reset the rest of the state, including the heap & the ioQueue
+    memset( _cx.p1TableWaitTime     , 0, sizeof( _cx.p1TableWaitTime ) );
+    _cx.ioWaitTime      = Duration::zero();
+    _cx.cTableWaitTime  = Duration::zero();
+    _cx.p7WaitTime      = Duration::zero();
 
     const bool bounded = _cx.cfg->bounded;
 
@@ -254,10 +246,11 @@ void DiskPlotter::Plot( const PlotRequest& req )
         ioQueue.WriteFile( FileId::PLOT, 0, _cx.plotTablePointers, sizeof( _cx.plotTablePointers ) );
         
         // Wait for all IO commands to finish
-        Fence fence;
+        Fence& fence = _cx.fencePool->RequireFence();
         ioQueue.SignalFence( fence );
         ioQueue.CommitCommands();
         fence.Wait();
+        _cx.fencePool->ReleaseFence( fence );
         
         const double elapsed = TimerEnd( timer );
         Log::Line( "Completed pending writes in %.2lf seconds.", elapsed );
