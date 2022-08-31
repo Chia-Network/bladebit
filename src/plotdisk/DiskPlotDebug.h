@@ -257,7 +257,11 @@ inline bool Debug::LoadRefTableByName( const char* fileName, T*& buffer, uint64&
 template<typename T>
 inline bool Debug::LoadRefTableByName( const char* fileName, Span<T>& buffer )
 {
-    return LoadRefTableByName( fileName, buffer.values, buffer.length );
+    // T*& buffer = buffer.values;
+    uint64 outEntryCount = 0;
+    bool r = LoadRefTableByName( fileName, buffer.values, outEntryCount );
+    buffer.length = (size_t)outEntryCount;
+    return r;
 }
 
 //-----------------------------------------------------------

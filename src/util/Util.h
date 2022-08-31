@@ -207,6 +207,7 @@ inline void bbvirtfree( void* ptr )
 template<typename T = void>
 inline T* bbvirtalloc( size_t size )
 {
+    ASSERT( size );
     void* ptr = SysHost::VirtualAlloc( size, false );
     FatalIf( !ptr, "VirtualAlloc failed." );
     return reinterpret_cast<T*>( ptr );

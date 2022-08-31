@@ -172,14 +172,6 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
                 file = new FileStream();
 
             fileSet.files[i] = file;
-
-            // Always align for now.
-            if( i == 0 )//&& IsFlagSet( options, FileSetOptions::DirectIO ) )
-            {
-                // const size_t totalBlockSize = file->BlockSize() * bucketCount;
-                fileSet.blockBuffer = bbvirtalloc<void>( file->BlockSize() );   // #TODO: This should be removed, and we should use
-                                                                                //        a shared one per temp dir.
-            }
         }
         
 
@@ -222,6 +214,15 @@ bool DiskBufferQueue::InitFileSet( FileId fileId, const char* name, uint bucketC
             }
             
             Fatal( "Failed to open temp work file @ %s with error: %d.", pathBuffer, file->GetError() );
+        }
+        
+        // Always align for now.
+        if( i == 0 && !fileSet.blockBuffer )//&& IsFlagSet( options, FileSetOptions::DirectIO ) )
+        {
+            // const size_t totalBlockSize = file->BlockSize() * bucketCount;
+            ASSERT( file->BlockSize() );
+            fileSet.blockBuffer = bbvirtalloc<void>( file->BlockSize() );   // #TODO: This should be removed, and we should use
+                                                                            //        a shared one per temp dir.
         }
     }
 
@@ -1214,7 +1215,12 @@ void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
     sprintf( path, "%st%d.%s.slices.tmp", BB_DP_DBG_TEST_DIR, (int)cmd.dbgSliceSizes.table+1, fName );
 
     FileStream file;
-    FatalIf( !file.Open( path, FileMode::Create, FileAccess::Write ), "Failed to open '%s' for writing.", path );
+    if( !file.Open( path, FileMode::Create, FileAccess::Write ) )
+    {
+        Log::Error( "Failed to open '%s' for writing.", path );
+        return;
+    }
+    // FatalIf( !file.Open( path, FileMode::Create, FileAccess::Write ), "Failed to open '%s' for writing.", path );
 
     FileSet& fileSet        = _files[(int)cmd.dbgSliceSizes.fileId];
     const uint32 numBuckets = (uint32)fileSet.files.Length();
@@ -1224,8 +1230,13 @@ void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
               auto   slices    = fileSet.writeSliceSizes[i];
         const size_t sizeWrite = sizeof( size_t ) * numBuckets;
 
-        FatalIf( file.Write( slices.Ptr(), sizeWrite ) != sizeWrite,
-            "Failed to write slice size for table %d", (int)cmd.dbgSliceSizes.table+1  );
+        if( file.Write( slices.Ptr(), sizeWrite ) != sizeWrite )
+        {
+            Log::Error( "Failed to write slice size for table %d", (int)cmd.dbgSliceSizes.table+1 );
+            return;
+        }
+        // FatalIf( file.Write( slices.Ptr(), sizeWrite ) != sizeWrite,
+        //     "Failed to write slice size for table %d", (int)cmd.dbgSliceSizes.table+1  );
     }
 }
 
