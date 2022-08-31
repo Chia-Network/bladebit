@@ -58,7 +58,7 @@ jobs:
       # uses: github/codeql-action/autobuild@v2
       run: |
         sudo apt update
-        sudo apt-get install numactl build-essential
+        sudo apt-get install numactl libnuma-dev build-essential
         ./.github/actions/build-asset-linux.sh
         
     # ℹ️ Command-line programs to run using the OS shell.
