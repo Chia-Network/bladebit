@@ -4,8 +4,8 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
-    relic.url = "github:abueide/relic/flake";
-    bls-signatures.url = "github:abueide/bls-signatures/flake";
+    relic.url = "github:Chia-Network/relic";
+    bls-signatures.url = "github:Chia-Network/bls-signatures";
   };
 
   outputs = { self, nixpkgs, flake-utils, relic, bls-signatures }:
@@ -30,7 +30,7 @@
 
          buildPhase = ''
              cmake .
-             cmake --build . --target bladebit --config Release -j10
+             cmake --build . --target bladebit --config Release -j
          '';
 
          installPhase = ''
