@@ -6,20 +6,20 @@
 
 include(FindPackageHandleStandardArgs)
 
-find_path(BLS_INCLUDE_DIR
-  NAMES bls.hpp chiabls/bls.hpp
+find_path(RELIC_INCLUDE_DIR
+  NAMES relic_conf.h relic/relic_conf.h
   HINTS ${INCLUDE_INSTALL_DIR})
 
-find_library(BLS_LIBRARY
-  NAMES libbls.a
+find_library(RELIC_LIBRARY
+  NAMES librelic_s.a
   HINTS ${LIB_INSTALL_DIR})
 
-set(BLS_INCLUDE_DIR ${BLS_INCLUDE_DIR}/chiabls)
+set(RELIC_INCLUDE_DIR ${RELIC_INCLUDE_DIR}/relic)
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(bls
-  REQUIRED_VARS BLS_INCLUDE_DIR BLS_LIBRARY)
+find_package_handle_standard_args(RELIC
+  REQUIRED_VARS RELIC_INCLUDE_DIR RELIC_LIBRARY)
 
 mark_as_advanced(
-  BLS_INCLUDE_DIR
-  BLS_LIBRARY)
+  RELIC_INCLUDE_DIR
+  RELIC_LIBRARY)

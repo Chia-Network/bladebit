@@ -13,11 +13,11 @@
      let pkgs = nixpkgs.legacyPackages.${system};
          chia-relic = relic.defaultPackage.${system};
          bls = bls-signatures.defaultPackage.${system};
-         deps = with pkgs; [ cmake gmp gmp.dev libsodium chia-relic bls-signatures ];
+         deps = with pkgs; [ cmake gmp gmp.dev libsodium chia-relic bls ];
          platform_deps = if(pkgs.lib.strings.hasSuffix "linux" system) then [ pkgs.numactl ] else [];
      in rec {
      devShells.default = pkgs.mkShell {
-         packages = deps;
+         packages = deps ++ platform_deps;
      };
      defaultPackage = with pkgs; stdenv.mkDerivation {
          pname = "bladebit";
@@ -25,7 +25,8 @@
 
          src = self;
 
-         nativeBuildInputs = [ cmake gmp gmp.dev libsodium chia-relic bls ] ++ platform_deps;
+         nativeBuildInputs = platform_deps;
+         buildInputs = deps;
 
          buildPhase = ''
              cmake . -DBUILD_BLADEBIT_TESTS=false
@@ -40,7 +41,6 @@
 
          enableParallelBuilding = true;
          cmakeFlags = [
-            "-DBUILD_BLADEBIT_TESTS=false"
             "-DBUILD_LOCAL=true"
          ];
   };

@@ -19,3 +19,6 @@ park*_hash.txt
 lib/*
 build*/
 cmake-build*/
+
+.idea/
+cmake-build-debug/

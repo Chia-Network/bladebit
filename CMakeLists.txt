@@ -53,6 +53,7 @@ set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
 else()
     find_package(bls REQUIRED)
+    find_package(relic REQUIRED)
 endif()
 
 # Threads
