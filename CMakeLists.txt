@@ -31,6 +31,7 @@ set(CMAKE_MODULE_PATH
 )
 
 set(BUILD_LOCAL "0" CACHE STRING "")
+set(BUILD_BLADEBIT_TESTS "1" CACHE STRING "")
 
 #
 # Grab Dependencies
@@ -52,7 +53,7 @@ set(BUILD_BLS_TESTS "0" CACHE STRING "")
 set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
 else()
-    find_package(bls REQUIRED)
+    find_package(BLS REQUIRED)
     find_package(relic REQUIRED)
 endif()
 
@@ -66,10 +67,11 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 endif()
 
 # Catch
-# TODO: Add configuration var to disable this
+if(BUILD_BLADEBIT_TESTS)
 include(cmake_modules/FindCatch2.cmake)
 set_target_properties(Catch2 PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set_target_properties(Catch2WithMain PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 
 # Config
@@ -393,8 +395,8 @@ set_target_properties(lib_bladebit PROPERTIES
         OUTPUT_NAME bladebit
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
-target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
-target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs} ${BLS_INCLUDE_DIR})
+target_link_libraries(lib_bladebit PUBLIC Threads::Threads ${RELIC_LIBRARY} ${BLS_LIBRARY} ${platform_libs})
+target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs} ${RELIC_INCLUDE_DIR} ${BLS_INCLUDE_DIR})
 
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
@@ -421,11 +423,13 @@ target_link_libraries(fsegen PRIVATE lib_bladebit)
 # target_link_libraries(plot_tool PRIVATE lib_bladebit)
 
 # Tests
+if(BUILD_BLADEBIT_TESTS)
 add_executable(tests ${src_tests} ${bb_headers})
 target_compile_options(tests PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
 target_compile_options(tests PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
 set_target_properties(tests PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
+endif()
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 

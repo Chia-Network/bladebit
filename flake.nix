@@ -29,7 +29,7 @@
          buildInputs = deps;
 
          buildPhase = ''
-             cmake . -DBUILD_BLADEBIT_TESTS=false
+             cmake .
              cmake --build . --target bladebit --config Release
          '';
 
@@ -42,6 +42,7 @@
          enableParallelBuilding = true;
          cmakeFlags = [
             "-DBUILD_LOCAL=true"
+            "-DBUILD_BLADEBIT_TESTS=false"
          ];
   };
 }
