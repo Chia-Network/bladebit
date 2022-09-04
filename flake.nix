@@ -30,7 +30,7 @@
 
          buildPhase = ''
              cmake .
-             cmake --build . --target bladebit --config Release
+             cmake --build . --target bladebit --config Release -j10
          '';
 
          installPhase = ''

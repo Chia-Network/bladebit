@@ -53,8 +53,10 @@ set(BUILD_BLS_TESTS "0" CACHE STRING "")
 set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
 else()
-    find_package(BLS REQUIRED)
+    find_package(sodium REQUIRED)
+    find_package(gmp REQUIRED)
     find_package(relic REQUIRED)
+    find_package(bls REQUIRED)
 endif()
 
 # Threads
@@ -395,7 +397,7 @@ set_target_properties(lib_bladebit PROPERTIES
         OUTPUT_NAME bladebit
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
-target_link_libraries(lib_bladebit PUBLIC Threads::Threads ${RELIC_LIBRARY} ${BLS_LIBRARY} ${platform_libs})
+target_link_libraries(lib_bladebit PUBLIC Threads::Threads ${GMP_LIBRARIES} ${sodium_LIBRARY_RELEASE} ${BLS_LIBRARY} ${RELIC_LIBRARY} ${platform_libs})
 target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs} ${RELIC_INCLUDE_DIR} ${BLS_INCLUDE_DIR})
 
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
