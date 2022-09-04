@@ -397,8 +397,14 @@ set_target_properties(lib_bladebit PROPERTIES
         OUTPUT_NAME bladebit
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
-target_link_libraries(lib_bladebit PUBLIC Threads::Threads ${GMP_LIBRARIES} ${sodium_LIBRARY_RELEASE} ${BLS_LIBRARY} ${RELIC_LIBRARY} ${platform_libs})
-target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs} ${RELIC_INCLUDE_DIR} ${BLS_INCLUDE_DIR})
+if(BUILD_LOCAL)
+    target_link_libraries(lib_bladebit PUBLIC Threads::Threads ${GMP_LIBRARIES} ${sodium_LIBRARY_RELEASE} ${BLS_LIBRARY} ${RELIC_LIBRARY} ${platform_libs})
+    target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs} ${RELIC_INCLUDE_DIR} ${BLS_INCLUDE_DIR})
+else()
+    target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
+    target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
+endif()
+
 
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
