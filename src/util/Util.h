@@ -465,6 +465,40 @@ inline void HexStrToBytes( const char* str, const size_t strSize,
 }
 
 //-----------------------------------------------------------
+inline bool HexStrToBytesSafe( const char* str, const size_t strSize,
+                               byte* dst, size_t dstSize )
+{
+    if( !str || !strSize || !dst || !dstSize )
+        return false;
+
+    const size_t maxSize = (strSize / 2) * 2;
+    const char* end      = str + maxSize;
+
+    if( dstSize < maxSize / 2 )
+        return false;
+
+    int i = 0;
+    while( str < end )
+    {
+        const int char0 = (int)str[0];
+        const int char1 = (int)str[1];
+
+        if( (char0 - (int)'0' > 9 && char0 - (int)'A' > 5 && char0 - (int)'a' > 5) ||
+            (char1 - (int)'0' > 9 && char1 - (int)'A' > 5 && char1 - (int)'a' > 5) )
+            return false;
+
+        byte msb = (byte)HEX_TO_BIN[char0];
+        byte lsb = (byte)HEX_TO_BIN[char1];
+
+        byte v = lsb + msb * 16u;
+        dst[i++] = v;
+        str += 2;
+    }
+
+    return true;
+}
+
+//-----------------------------------------------------------
 // Encode bytes into hex format
 // Return:
 //  0 if OK
