@@ -74,23 +74,25 @@ void KeyTools::PrintSK( const bls::PrivateKey& key )
 /// PuzzleHash
 ///
 //-----------------------------------------------------------
-bool PuzzleHash::FromAddress( PuzzleHash& hash, const char address[CHIA_ADDRESS_LENGTH+1] )
+bool PuzzleHash::FromAddress( PuzzleHash& hash, const char address[CHIA_ADDRESS_MAX_LENGTH+1] )
 {
     ASSERT( address );
     if( !address )
         return false;
 
-    if( strlen( address ) != CHIA_ADDRESS_LENGTH )
+    const size_t addrLen = strlen( address );
+    if( addrLen != CHIA_ADDRESS_LENGTH && addrLen != CHIA_TESTNET_ADDRESS_LENGTH )
         return false;
 
-    char hrp [CHIA_ADDRESS_LENGTH-5] = { 0 };
-    byte data[CHIA_ADDRESS_LENGTH-8];
+    char hrp [CHIA_ADDRESS_MAX_LENGTH-5] = {};
+    byte data[CHIA_ADDRESS_MAX_LENGTH-8];
 
     size_t dataLen = 0;
     if( bech32_decode( hrp, data, &dataLen, address ) != BECH32_ENCODING_BECH32M )
         return false;
 
-    if( memcmp( "xch", hrp, sizeof( "xch" ) ) != 0 )
+    if( memcmp( "xch",  hrp, sizeof( "xch" ) )  != 0 &&
+        memcmp( "txch", hrp, sizeof( "txch" ) ) != 0 )
         return false;
 
     byte decoded[40];
@@ -103,5 +105,15 @@ bool PuzzleHash::FromAddress( PuzzleHash& hash, const char address[CHIA_ADDRESS_
     
     memcpy( hash.data, decoded, CHIA_PUZZLE_HASH_SIZE );
     return true;
+}
+
+//-----------------------------------------------------------
+bool PuzzleHash::FromHex( const char hex[CHIA_PUZZLE_HASH_SIZE*2+1], PuzzleHash& outHash )
+{
+    const size_t hexLen = strlen( hex );
+    if( hexLen != CHIA_PUZZLE_HASH_SIZE*2 )
+        return false;
+
+    return HexStrToBytesSafe( hex, hexLen, outHash.data, CHIA_PUZZLE_HASH_SIZE );
 }
 
