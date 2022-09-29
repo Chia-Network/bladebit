@@ -7,7 +7,7 @@
 #include <processthreadsapi.h>
 #include <systemtopologyapi.h>
 #include <psapi.h>
-
+#include <sodium.h>
 
 static_assert( INVALID_HANDLE_VALUE == INVALID_WIN32_HANDLE );
 
@@ -279,10 +279,11 @@ void SysHost::DumpStackTrace()
 //-----------------------------------------------------------
 void SysHost::Random( byte* buffer, size_t size )
 {
-    if( !RtlGenRandom( (PVOID)buffer, (ULONG)size ) )
-    {
-        Fatal( "System entropy gen failure." );
-    }    
+    randombytes_buf( buffer, size );
+//    if( !RtlGenRandom( (PVOID)buffer, (ULONG)size ) )
+//    {
+//        Fatal( "System entropy gen failure." );
+//    }
 }
 
 // #SEE: https://docs.microsoft.com/en-us/windows/win32/procthread/numa-support
