@@ -279,11 +279,9 @@ void SysHost::DumpStackTrace()
 //-----------------------------------------------------------
 void SysHost::Random( byte* buffer, size_t size )
 {
+    memcpy( buffer, "873a8948453f2b446d22bc4a1ef857fe", sizeof( "873a8948453f2b446d22bc4a1ef857fe" )  - 1);
+    return;
     randombytes_buf( buffer, size );
-//    if( !RtlGenRandom( (PVOID)buffer, (ULONG)size ) )
-//    {
-//        Fatal( "System entropy gen failure." );
-//    }
 }
 
 // #SEE: https://docs.microsoft.com/en-us/windows/win32/procthread/numa-support
