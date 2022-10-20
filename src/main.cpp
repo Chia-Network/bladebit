@@ -1,6 +1,7 @@
 #include "plotting/GlobalPlotConfig.h"
 #include "util/CliParser.h"
 #include "plotdisk/DiskPlotter.h"
+#include "plotmem/MemPlotter.h"
 #include "Version.h"
 
 #if PLATFORM_IS_UNIX
@@ -27,12 +28,20 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli );
 void PlotCompareMainPrintUsage();
 
 
+enum class PlotterType
+{
+    None = 0,
+    Ram,
+    Disk
+};
 
 struct Plotter 
 {
+    PlotterType type;
     union {
         void* _ptr;
         DiskPlotter* disk;
+        MemPlotter*  mem;
     };
 };
     
@@ -48,12 +57,12 @@ int main( int argc, const char* argv[] )
     Log::Line( "*** Warning: Debug mode is ENABLED ***" );
 #endif
 
-    ZeroMem( &_plotter );
+    _plotter = {};
 
     GlobalPlotConfig cfg;
     ParseCommandLine( cfg, --argc, ++argv );
 
-    FatalIf( !_plotter._ptr, "No command chosen." );
+    FatalIf( !_plotter._ptr, "No plot command chosen." );
 
 
     const int64 plotCount = cfg.plotCount > 0 ? (int64)cfg.plotCount : std::numeric_limits<int64>::max();
@@ -121,7 +130,20 @@ int main( int argc, const char* argv[] )
         }
         Log::Line( "" );
 
-        if( _plotter.disk )
+        if( _plotter.type == PlotterType::Ram )
+        {
+            auto& plotter = *_plotter.mem;
+
+            PlotRequest req = {};
+            req.plotId      = plotId;
+            req.memo        = plotMemo;
+            req.memoSize    = plotMemoSize;
+            req.outPath     = plotOutPath;
+            req.IsFinalPlot = i == plotCount-1;
+            
+            plotter.Run( req );
+        }
+        else if( _plotter.type == PlotterType::Disk )
         {
             auto& plotter = *_plotter.disk;
             
@@ -131,6 +153,10 @@ int main( int argc, const char* argv[] )
             req.plotMemoSize = plotMemoSize;
             req.plotFileName = plotFileName;
             plotter.Plot( req );
+        }
+        else
+        {
+            Fatal( "Unknown plotter type." );
         }
     }
 }
@@ -143,6 +169,9 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
     const char* farmerPublicKey     = nullptr;
     const char* poolPublicKey       = nullptr;
     const char* poolContractAddress = nullptr;
+
+    DiskPlotter::Config diskCfg = {};
+    MemPlotConfig       ramCfg  = {};
 
     while( cli.HasArgs() )
     {
@@ -239,12 +268,22 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
                 }
             #endif
 
-            DiskPlotter::Config diskCfg;
+            // DiskPlotter::Config diskCfg;
             diskCfg.globalCfg = &cfg;
             DiskPlotter::ParseCommandLine( cli, diskCfg );
 
-            _plotter.disk = new DiskPlotter( diskCfg );
+            _plotter.type = PlotterType::Disk;
+            break;
+        }
+        else if( cli.ArgConsume( "ramplot" ) )
+        {
+            ramCfg.threadCount   = cfg.threadCount == 0 ? 
+                                    SysHost::GetLogicalCPUCount() : 
+                                    bbclamp( cfg.threadCount, 1u, SysHost::GetLogicalCPUCount() );
+            ramCfg.warmStart     = cfg.warmStart;
+            ramCfg.gCfg          = &cfg;
 
+            _plotter.type = PlotterType::Ram;
             break;
         }
         else if( cli.ArgConsume( "iotest" ) )
@@ -374,6 +413,12 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
 
     // Config Summary
     Log::Line( "" );
+    Log::Line( "Bladebit Chia Plotter" );
+    Log::Line( "Version      : %s", BLADEBIT_VERSION_STR   );
+    Log::Line( "Git Commit   : %s", BLADEBIT_GIT_COMMIT    );
+    Log::Line( "Compiled With: %s", BBGetCompilerVersion() );
+    Log::Line( "" );
+
     Log::Line( "[Global Plotting Config]" );
     if( cfg.plotCount == 0 )
         Log::Line( " Will create plots indefinitely." );
@@ -396,6 +441,23 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
     Log::Line( " Output path           : %s", cfg.outputFolder );
 
     Log::Line( "" );
+
+    // Create plotter
+    switch( _plotter.type )
+    {
+        case PlotterType::Disk:
+            _plotter.disk = new DiskPlotter( diskCfg );
+            break;
+
+        case PlotterType::Ram:
+            _plotter.mem  = new MemPlotter( ramCfg );
+            break;
+        
+        default:
+            Fatal( "No plotter chosen." );
+            break;
+    }
+    Log::Line( "" );
 }
 
 
@@ -404,6 +466,7 @@ static const char* USAGE = "bladebit [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS
 R"(
 [COMMANDS]
  diskplot   : Create a plot by making use of a disk.
+ ramplot    : Create a plot completely in-ram.
  iotest     : Perform a write and read test on a specified disk.
  memtest    : Perform a memory (RAM) copy test.
  validate   : Validates all entries in a plot to ensure they all evaluate to a valid proof.

@@ -152,12 +152,6 @@ uint64 MemPhase3::ProcessTable( uint32* lEntries, uint64* lpBuffer, Pair* rTable
             lEntries,     lEntriesSortTmp,
             newLength );
 
-        // #NOTE: Because the C2 table size is inferred by substracting table pointers
-        //        in chiapos, we need to make sure we don't have any f7 entries with the
-        //        value of 0xFFFFFFFF. See WriteC12Parallel in Phase4 for more details.
-        while( newLength && cx.t7YBuffer[newLength-1] == 0xFFFFFFFF )
-            --newLength;
-
         cx.entryCount[(uint)TableId::Table7] = newLength;
     }
 

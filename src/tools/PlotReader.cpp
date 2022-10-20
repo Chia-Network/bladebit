@@ -4,6 +4,7 @@
 #include "plotting/PlotTools.h"
 #include "plotting/CTables.h"
 #include "plotting/DTables.h"
+#include "plotmem/LPGen.h"
 
 ///
 /// Plot Reader
@@ -25,6 +26,15 @@ PlotReader::~PlotReader()
 {
     free( _parkBuffer );
     free( _deltasBuffer );
+
+    if( _c2Entries.values )
+        bbvirtfreebounded( _c2Entries.values );
+
+    if( _c1Buffer )
+        bbvirtfreebounded( _c1Buffer );
+
+    if( _c3Buffer.Ptr() )
+        bbvirtfreebounded( _c3Buffer.Ptr() );
 }
 
 //-----------------------------------------------------------
@@ -35,9 +45,7 @@ uint64 PlotReader::GetC3ParkCount() const
     // However, to make sure this is the case, we'll have to 
     // read-in all C1 entries and ensure we hit an empty one,
     // to ensure we don't run into dead/alignment-space
-    const size_t c1TableSize = _plot.TableSize( PlotTable::C1 );
-    const size_t f7Size      = CDiv( _plot.K(), 8 );
-    const uint64 c3ParkCount = std::max( c1TableSize / f7Size, (size_t)1 ) - 1;
+    const uint64 c3ParkCount = GetMaximumC1Entries();
 
     // Or just do this: 
     //  Same thing, but we use it
@@ -79,6 +87,59 @@ size_t PlotReader::GetTableParkCount( const PlotTable table ) const
         default:
             return 0;
     }
+}
+
+//-----------------------------------------------------------
+uint64 PlotReader::GetMaximumC1Entries() const
+{
+    // -1 because an extra 0 entry is added at the end
+    const size_t c1TableSize = _plot.TableSize( PlotTable::C1 );
+    const size_t f7Size      = CDiv( _plot.K(), 8 );
+    const uint64 c3ParkCount = std::max( c1TableSize / f7Size, (size_t)1 ) - 1;
+
+    return c3ParkCount;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::GetActualC1EntryCount( uint64& outC1Count )
+{
+    outC1Count = 0;
+
+    const uint64 maxC1Entries = GetMaxF7EntryCount();
+
+    if( maxC1Entries < 1 )
+        return true;
+        
+    const size_t f7SizeBytes   = CDiv( _plot.K(), 8 );
+    const uint64 c1Address     = _plot.TableAddress( PlotTable::C1 );
+    const size_t c1TableSize   = _plot.TableSize( PlotTable::C1 );
+          size_t c1ReadAddress = c1Address + c1TableSize - f7SizeBytes; 
+
+    // Read entries from the end of the table until the start, until we find an entry that is
+    // not zero/higher than the previous one
+    if( !_plot.Seek( SeekOrigin::Begin, (int64)c1ReadAddress ) )
+        return false;
+
+    const uint32 k  = _plot.K();
+          uint64 c1 = 0;
+    while( c1ReadAddress >= c1Address )
+    {
+        uint64 newC1;
+        if( _plot.Read( f7SizeBytes, &newC1 ) != (ssize_t)f7SizeBytes )
+            return false;
+
+        newC1 = Swap64( newC1 ) >> ( 64 - k );
+        if( newC1 > c1 )
+            break;
+
+        if( c1ReadAddress <= c1Address )
+            return false;
+        
+        c1ReadAddress -= f7SizeBytes;
+    }
+
+    outC1Count = ( c1ReadAddress - c1Address ) / f7SizeBytes;
+    return true;
 }
 
 //-----------------------------------------------------------
@@ -366,6 +427,220 @@ bool PlotReader::FetchProofFromP7Entry( uint64 p7Entry, uint64 proof[32] )
     // #TODO: Implement me
     ASSERT( 0 );
     return false;
+}
+
+//-----------------------------------------------------------
+Span<uint64> PlotReader::GetP7IndicesForF7( const uint64 f7, Span<uint64> indices )
+{
+    if( indices.Length() == 0 )
+        return {};
+
+    if( !LoadC2Entries() )
+        return {};
+
+    uint64 c2Index = 0;
+
+    for( uint64 i = 0; ; )
+    {
+        const uint64 c2 = _c2Entries[i];
+
+        if( c2 > f7 || ++i >= _c2Entries.Length() )
+        {
+            if( c2Index > 0 ) c2Index--;
+            break;
+        }
+
+        c2Index++;
+    }
+
+    const uint64 c1StartIndex = c2Index * kCheckpoint2Interval;
+
+    const uint32 k              = _plot.K();
+    const size_t f7SizeBytes    = CDiv( k, 8 );
+    const size_t f7BitCount     = f7SizeBytes * 8;
+    const uint64 c1TableAddress = _plot.TableAddress( PlotTable::C1 );
+    const size_t c1TableSize    = _plot.TableSize( PlotTable::C1 );
+    const uint64 c1TableEnd     = c1TableAddress + c1TableSize;
+    const uint64 c1EntryAddress = c1TableAddress + c1StartIndex * f7SizeBytes;
+
+
+    const uint64 c1EndAddress = std::min( c1EntryAddress + ( kCheckpoint1Interval * f7SizeBytes ), c1TableEnd );
+
+    const size_t readSize     = c1EndAddress - c1EntryAddress;
+    const uint64 c1EntryCount = readSize / f7SizeBytes;
+
+    if( c1EntryCount < 1 )
+        return {};
+
+    if( !_plot.Seek( SeekOrigin::Begin, (int64)c1EntryAddress ) )
+    {
+        Log::Error( "Seek to C1 address failed: %d", _plot.GetError() );
+        return {};
+    }
+
+    // Read C1 entries until we find one equal or larger than the f7 we're looking for
+    if( !_c1Buffer )
+        _c1Buffer = bbcvirtallocbounded<byte>( kCheckpoint1Interval * f7SizeBytes );
+    
+    if( _plot.Read( readSize, _c1Buffer ) != (ssize_t)readSize )
+    {
+        Log::Error( "Failed to read C1 entries: %d", _plot.GetError() );
+        return {};
+    }
+
+    CPBitReader reader( _c1Buffer, readSize * 8 );
+    uint64 c3Park = c1StartIndex;
+    uint64 c1     = 0;
+
+    for( uint64 i = 0; ; )
+    {
+        c1 = reader.Read64( f7BitCount );
+
+        if( c1 >= f7 || ++i >= c1EntryCount )
+        {
+            if( c3Park > 0 ) c3Park--;
+            break;
+        }
+
+        c3Park++;
+    }
+
+    const uint64 parkCount = c1 == f7 && c3Park > 0 ? 2 : 1; // If we got the same c1 as f7, then the previous
+                                                             // needs to be read as well because we may have duplicate f7s
+                                                             // in the previous park's last entries.
+        
+    if( _c3Buffer.Ptr() == nullptr )
+    {
+        _c3Buffer.values = bbcvirtallocbounded<uint64>( kCheckpoint1Interval * 2 );
+        _c3Buffer.length = kCheckpoint1Interval * 2;
+    }
+
+    uint64 c3Count = (uint64)ReadC3Park( c3Park, _c3Buffer.Ptr() );
+
+    if( parkCount > 1 )
+    {
+        ASSERT( parkCount == 2 );
+        c3Count += (uint64)ReadC3Park( c3Park+1, _c3Buffer.Ptr() + c3Count );
+    }
+
+    // Grab as many matches as we can
+    const Span<uint64> c3Entries    = _c3Buffer.SliceSize( (size_t)c3Count );
+    const uint64       c3StartIndex = c3Park * kCheckpoint1Interval;
+    uint64 matchCount = 0;
+
+    for( uint64 i = 0; i < c3Entries.Length(); i++ )
+    {
+        if( c3Entries[i] == f7 )
+        {
+            while( matchCount < indices.Length() && i < c3Count && c3Entries[i] == f7 )
+                indices[matchCount++] = c3StartIndex + i++;
+
+            return indices.SliceSize( matchCount );
+        }
+    }
+
+    return {};
+}
+
+
+//-----------------------------------------------------------
+bool PlotReader::FetchProof( const uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] )
+{
+    uint64 lpIndices[2][BB_PLOT_PROOF_X_COUNT];
+
+    uint64* lpIdxSrc = lpIndices[0];
+    uint64* lpIdxDst = lpIndices[1];
+
+    *lpIdxSrc = t6LPIndex;
+
+    // Fetch line points to back pointers going through all our tables
+    // from 6 to 1, grabbing all of the x's that make up a proof.
+    uint32 lookupCount = 1;
+
+    for( TableId table = TableId::Table6; table >= TableId::Table1; table-- )
+    {
+        ASSERT( lookupCount <= 32 );
+
+        for( uint32 i = 0, dst = 0; i < lookupCount; i++, dst += 2 )
+        {
+            const uint64 idx = lpIdxSrc[i];
+
+            uint128 lp = 0;
+            if( !ReadLP( table, idx, lp ) )
+                return false;
+
+            BackPtr ptr;
+            if( table < TableId::Table6 && _plot.K() <= 32 )
+                ptr = LinePointToSquare64( (uint64)lp );
+            else
+                ptr = LinePointToSquare( lp );
+
+            lpIdxDst[dst+0] = ptr.y;
+            lpIdxDst[dst+1] = ptr.x;
+        }
+
+        lookupCount <<= 1;
+
+        std::swap( lpIdxSrc, lpIdxDst );
+        // memset( lpIdxDst, 0, sizeof( uint64 ) * PROOF_X_COUNT );
+    }
+
+    // Full proof x's will be at the src ptr
+    memcpy( fullProofXs, lpIdxSrc, sizeof( uint64 ) * BB_PLOT_PROOF_X_COUNT );
+    return true;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::LoadC2Entries()
+{
+    if( _c2Entries.Ptr() )
+        return true;
+
+    const size_t c2Size = _plot.TableSize( PlotTable::C2 );
+    if( c2Size == 0 )
+        return false;
+
+    const size_t f7ByteSize = CDiv( _plot.K(), 8 );
+
+    const uint64 c2MaxEntries = c2Size / f7ByteSize;
+    if( c2MaxEntries < 1 )
+        return false;
+
+    if( !_plot.Seek( SeekOrigin::Begin, (int64)_plot.TableAddress( PlotTable::C2 ) ) )
+        return false;
+
+   
+    byte* buffer = bbvirtallocbounded<byte>( c2Size );
+
+    if( _plot.Read( c2Size, buffer ) != (ssize_t)c2Size )
+    {
+        bbvirtfreebounded( buffer );
+        return false;
+    }
+
+    _c2Entries = bbcalloc_span<uint64>( c2MaxEntries );
+
+    const size_t f7BitCount = f7ByteSize * 8;
+    CPBitReader reader( buffer, c2Size * 8 );
+
+    uint64 prevF7 = 0;
+    uint64 i;
+    for( i = 0; i < c2MaxEntries; i++ )
+    {
+        const uint64 f7 = reader.Read64( f7BitCount );
+        
+        // Short circuit if we encounter an unsorted/out-of-order c2 entry
+        if( f7 < prevF7 )
+            break;
+
+        _c2Entries[i] = f7;
+        prevF7 = f7;
+    }
+
+    _c2Entries.length = i;
+
+    bbvirtfreebounded( buffer );
+    return true;
 }
 
 ///
