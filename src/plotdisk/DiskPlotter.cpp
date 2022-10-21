@@ -314,16 +314,14 @@ void DiskPlotter::ParseCommandLine( CliParser& cli, Config& cfg )
             FatalIf( cfg.numBuckets < BB_DP_MIN_BUCKET_COUNT || cfg.numBuckets > BB_DP_MAX_BUCKET_COUNT,
                 "Buckets must be between %u and %u, inclusive.", (uint)BB_DP_MIN_BUCKET_COUNT, (uint)BB_DP_MAX_BUCKET_COUNT );
             FatalIf( ( cfg.numBuckets & ( cfg.numBuckets - 1 ) ) != 0, "Buckets must be power of 2." );
+            FatalIf( !cfg.tmpPath, "Please specify at least 1 temporary path." );
+
+            const uint32 threadCount = bbclamp<uint32>( cfg.globalCfg->threadCount, 1u, SysHost::GetLogicalCPUCount() );
 
             size_t heapSize = 0;
-            if( cfg.tmpPath )
-            {
-                cfg.tmpPath2 = cfg.tmpPath2 ? cfg.tmpPath2 : cfg.tmpPath;
-                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, cfg.tmpPath2, cfg.tmpPath, BB_DP_MAX_JOBS );
-            }
-            else
-                heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, 1, 1, BB_DP_MAX_JOBS );
-                
+            cfg.tmpPath2 = cfg.tmpPath2 ? cfg.tmpPath2 : cfg.tmpPath;
+            heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, cfg.tmpPath2, cfg.tmpPath, threadCount );
+            
             Log::Line( "Buckets: %u | Heap Sizes: %.2lf GiB", cfg.numBuckets, (double)heapSize BtoGB );
             exit( 0 );
         }
