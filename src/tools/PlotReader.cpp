@@ -494,7 +494,7 @@ Span<uint64> PlotReader::GetP7IndicesForF7( const uint64 f7, Span<uint64> indice
 
     for( uint64 i = 0; ; )
     {
-        c1 = reader.Read64( f7BitCount );
+        c1 = reader.Read64( (uint32)f7BitCount );
 
         if( c1 >= f7 || ++i >= c1EntryCount )
         {
@@ -627,7 +627,7 @@ bool PlotReader::LoadC2Entries()
     uint64 i;
     for( i = 0; i < c2MaxEntries; i++ )
     {
-        const uint64 f7 = reader.Read64( f7BitCount );
+        const uint64 f7 = reader.Read64( (uint32)f7BitCount );
         
         // Short circuit if we encounter an unsorted/out-of-order c2 entry
         if( f7 < prevF7 )
