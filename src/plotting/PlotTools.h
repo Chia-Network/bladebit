@@ -2,6 +2,8 @@
 #include "ChiaConsts.h"
 #include "util/KeyTools.h"
 
+#define BB_PLOT_PROOF_X_COUNT 32
+
 #define BB_PLOT_ID_LEN 32
 #define BB_PLOT_ID_HEX_LEN (BB_PLOT_ID_LEN * 2)
 

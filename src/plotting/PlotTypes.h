@@ -1,5 +1,4 @@
 #pragma once
-#include "threading/AutoResetSignal.h"
 
 struct Pairs
 {
@@ -29,3 +28,19 @@ struct Pair
     }
 };
 static_assert( sizeof( Pair ) == 8, "Invalid Pair struct." );
+
+
+enum class PlotTable
+{
+    Table1 = 0,
+    Table2,
+    Table3,
+    Table4,
+    Table5,
+    Table6,
+    Table7,
+    C1,
+    C2,
+    C3,
+}; ImplementArithmeticOps( PlotTable );
+

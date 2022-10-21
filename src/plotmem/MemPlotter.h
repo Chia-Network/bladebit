@@ -1,10 +1,12 @@
 #pragma once
 #include "PlotContext.h"
+#include "plotting/GlobalPlotConfig.h"
 
 struct NumaInfo;
 
 struct MemPlotConfig
 {
+    GlobalPlotConfig* gCfg;
     uint threadCount;
     bool warmStart;
     bool noNUMA;

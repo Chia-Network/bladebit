@@ -1,24 +1,11 @@
 #pragma once
 #include "plotting/PlotTools.h"
+#include "plotting/PlotTypes.h"
 #include "io/FileStream.h"
 #include "util/Util.h"
 #include <vector>
 
 class CPBitReader;
-
-enum class PlotTable
-{
-    Table1 = 0,
-    Table2,
-    Table3,
-    Table4,
-    Table5,
-    Table6,
-    Table7,
-    C1,
-    C2,
-    C3,
-}; ImplementArithmeticOps( PlotTable );
 
 struct PlotHeader
 {
@@ -175,6 +162,15 @@ public:
 
     size_t GetTableParkCount( const PlotTable table ) const;
 
+    uint64 GetMaximumC1Entries() const;
+
+    // Returns the number of apparent C1 entries (same as C3 park count),
+    // excluding any empty space appearing after the table for alignment,
+    // This may not be accurate if the C1 entries are malformed and 
+    // not sorted in ascending order.
+    // This method performs various reads until it find a seemingly valid C1 entries
+    bool GetActualC1EntryCount( uint64& outC1Count );
+
     // Read a whole C3 park into f7Buffer.
     // f7Buffer must hold at least as many as the amount of entries
     // required per C3Park. (kCheckpoint1Interval).
@@ -187,6 +183,8 @@ public:
 
     uint64 GetFullProofForF7Index( uint64 f7Index, byte* fullProof );
 
+    bool FetchProof( uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] );
+
     // void   FindF7ParkIndices( uintt64 f7, std::vector<uint64> indices );
     bool ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints[kEntriesPerPark], uint64& outEntryCount );
 
@@ -196,17 +194,25 @@ public:
 
     inline IPlotFile& PlotFile() const { return _plot; }
 
+    Span<uint64> GetP7IndicesForF7( const uint64 f7, Span<uint64> indices );
+    
 private:
 
     bool ReadLPParkComponents( TableId table, uint64 parkIndex, 
                                CPBitReader& outStubs, byte*& outDeltas, 
                                uint128& outBaseLinePoint, uint64& outDeltaCounts );
 
+    bool LoadC2Entries();
 private:
     IPlotFile& _plot;
+    uint32     _version;
 
     // size_t  _parkBufferSize;
-    uint64* _parkBuffer    ;        // Buffer for loading compressed park data.
-    byte*   _deltasBuffer  ;        // Buffer for decompressing deltas in parks that have delta. 
+    uint64*      _parkBuffer    ;        // Buffer for loading compressed park data.
+    byte*        _deltasBuffer  ;        // Buffer for decompressing deltas in parks that have delta. 
+
+    Span<uint64> _c2Entries;
+    byte*        _c1Buffer = nullptr;
+    Span<uint64> _c3Buffer;
 };
 

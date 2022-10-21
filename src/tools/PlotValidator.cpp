@@ -58,6 +58,8 @@ You can specify the thread count in the bladebit global option '-t'.
                 it requires around 128GiB of RAM for k=32.
                 This is only supported for plots with k=32 and below.
 
+ --f7 <f7>    : Specify an f7 to find and validate in the plot.
+
  -h, --help   : Print this help message and exit.
 )";
 
@@ -98,6 +100,7 @@ static void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 full
 template<bool Use64BitLpToSquare>
 static bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] );
 
+static void GetProofForChallenge( const char* plotPath, const char* challengeHex );
 static bool ValidateFullProof( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 );
 static void ReorderProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT] );
 static void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
@@ -137,6 +140,9 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
 {
     ValidatePlotOptions opts;
 
+    const char* challenge = nullptr;
+    int64       f7        = -1;
+
     while( cli.HasArgs() )
     {
         if( cli.ReadSwitch( opts.inRAM, "-m", "--in-ram" ) )
@@ -144,6 +150,10 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
         else if( cli.ReadSwitch( opts.unpacked, "-u", "--unpack" ) )
             continue;
         else if( cli.ReadF32( opts.startOffset, "-o", "--offset" ) )
+            continue;
+        else if( cli.ReadStr( challenge, "--prove" ) )
+            continue;
+        else if( cli.ReadI64( f7, "--f7" ) )    // Same as proof, but the challenge is made from an f7
             continue;
         else if( cli.ArgConsume( "-h", "--help" ) )
         {
@@ -158,6 +168,22 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
         {
             Fatal( "Unexpected argument '%s'.", cli.Arg() );
         }
+    }
+
+    // Check for f7
+    if( f7 >= 0 )
+    {
+        challenge = new char[65];
+        sprintf( (char*)challenge, "%08llx", f7 );
+        memset( (void*)(challenge+8), '0', 64-8 );
+        ((char*)challenge)[64] = 0;
+    }
+
+    // Check for challenge
+    if( challenge != nullptr )
+    {
+        GetProofForChallenge( opts.plotPath.c_str(), challenge );
+        Exit( 0 );
     }
 
     const uint32 maxThreads = SysHost::GetLogicalCPUCount();
@@ -208,11 +234,11 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     FatalIf( options.unpacked && plotFile->K() != 32, "Unpacked plots are only supported for k=32 plots." );
 
     Log::Line( "Validating plot %s", options.plotPath.c_str() );
-    Log::Line( "K       : %u", plotFile->K() );
-    Log::Line( "Unpacked: %s", options.unpacked? "true" : "false" );;
+    Log::Line( "K               : %u", plotFile->K() );
+    Log::Line( "Unpacked        : %s", options.unpacked? "true" : "false" );;
 
     const uint64 plotC3ParkCount = plotFile->TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
-    Log::Line( "C3 Parks: %llu", plotC3ParkCount );
+    Log::Line( "Maximum C3 Parks: %llu", plotC3ParkCount );
     Log::Line( "" );
 
 
@@ -309,13 +335,31 @@ uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool )
                     const uint32 expectedF7 = plot.f7[i];
 
                     if( expectedF7 != outF7 )
-                        failedCount++;
+                    {
+                        if( failedCount++ == 0 )
+                        {
+                            Log( "Proof failed: Expected %llu but got %llu @ %llu (park %llu).", 
+                                (uint64)expectedF7, outF7, i, i / kCheckpoint1Interval );
+                        }
+                    }
                 }
                 else
-                    failedCount++;
+                {
+                    if( failedCount++ == 0 )
+                    {
+                        Log( "Proof failed: Validation error for f7 %llu @ %llu (park %llu).", 
+                             (uint64)plot.f7[i], i, i / kCheckpoint1Interval );
+                    }
+                }
             }
             else
-                failedCount++;
+            {
+                if( failedCount++ == 0 )
+                {
+                    Log( "Proof failed: Fetch failure for f7 %llu @ %llu (park %llu).", 
+                            (uint64)plot.f7[i], i, i / kCheckpoint1Interval );
+                }
+            }
 
             const uint64 proofsChecked = i - offset;
             if( ( proofsChecked > 0 && proofsChecked % reportInterval == 0 ) || i + 1 == end )
@@ -476,6 +520,80 @@ void ValidateJob::Run()
     this->failCount = proofFailCount;
 }
 
+// #TODO: Support K>32
+//-----------------------------------------------------------
+void GetProofForChallenge( const char* plotPath, const char* challengeHex )
+{
+    FatalIf( !plotPath || !*plotPath, "Invalid plot path." );
+    FatalIf( !challengeHex || !*challengeHex, "Invalid challenge." );
+
+    const size_t lenChallenge = strlen( challengeHex );
+    FatalIf( lenChallenge != 64, "Invalid challenge, should be 32 bytes." );
+
+    uint64 challenge[4] = {};
+    HexStrToBytes( challengeHex, lenChallenge, (byte*)challenge, 32 );
+
+    FilePlot plot;
+    FatalIf( !plot.Open( plotPath ), "Failed to open plot at %s.", plotPath );
+    FatalIf( plot.K() != 32, "Only k32 plots are supported." );
+
+    // Read F7 value
+    CPBitReader f7Reader( (byte*)challenge, sizeof( challenge ) * 8 );
+    const uint32 f7 = (uint32)f7Reader.Read64( 32 );
+
+    // Find this f7 in the plot file
+    PlotReader reader( plot );
+
+    uint64 _indices[64] = {};
+    Span<uint64> indices( _indices, sizeof( _indices ) / sizeof( uint64 ) );    // #TODO: Should simply return the start index and count
+
+    auto matches = reader.GetP7IndicesForF7( f7, indices );
+    FatalIf( matches.Length() == 0, "Could not find f7 %llu in plot", f7 );
+
+    uint64 fullProofXs[PROOF_X_COUNT];
+    uint64 proof   [32]  = {};
+    char   proofStr[513] = {};
+    uint64 p7Entries[kEntriesPerPark] = {};
+
+    int64 prevP7Park = -1;
+
+    for( uint64 i = 0; i < matches.Length(); i++ )
+    {
+        const uint64 p7Index = matches[i];
+        const uint64 p7Park  = p7Index / kEntriesPerPark;
+        
+        // uint64 o = reader.GetFullProofForF7Index( matches[i], proof );
+        if( (int64)p7Park != prevP7Park )
+        {
+            FatalIf( !reader.ReadP7Entries( p7Park, p7Entries ), "Failed to read P7 %llu.", p7Park );
+        }
+
+        prevP7Park = (int64)p7Park;
+
+        const uint64 localP7Index = p7Index - p7Park * kEntriesPerPark;
+        const uint64 t6Index      = p7Entries[localP7Index];
+
+        const bool gotProof = FetchProof<true>( reader, t6Index, fullProofXs );
+        
+        if( gotProof )
+        {
+            ReorderProof( reader, fullProofXs );
+
+            BitWriter writer( proof, sizeof( proof ) * 8 );
+
+            for( uint32 j = 0; j < PROOF_X_COUNT; j++ )
+                writer.Write64BE( fullProofXs[j], 32 );
+
+            for( uint32 j = 0; j < PROOF_X_COUNT/2; j++ )
+                proof[j] = Swap64( proof[j] );
+
+            size_t encoded;
+            BytesToHexStr( (byte*)proof, sizeof( proof ), proofStr, sizeof( proofStr ), encoded );
+            // Log::Line( "[%llu] : %s", i, proofStr );
+            Log::Line( proofStr );
+        }
+    }
+}
 
 //-----------------------------------------------------------
 UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, uint32 threadCount )
@@ -495,6 +613,9 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
 
     PlotReader& plotReader = readers[0];
 
+    // uint64 c1EntryCount = 0;
+    // FatalIf( !plotReader.GetActualC1EntryCount( c1EntryCount ), "Failed to obtain C1 entry count." );
+    
     uint64 f7Count = plotReader.GetMaxF7EntryCount(); FatalIf( f7Count < 1, "No F7s found." );
 
     // Load F7s
@@ -502,7 +623,7 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
         Log::Line( "Unpacking f7 values..." );
         uint32* f7 = bbcvirtallocboundednuma<uint32>( f7Count );
 
-        uint64 missingF7 = 0;
+        std::atomic<uint64> sharedF7Count = 0;
 
         AnonMTJob::Run( pool, threadCount, [&]( AnonMTJob* self ) {
 
@@ -513,8 +634,10 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
             uint64 parkCount, parkOffset, parkEnd;
             GetThreadOffsets( self, plotParkCount, parkCount, parkOffset, parkEnd );
 
-            uint64 f7Buffer[kCheckpoint1Interval];
-            uint32* f7Writer = f7 + parkOffset * kCheckpoint1Interval;
+            uint64  f7Buffer[kCheckpoint1Interval];
+
+            uint32* f7Start  = f7 + parkOffset * kCheckpoint1Interval;
+            uint32* f7Writer = f7Start;
 
             for( uint64 i = parkOffset; i < parkEnd; i++ )
             {
@@ -522,27 +645,34 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
 
                 FatalIf( entryCount == 0, "Empty C3 park @ %llu.", i );
 
-                for( int64 e = 0; e < entryCount; e++ )
-                    f7Writer[e] = (uint32)f7Buffer[e];
-
-                f7Writer += entryCount;
+                if( entryCount > 0 )
+                {
+                    for( int64 e = 0; e < entryCount; e++ )
+                        f7Writer[e] = (uint32)f7Buffer[e];
+                    
+                    f7Writer += entryCount;
+                }
 
                 if( entryCount < kCheckpoint1Interval )
                 {
-                    if( self->IsLastThread() && i + 1 == parkEnd )
+                    if( self->IsLastThread() )
                     {
-                        missingF7 = kCheckpoint1Interval - entryCount;
+                        // Short-circuit as soon as we find a partial park in the last thread
                         break;
                     }
                     else
-                        FatalErrorMsg( "C3 park %llu is not full and it is not the last park.", i );
+                        Fatal( "[%u/%u] C3 park %llu is not full and it is not the last park.", self->_jobId, self->_jobCount, i );
                 }
             }
+
+            sharedF7Count += (uint64)(uintptr_t)(f7Writer - f7Start);
         });
 
-        f7Count        -= missingF7;
+        f7Count        = sharedF7Count;
         plot.f7.length = f7Count;
         plot.f7.values = f7;
+
+        Log::Line( "Actual C3 Parks : %llu", CDiv( f7Count, kCheckpoint1Interval ) );
     }
     
     // Read Park 7

@@ -37,27 +37,6 @@
 #endif
 
 
-typedef uint32 K32Meta1;
-typedef uint64 K32Meta2;
-// struct K32Meta3 { uint32 m0, m1, m2; };
-struct K32Meta3 { uint64 m0, m1; };
-struct K32Meta4 { uint64 m0, m1; };
-struct K32NoMeta {};
-
-template<TableId rTable>
-struct K32MetaType{};
-
-template<> struct K32MetaType<TableId::Table1>{ using In = K32NoMeta; using Out = K32Meta1;  };
-template<> struct K32MetaType<TableId::Table2>{ using In = K32Meta1;  using Out = K32Meta2;  };
-template<> struct K32MetaType<TableId::Table3>{ using In = K32Meta2;  using Out = K32Meta4;  };
-template<> struct K32MetaType<TableId::Table4>{ using In = K32Meta4;  using Out = K32Meta4;  };
-template<> struct K32MetaType<TableId::Table5>{ using In = K32Meta4;  using Out = K32Meta3;  };
-template<> struct K32MetaType<TableId::Table6>{ using In = K32Meta3;  using Out = K32Meta2;  };
-template<> struct K32MetaType<TableId::Table7>{ using In = K32Meta2;  using Out = K32NoMeta; };
-
-template<TableId rTable> struct K32TYOut { using Type = uint64; };
-template<>               struct K32TYOut<TableId::Table7> { using Type = uint32; };
-
 template<TableId rTable, uint32 _numBuckets>
 class DiskPlotFxBounded
 {

@@ -450,6 +450,14 @@ public:
     }
 
     //-----------------------------------------------------------
+    inline void Write64BE( const uint64 value, const uint32 bitCount )
+    {
+        ASSERT( _capacity - _position >= bitCount );
+        WriteBits64BE( _fields, _position, value, bitCount );
+        _position += bitCount;
+    }
+
+    //-----------------------------------------------------------
     // dstOffset: Offset in bits as to where to start writing in fields
     //-----------------------------------------------------------
     inline static void WriteBits64( uint64* fields, const uint64 dstOffset, const uint64 value, const uint32 bitCount )
