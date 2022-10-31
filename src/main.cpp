@@ -524,10 +524,10 @@ bladebit --help
 bladebit help diskplot
 
 # Simple config:
-bladebit -t 24 -f <farmer_pub_key> -c <contract_address> diskplot --t1 /my/temporary/plot/dir /my/output/dir
+bladebit -t 24 -f <farmer_pub_key> -c <contract_address> diskplot -t1 /my/temporary/plot/dir /my/output/dir
 
 # With fine-grained control over threads per phase/section (see bladebit -h diskplot):
-bladebit -t 30 -f <farmer_pub_key> -c <contract_address> diskplot --f1-threads 16 --c-threads 16 --p2-threads 8 --t1 /my/temporary/plot/dir /my/output/dir
+bladebit -t 30 -f <farmer_pub_key> -c <contract_address> diskplot --f1-threads 16 --c-threads 16 --p2-threads 8 -t1 /my/temporary/plot/dir /my/output/dir
 )";
 
 //-----------------------------------------------------------

@@ -2,15 +2,29 @@
 
 [![Release Builds](https://github.com/Chia-Network/bladebit/actions/workflows/build-release.yml/badge.svg?branch=master&event=push)](https://github.com/Chia-Network/bladebit/actions/workflows/build-release.yml)
 
-A fast **RAM-only**, **k32-only**, Chia plotter.
+A high-performance **k32-only**, Chia (XCH) plotter supporting in-RAM and disk-based plotting.
 
 ## Requirements
-**416 GiB of RAM are required** to run it, plus a few more megabytes for stack space and small allocations.
+
+### In-RAM
+**416 GiB of RAM are required** to run it, and a few more megabytes for stack space and small allocations.
 
 64-bit is supported only, for obvious reasons.
 
+
+### Disk-based
+A minimum of **4 GiB of RAM** is required, with lower bucket counts requiring up to 12 GiB of RAM. 
+
+Around **480 GiB** of total temporary space is required when plotting to disk in the default mode, or around 390 GiB with `--alternate` mode enabled.
+
+The exact amounts of RAM and disk space required may vary slightly depending on the system's page size and the target disk file system block size (block-alignment is required for direct I/O).
+
+SSDs are highly recommended for disk-based plotting.
+
+
 ## Prerequisites
-Only **Linux** & **Windows** are supported.
+Linux, Windows and MacOS (both intel and ARM (Apple Silicon)) are supported.
+
 
 ### Linux
 
@@ -26,6 +40,14 @@ sudo apt install -y build-essential cmake libgmp-dev libnuma-dev
 
 ### Windows
 Must have at least [Visual Studio 2019](https://visualstudio.microsoft.com/vs/) or its build tools installed.
+
+### macOS
+Must have Xcode or Xcode build tools installed.
+`brew install cmake`
+
+Optionally install `gmp`:
+`brew install gmp`
+
 
 ## Building
 
@@ -49,7 +71,7 @@ On Windows it will be under `build/Release/`.
 Run **bladebit** with the `-h` for complete usage and command line options:
 
 ```bash
-# Linux
+# Linux & macOS
 build/bladebit -h
 
 # Windows
@@ -57,29 +79,50 @@ build/Release/bladebit.exe -h
 ```
 
 
+The bladebit CLI uses the format `bladebit <GLOBAL_OPTIONS> <sub_command> <COMMAND_OPTIONS>`.
+
+Use the aforementioned `-h` parameter to get the full list of sub-commands and `GLOBAL_OPTIONS`. 
+The `sub_command`-specific `COMMAND_OPTIONS` can be obtained by using the `help` sub command with the desired command as the parameter: 
+
+```bash
+bladebit help ramplot
+bladebit help diskplot
+```
+
+### In-RAM
+Basic `ramplot` usage:
+```bash
+# OG plots
+./bladebit -f <farmer_public_key> -p <pool_public_key> ramplot <output_directory>
+
+# Portable plots
+./bladebit -f <farmer_public_key> -c <pool_contract_address> ramplot <output_directory>
+```
+
+### Disk-Based
+Basic `diskplot` usage:
+```bash
+
+# OG plots
+./bladebit -f <farmer_public_key> -p <pool_public_key> diskplot -t1 <temp_directory> <output_directory>
+
+# Portable plots
+./bladebit -f <farmer_public_key> -c <pool_contract_address> diskplot -t1 <temp_directory> <output_directory>
+
+# Differing temp directories:
+./bladebit -f ... -c ... diskplot -t1 /path/to/temp_1 -t2 /path/to/temp2 /my/output/dir
+
+# With a 100 GiB temp2 cache and alternating mode
+./bladebit -f ... -c ... diskplot -a --cache 100G -t1 /path/to/temp_1 -t2 /path/to/temp2 /my/output/dir
+
+# With fine-grained thread control depending on the workload
+./bladebit -f ... -c ... diskplot --f1-threads 12 --fp-threads 32 -t1 /path/to/temp_1  /my/output/dir
+```
+
+
 ## License
 Licensed under the [Apache 2.0 license](https://www.apache.org/licenses/LICENSE-2.0). See [LICENSE](LICENSE).
 
 
-# Other Details
-
-## Disk I/O
-Writes to disk only occur to the final plot file, and it is done sequentially, un-buffered, with direct I/O. This means that writes will be block-aligned. If you've gotten faster writes elsewhere in your drive than you will get with this, it is likely that it is using buffered writes, therefore it "finishes" before it actually finishes writing to disk. The kernel will handle the I/O in the background from cache (you can confirm this with tools such as iotop). The final writes here ought to pretty much saturate your sequential writes. Writes begin happening in the background at Phase 3 and will continue to do so, depending on the disk I/O throughput, through the next plot, if it did not finish beforehand. At some point in Phase 1 of the next plot, it might stall if it still has not finished writing to disk and a buffer it requires is still being written to disk. On the system I tested, there was no interruption when using an NVMe drive.
-
-
-## Pool Plots
-Pool plots are fully supported and tested against the chia-blockchain implementation. The community has also verified that pool plots are working properly and winning proofs with them.
-
-## NUMA systems
-Memory is bound on interleaved mode for NUMA systems which currently gives the best performance on systems with several nodes. This is the default behavior on NUMA systems, it can be disabled with with the `-m or --no-numa` switch.
-
-
-## Huge TLBs
-This is not supported yet. Some folks have reported some gains when using huge page sizes. Although this was something I wanted to test, I focused first instead on things that did not necessarily depended on system config. But I'd like to add support for it in the future (trivial from the development point of view, I have just not configured the test system with huge page sizes).
-
-## Other Observations
-This implementation is highly memory-bound so optimizing your system towards fast memory access is essential. CPUs with large caches will benefit as well.
-
-
-Copyright 2021 Harold Brenes, Chia Network Inc
+Copyright 2022 Harold Brenes, Chia Network Inc
 
