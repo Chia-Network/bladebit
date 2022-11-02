@@ -4,6 +4,9 @@ on:
     branches: ['*']
   workflow_dispatch:
 
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 1
+
 jobs:
   build-ubuntu-x86-64:
     runs-on: ubuntu-20.04
