@@ -49,6 +49,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: data
+          path: data
 
       - name: tar/untar
         run: |
