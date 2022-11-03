@@ -33,7 +33,7 @@ if [[ "$bb_version" != "$BB_VERSION" ]]; then
     exit 1
 fi
 
-ls -la $BB_ARTIFACT_NAME
+ls -la bladebit
 tar -czvf $BB_ARTIFACT_NAME bladebit
 mkdir ../bin
 mv $BB_ARTIFACT_NAME ../bin/
