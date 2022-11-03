@@ -39,6 +39,7 @@ jobs:
 
   tar:
     runs-on: macOS-latest
+    needs: build-macos-x86-64
     strategy:
       fail-fast: false
       matrix:
