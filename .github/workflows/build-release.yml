@@ -8,7 +8,6 @@ jobs:
   tar:
     name: tar - ${{ matrix.runs-on }} - ${{ matrix.n }}
     runs-on: ${{ matrix.runs-on }}
-    needs: build-macos-x86-64
     strategy:
       fail-fast: false
       matrix:
