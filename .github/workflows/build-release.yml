@@ -163,6 +163,7 @@ jobs:
           
           mkdir ../bin
           cd Release
+          ls -la
           7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
           ls -la ../../bin
 
