@@ -37,6 +37,7 @@ ls -la bladebit
 tar -czvf $BB_ARTIFACT_NAME bladebit
 ls -la $BB_ARTIFACT_NAME
 mkdir ../bin
+cp bladebit ../bin/
 mv $BB_ARTIFACT_NAME ../bin/
 ls -la ../bin
 
