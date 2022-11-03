@@ -6,6 +6,7 @@
 #   - BB_VERSION
 #
 set -eo pipefail
+set -vx
 
 thread_count=2
 
@@ -39,9 +40,14 @@ tar -czvf $BB_ARTIFACT_NAME bladebit
 ls -la $BB_ARTIFACT_NAME
 mkdir ../bin
 cp bladebit ../bin/
-mv $BB_ARTIFACT_NAME ../bin/
-ls -la ../bin
 mkdir tmp
 cd tmp
-tar -xvf ../../$BB_ARTIFACT_NAME
-python -c 'f = open("bladebit.notar.tarred", "rb"); contents = f.read(); print(contents.count(b"\x00"))'
+tar -xvf ../$BB_ARTIFACT_NAME
+python -c 'f = open("bladebit", "rb"); contents = f.read(); print("zero count:", contents.count(b"\x00"))'
+cd ..
+mv $BB_ARTIFACT_NAME ../bin/
+ls -la ../bin/
+mkdir tmp
+cd tmp
+tar -xvf ../$BB_ARTIFACT_NAME
+python -c 'f = open("bladebit", "rb"); contents = f.read(); print("zero count:", contents.count(b"\x00"))'
