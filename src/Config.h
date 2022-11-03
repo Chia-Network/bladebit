@@ -3,6 +3,7 @@
 // Jobs will be stack allocated to this size.
 // #TODO: This should perhaps be named max jobs.
 #define MAX_THREADS 256
+#define BB_MAX_JOBS MAX_THREADS
 
 // Perform Y sorts at the block level.
 // Unrolling loops by chacha block size.
@@ -40,4 +41,9 @@
 
 // Enable to test plotting times without writing to disk
 // #define BB_BENCHMARK_MODE 1
+
+// Enable for verbose debug logging.
+// Good for tracking internal state changes and finding bugs.
+// #define DBG_LOG_ENABLE 1
+
 

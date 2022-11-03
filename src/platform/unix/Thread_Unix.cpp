@@ -1,6 +1,6 @@
-#include "../../threading/Thread.h"
-#include "../../Util.h"
-#include "../../Globals.h"
+#include "threading/Thread.h"
+#include "util/Util.h"
+#include "Globals.h"
 #include "SysHost.h"
 #include "util/Log.h"
 
@@ -141,8 +141,13 @@ void Thread::Sleep( long milliseconds )
         #if _DEBUG
         int r =
         #endif
+
         nanosleep( &req, NULL );
+
+        #if _DEBUG
         ASSERT( !r );
+        #endif
+
     #else
         #error Unimplemented
     #endif
@@ -228,5 +233,28 @@ void* Thread::ThreadStarterUnix( Thread* t )
     pthread_exit( nullptr );
     
     return nullptr;
+}
+
+//-----------------------------------------------------------
+bool Thread::SetPriority( const ThreadPriority priority )
+{
+    // #TODO: Implement
+    // struct sched_param sched;
+
+    switch( priority )
+    {
+        // case ThreadPriority::Normal:
+        
+        //     break;
+
+        // case ThreadPriority::High:
+        
+        //     break;
+            
+        
+        default:
+            ASSERT( 0 );
+            return false;
+    }
 }
 

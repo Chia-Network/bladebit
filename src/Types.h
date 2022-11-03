@@ -4,13 +4,16 @@ typedef uint8_t                 byte;
 typedef uint8_t                 uint8;
 typedef uint16_t                uint16;
 typedef uint32_t                uint32;
-typedef unsigned long long int  uint64;
+typedef uint64_t                uint64;
+
+// Prevent compiler whining about %llu when uint64:
+typedef long long unsigned int  llu;
 
 #if !uint
     typedef uint32          uint;
 #endif
 
-#if !ssize_t
+#if _WIN32
     typedef int64_t         ssize_t;
 #endif
 
@@ -52,3 +55,14 @@ static_assert( sizeof( int64 ) == 8, "int64 must be 8" );
 
 static_assert( sizeof( float32 ) == 4, "float32 must be 4" );
 static_assert( sizeof( float64 ) == 8, "float64 must be 8" );
+
+#ifdef __SIZEOF_INT128__
+    typedef __uint128_t uint128_t;
+#else
+    #include "uint128_t/uint128_t.h"
+#endif
+
+typedef uint128_t uint128;
+
+typedef std::chrono::steady_clock::duration   Duration;
+typedef std::chrono::steady_clock::time_point TimePoint;

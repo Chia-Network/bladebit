@@ -1,8 +1,10 @@
-#include "../../threading/Thread.h"
-#include "../../Util.h"
-#include "../../Globals.h"
+#include "threading/Thread.h"
+#include "util/Util.h"
+#include "Globals.h"
 #include "SysHost.h"
 #include "util/Log.h"
+#include <Windows.h>
+
 
 //-----------------------------------------------------------
 Thread::Thread( size_t stackSize )
@@ -16,7 +18,7 @@ Thread::Thread( size_t stackSize )
     _threadId = CreateThread(
                     NULL,
                     (SIZE_T)stackSize,
-                    Thread::ThreadStarterWin,
+                    (LPTHREAD_START_ROUTINE)(void*)Thread::ThreadStarterWin,
                     (LPVOID)this,
                     CREATE_SUSPENDED,
                     nullptr );
@@ -108,7 +110,7 @@ bool Thread::WaitForExit( long milliseconds )
 
 // Thread entry point
 //-----------------------------------------------------------
-DWORD Thread::ThreadStarterWin( LPVOID param )
+unsigned long Thread::ThreadStarterWin( intptr_t param )
 {
     ASSERT( param );
 

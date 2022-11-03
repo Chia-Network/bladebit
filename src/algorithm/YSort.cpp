@@ -1,7 +1,7 @@
 #include "YSort.h"
 #include "SysHost.h"
 #include "threading/ThreadPool.h"
-#include "Util.h"
+#include "util/Util.h"
 #include "util/Log.h"
 #include "Config.h"
 #include "ChiaConsts.h"
@@ -176,7 +176,7 @@ void SortYJob::SortYThread( SortYJob* job )
     uint32 counts[Radix];
     job->counts = counts;
 
-    // Sort the last most significant byte first, yielding 256 buckets and
+    // Sort the most-significant-byte first, yielding 64 buckets and
     // stripping out that byte, leaving us with a 32-bit element size for the radix sort.
     {
         uint64 pfxSum[Buckets];

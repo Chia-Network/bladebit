@@ -10,10 +10,12 @@ _[tT]mp/
 .dist/
 .keys/
 dist/
+out/
 
 .DS_Store
 *.log
 park*_hash.txt
 
 lib/*
-build/
+build*/
+cmake-build*/

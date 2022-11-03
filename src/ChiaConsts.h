@@ -1,22 +1,10 @@
 #pragma once
-#include "Util.h"
+#include "util/Util.h"
+#include "plotting/Tables.h"
 
 // Hard-coded k to 32
 #define _K 32
 #define ENTRIES_PER_TABLE ( 1ull << _K )
-
-enum class TableId
-{
-    Table1 = 0,
-    Table2 = 1,
-    Table3 = 2,
-    Table4 = 3,
-    Table5 = 4,
-    Table6 = 5,
-    Table7 = 6
-
-    ,_Count
-};
 
 ///
 /// These are extracted from chiapos.
@@ -28,6 +16,8 @@ enum class TableId
 
 // ChaCha8 block size
 #define kF1BlockSizeBits 512
+
+#define kF1BlockSize (kF1BlockSizeBits / 8u)
 
 // Extra bits of output from the f functions. Instead of being a function from k -> k bits,
 // it's a function from k -> k + kExtraBits bits. This allows less collisions in matches.
@@ -112,8 +102,10 @@ inline void LoadLTargets()
 
 // This is the full size of the deltas section in a park. However, it will not be fully filled
 //-----------------------------------------------------------
-inline size_t CalculateMaxDeltasSize( TableId tableId )
+inline constexpr size_t CalculateMaxDeltasSize( const TableId tableId )
 {
+    ASSERT( tableId < TableId::Table7 );
+
     if( tableId == TableId::Table1 )
         return CDiv( (size_t)((kEntriesPerPark - 1) * kMaxAverageDeltaTable1), 8 );
     
@@ -133,11 +125,41 @@ inline size_t CalculateParkSize( TableId tableId )
     //         CalculateMaxDeltasSize(k, table_index);
 }
 
+//-----------------------------------------------------------
+inline constexpr size_t CalculateParkSize( const TableId tableId, const uint32 k )
+{
+    ASSERT( k >= 20 );
+
+    return 
+        CDiv( k * 2, 8 ) +                                         // LinePoint size
+        CDiv( (kEntriesPerPark - 1) * (k - kStubMinusBits), 8 ) +  // Stub Size 
+        CalculateMaxDeltasSize( tableId );                         // Max delta
+
+    // return CalculateLinePointSize(k) + CalculateStubsSize(k) +
+    //         CalculateMaxDeltasSize(k, table_index);
+}
+
 // Calculates the size of one C3 park. This will store bits for each f7 between
-// two C1 checkpoints, depending on how many times that f7 is present. For low
-// values of k, we need extra space to account for the additional variability.
+// two C1 checkpoints, depending on how many times that f7 is present. 
 constexpr inline static size_t CalculateC3Size()
 {
     return (size_t)CDiv( kC3BitsPerEntry * kCheckpoint1Interval, 8 );
 }
 
+//-----------------------------------------------------------
+inline constexpr static size_t CalculatePark7Size( const uint k )
+{
+    return CDiv( (k + 1) * (uint64)kEntriesPerPark, 8 );
+}
+
+//-----------------------------------------------------------
+constexpr inline static size_t LinePointSizeBits( uint32 k )
+{
+    return (size_t)k * 2;
+}
+
+//-----------------------------------------------------------
+constexpr inline static size_t LinePointSizeBytes( uint32 k )
+{
+    return CDiv( LinePointSizeBits( k ), 8 );
+}

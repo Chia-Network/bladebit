@@ -2,11 +2,10 @@
 
 enum class VProtect : uint
 {
-    None = 0,                   // No protection / Clear protection
+    NoAccess = 0,               // No memory access allowed at all
 
     Read     = 1 << 0,          // Allow reads. (Make pages read-only.)
-    Write    = 1 << 1,          // Allow writes. (Make pages write-only.)
-    NoAccess = 1 << 2,          // No memory access allowed at all
+    Write    = 1 << 1,          // Allow writes. (Make pages write-only.) // NOTE: This is not guaranteed depending on implementation.
 
     ReadWrite = Read | Write    // Make pages read/writable
 };
@@ -14,9 +13,9 @@ ImplementFlagOps( VProtect );
 
 struct NumaInfo
 {
-    uint        nodeCount;  // How many NUMA nodes in the system
-    uint        cpuCount;   // Total cpu count used by nodes
-    Span<uint>* cpuIds;     // CPU ids of each node
+    uint        nodeCount;      // How many NUMA nodes in the system
+    uint        cpuCount;       // Total cpu count used by nodes
+    Span<uint>* cpuIds;         // CPU ids of each node
 
     #ifdef _WIN32
 //         Span<uint16> procGroup; // Processor group each cpu belongs to.
@@ -55,10 +54,13 @@ public:
 //     static uint64 SetCurrentThreadAffinityMask( uint64 mask );
 
     /// Set the processor affinity mask to a specific cpu id for the current thread
-    static bool   SetCurrentThreadAffinityCpuId( uint32 cpuId );
+    static bool SetCurrentThreadAffinityCpuId( uint32 cpuId );
 
     /// Install a crash handler to dump stack traces upon crash
     static void InstallCrashHandler();
+
+    /// Dump stack trace to stderr
+    static void DumpStackTrace();
 
     /// Generate random data
     /// (We basically do what libsodium does here)
@@ -79,7 +81,7 @@ public:
 
     /// Get the node a memory page belongs to.
     /// Returns a negative value upon failure.
-    /// NOTE: Pages must first be faulted on linuz.
+    /// NOTE: Pages must first be faulted on linux.
     static int NumaGetNodeFromPage( void* ptr );
 
 };

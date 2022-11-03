@@ -1,19 +1,23 @@
 #include "SysHost.h"
 #include "Platform.h"
-#include "Util.h"
+#include "util/Util.h"
 
 #include <sys/random.h>
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
+#include <errno.h>
 #include <numa.h>
 #include <numaif.h>
+#include <stdio.h>
+#include <mutex>
 
 // #if _DEBUG
     #include "util/Log.h"
 // #endif
 
 std::atomic<bool> _crashed = false;
+
 
 //-----------------------------------------------------------
 size_t SysHost::GetPageSize()
@@ -109,19 +113,19 @@ bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
 {
     ASSERT( ptr );
 
-    int prot = 0;
+    int prot = PROT_NONE;
 
-    if( IsFlagSet( flags, VProtect::NoAccess ) )
-    {
-        prot = PROT_NONE;
-    }
-    else
-    {
+    // if( IsFlagSet( flags, VProtect::NoAccess ) )
+    // {
+    //     prot = PROT_NONE;
+    // }
+    // else
+    // {
         if( IsFlagSet( flags, VProtect::Read ) )
             prot |= PROT_READ;
         if( IsFlagSet( flags, VProtect::Write ) )
             prot |= PROT_WRITE;
-    }
+    // }
 
     int r = mprotect( ptr, size, prot );
     ASSERT( !r );
@@ -204,6 +208,17 @@ void CrashHandler( int signal )
     int traceSize = backtrace( stackTrace, (int)MAX_POINTERS );
     backtrace_symbols_fd( stackTrace, traceSize, fileno( stderr ) );
     fflush( stderr );
+
+    FILE* crashFile = fopen( "crash.log", "w" );
+    if( crashFile )
+    {
+        fprintf( stderr, "Dumping crash to crash.log\n" );
+        fflush( stderr );
+        
+        backtrace_symbols_fd( stackTrace, traceSize, fileno( crashFile ) );
+        fflush( crashFile );
+        fclose( crashFile );
+    }
     
     exit( 1 );
 }
@@ -212,6 +227,33 @@ void CrashHandler( int signal )
 void SysHost::InstallCrashHandler()
 {
     signal( SIGSEGV, CrashHandler ); 
+}
+
+//-----------------------------------------------------------
+void SysHost::DumpStackTrace()
+{
+    static std::mutex _lock;
+    _lock.lock();
+
+    const size_t MAX_POINTERS = 256;
+    void* stackTrace[256] = { 0 };
+
+    int traceSize = backtrace( stackTrace, (int)MAX_POINTERS );
+    backtrace_symbols_fd( stackTrace, traceSize, fileno( stderr ) );
+    fflush( stderr );
+
+    // FILE* crashFile = fopen( "stack.log", "w" );
+    // if( crashFile )
+    // {
+    //     fprintf( stderr, "Dumping crash to crash.log\n" );
+    //     fflush( stderr );
+        
+    //     backtrace_symbols_fd( stackTrace, traceSize, fileno( crashFile ) );
+    //     fflush( crashFile );
+    //     fclose( crashFile );
+    // }
+
+    _lock.unlock();
 }
 
 //-----------------------------------------------------------
@@ -234,8 +276,9 @@ void SysHost::Random( byte* buffer, size_t size )
         sizeRead = getrandom( writer, readSize, 0 );
 
         // Should never get EINTR, but docs say to check anyway.
-        if( sizeRead < 0 && errno != EINTR )
-            Fatal( "getrandom syscall failed." );
+        int err = errno;
+        if( sizeRead < 0 && err != EINTR )
+            Fatal( "getrandom syscall failed with error %d.", err );
 
         writer += (size_t)sizeRead;
     }

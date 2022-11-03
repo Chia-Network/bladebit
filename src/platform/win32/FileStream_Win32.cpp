@@ -1,10 +1,12 @@
 #include "io/FileStream.h"
-#include "Util.h"
+#include "util/Util.h"
 #include "util/Log.h"
+#include <Windows.h>
+#include <stringapiset.h>
+//#include <winioctl.h>
+//#include <shlwapi.h>
+//#pragma comment( lib, "Shlwapi.lib" )
 
-#include <winioctl.h>
-#include <shlwapi.h>
-#pragma comment( lib, "Shlwapi.lib" )
 
 const size_t BUF16_STACK_LEN = 1024;
 
@@ -39,10 +41,10 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
     if( access == FileAccess::None )
         access = FileAccess::Read;
 
-    const DWORD dwShareMode           = 0;
-    const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS : 
-                                        mode == FileMode::Open   ? OPEN_ALWAYS   :
-                                                                   OPEN_EXISTING;
+    const DWORD dwShareMode           = FILE_SHARE_READ | FILE_SHARE_WRITE;  // #TODO: Specify this as flags, for now we need full share for MT I/O
+    const DWORD dwCreationDisposition = mode == FileMode::Create ? CREATE_ALWAYS :
+                                        mode == FileMode::Open   ? OPEN_EXISTING : OPEN_ALWAYS;
+
     DWORD dwFlags  = FILE_ATTRIBUTE_NORMAL;
     DWORD dwAccess = 0;
 
@@ -60,6 +62,9 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
 
     if( fd != INVALID_HANDLE_VALUE )
     {
+        // Clear error in case we're re-opening an existing file (it emits ERROR_ALREADY_EXISTS)
+        GetLastError();
+
         // Get the block (cluster) size
         size_t blockSize;
 
@@ -68,8 +73,7 @@ bool FileStream::Open( const char* path, FileStream& file, FileMode mode, FileAc
 
         file._fd            = fd;
         file._blockSize     = blockSize;
-        file._writePosition = 0;
-        file._readPosition  = 0;
+        file._position      = 0;
         file._access        = access;
         file._flags         = flags;
         file._error         = 0;
@@ -105,8 +109,7 @@ void FileStream::Close()
     #endif
 
     _fd            = INVALID_HANDLE_VALUE;
-    _writePosition = 0;
-    _readPosition  = 0;
+    _position      = 0;
     _access        = FileAccess::None;
     _error         = 0;
     _blockSize     = 0;
@@ -145,11 +148,11 @@ ssize_t FileStream::Read( void* buffer, size_t size )
     const BOOL r = ReadFile( _fd, buffer, bytesToRead, &bytesRead, NULL );
     
     if( r )
-        _readPosition += (size_t)bytesRead;
+        _position += (size_t)bytesRead;
     else
     {
-        _error = (int)GetLastError();
-        return (ssize_t)-1;
+        _error    = (int)GetLastError();
+        bytesRead = -1;
     }
 
     return (ssize_t)bytesRead;
@@ -182,7 +185,7 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
     {
         // We can only write in block sizes. But since the user may have
         // specified a size greater than DWORD, our clamping it to 
-        // DWORD's max can cause it to become not bounded to block size,
+        // DWORD's max can cause it to become not k32 to block size,
         // even if the user's original size was block-bound.
         // So let's limit this to a block size.
         bytesToWrite = (DWORD)(bytesToWrite / _blockSize * _blockSize);
@@ -192,14 +195,14 @@ ssize_t FileStream::Write( const void* buffer, size_t size )
     BOOL r = WriteFile( _fd, buffer, bytesToWrite, &bytesWritten, NULL );
 
     if( r )
-        _writePosition += (size_t)bytesWritten;
+        _position += (size_t)bytesWritten;
     else
     {
-        _error = (int)GetLastError();
-        return (ssize_t)-1;
+        _error       = (int)GetLastError();
+        bytesWritten = -1;
     }
 
-    return (ssize_t)bytesWritten;
+    return bytesWritten;
 }
 
 //----------------------------------------------------------
@@ -234,8 +237,7 @@ bool FileStream::Seek( int64 offset, SeekOrigin origin )
     if( !r )
         _error = GetLastError();
 
-    _writePosition = (size_t)newPosition.QuadPart;
-    _readPosition  = (size_t)newPosition.QuadPart;
+    _position = (size_t)newPosition.QuadPart;
     
     return (bool)r;
 }
@@ -258,6 +260,39 @@ bool FileStream::Flush()
 bool FileStream::IsOpen() const
 {
     return HasValidFD();
+}
+
+//-----------------------------------------------------------
+ssize_t FileStream::Size()
+{
+    LARGE_INTEGER size;
+    const BOOL r = ::GetFileSizeEx( _fd, &size );
+
+    if( !r )
+    {
+        _error = ::GetLastError();
+        Log::Line( "Error: GetFileSizeEx() failed with error: %d", _error );
+        return 0;
+    }
+
+    return (ssize_t)size.QuadPart;
+}
+
+//-----------------------------------------------------------
+bool FileStream::Truncate( const ssize_t length )
+{
+    if( !Seek( (int64)length, SeekOrigin::Begin ) )
+        return false;
+
+    const BOOL r = ::SetEndOfFile( _fd );
+    if( !r )
+    {
+        _error = ::GetLastError();
+        Log::Line( "Error: SetEndOfFile() failed with error: %d", _error );
+        return false;
+    }
+
+    return true;
 }
 
 //-----------------------------------------------------------
@@ -339,6 +374,110 @@ wchar_t* Utf8ToUtf16( const char* utf8Str, wchar_t* stackBuffer16, const size_t 
     str16[numEncoded] = 0;
 
     return str16;
+}
+
+//-----------------------------------------------------------
+size_t FileStream::GetBlockSizeForPath( const char* pathU8 )
+{
+    wchar_t path16Stack[BUF16_STACK_LEN];
+
+    wchar_t* path16 = Utf8ToUtf16( pathU8, path16Stack, BUF16_STACK_LEN );
+    if( !path16 )
+        return 0;
+
+
+    const DWORD dwShareMode           = FILE_SHARE_READ;
+    const DWORD dwCreationDisposition = OPEN_EXISTING;
+
+    DWORD dwFlags  = FILE_FLAG_BACKUP_SEMANTICS ;
+    DWORD dwAccess = GENERIC_READ;
+
+    HANDLE fd = CreateFile( path16, dwAccess, dwShareMode, NULL,
+                            dwCreationDisposition, dwFlags, NULL );
+
+    size_t blockSize = 0;
+    if( fd != INVALID_HANDLE_VALUE )
+    {
+        if( !GetFileClusterSize( fd, blockSize ) )
+            blockSize = 0;
+
+        ::CloseHandle( fd );
+    }
+
+    if( path16 != path16Stack )
+        free( path16 );
+
+    return blockSize;
+//    ASSERT( pathU8 );
+//
+//    const int path16Len = ::MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, pathU8, -1, nullptr, 0 );
+//
+//    if( !path16Len )
+//    {
+//        Log::Error( "[Warning] MultiByteToWideChar() failed with error %d", (int)::GetLastError() );
+//        ASSERT( 0 );
+//        return 0;
+//    }
+//
+//    wchar_t* pathU16 = bbcalloc<wchar_t>( path16Len );
+//    const int written = ::MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, pathU8, -1, pathU16, path16Len );
+//    ASSERT( written == path16Len);
+//
+//    if( !written )
+//    {
+//        free( pathU16 );
+//        Log::Error( "[Warning] MultiByteToWideChar() failed with error %d", (int)::GetLastError() );
+//        ASSERT( 0 );
+//        return 0;
+//    }
+//
+//    DWORD sectorsPerCluster, bytesPerSector, numberOfFreeClusters, totalNumberOfClusters;
+//
+//    const BOOL r = GetDiskFreeSpaceW(
+//                    pathU16,
+//                    &sectorsPerCluster,
+//                    &bytesPerSector,
+//                    &numberOfFreeClusters,
+//                    &totalNumberOfClusters );
+//    ASSERT( r );
+//    free( pathU16 );
+//
+//    if( !r )
+//        return 0;
+//
+//    return bytesPerSector * sectorsPerCluster;
+}
+
+//-----------------------------------------------------------
+bool FileStream::Move( const char* oldPathU8, const char* newPathU8, int32* outError )
+{
+    wchar_t oldPathU16Stack[BUF16_STACK_LEN];
+    wchar_t newPathU16Stack[BUF16_STACK_LEN];
+
+    wchar_t* oldPath16 = Utf8ToUtf16( oldPathU8, oldPathU16Stack, BUF16_STACK_LEN );
+    if( !oldPath16 )
+        return false;
+
+    wchar_t* newPath16 = Utf8ToUtf16( newPathU8, newPathU16Stack, BUF16_STACK_LEN );
+    if( !newPath16 )
+    {
+        if( oldPath16 != oldPathU16Stack )
+            free( oldPath16 );
+        return false;
+    }
+
+    const BOOL moved = ::MoveFileW( oldPath16, newPath16 );
+
+    if( !moved && outError )
+        *outError = (int32)::GetLastError();
+
+    if( oldPath16 != oldPathU16Stack )
+        free( oldPath16 );
+
+    if( newPath16 != newPathU16Stack )
+        free( newPath16 );
+
+    return (bool)moved;
 }
 
 //-----------------------------------------------------------

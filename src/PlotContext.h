@@ -3,6 +3,7 @@
 #include "ChiaConsts.h"
 #include "threading/ThreadPool.h"
 #include "PlotWriter.h"
+#include "plotting/PlotTypes.h"
 
 struct PlotRequest
 {
@@ -13,12 +14,6 @@ struct PlotRequest
     bool        IsFinalPlot;  
 };
 
-struct Pair
-{
-    uint32 left;
-    uint32 right;
-};
-static_assert( sizeof( Pair ) == 8, "Invalid Pair struct." );
 
 
 ///

@@ -110,4 +110,6 @@ bech32_encoding bech32_decode(
     const char *input
 );
 
+int bech32_convert_bits(uint8_t* out, size_t* outlen, int outbits, const uint8_t* in, size_t inlen, int inbits, int pad);
+
 #endif

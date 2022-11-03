@@ -99,14 +99,13 @@
         "__tuple": "cpp",
         "ios": "cpp",
         "locale": "cpp",
-        "stack": "cpp"
+        "stack": "cpp",
+        "*.include": "cpp",
+        "relic_core.h": "c"
     },
     "cSpell.words": [
         "Ryzen"
     ],
     "C_Cpp.errorSquiggles": "Enabled",
-    "cmake.configureOnOpen": true,
-    "cmake.sourceDirectory": "${workspaceFolder}/."
-
-    ,"cmake.generator": "Unix Makefiles"
+    "cmake.configureOnOpen": true
 }

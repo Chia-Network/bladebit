@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-release/_deps/bls-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-release/_deps/catch2-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-release/_deps/relic-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-release/_deps/sodium-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-release/_deps/sodium-src/libsodium" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build/_deps/bls-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build/_deps/catch2-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build/_deps/relic-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build/_deps/sodium-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build/_deps/sodium-src/libsodium" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug-visual-studio-x64/_deps/bls-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug-visual-studio-x64/_deps/catch2-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug-visual-studio-x64/_deps/relic-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug-visual-studio-x64/_deps/sodium-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug-visual-studio-x64/_deps/sodium-src/libsodium" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug/_deps/bls-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug/_deps/catch2-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug/_deps/relic-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug/_deps/sodium-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-debug/_deps/sodium-src/libsodium" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release-visual-studio-x64/_deps/bls-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release-visual-studio-x64/_deps/catch2-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release-visual-studio-x64/_deps/relic-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release-visual-studio-x64/_deps/sodium-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release-visual-studio-x64/_deps/sodium-src/libsodium" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release/_deps/bls-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release/_deps/catch2-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release/_deps/relic-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release/_deps/sodium-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-release/_deps/sodium-src/libsodium" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/out/build/x64-Debug/_deps/bls-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/out/build/x64-Debug/_deps/catch2-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/out/build/x64-Debug/_deps/relic-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/out/build/x64-Debug/_deps/sodium-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/out/build/x64-Debug/_deps/sodium-src/libsodium" vcs="Git" />
+  </component>
+</project>
