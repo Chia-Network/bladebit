@@ -30,7 +30,7 @@ jobs:
       - name: Upload Artifact macOS x86-64
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          name: data
           path: ${{ github.workspace }}/bin/
           if-no-files-found: error
 
@@ -47,8 +47,7 @@ jobs:
       - name: download
         uses: actions/download-artifact@v3
         with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: data
+          name: data
 
       - name: tar/untar
         run: |
