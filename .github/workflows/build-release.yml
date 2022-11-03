@@ -55,6 +55,7 @@ jobs:
 
       - name: tar/untar
         run: |
+          ls -la data
           tar -cvzf tarred.tar --directory data bladebit
           tar -xvf tarred.tar
 
