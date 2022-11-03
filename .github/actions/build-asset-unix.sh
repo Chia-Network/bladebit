@@ -33,5 +33,5 @@ if [[ "$bb_version" != "$BB_VERSION" ]]; then
     exit 1
 fi
 
-mkdir ../bin
-cp bladebit ../bin/
+mkdir ../data
+cp bladebit ../data/
