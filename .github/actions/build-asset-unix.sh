@@ -49,5 +49,5 @@ mv $BB_ARTIFACT_NAME ../bin/
 ls -la ../bin/
 mkdir tmp2
 cd tmp2
-tar -xvf ../bin/$BB_ARTIFACT_NAME
+tar -xvf ../../bin/$BB_ARTIFACT_NAME
 python -c 'f = open("bladebit", "rb"); contents = f.read(); print("zero count:", contents.count(b"\x00"))'
