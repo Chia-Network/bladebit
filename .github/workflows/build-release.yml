@@ -64,12 +64,13 @@ jobs:
           with open("data/bladebit", "rb") as f:
               contents = f.read()
           pre_count = contents.count(b"\x00")
-          print("zero pre-count:", count)
+          print("zero pre-count:", pre_count)
 
           with open("bladebit", "rb") as f:
               contents = f.read()
           post_count = contents.count(b"\x00")
-          print("zero post-count:", count)
+          print("zero post-count:", post_count)
+          print("ratio:", post_count / pre_count)
 
       - name: diff
         run: |
