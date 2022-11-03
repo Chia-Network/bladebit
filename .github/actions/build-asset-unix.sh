@@ -40,14 +40,14 @@ tar -czvf $BB_ARTIFACT_NAME bladebit
 ls -la $BB_ARTIFACT_NAME
 mkdir ../bin
 cp bladebit ../bin/
-mkdir tmp
-cd tmp
+mkdir tmp1
+cd tmp1
 tar -xvf ../$BB_ARTIFACT_NAME
 python -c 'f = open("bladebit", "rb"); contents = f.read(); print("zero count:", contents.count(b"\x00"))'
 cd ..
 mv $BB_ARTIFACT_NAME ../bin/
 ls -la ../bin/
-mkdir tmp
-cd tmp
+mkdir tmp2
+cd tmp2
 tar -xvf ../$BB_ARTIFACT_NAME
 python -c 'f = open("bladebit", "rb"); contents = f.read(); print("zero count:", contents.count(b"\x00"))'
