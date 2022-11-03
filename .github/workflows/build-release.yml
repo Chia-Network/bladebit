@@ -231,5 +231,5 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/
           if-no-files-found: error
