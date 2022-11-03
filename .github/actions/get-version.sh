@@ -6,12 +6,15 @@ set -eo pipefail
 os=$1
 arch=$2
 
-version_cmp=($(./extract-version.sh))
+shift $#
 
-ver_maj=${version_cmp[0]}
-ver_min=${version_cmp[1]}
-ver_rev=${version_cmp[2]}
-ver_suffix=${version_cmp[3]}
+# version_cmp=($(./extract-version.sh))
+. ./extract-version.sh
+
+ver_maj=$bb_ver_maj
+ver_min=$bb_ver_min
+ver_rev=$bb_ver_rev
+ver_suffix=$bb_version_suffix
 
 version="${ver_maj}.${ver_min}.${ver_rev}${ver_suffix}"
 

@@ -2,13 +2,14 @@
 set -eo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 
-version=($(./extract-version.sh))
+# version=($(./extract-version.sh))
+. ./extract-version.sh
 
-ver_maj=${version[0]}
-ver_min=${version[1]}
-ver_rev=${version[2]}
-ver_suffix=${version[3]}
-git_commit=${version[4]}
+ver_maj=$bb_ver_maj
+ver_min=$bb_ver_min
+ver_rev=$bb_ver_rev
+ver_suffix=$bb_version_suffix
+git_commit=$bb_git_commit
 
 echo "Version: $ver_maj.$ver_min.$ver_rev$ver_suffix"
 echo "Commit : $git_commit"
