@@ -204,7 +204,7 @@ jobs:
           if-no-files-found: error
 
   build-macos-x86-64:
-    runs-on: macOS-latest
+    runs-on: macOS-11
     steps:
       - name: Cleanup Environment
         uses: Chia-Network/actions/clean-workspace@main
