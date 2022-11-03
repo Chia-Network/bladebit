@@ -6,7 +6,6 @@
 #   - BB_VERSION
 #
 set -eo pipefail
-set -vx
 
 thread_count=2
 

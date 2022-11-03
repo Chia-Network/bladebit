@@ -4,9 +4,6 @@ on:
     branches: ['*']
   workflow_dispatch:
 
-env:
-  CMAKE_BUILD_PARALLEL_LEVEL: 1
-
 jobs:
   build-macos-x86-64:
     runs-on: macOS-latest
