@@ -34,6 +34,7 @@ if [[ "$bb_version" != "$BB_VERSION" ]]; then
     exit 1
 fi
 
+tar --version
 ls -la bladebit
 python3 -c 'f = open("bladebit", "rb"); contents = f.read(); print("zero count:", contents.count(b"\x00"))'
 tar -czvf $BB_ARTIFACT_NAME bladebit
