@@ -25,6 +25,12 @@ bash -eo pipefail ../embed-version.sh
 cmake --build . --target bladebit --config Release -j $thread_count
 chmod +x ./bladebit
 
+if [[ $OSTYPE == 'msys'* ]] || [[ $OSTYPE == 'cygwin'* ]]; then
+  ls -la Release
+else
+  ls -la
+fi
+
 # Ensure bladebit version matches expected version
 bb_version="$(./bladebit --version | xargs)"
 
@@ -33,6 +39,7 @@ if [[ "$bb_version" != "$BB_VERSION" ]]; then
     exit 1
 fi
 
+tar --version
 tar -czvf $BB_ARTIFACT_NAME bladebit
 mkdir ../bin
 mv $BB_ARTIFACT_NAME ../bin/

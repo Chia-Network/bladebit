@@ -8,28 +8,30 @@ ver_component=$1  # The user specified a specified component from the full veris
                   # See the case switch below.
 
 # Grab version specified in the file
-set IFS=
+_IFS=IFS
+IFS=
 version_str=$(cat VERSION | head -n 1 | xargs)
-version_suffix=$(cat VERSION | tail -n 1 | xargs)
+bb_version_suffix=$(cat VERSION | tail -n 1 | xargs)
 version_header='src/Version.h'
+IFS=$_IFS
 
-if [[ "$version_str" == "$version_suffix" ]]; then
-    version_suffix=
+if [[ "$version_str" == "$bb_version_suffix" ]]; then
+    bb_version_suffix=
 fi
 
-ver_maj=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
-ver_min=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
-ver_rev=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
+bb_ver_maj=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
+bb_ver_min=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
+bb_ver_rev=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
 
-git_commit=$GITHUB_SHA
-if [[ -z $git_commit ]]; then
+bb_git_commit=$GITHUB_SHA
+if [[ -z $bb_git_commit ]]; then
     set +e
-    git_commit=$(git rev-parse HEAD)
+    bb_git_commit=$(git rev-parse HEAD)
     set -e
 fi
     
-if [[ -z $git_commit ]]; then
-    git_commit="unknown"
+if [[ -z $bb_git_commit ]]; then
+    bb_git_commit="unknown"
 fi
 
 # Check if the user wants a specific component
@@ -38,23 +40,23 @@ if [[ -n $ver_component ]]; then
   case "$ver_component" in
 
     "major")
-      echo -n $ver_maj
+      echo -n $bb_ver_maj
       ;;
 
     "minor")
-      echo -n $ver_min
+      echo -n $bb_ver_min
       ;;
 
     "revision")
-      echo -n $ver_rev
+      echo -n $bb_ver_rev
       ;;
 
     "suffix")
-      echo -n $version_suffix
+      echo -n $bb_version_suffix
       ;;
 
     "commit")
-      echo -n $git_commit
+      echo -n $bb_git_commit
       ;;
 
     *)
@@ -66,8 +68,9 @@ if [[ -n $ver_component ]]; then
 fi
 
 # Emit all version components
-echo "$ver_maj"
-echo "$ver_min"
-echo "$ver_rev"
-echo "$version_suffix"
-echo "$git_commit"
+# echo "$bb_ver_maj"
+# echo "$bb_ver_min"
+# echo "$bb_ver_rev"
+# echo "$bb_version_suffix"
+# echo "$bb_git_commit"
+

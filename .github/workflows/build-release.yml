@@ -163,6 +163,7 @@ jobs:
           
           mkdir ../bin
           cd Release
+          ls -la
           7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
           ls -la ../../bin
 
@@ -203,7 +204,7 @@ jobs:
           if-no-files-found: error
 
   build-macos-x86-64:
-    runs-on: macOS-latest
+    runs-on: macOS-11
     steps:
       - name: Cleanup Environment
         uses: Chia-Network/actions/clean-workspace@main
