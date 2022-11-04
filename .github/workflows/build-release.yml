@@ -31,6 +31,7 @@ jobs:
         run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact macOS x86-64
+        if: always()
         uses: actions/upload-artifact@v2
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
