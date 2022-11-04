@@ -46,3 +46,6 @@ cd tmp1
 tar -xvf ../$BB_ARTIFACT_NAME
 python3 -c 'f = open("bladebit", "rb"); contents = f.read(); print("zero count:", contents.count(b"\x00"))'
 diff bladebit ../../bin/bladebit
+cd ..
+mv $BB_ARTIFACT_NAME ../bin/
+ls -la ../bin/
