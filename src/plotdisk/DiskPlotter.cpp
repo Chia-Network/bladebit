@@ -117,9 +117,7 @@ DiskPlotter::DiskPlotter( const Config& cfg )
     _cx.ioQueue    = new DiskBufferQueue( _cx.tmpPath, _cx.tmpPath2, gCfg.outputFolder, _cx.heapBuffer, _cx.heapSize, _cx.ioThreadCount, ioThreadId );
     _cx.fencePool  = new FencePool( 8 );
 
-    // if( cfg.globalCfg->warmStart )
-    // #TODO: IMPORTANT: Remove this after testing
-    Log::Line( "WARNING: Forcing warm start for testing." );
+    if( cfg.globalCfg->warmStart )
     {
         Log::Line( "Warm start: Pre-faulting memory pages..." );
 
