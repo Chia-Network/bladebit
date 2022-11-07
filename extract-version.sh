@@ -19,6 +19,11 @@ if [[ "$version_str" == "$bb_version_suffix" ]]; then
     bb_version_suffix=
 fi
 
+# prepend a '-' to the suffix, if necessarry
+if [[ -n "$bb_version_suffix" ]] && [[ "${bb_version_suffix:0:1}" != "-" ]]; then
+  bb_version_suffix="-${bb_version_suffix}"
+fi
+
 bb_ver_maj=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
 bb_ver_min=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
 bb_ver_rev=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
