@@ -352,7 +352,7 @@ private:
 
     MapWriter<_numBuckets, false> _mapWriter;
     uint64                        _mapOffset = 0;
-    uint64                        _mapBitCounts[BB_DP_MAX_JOBS] = {};
+    uint64                        _mapBitCounts[_numBuckets] = {};
 
     Duration        _tableIOWait    = Duration::zero();
     uint32          _threadCount    = 0;
