@@ -47,7 +47,7 @@ You can specify the thread count in the bladebit global option '-t'.
 [ARGUMENTS]
 <plot_path>   : Path to the plot file to be validated.
 
-[OPTIOINS]
+[OPTIONS]
  -m, --in-ram : Loads the whole plot file into memory before validating.
 
  -o, --offset : Percentage offset at which to start validating.
