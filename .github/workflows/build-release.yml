@@ -25,7 +25,7 @@ jobs:
         run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact Ubuntu x86-64
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
@@ -57,7 +57,7 @@ jobs:
           .github/actions/build-asset-unix.sh
       
       - name: Upload Artifact CentOS x86-64
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
@@ -91,7 +91,7 @@ jobs:
         run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact Ubuntu ARM64
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
@@ -123,7 +123,7 @@ jobs:
           .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact CentOS ARM64
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
@@ -168,7 +168,7 @@ jobs:
           ls -la ../../bin
 
       - name: Upload Artifact Windows x86-64
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
@@ -197,7 +197,7 @@ jobs:
         run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact macOS arm64
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
@@ -226,7 +226,7 @@ jobs:
         run: .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact macOS x86-64
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
