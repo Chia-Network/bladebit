@@ -566,3 +566,25 @@ inline void GetThreadOffsets( MTJob<TJob>* job, const T totalCount, T& count, T&
     GetThreadOffsets( job->JobId(), job->JobCount(), totalCount, count, offset, end );
 }
 
+//-----------------------------------------------------------
+template<typename TJob, typename T>
+inline Span<T> GetThreadOffsets( MTJob<TJob>* job, const Span<T> values )
+{
+    const uint32 id          = job->JobId();
+    const uint32 threadCount = job->JobCount();
+
+    size_t count, offset;
+    
+    const size_t totalCount     = values.Length();
+    const size_t countPerThread = totalCount / threadCount;
+    const size_t remainder      = totalCount - countPerThread * threadCount;
+
+    count  = countPerThread;
+    offset = id * countPerThread;
+
+    if( id == threadCount-1 )
+        count += remainder;
+
+    return values.Slice( offset, count );
+}
+

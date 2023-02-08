@@ -18,17 +18,34 @@ jobs:
       - name: Install Prerequisites
         run: sudo apt install -y libgmp-dev libnuma-dev
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-unix.sh
+      # - name: Build
+      #   run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      - name: Upload Artifact Ubuntu x86-64
+      - name: Install CUDA Prerequisites
+        run: |
+            distro=ubuntu2004
+            arch=x86_64
+            sudo apt-key del 7fa2af80
+            wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
+            sudo dpkg -i cuda-keyring_1.0-1_all.deb
+            sudo apt-get update
+            sudo apt-get install cuda
+
+      - name: Build CUDA
+        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+
+      # - name: Upload Artifact Ubuntu x86-64
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+      #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+      #     if-no-files-found: error
+
+      - name: Upload Artifact CUDA Ubuntu x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
   build-centos-x86-64:
@@ -46,188 +63,214 @@ jobs:
       - name: Install Prerequisites
         run: |
           dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git
+                         cmake gmp-devel numactl-devel make git wget subscription-manager
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+      # - name: Build
+      #   run: |
+      #     source /opt/rh/gcc-toolset-9/enable
+      #     .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+
+      - name: Install CUDA Prerequisites
+        run: |
+          distro=rhel8
+          arch=x86_64
+          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+          # subscription-manager repos --enable=rhel-8-for-x86_64-appstream-rpms
+          # subscription-manager repos --enable=rhel-8-for-x86_64-baseos-rpms
+          # subscription-manager repos --enable=codeready-builder-for-rhel-8-x86_64-rpms
+          # rpm --erase gpg-pubkey-7fa2af80*
+          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+          dnf clean expire-cache
+          dnf module install -y nvidia-driver:latest-dkms
+          dnf install -y cuda
+          ls -la /usr/local/
+          ls -la /usr/local/cuda/
+          # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
+          # sh cuda_12.0.1_525.85.12_linux.run
+
+      - name: Build CUDA
         run: |
           source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-unix.sh
+          export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+          export PATH=/usr/local/cuda/bin:$PATH
+          .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
       
-      - name: Upload Artifact CentOS x86-64
+      # - name: Upload Artifact CentOS x86-64
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+      #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+      #     if-no-files-found: error
+
+      - name: Upload CUDA Artifact CentOS x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
-  build-ubuntu-arm64:
-    runs-on: [ARM64, Linux]
-    container:
-      image: chianetwork/ubuntu-20.04-builder:latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+  # build-ubuntu-arm64:
+  #   runs-on: [ARM64, Linux]
+  #   container:
+  #     image: chianetwork/ubuntu-20.04-builder:latest
+  #   defaults:
+  #     run:
+  #       shell: bash
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh ubuntu arm64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh ubuntu arm64
 
-      - name: Install Prerequisites
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          apt update
-          apt install -y build-essential git libgmp-dev libnuma-dev
+  #     - name: Install Prerequisites
+  #       run: |
+  #         export DEBIAN_FRONTEND=noninteractive
+  #         apt update
+  #         apt install -y build-essential git libgmp-dev libnuma-dev
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-unix.sh
+  #     - name: Build
+  #       run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      - name: Upload Artifact Ubuntu ARM64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact Ubuntu ARM64
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
-  build-centos-arm64:
-    runs-on: [ARM64, Linux]
-    container:
-      image: quay.io/centos/centos:stream8
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+  # build-centos-arm64:
+  #   runs-on: [ARM64, Linux]
+  #   container:
+  #     image: quay.io/centos/centos:stream8
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh centos arm64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh centos arm64
 
-      - name: Install Prerequisites
-        run: |
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git
+  #     - name: Install Prerequisites
+  #       run: |
+  #         dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+  #                        cmake gmp-devel numactl-devel make git
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: |
-          source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-unix.sh
+  #     - name: Build
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: |
+  #         source /opt/rh/gcc-toolset-9/enable
+  #         .github/actions/build-asset-unix.sh
 
-      - name: Upload Artifact CentOS ARM64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact CentOS ARM64
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
-  build-windows-x86-64:
-    runs-on: windows-2019
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+  # build-windows-x86-64:
+  #   runs-on: windows-2019
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
 
-      - name: Get Version Number
-        shell: bash
-        id: version_number
-        run: .github/actions/get-version.sh windows x86-64
+  #     - name: Get Version Number
+  #       shell: bash
+  #       id: version_number
+  #       run: .github/actions/get-version.sh windows x86-64
 
-      - name: Build
-        shell: bash
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: |
+  #     - name: Build
+  #       shell: bash
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: |
           
-          mkdir build && cd build
-          cmake ..
-          bash -e -o pipefail ../embed-version.sh
-          cat ../src/Version.h
-          cmake --build . --target bladebit --config Release
+  #         mkdir build && cd build
+  #         cmake ..
+  #         bash -e -o pipefail ../embed-version.sh
+  #         cat ../src/Version.h
+  #         cmake --build . --target bladebit --config Release
 
-          # Ensure bladebit version matches expected version
-          bb_version="$(./Release/bladebit.exe --version | xargs)"
+  #         # Ensure bladebit version matches expected version
+  #         bb_version="$(./Release/bladebit.exe --version | xargs)"
 
-          if [[ "$bb_version" != "$BB_VERSION" ]]; then
-              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
-              exit 1
-          fi
+  #         if [[ "$bb_version" != "$BB_VERSION" ]]; then
+  #             >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
+  #             exit 1
+  #         fi
           
-          mkdir ../bin
-          cd Release
-          ls -la
-          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
-          ls -la ../../bin
+  #         mkdir ../bin
+  #         cd Release
+  #         ls -la
+  #         7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
+  #         ls -la ../../bin
 
-      - name: Upload Artifact Windows x86-64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact Windows x86-64
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
-  build-macos-arm64:
-    runs-on: [macOS, ARM64]
-    steps:
-      - name: Cleanup Environment
-        uses: Chia-Network/actions/clean-workspace@main
+  # build-macos-arm64:
+  #   runs-on: [macOS, ARM64]
+  #   steps:
+  #     - name: Cleanup Environment
+  #       uses: Chia-Network/actions/clean-workspace@main
 
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
 
-      - name: Get Version Number
-        id: version_number
-        run: bash -e .github/actions/get-version.sh macos arm64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: bash -e .github/actions/get-version.sh macos arm64
 
-      - name: Install Prerequisites
-        run: brew install cmake
+  #     - name: Install Prerequisites
+  #       run: brew install cmake
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-unix.sh
+  #     - name: Build
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: .github/actions/build-asset-unix.sh
 
-      - name: Upload Artifact macOS arm64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact macOS arm64
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
-  build-macos-x86-64:
-    runs-on: macOS-11
-    steps:
-      - name: Cleanup Environment
-        uses: Chia-Network/actions/clean-workspace@main
+  # build-macos-x86-64:
+  #   runs-on: macOS-11
+  #   steps:
+  #     - name: Cleanup Environment
+  #       uses: Chia-Network/actions/clean-workspace@main
 
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh macos x86-64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh macos x86-64
 
-      - name: Install Prerequisites
-        run: brew install cmake
+  #     - name: Install Prerequisites
+  #       run: brew install cmake
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
-        run: .github/actions/build-asset-unix.sh
+  #     - name: Build
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: .github/actions/build-asset-unix.sh
 
-      - name: Upload Artifact macOS x86-64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact macOS x86-64
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error

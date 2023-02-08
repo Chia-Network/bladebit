@@ -57,6 +57,9 @@
 
 #define TicksToSeconds( duration ) \
     ( std::chrono::duration_cast<std::chrono::nanoseconds>( (duration) ).count() * 1e-9 )
+
+#define TicksToNanoSeconds( duration ) \
+    ( std::chrono::duration_cast<std::chrono::nanoseconds>( (duration) ).count() )
     
 
 #define ImplementFlagOps( FlagType ) \

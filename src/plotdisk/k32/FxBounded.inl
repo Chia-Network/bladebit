@@ -5,6 +5,7 @@
 #include "plotdisk/BitBucketWriter.h"
 #include "plotdisk/MapWriter.h"
 #include "plotdisk/BlockWriter.h"
+#include "plotmem/LPGen.h"
 #include "util/StackAllocator.h"
 #include "FpMatchBounded.inl"
 #include "b3/blake3.h"
@@ -82,16 +83,21 @@ public:
         _idxId [1] = FileId::INDEX0 + (FileId)((int)rTable & 1);
         _metaId[1] = FileId::META0  + (FileId)((int)rTable & 1);
 
-        if( context.cfg && context.cfg->alternateBuckets )
+        if( context.cfg )
         {
-            _interleaved = ((uint)rTable & 1) == 0; // Only even tables have interleaved writes when alternating mode is enabled
-    
-            _yId   [0] = FileId::FX0;
-            _idxId [0] = FileId::INDEX0;
-            _metaId[0] = FileId::META0;
-            _yId   [1] = FileId::FX0;
-            _idxId [1] = FileId::INDEX0;
-            _metaId[1] = FileId::META0;
+            if( context.cfg->alternateBuckets )
+            {
+                _interleaved = ((uint)rTable & 1) == 0; // Only even tables have interleaved writes when alternating mode is enabled
+        
+                _yId   [0] = FileId::FX0;
+                _idxId [0] = FileId::INDEX0;
+                _metaId[0] = FileId::META0;
+                _yId   [1] = FileId::FX0;
+                _idxId [1] = FileId::INDEX0;
+                _metaId[1] = FileId::META0;
+            }
+
+            _compressPlot = context.cfg->globalCfg->compressionLevel > 0;
         }
     }
 
@@ -183,7 +189,9 @@ public:
         
         if constexpr ( rTable == TableId::Table2 )
         {
-            _xWriter = BlockWriter<uint32>( allocator, FileId::T1, _mapWriteFence, t1BlockSize, entriesPerBucket );
+            const FileId xFileId = _compressPlot ? FileId::T2 : FileId::T1;
+
+            _xWriter = BlockWriter<uint32>( allocator, xFileId, _mapWriteFence, t1BlockSize, entriesPerBucket );
         }
         else
         {
@@ -428,7 +436,8 @@ private:
                 ASSERT( tableEntryCount + totalMatches == _maxTableEntries );
             }
 
-            WritePairs( self, bucket, totalMatches, matches, matchOffset );
+            if( rTable != TableId::Table2 || !_compressPlot )
+                WritePairs( self, bucket, totalMatches, matches, matchOffset );
 
             ///
             /// Sort meta on Y
@@ -437,17 +446,25 @@ private:
     
             Span<TMetaIn> metaUnsorted = _meta[bucket].SliceSize( entryCount );                 ASSERT( metaUnsorted.Length() == entryCount );
             Span<TMetaIn> metaIn       = _metaTmp[0].template As<TMetaIn>().SliceSize( entryCount );
+            Span<uint32>  xWriteBuffer;
 
             if constexpr ( rTable == TableId::Table2 )
             {
                 // #TODO: Simplify this, allowing BlockWriter to let the user specify a buffer, like in BitWriter
                 // Get and set shared x buffer for other threads
                 if( self->BeginLockBlock() )
-                    _xWriteBuffer = Span<TMetaIn>( _xWriter.GetNextBuffer( _tableIOWait ), entryCount );
+                {
+                    const uint64 xBufferLength = _compressPlot ? totalMatches : entryCount;
+
+                    _xWriteBuffer = Span<uint32>( _xWriter.GetNextBuffer( _tableIOWait ), xBufferLength );
+                }
                 self->EndLockBlock();
 
-                // Grap shared buffer
-                metaIn = _xWriteBuffer;
+                xWriteBuffer = _xWriteBuffer;
+                
+                // Grab shared buffer
+                if( !_compressPlot )
+                    metaIn = xWriteBuffer;
             }
 
             SortOnYKey( self, sortKey, metaUnsorted, metaIn );
@@ -459,6 +476,9 @@ private:
             // On Table 2, metadata is our x values, which have to be saved as table 1
             if constexpr ( rTable == TableId::Table2 )
             {
+                if( _compressPlot )
+                    CompressTable1( self, matchOffset, matches, metaIn, xWriteBuffer );
+                
                 // Write (sorted-on-y) x back to disk
                 if( self->BeginLockBlock() )
                 {
@@ -466,7 +486,7 @@ private:
                         _dbgPlot.WriteYX( bucket, yInput, metaIn );
                     #endif
 
-                    _xWriter.SubmitBuffer( _ioQueue, entryCount );
+                    _xWriter.SubmitBuffer( _ioQueue, xWriteBuffer.Length() );
                     if( bucket == _numBuckets - 1 )
                         _xWriter.SubmitFinalBlock( _ioQueue );
                 }
@@ -525,6 +545,50 @@ private:
                 #endif
             }
         }
+    }
+
+    //-----------------------------------------------------------
+    void CompressTable1( Job* self, const uint64 matchOffset, const Span<Pair> pairs, const Span<uint32> inXEntries, Span<uint32> outXEntries )
+    {
+#if _DEBUG
+        uint64 numRepeated = 0;
+#endif
+        const uint32 entryBits = _context.cfg->globalCfg->compressedEntryBits;
+        const uint32 shift     = 32 - entryBits;
+
+        for( uint64 i = 0; i < pairs.Length(); i++ )
+        {
+            const Pair p = pairs[i];
+
+            const uint32 x1 = inXEntries[p.left ] >> shift;
+            const uint32 x2 = inXEntries[p.right] >> shift;
+
+            // Convert to linepoint            
+            const uint32 x12 = (uint32)SquareToLinePoint( x2, x1 );
+            ASSERT( !(x12 & 1ul << 31 ) );
+            ASSERT( !(x12 & (1ul << (entryBits*2-1)) ) );
+
+// #if _DEBUG
+//             const BackPtr deconverted = LinePointToSquare64( x12 ) ;
+
+//             if( x1 == x2 )
+//                 numRepeated ++;
+//             else
+//             {
+//                 ASSERT( ( deconverted.x == x1 && deconverted.y == x2 ) || 
+//                         ( deconverted.x == x2 && deconverted.y == x1 ) );
+//             }
+// #endif
+            // const uint32 x12 = (x2 & 0xFFFF0000) | ( x1 >> 16 );
+            // const uint32 x12 = (x2 << shift) | x1;
+            outXEntries[matchOffset+i] = x12;
+        }
+
+// #if _DEBUG
+//         Log::WriteLine( "[%u] %llu / %llu : %.2lf", self->JobId(), 
+//             numRepeated, pairs.Length(),
+//              numRepeated / (double)pairs.Length() );
+// #endif
     }
 
     //-----------------------------------------------------------
@@ -1297,8 +1361,9 @@ private:
     Span<uint32>        _xWriteBuffer;          // Set by the control thread for other threads to use
 
     // Writers for when using alternating mode, for non-interleaved writes
-    bool                _interleaved = true;
-    
+    bool                _interleaved  = true;
+    bool                _compressPlot = false;
+
     // Working buffers
     Span<uint64>        _yTmp;
     Span<uint32>        _sortKey;

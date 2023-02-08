@@ -73,9 +73,9 @@ if [[ -n $ver_component ]]; then
 fi
 
 # Emit all version components
-# echo "$bb_ver_maj"
-# echo "$bb_ver_min"
-# echo "$bb_ver_rev"
-# echo "$bb_version_suffix"
-# echo "$bb_git_commit"
+# echo "MAJ: $bb_ver_maj"
+# echo "MIN: $bb_ver_min"
+# echo "REV: $bb_ver_rev"
+# echo "SUF: $bb_version_suffix"
+# echo "COM: $bb_git_commit"
 

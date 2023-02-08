@@ -72,6 +72,24 @@ const double kRValues[7] = { 4.7, 2.75, 2.75, 2.7, 2.6, 2.45 };
 #define kPOSMagic          "Proof of Space Plot"
 #define kFormatDescription "v1.0"
 
+#define CHIA_PLOT_V2_MAGIC       0x544F4C50ul   // "PLOT"
+#define CHIA_PLOT_VERSION_2_0_0  ((2ul*10000) + (0ul * 100) + 0)
+
+#define BB_PLOT_ID_LEN 32
+#define BB_PLOT_ID_HEX_LEN (BB_PLOT_ID_LEN * 2)
+
+#define BB_PLOT_MEMO_MAX_SIZE (48+48+32)
+
+#define BB_PLOT_FILE_LEN_TMP (sizeof( "plot-k32-2021-08-05-18-55-77a011fc20f0003c3adcc739b615041ae56351a22b690fd854ccb6726e5f43b7.plot.tmp" ) - 1)
+#define BB_PLOT_FILE_LEN (BB_PLOT_FILE_LEN_TMP - 4)
+
+#define BB_COMPRESSED_PLOT_FILE_LEN_TMP (sizeof( "plot-k32-c01-2021-08-05-18-55-77a011fc20f0003c3adcc739b615041ae56351a22b690fd854ccb6726e5f43b7.plot.tmp" ) - 1)
+#define BB_COMPRESSED_PLOT_FILE_LEN (BB_PLOT_FILE_LEN_TMP - 4)
+
+#define BB_PLOT_PROOF_X_COUNT 64
+
+
+
 // Initializes L_targets table
 //-----------------------------------------------------------
 inline void LoadLTargets()
@@ -114,8 +132,9 @@ inline constexpr size_t CalculateMaxDeltasSize( const TableId tableId )
 
 /// Fixed size for parks
 //-----------------------------------------------------------
-inline size_t CalculateParkSize( TableId tableId )
+inline constexpr size_t CalculateParkSize( TableId tableId )
 {
+    // if( tableId == TableId::Table1 ) return 8960;
     return 
         CDiv( _K * 2, 8 ) +                                         // LinePoint size
         CDiv( (kEntriesPerPark - 1) * (_K - kStubMinusBits), 8 ) +  // Stub Size 
@@ -140,7 +159,8 @@ inline constexpr size_t CalculateParkSize( const TableId tableId, const uint32 k
 }
 
 // Calculates the size of one C3 park. This will store bits for each f7 between
-// two C1 checkpoints, depending on how many times that f7 is present. 
+// two C1 checkpoints, depending on how many times that f7 is present.
+//-----------------------------------------------------------
 constexpr inline static size_t CalculateC3Size()
 {
     return (size_t)CDiv( kC3BitsPerEntry * kCheckpoint1Interval, 8 );

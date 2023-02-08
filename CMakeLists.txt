@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.9 FATAL_ERROR)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,10 +12,19 @@ if(NOT CMAKE_BUILD_TYPE)
    )
 endif()
 
+# Allows for CMAKE_MSVC_RUNTIME_LIBRARY
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW) 
+endif()
+
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version.")
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC Runtime Library")
 
-project(bladebit C CXX ASM)
+if(LINUX) 
+    set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+endif()
+
+project(bladebit LANGUAGES C CXX ASM CUDA)
 
 message("Config   : ${CMAKE_BUILD_TYPE}")
 message("Compiler : ${CMAKE_CXX_COMPILER_ID}")
@@ -50,6 +59,8 @@ set(BUILD_BLS_TESTS "0" CACHE STRING "")
 set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
 
+include(FindCUDAToolkit)
+
 # Threads
 find_package(Threads REQUIRED)
 
@@ -59,11 +70,13 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     set(platform_libs ${NUMA_LIBRARY})
 endif()
 
+
+
 # Catch
 # TODO: Add configuration var to disable this
 include(cmake_modules/FindCatch2.cmake)
-set_target_properties(Catch2 PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-set_target_properties(Catch2WithMain PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# set_target_properties(Catch2 PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# set_target_properties(Catch2WithMain PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 
 # Config
@@ -73,6 +86,16 @@ set(link_opts)
 set(release_c_opts)
 set(debug_c_opts)
 set(dev_c_opts)
+
+set(c_defs)
+set(release_c_defs
+    NDEBUG=1
+    _NDEBUG=1
+)
+set(debug_c_defs
+    DEBUG=1
+    _DEBUG=1
+)
 
 set(release_link_opts)
 set(debug_link_opts)
@@ -129,10 +152,10 @@ if(NOT DEFINED ENV{CI})
     add_compile_definitions(BLADEBIT_GIT_COMMIT="${bb_ver_commit}")
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+if(MSVC)
 
     # MSVC
-    set(c_opts
+    set(c_opts ${c_opts}
         /std:c++17
         /Zc:__cplusplus
         /MP
@@ -141,7 +164,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         # /Wall
         /W3
         /WX
-        /FIpch.h 
+        #/FIpch.h 
         /wd4068
         /wd4464
         /wd4668
@@ -149,12 +172,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /wd4514
         /wd4626
         /wd5027
-        /DUNICODE=1
-        /DWIN32_LEAN_AND_MEAN=1
-        /DNOMINMAX=1
-        /D_CRT_SECURE_NO_WARNINGS=1
-        /D_HAS_EXCEPTIONS=0
-        ${c_opts})
+        )
     
     set(tests_c_opts /DBB_TEST_MODE=1 ${tests_c_opts})
     
@@ -168,19 +186,22 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         /O2
         /Gy
         /GL
-        /DNDEBUG=1
-        /D_NDEBUG=1
         ${release_c_opts})
 
-    set(debug_c_opts
+    set(debug_c_opts ${debug_c_opts}
         /Od
-        /DDEBUG=1
-        /D_DEBUG=1
-        ${debug_c_opts})
+        )
 
     set(dev_c_opts 
         ${dev_c_opts})
 
+    set(c_defs 
+        UNICODE=1
+        WIN32_LEAN_AND_MEAN=1
+        NOMINMAX=1
+        _CRT_SECURE_NO_WARNINGS=1
+        _HAS_EXCEPTIONS=0
+        ${c_defs})
     
     set(release_link_opts 
         /DEBUG:FULL
@@ -198,15 +219,6 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     target_compile_options(bls     PRIVATE /MP)
     target_compile_options(relic_s PRIVATE /MP)
     target_compile_options(sodium  PRIVATE /MP)
-
-    target_compile_options(bls     PRIVATE $<$<CONFIG:Release>:/MT>)
-    target_compile_options(relic_s PRIVATE $<$<CONFIG:Release>:/MT>)
-    target_compile_options(sodium  PRIVATE $<$<CONFIG:Release>:/MT>)
-
-    target_compile_options(bls     PRIVATE $<$<CONFIG:Debug>:/MTd>)
-    target_compile_options(relic_s PRIVATE $<$<CONFIG:Debug>:/MTd>)
-    target_compile_options(sodium  PRIVATE $<$<CONFIG:Debug>:/MTd>)
-    
 else()
 
     # *Nix
@@ -361,7 +373,6 @@ else()
     message( FATAL_ERROR "Unsupported operating system '${CMAKE_SYSTEM_NAME}'" )
 endif()
 
-
 #
 # Targets
 #
@@ -369,6 +380,13 @@ set(bb_include_dirs
     ${INCLUDE_DIRECTORIES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+
+set(bb_c_opts)
+
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+    set(bb_c_opts ${bb_c_opts} /FIpch.h )
+endif()
+
 
 # macro(config_proj tgt)
 #     message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
@@ -384,26 +402,34 @@ set(bb_include_dirs
 add_library(lib_bladebit ${bb_sources} ${bb_headers} src/plotdisk/k32/FpMatchBounded.inl src/plotdisk/k32/F1Bounded.inl)
 
 set_target_properties(lib_bladebit PROPERTIES
-        OUTPUT_NAME bladebit
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    OUTPUT_NAME bladebit
 )
 target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
 target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
 
-target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
-target_link_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
+target_compile_definitions(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
+target_compile_definitions(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
+#target_compile_definitions(lib_bladebit PUBLIC BLAKE3_NO_SSE41=1)
+
+target_compile_options(lib_bladebit PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+target_compile_options(lib_bladebit PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+target_compile_options(lib_bladebit PRIVATE ${bb_c_opts})
+
+target_link_options(lib_bladebit PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
+target_link_options(lib_bladebit PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
 
 add_executable(bladebit ${bb_headers} src/main.cpp src/plotdisk/k32/FxBounded.inl)
+target_compile_options(bladebit PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+target_compile_options(bladebit PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+target_compile_options(bladebit PRIVATE ${bb_c_opts})
 target_link_libraries(bladebit PRIVATE lib_bladebit)
 
-add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/sandbox/sandbox_main.cpp ${src_dev} ${bb_headers})
-target_link_libraries(bladebit_dev PRIVATE lib_bladebit)
+#add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/sandbox/sandbox_main.cpp ${src_dev} ${bb_headers})
+#target_link_libraries(bladebit_dev PRIVATE lib_bladebit)
 
 # Tools
-add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
-target_link_libraries(fsegen PRIVATE lib_bladebit)
+#add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
+#target_link_libraries(fsegen PRIVATE lib_bladebit)
 
 # add_executable(plot_tool 
 #     src/tools/PlotTools_Main.cpp 
@@ -416,10 +442,77 @@ target_link_libraries(fsegen PRIVATE lib_bladebit)
 
 # Tests
 add_executable(tests ${src_tests} ${bb_headers})
-target_compile_options(tests PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
-target_compile_options(tests PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
-set_target_properties(tests PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_compile_options(tests PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
+target_compile_options(tests PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
+target_compile_options(tests PRIVATE ${bb_c_opts})
+# set_target_properties(tests PROPERTIES MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>)
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
+
+#
+# CUDA Plotter
+#
+set(is_release "$<CONFIG:Release>")
+set(is_debug "$<CONFIG:Debug>")
+set(is_cuda "$<COMPILE_LANGUAGE:CUDA>")
+set(is_cuda_release "$<AND:${is_cuda},${is_release}>")
+set(is_cuda_debug "$<AND:${is_cuda},${is_debug}>")
+set(cuda_release_c_opts ${c_opts} ${debug_c_opts})
+set(cuda_debug_c_opts ${c_opts} ${debug_c_opts})
+
+add_library(lib_bladebit_cuda 
+    # cuda/main_cuda.cpp
+    cuda/CudaPlotter.cu
+    cuda/CudaPlotter.h
+    cuda/CudaPlotContext.h
+    cuda/CudaPlotPhase2.cu
+    cuda/CudaPlotPhase3.cu
+    cuda/CudaPlotPhase3Step2.cu
+    cuda/CudaPlotPhase3Step3.cu
+    cuda/CudaPlotPhase3Internal.h
+    cuda/CudaParkSerializer.h
+    cuda/CudaParkSerializer.cu
+    cuda/chacha8.cu
+    cuda/MatchCuda.cu
+    cuda/FxCuda.cu
+    cuda/CudaUtil.h
+    cuda/CudaPlotUtil.cu
+    cuda/GpuStreams.h
+    cuda/GpuStreams.cpp
+)
+
+target_include_directories(lib_bladebit_cuda PUBLIC ${bb_include_dirs} src cuda)
+target_include_directories(lib_bladebit_cuda PRIVATE SYSTEM cuda)
+target_compile_definitions(lib_bladebit_cuda PRIVATE THRUST_IGNORE_CUB_VERSION_CHECK=1)
+target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
+target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
+
+# target_compile_options(lib_bladebit_cuda PUBLIC --pre-include pch.h)
+target_compile_options(lib_bladebit_cuda PUBLIC $<${is_cuda}:--pre-include pch.h> )
+
+# target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_release}:-Xcompiler=\"${cuda_release_c_opts}\"">)
+# target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-Xcompiler=${cuda_debug_c_opts}">)
+# target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-G">)
+# target_compile_options(lib_bladebit_cuda PRIVATE $<${is_cuda}:-Xcompiler=/FIpch.h>)
+
+# target_compile_options(lib_bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+# target_compile_options(lib_bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+target_link_libraries(lib_bladebit_cuda PUBLIC lib_bladebit CUDA::cudart_static CUDA::cuda_driver)
+
+
+add_executable(bladebit_cuda ${bb_headers} src/main.cpp)
+
+target_compile_definitions(bladebit_cuda PUBLIC BB_CUDA_ENABLED=1)
+target_compile_options(bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+target_compile_options(bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+target_compile_options(bladebit_cuda PRIVATE ${bb_c_opts})
+target_link_libraries(bladebit_cuda PRIVATE lib_bladebit_cuda)
+
+set_target_properties(lib_bladebit_cuda bladebit_cuda PROPERTIES 
+    MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
+    CUDA_RUNTIME_LIBRARY Static
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON  # Required under windows
+)
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 

@@ -25,6 +25,10 @@
 #define MB *(1<<20)
 #define GB *(1<<30)
 
+#define KiB *(1<<10)
+#define MiB *(1<<20)
+#define GiB *(1<<30)
+
 #define BtoKB /(1<<10)
 #define BtoMB /(1<<20)
 #define BtoGB /(1<<30)
@@ -204,6 +208,16 @@ inline void bbvirtfree( void* ptr )
 }
 
 //-----------------------------------------------------------
+template<typename T>
+inline void bbvirtfree_span( Span<T>& span )
+{
+    if( span.values )
+        SysHost::VirtualFree( span.values );
+
+    span = {};
+}
+
+//-----------------------------------------------------------
 template<typename T = void>
 inline T* bbvirtalloc( size_t size )
 {
@@ -238,19 +252,49 @@ inline T* bbcvirtalloc( size_t count )
 // Allocate virtual memory with protected boundary pages
 // #NOTE: Only free with bbvirtfreebounded
 //-----------------------------------------------------------
-template<typename T = void>
-inline T* bbvirtallocbounded( size_t size )
+inline void* bb_try_virt_alloc_bounded( size_t size )
 {
     const size_t pageSize = SysHost::GetPageSize();
     size = RoundUpToNextBoundaryT<size_t>( size, pageSize ) + pageSize * 2;
 
     auto* ptr = (byte*)SysHost::VirtualAlloc( size, false );
-    FatalIf( !ptr, "VirtualAlloc failed." );
+    if( !ptr )
+        return nullptr;
 
     SysHost::VirtualProtect( ptr, pageSize, VProtect::NoAccess );
     SysHost::VirtualProtect( ptr + size - pageSize, pageSize, VProtect::NoAccess );
 
-    return reinterpret_cast<T*>( ptr + pageSize );
+    return ptr + pageSize;
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T* bb_try_virt_calloc_bounded( const size_t count )
+{
+    return reinterpret_cast<T*>( bb_try_virt_alloc_bounded( count * sizeof( T ) ) );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline Span<T> bb_try_virt_calloc_bounded_span( const size_t count )
+{
+    auto span = Span<T>( bb_try_virt_calloc_bounded<T>( count ), count );
+    if( span.Ptr() == nullptr )
+        span.length = 0;
+
+    return span;
+}
+
+// Allocate virtual memory with protected boundary pages
+// #NOTE: Only free with bbvirtfreebounded
+//-----------------------------------------------------------
+template<typename T = void>
+inline T* bbvirtallocbounded( const size_t size )
+{
+    void* ptr = bb_try_virt_alloc_bounded( size );
+    FatalIf( !ptr, "VirtualAlloc failed." );
+
+    return reinterpret_cast<T*>( ptr );
 }
 
 //-----------------------------------------------------------
@@ -290,6 +334,13 @@ inline T* bbcvirtallocboundednuma( size_t count )
 
 //-----------------------------------------------------------
 template<typename T = void>
+inline bool bb_interleave_numa_memory( const size_t count, T* ptr )
+{
+    return SysHost::GetNUMAInfo() && SysHost::NumaSetMemoryInterleavedMode( ptr, count * sizeof( T ) );
+}
+
+//-----------------------------------------------------------
+template<typename T = void>
 inline Span<T> bbcvirtallocboundednuma_span( size_t count )
 {
     return Span<T>( bbcvirtallocboundednuma<T>( count ), count );
@@ -302,6 +353,15 @@ inline void bbvirtfreebounded( void* ptr )
     SysHost::VirtualFree( ((byte*)ptr) - SysHost::GetPageSize() );
 }
 
+//-----------------------------------------------------------
+template<typename T>
+inline void bbvirtfreebounded_span( Span<T>& span )
+{
+    if( span.values )
+        bbvirtfreebounded( span.values );
+    
+    span = {};
+}
 
 
 const char HEX_TO_BIN[256] = {
@@ -577,3 +637,23 @@ std::string HexToString( const byte* bytes, size_t length );
 std::vector<uint8_t> HexStringToBytes( const char* hexStr );
 std::vector<uint8_t> HexStringToBytes( const std::string& hexStr );
 
+//-----------------------------------------------------------
+inline bool IsDigit( const char c )
+{
+    return c >= '0' && c <= '9';
+}
+
+//-----------------------------------------------------------
+inline bool IsNumber( const char* str )
+{
+    if( str == nullptr )
+        return false;
+
+    while( *str )
+    {
+        if( !IsDigit( *str++ ) )
+            return false;
+    }
+    
+    return true;
+}

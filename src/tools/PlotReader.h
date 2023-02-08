@@ -1,27 +1,37 @@
 #pragma once
 #include "plotting/PlotTools.h"
 #include "plotting/PlotTypes.h"
+#include "plotting/PlotHeader.h"
 #include "io/FileStream.h"
 #include "util/Util.h"
 #include <vector>
 
 class CPBitReader;
 
-struct PlotHeader
-{
-    byte   id  [BB_PLOT_ID_LEN]        = { 0 };
-    byte   memo[BB_PLOT_MEMO_MAX_SIZE] = { 0 };
-    uint   memoLength                  = 0;
-    uint32 k                           = 0;
-    uint64 tablePtrs[10]               = { 0 };
-};
+
+
 
 // Base Abstract class for read-only plot files
 class IPlotFile
 {
 public:
-
     inline uint K() const { return _header.k; }
+
+    inline PlotFlags Flags() const 
+    {
+        if( _version < PlotVersion::v2_0 )
+            return PlotFlags::None;
+
+         return _header.flags;
+    }
+
+    inline uint CompressionLevel() const
+    {
+        if( _version < PlotVersion::v2_0 )
+            return 0;
+
+        return _header.compressionLevel;
+    }
 
     inline const byte* PlotId() const { return _header.id; }
 
@@ -96,7 +106,8 @@ protected:
     bool ReadHeader( int& error );
 
 protected:
-    PlotHeader _header;
+    PlotFileHeaderV2 _header;
+    PlotVersion      _version;
 };
 
 class MemoryPlot : public IPlotFile
@@ -196,6 +207,13 @@ public:
 
     Span<uint64> GetP7IndicesForF7( const uint64 f7, Span<uint64> indices );
     
+    TableId GetLowestStoredTable() const;
+    bool IsCompressedXTable( TableId table ) const;
+    size_t GetParkSizeForTable( TableId table ) const;
+    uint32 GetLPStubBitSize( TableId table ) const;
+    uint32 GetLPStubByteSize( TableId table ) const;
+    size_t GetParkDeltasSectionMaxSize( TableId table ) const;
+    const FSE_DTable* GetDTableForTable( TableId table ) const;
 private:
 
     bool ReadLPParkComponents( TableId table, uint64 parkIndex, 

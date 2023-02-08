@@ -130,7 +130,9 @@ void DiskPlotPhase2::RunWithBuckets()
     uint64* lMarkingTable = bitFields[0];
     uint64* rMarkingTable = bitFields[1];
 
-    for( TableId table = TableId::Table7; table > TableId::Table2; table = table-1 )
+    const TableId endTable = _context.cfg->globalCfg->compressionLevel > 0 ? TableId::Table3 : TableId::Table2;
+
+    for( TableId table = TableId::Table7; table > endTable; table = table-1 )
     {
         readFence.Reset( 0 );
 

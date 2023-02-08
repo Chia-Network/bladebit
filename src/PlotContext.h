@@ -2,25 +2,33 @@
 #include "Config.h"
 #include "ChiaConsts.h"
 #include "threading/ThreadPool.h"
-#include "PlotWriter.h"
 #include "plotting/PlotTypes.h"
+#include "plotting/PlotWriter.h"
+#include "plotting/GlobalPlotConfig.h"
 
 struct PlotRequest
 {
     const byte* plotId;       // Id of the plot we want to create       
-    const char* outPath;      // Output plot path
+    const char* outDir;       // Output plot directory
+    const char* plotFileName; // .plot.tmp file name
     const byte* memo;         // Plot memo
     uint16      memoSize;
-    bool        IsFinalPlot;  
+    bool        isFirstPlot;
+    bool        IsFinalPlot;
 };
 
-
+struct MemPlotConfig
+{
+    const struct GlobalPlotConfig* gCfg;
+};
 
 ///
 /// Context for a in-memory plotting
 ///
 struct MemPlotContext
 {
+    MemPlotConfig cfg;
+
     // They id of the plot being plotted
     const byte* plotId;
 
@@ -66,7 +74,7 @@ struct MemPlotContext
                             // These are only used for tables 2-6 (inclusive).
                             // These buffers map to regions in yBuffer0.
 
-    DiskPlotWriter* plotWriter;
+    PlotWriter* plotWriter;
 
     // The buffer used to write to disk the Phase 4 data.
     // This may be metaBuffer0 or a an L/R buffer from

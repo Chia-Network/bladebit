@@ -5,6 +5,7 @@
 #include "plotting/CTables.h"
 #include "plotting/DTables.h"
 #include "plotmem/LPGen.h"
+#include "plotting/Compression.h"
 
 ///
 /// Plot Reader
@@ -82,7 +83,7 @@ size_t PlotReader::GetTableParkCount( const PlotTable table ) const
         case PlotTable::Table4:
         case PlotTable::Table5:
         case PlotTable::Table6:
-            return _plot.TableSize( table ) / CalculateParkSize( (TableId)table );
+            return _plot.TableSize( table ) / GetParkSizeForTable( (TableId)table );
 
         default:
             return 0;
@@ -264,11 +265,11 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     if( table >= TableId::Table7 )
         return false;
 
-    const uint32 k              = _plot.K();
-    const size_t lpSizeBytes    = LinePointSizeBytes( k );
-    const size_t tableMaxSize   = _plot.TableSize( (PlotTable)table );
-    const size_t tableAddress   = _plot.TableAddress( (PlotTable)table );
-    const size_t parkSize       = CalculateParkSize( table, k );
+    const uint32 k                = _plot.K();
+    const size_t lpSizeBytes      = LinePointSizeBytes( k );
+    const size_t tableMaxSize     = _plot.TableSize( (PlotTable)table );
+    const size_t tableAddress     = _plot.TableAddress( (PlotTable)table );
+    const size_t parkSize         = GetParkSizeForTable( table );
 
     const uint64 maxParks       = tableMaxSize / parkSize;
     if( parkIndex >= maxParks )
@@ -294,17 +295,17 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     }
 
     // Read stubs
-    const size_t stubsSizeBytes = CDiv( ( kEntriesPerPark - 1 ) * ( k - kStubMinusBits ), 8 );
+    const size_t stubsSizeBytes = GetLPStubByteSize( table );
     uint64* stubsBuffer = _parkBuffer;
 
     if( _plot.Read( stubsSizeBytes, stubsBuffer ) != (ssize_t)stubsSizeBytes )
         return false;
 
     // Read deltas
-    const size_t maxDeltasSizeBytes = CalculateMaxDeltasSize( (TableId)table );
+    const size_t maxDeltasSizeBytes = GetParkDeltasSectionMaxSize( (TableId)table );
     byte* compressedDeltaBuffer = ((byte*)_parkBuffer) + RoundUpToNextBoundary( stubsSizeBytes, sizeof( uint64 ) );
     byte* deltaBuffer           = _deltasBuffer;
-    
+
     uint16 compressedDeltasSize = 0;
     if( _plot.Read( 2, &compressedDeltasSize ) != 2 )
         return false;
@@ -329,10 +330,12 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
             return false;
 
         // Decompress deltas
+        const FSE_DTable* dTable = GetDTableForTable( table );
+
         deltaCount = FSE_decompress_usingDTable( 
                         deltaBuffer, kEntriesPerPark - 1, 
                         compressedDeltaBuffer, compressedDeltasSize, 
-                        DTables[(int)table] );
+                        dTable );
 
         if( FSE_isError( deltaCount ) )
             return false;
@@ -344,6 +347,15 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     outDeltaCounts   = deltaCount;
 
     return true;
+}
+
+//-----------------------------------------------------------
+const FSE_DTable* PlotReader::GetDTableForTable( TableId table ) const
+{
+    if( !IsCompressedXTable( table ) )
+        return DTables[(int)table];
+
+    return CreateCompressionDTable( _plot.CompressionLevel() );
 }
 
 //-----------------------------------------------------------
@@ -363,7 +375,7 @@ bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints
     linePoints[0] = baseLinePoint;
     if( deltaCount > 0 )
     {
-        const uint32 stubBitSize = ( _plot.K() - kStubMinusBits );
+        const uint32 stubBitSize = GetLPStubBitSize( table );
         
         for( uint64 i = 1; i <= deltaCount; i++ )
         {
@@ -378,6 +390,70 @@ bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints
 
     outEntryCount = deltaCount + 1;
     return true;
+}
+
+//-----------------------------------------------------------
+TableId PlotReader::GetLowestStoredTable() const
+{
+    const uint32 compressionLevel = _plot.CompressionLevel();
+
+    const uint32 numDroppedTables = compressionLevel == 0 ? 0 :
+                                    compressionLevel >= 9 ? 2 : 1;
+
+    return TableId::Table1 + numDroppedTables;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::IsCompressedXTable( const TableId table ) const
+{
+    return _plot.CompressionLevel() > 0 && table == GetLowestStoredTable();
+}
+
+//-----------------------------------------------------------
+size_t PlotReader::GetParkSizeForTable( TableId table ) const
+{
+    if( IsCompressedXTable( table ) )
+        return GetCompressionInfoForLevel( _plot.CompressionLevel() ).tableParkSize;
+
+    if( table < GetLowestStoredTable() )
+    {
+        ASSERT(0);
+        return 0;
+    }
+
+    return CalculateParkSize( table, _plot.K() );
+}
+
+//-----------------------------------------------------------
+uint32 PlotReader::GetLPStubBitSize( TableId table ) const
+{
+    FatalIf( table < GetLowestStoredTable(), "Getting stub bit size for invalid table." );
+
+    if( !IsCompressedXTable( table ) )
+        return _plot.K() - kStubMinusBits;
+
+    auto info = GetCompressionInfoForLevel( _plot.CompressionLevel() );
+    return info.subtSizeBits;
+}
+
+//-----------------------------------------------------------
+uint32 PlotReader::GetLPStubByteSize( const TableId table ) const
+{
+    return CDiv( ( kEntriesPerPark - 1 ) * GetLPStubBitSize( table ), 8 );
+}
+
+//-----------------------------------------------------------
+size_t PlotReader::GetParkDeltasSectionMaxSize( const TableId table ) const
+{
+    if( !IsCompressedXTable( table ) )
+        return CalculateMaxDeltasSize( table );
+
+    auto info = GetCompressionInfoForLevel( _plot.CompressionLevel() );
+
+    const uint32 lpSize       = CDiv( _K * 2u, 8 );
+    const uint32 stubByteSize = GetLPStubByteSize( table );
+    
+    return info.tableParkSize - ( lpSize + stubByteSize );
 }
 
 // #TODO: Add 64-bit outLinePoint (templatize)
@@ -404,7 +480,7 @@ bool PlotReader::ReadLP( TableId table, uint64 index, uint128& outLinePoint )
             return false;
 
         const uint64 maxIter     = std::min( lpLocalIdx, deltaCount );
-        const uint32 stubBitSize = ( _plot.K() - kStubMinusBits );
+        const uint32 stubBitSize = GetLPStubBitSize( table );
 
         for( uint64 i = 0; i < maxIter; i++ )
         {
@@ -642,104 +718,6 @@ bool PlotReader::LoadC2Entries()
     bbvirtfreebounded( buffer );
     return true;
 }
-
-///
-/// Plot Files
-///
-// #TODO: Move to other source files
-//-----------------------------------------------------------
-bool IPlotFile::ReadHeader( int& error )
-{
-    error = 0;
-
-    // Magic
-    {
-        char magic[sizeof( kPOSMagic )-1] = { 0 };
-        if( Read( sizeof( magic ), magic ) != sizeof( magic ) )
-            return false;
-        
-        if( !MemCmp( magic, kPOSMagic, sizeof( magic ) ) )
-        {
-            error = -1;       // #TODO: Set actual user error
-            return false;
-        }
-    }
-    
-    // Plot Id
-    {
-        if( Read( sizeof( _header.id ), _header.id ) != sizeof( _header.id ) )
-            return false;
-
-        // char str[65] = { 0 };
-        // size_t numEncoded = 0;
-        // BytesToHexStr( _header.id, sizeof( _header.id ), str, sizeof( str ), numEncoded );
-        // ASSERT( numEncoded == sizeof( _header.id ) );
-        // _idString = str;
-    }
-
-    // K
-    {
-        byte k = 0;
-        if( Read( 1, &k ) != 1 )
-            return false;
-
-        _header.k = k;
-    }
-
-    // Format Descritption
-    {
-        const uint formatDescSize =  ReadUInt16();
-        FatalIf( formatDescSize != sizeof( kFormatDescription ) - 1, "Invalid format description size." );
-
-        char desc[sizeof( kFormatDescription )-1] = { 0 };
-        if( Read( sizeof( desc ), desc ) != sizeof( desc ) )
-            return false;
-        
-        if( !MemCmp( desc, kFormatDescription, sizeof( desc ) ) )
-        {
-            error = -1; // #TODO: Set proper user error
-            return false;
-        }
-    }
-    
-    // Memo
-    {
-        uint memoSize = ReadUInt16();
-        if( memoSize > sizeof( _header.memo ) )
-        {
-            error = -1; // #TODO: Set proper user error
-            return false;
-        } 
-
-        _header.memoLength = memoSize;
-
-        if( Read( memoSize, _header.memo ) != memoSize )
-        {
-            error = -1; // #TODO: Set proper user error
-            return false;
-        }
-
-        // char str[BB_PLOT_MEMO_MAX_SIZE*2+1] = { 0 };
-        // size_t numEncoded = 0;
-        // BytesToHexStr( _memo, memoSize, str, sizeof( str ), numEncoded );
-        
-        // _memoString = str;
-    }
-
-    // Table pointers
-    if( Read( sizeof( _header.tablePtrs ), _header.tablePtrs ) != sizeof( _header.tablePtrs ) )
-    {
-        error = -1; // #TODO: Set proper user error
-        return false;
-    }
-
-    for( int i = 0; i < 10; i++ )
-        _header.tablePtrs[i] = Swap64( _header.tablePtrs[i] );
-
-    // What follows is table data
-    return true;
-}
-
 
 ///
 /// Memory Plot

@@ -31,10 +31,14 @@ public:
     // Wait until the fence reaches or passes the specified value
     void Wait( uint32 value, Duration& accumulator );
 
+    // Same as wait, but it does not suspend the thread, 
+    // instead continuously checks if the current fence value is >= value
+    void SpinWait( uint32 value );
+
 private:
-    // std::atomic<uint32> _value;
+     std::atomic<uint32> _value;
     // #NOTE: Don't think we need atomic, since memory ordering ought to be enforced by the mutex.
-    volatile uint32     _value = 0;
+    //volatile uint32     _value = 0;
     AutoResetSignal     _signal;
 
 };

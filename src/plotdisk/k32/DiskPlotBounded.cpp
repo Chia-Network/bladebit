@@ -340,12 +340,19 @@ void K32BoundedPhase1::RunFx()
     _context.ioWaitTime += fx._tableIOWait;
 
     #if _DEBUG
+    {
         BB_DP_DBG_WriteTableCounts( _context );
          // #TODO: Update this for alternating mode
         _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::FX0    : FileId::FX1    );
         _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::INDEX0 : FileId::INDEX1 );
         _ioQueue.DebugWriteSliceSizes( table, (uint)table %2 == 0 ? FileId::META0  : FileId::META1  );
+        
+        auto& fence = _context.fencePool->RequireFence();
+        _ioQueue.SignalFence( fence );
         _ioQueue.CommitCommands();
+        fence.Wait();
+        _context.fencePool->ReleaseFence( fence );
+    }
     #endif
 }
 

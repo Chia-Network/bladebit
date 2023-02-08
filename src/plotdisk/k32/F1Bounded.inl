@@ -77,7 +77,7 @@ public:
         Job::Run( *_context.threadPool, _context.f1ThreadCount, [=]( Job* self ) {
 
             byte key[BB_PLOT_ID_LEN] = { 1 };
-            memcpy( key + 1, _context.plotId, BB_PLOT_ID_LEN-1 );
+            memcpy( key + 1, _context.plotRequest.plotId, BB_PLOT_ID_LEN-1 );
 
             chacha8_ctx chacha;
             chacha8_keysetup( &chacha, key, 256, nullptr );

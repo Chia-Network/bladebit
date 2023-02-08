@@ -1,8 +1,10 @@
 #pragma once
-
+#include "plotting/GlobalPlotConfig.h"
 
 struct ValidatePlotOptions
 {
+    struct GlobalPlotConfig* gCfg;
+
     std::string plotPath    = "";
     bool        inRAM       = false;
     bool        unpacked    = false;

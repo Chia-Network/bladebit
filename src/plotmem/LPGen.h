@@ -61,7 +61,7 @@ inline BackPtr LinePointToSquare64( uint64 index );
 //-----------------------------------------------------------
 FORCE_INLINE uint64 GetXEnc( uint64 x )
 {
-    ASSERT( x );
+    // ASSERT( x );
     uint64 a = x, b = x - 1;
 
     // if( a % 2 == 0 )
@@ -71,7 +71,7 @@ FORCE_INLINE uint64 GetXEnc( uint64 x )
         b >>= 1; // b /= 2;
 
     const uint64 r = a * b;
-    ASSERT( r >= a && r >= b );
+    // ASSERT( r >= a && r >= b );
 
     return r;
 }

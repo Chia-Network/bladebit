@@ -517,7 +517,15 @@ void DiskBufferQueue::DebugReadSliceSizes( const TableId table, const FileId fil
 #endif
 
 //-----------------------------------------------------------
-inline DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject( Command::CommandType type )
+void DiskBufferQueue::CommitCommands()
+{
+    //Log::Debug( "Committing %d commands.", _commands._pendingCount );
+    _commands.Commit();
+    _cmdReadySignal.Signal();
+}
+
+//-----------------------------------------------------------
+DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject( Command::CommandType type )
 {
     Command* cmd;
     while( !_commands.Write( cmd ) )
@@ -541,13 +549,6 @@ inline DiskBufferQueue::Command* DiskBufferQueue::GetCommandObject( Command::Com
     return cmd;
 }
 
-//-----------------------------------------------------------
-void DiskBufferQueue::CommitCommands()
-{
-    //Log::Debug( "Committing %d commands.", _commands._pendingCount );
-    _commands.Commit();
-    _cmdReadySignal.Signal();
-}
 
 //-----------------------------------------------------------
 void DiskBufferQueue::CommandThreadMain( DiskBufferQueue* self )
@@ -718,13 +719,17 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             CmdTruncateBucket( cmd );
         break;
 
+        case Command::PlotWriterCommand:
+            CmdPlotWriterCommand( cmd );
+        break;
+
     #if _DEBUG
         case Command::DBG_WriteSliceSizes:
             CmdDbgWriteSliceSizes( cmd );
         break;
 
         case Command::DBG_ReadSliceSizes:
-        CmdDbgReadSliceSizes( cmd );
+            CmdDbgReadSliceSizes( cmd );
         break;
     #endif
 
@@ -1203,6 +1208,13 @@ inline const char* DiskBufferQueue::DbgGetCommandName( Command::CommandType type
     }
 }
 
+//-----------------------------------------------------------
+void DiskBufferQueue::CmdPlotWriterCommand( const Command& cmd )
+{
+    ASSERT( cmd.type == Command::PlotWriterCommand );
+    cmd.plotWriterCmd.writer->ExecuteCommand( cmd.plotWriterCmd.cmd );   
+}
+
 #if _DEBUG
 //-----------------------------------------------------------
 void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
@@ -1222,7 +1234,7 @@ void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
     }
     // FatalIf( !file.Open( path, FileMode::Create, FileAccess::Write ), "Failed to open '%s' for writing.", path );
 
-    FileSet& fileSet        = _files[(int)cmd.dbgSliceSizes.fileId];
+    FileSet& fileSet        = _files[(int)fileId];
     const uint32 numBuckets = (uint32)fileSet.files.Length();
 
     for( uint32 i = 0; i < numBuckets; i++ )
@@ -1230,7 +1242,7 @@ void DiskBufferQueue::CmdDbgWriteSliceSizes( const Command& cmd )
               auto   slices    = fileSet.writeSliceSizes[i];
         const size_t sizeWrite = sizeof( size_t ) * numBuckets;
 
-        if( file.Write( slices.Ptr(), sizeWrite ) != sizeWrite )
+        if( file.Write( slices.Ptr(), sizeWrite ) != (ssize_t)sizeWrite )
         {
             Log::Error( "Failed to write slice size for table %d", (int)cmd.dbgSliceSizes.table+1 );
             return;
@@ -1381,4 +1393,6 @@ void DiskBufferQueue::DeleteBucketNow( const FileId fileId )
             Log::Error( "Error: Failed to delete file %s with errror %d (0x%x).", filePath, r, r );
     }
 }
+
+
 

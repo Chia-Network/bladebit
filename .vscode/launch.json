@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name"          : "Bladebit RAM",
             "type"          : "cppdbg",
@@ -33,10 +34,12 @@
             "args": [
                 "-f", "ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef",
                 "-p", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8",
-                "-i", "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835",
-                // "-n", "1",
+                // "-i", "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835",
+                "-i", "5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863",
+                // "-n", "2",
                 "-w",
                 "-v",
+                "--compress", "4",
                 "ramplot",
                 "~/plot/tmp"
             ]
@@ -86,11 +89,13 @@
 
                 "--show-memo",
 
+                // "--compress", "6",
+
                 "diskplot",
 
                 "-t1", "~/plot/tmp",
                 "--f1-threads", "24",
-                // "--fp-threads", "62",
+                "--fp-threads", "62",
                 "--c-threads", "28",
                 "--p2-threads", "24",
                 
@@ -101,20 +106,39 @@
                 // "--cache", "64G",
                 // "-s",
                 // "--k32-bounded",
-                "-b", "64",
+                // "-b", "64",
                 // "--sizes",
-                // "-b", "128",
+                "-b", "128",
                 // "-b", "256",
 
-                "--c-threads", "26",
-                "--p2-threads", "24",
-                "--p3-threads", "48",
+                // "--c-threads", "26",
+                // "--p2-threads", "24",
+                // "--p3-threads", "48",
                 "~/plot/tmp"
             ],
 
             // ,"stopAtEntry": true
             
             "environment": []
+        },
+
+        {
+            "name"       : "Bladebit CUDA",
+            
+            "type"          : "cuda-gdb",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            "preLaunchTask" : "build_cuda_debug",
+
+            "program": "${workspaceFolder}/build/bladebit_cuda",
+            
+            //                 "-c", "xch1uf48n3f50xrs7zds0uek9wp9wmyza6crnex6rw8kwm3jnm39y82q5mvps6",
+            // "-i", "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73",    // Yes overflow
+            // "--memo", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef207d52406afa2b6d7d92ea778f407205bd9dca40816c1b1cacfca2a6612b93eb",
+            
+            "args": 
+            "-f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 --compress 9 cudaplot ~/plot/tmp"
         },
 
         {
@@ -182,6 +206,7 @@
                 // "F1Disk"
                 // "PairsAndMap"
                 // "bucket-slice-write"
+                "compressed-plot-proof"
                 // "line-point-deltas"
             ]
         }
@@ -208,23 +233,35 @@
 
             "args": [
                 /// Validate
-                // "-t", "32",
+                "-t", "16",
                 // "-t", "1",
                 "validate",
 
-                "--f7", "2534554965",
-                "~/plot/tmp/plot-k32-2022-10-18-22-25-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                // "--f7", "2534554965", "~/plot/tmp/plot-k32-2022-10-18-22-25-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                "--f7", "0",
+                //  "~/plot/tmp/plot-k32-c04-2023-01-29-03-29-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
+                // "~/plot/tmp/ramplot-k32-2023-01-30-09-04-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
+                // "~/plot/tmp/disk/plot-k32-c04-2023-01-30-23-07-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
+                // "~/plot/tmp/plot-k32-c04-2023-01-30-23-55-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
+                // "~/plot/tmp/plot-k32-c04-2023-01-31-01-00-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
+                // "/home/harold/plot/tmp/plot-k32-c04-2023-01-31-22-57-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
+                // "/home/harold/plot/tmp/plot-k32-c04-2023-01-31-23-15-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
+                "/home/harold/plot/tmp/plot-k32-c07-2023-02-01-01-47-4edafc0015178d33f971367c63196a8a756428e7a4cb38a3826a0bea842dc757.plot"
                 
                 // "-m",
-                // "-u",
-                // "~/plot/tmp/plot-k32-2022-10-17-15-05-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+                // "-u", "~/plot/tmp/plot-k32-2022-10-26-23-58-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
 
                 // "/mnt/p5510a/disk_tmp/plot.dat"
+                
+                // "--f7", "3983284117", "/home/harito/plot/tmp/plot-k32-2022-11-21-05-59-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+                // "--f7", "3983284117", "/home/harito/plot/tmp/gpu_1.plot",
 
                 /// Compare
                 // "plotcmp",
-                // "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-53-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
-                // "/mnt/p5510a/disk_tmp/plot-k32-2022-04-12-13-03-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                // "/home/harito/plot/tmp/gpu_1.plot.old",
+                // "/home/harold/plot-tmpfs/gpu_1.plot",
+                // "/home/harito/plot/tmp/gpu_1.plot",
+                // "/home/harito/plot/tmp/plot-k32-2022-11-21-05-59-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
             ]
         },
 

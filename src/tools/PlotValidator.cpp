@@ -12,6 +12,7 @@
 #include "threading/MTJob.h"
 #include "util/CliParser.h"
 #include "plotting/GlobalPlotConfig.h"
+#include "harvesting/GreenReaper.h"
 #include <mutex>
 
 #pragma GCC diagnostic push
@@ -45,30 +46,30 @@ Validates all of a plot's values to ensure they all contain valid proofs.
 You can specify the thread count in the bladebit global option '-t'.
 
 [ARGUMENTS]
-<plot_path>   : Path to the plot file to be validated.
+<plot_path>      : Path to the plot file to be validated.
 
 [OPTIOINS]
- -m, --in-ram : Loads the whole plot file into memory before validating.
+ -m, --in-ram    : Loads the whole plot file into memory before validating.
 
- -o, --offset : Percentage offset at which to start validating.
-                Ex (start at 50%): bladebit validate -o 50 /path/to/my/plot
+ -o, --offset    : Percentage offset at which to start validating.
+                   Ex (start at 50%): bladebit validate -o 50 /path/to/my/plot
 
- -u, --unpack : Decompress the plot into memory before validating.
-                This decreases validation time substantially but
-                it requires around 128GiB of RAM for k=32.
-                This is only supported for plots with k=32 and below.
+ -u, --unpack    : Decompress the plot into memory before validating.
+                   This decreases validation time substantially but
+                   it requires around 128GiB of RAM for k=32.
+                   This is only supported for plots with k=32 and below.
 
- --f7 <f7>    : Specify an f7 to find and validate in the plot.
+ --prove, -p <c> : Find if a proof exists given challenge <c>.
 
- -h, --help   : Print this help message and exit.
+ --f7 <f7>       : Specify an f7 to find and validate in the plot.
+
+ -h, --help      : Print this help message and exit.
 )";
 
 void PlotValidatorPrintUsage()
 {
     Log::Line( USAGE );
 }
-
-
 
 struct UnpackedK32Plot
 {
@@ -98,12 +99,13 @@ struct UnpackedK32Plot
 static void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
 
 template<bool Use64BitLpToSquare>
-static bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] );
+static bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT], GreenReaperContext* gr = nullptr );
 
-static void GetProofForChallenge( const char* plotPath, const char* challengeHex );
+static void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challengeHex );
 static bool ValidateFullProof( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 );
 static void ReorderProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT] );
 static void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
+static bool DecompressProof( const byte plotId[BB_PLOT_ID_LEN], const uint32 compressionLevel, const uint64 compressedProof[PROOF_X_COUNT], uint64 fullProofXs[PROOF_X_COUNT], GreenReaperContext* gr = nullptr );
 
 static uint64 BytesToUInt64( const byte bytes[8] );
 static uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 bitCount );
@@ -115,6 +117,7 @@ static void FxGen( const TableId table, const uint32 k,
                    uint64& outY, MetaBits& outMeta );
 
 static bool ValidatePlot( const ValidatePlotOptions& options );
+static void ValidatePark( IPlotFile& file, const uint64 parkIndex );
 
 static uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool );
 
@@ -139,6 +142,7 @@ struct ValidateJob : MTJob<ValidateJob>
 void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
 {
     ValidatePlotOptions opts;
+    opts.gCfg = &gCfg;
 
     const char* challenge = nullptr;
     int64       f7        = -1;
@@ -179,14 +183,15 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
         ((char*)challenge)[64] = 0;
     }
 
+    const uint32 maxThreads = SysHost::GetLogicalCPUCount();
+
     // Check for challenge
     if( challenge != nullptr )
     {
-        GetProofForChallenge( opts.plotPath.c_str(), challenge );
+        opts.threadCount = std::min( maxThreads, gCfg.threadCount == 0 ? 8u : gCfg.threadCount );
+        GetProofForChallenge( opts,  challenge );
         Exit( 0 );
     }
-
-    const uint32 maxThreads = SysHost::GetLogicalCPUCount();
 
     opts.threadCount = gCfg.threadCount == 0 ? maxThreads : std::min( maxThreads, gCfg.threadCount );
     opts.startOffset = std::max( std::min( opts.startOffset / 100.f, 100.f ), 0.f );
@@ -384,6 +389,80 @@ uint64 ValidateInMemory( UnpackedK32Plot& plot, ThreadPool& pool )
     return totalFailures;
 }
 
+//-----------------------------------------------------------
+void ValidatePark( IPlotFile& file, const uint64 c3ParkIndex )
+{
+    PlotReader reader( file );
+    const uint32 k = file.K();
+
+    const uint64 plotC3ParkCount = file.TableSize( PlotTable::C1 ) / sizeof( uint32 ) - 1;
+
+    if( c3ParkIndex >= plotC3ParkCount )
+        Fatal( "C3 park index %llu is out of range of %llu maximum parks.", c3ParkIndex, plotC3ParkCount );
+    
+    uint64 f7Entries[kCheckpoint1Interval];
+    uint64 p7Entries[kEntriesPerPark];
+    
+    const int64 f7EntryCount = reader.ReadC3Park( c3ParkIndex, f7Entries );
+    FatalIf( f7EntryCount < 0, "Failed to read C3 Park %llu", c3ParkIndex );
+
+    const uint64 f7IdxBase       = c3ParkIndex * kCheckpoint1Interval;
+    
+    int64 curPark7 = -1;
+
+    uint64 failCount = 0;
+
+    for( uint32 i = 0; i < (uint32)f7EntryCount; i++ )
+    {
+        const uint64 f7Idx       = f7IdxBase + i;
+        const uint64 p7ParkIndex = f7Idx / kEntriesPerPark;
+        const uint64 f7          = f7Entries[i];
+
+        if( (int64)p7ParkIndex != curPark7 )
+        {
+            curPark7 = (int64)p7ParkIndex;
+            FatalIf( !reader.ReadP7Entries( p7ParkIndex, p7Entries ), "Failed to read P7 %llu.", p7ParkIndex );
+        }
+
+        const uint64 p7LocalIdx = f7Idx - p7ParkIndex * kEntriesPerPark;
+        const uint64 t6Index    = p7Entries[p7LocalIdx];
+
+        bool success = true;
+
+        // if( k <= 32 )
+        // {
+        //     success = FetchProof<true>( reader, t6Index, fullProofXs );
+        // }
+        // else
+        //     success = FetchProof<false>( reader, t6Index, fullProofXs );
+
+        // if( success )
+        // {
+        //     // ReorderProof( plot, fullProofXs );   // <-- No need for this for validation
+            
+        //     // Now we can validate the proof
+        //     uint64 outF7;
+
+        //     if( ValidateFullProof( k, plot.PlotFile().PlotId(), fullProofXs, outF7 ) )
+        //         success = f7 == outF7;
+        //     else
+        //         success = false;
+        // }
+        // else
+        // {
+        //     success = false;
+        //     Log::Error( "Park %llu proof fetch failed for f7[%llu] local(%llu) = %llu ( 0x%016llx ) ", 
+        //         c3ParkIdx, f7Idx, i, f7, f7 );
+
+        //     failCount++;
+        // }
+    }
+
+    // if( failCount == 0 )
+    //     Log::Line( "SUCCESS: C3 park %llu is valid.", c3ParkIdx );
+    // else
+    //     Log::Line( "FAILED: Invalid C3 park %llu.", c3ParkIdx );
+}
 
 //-----------------------------------------------------------
 void ValidateJob::Log( const char* msg, ... )
@@ -522,9 +601,9 @@ void ValidateJob::Run()
 
 // #TODO: Support K>32
 //-----------------------------------------------------------
-void GetProofForChallenge( const char* plotPath, const char* challengeHex )
+void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challengeHex )
 {
-    FatalIf( !plotPath || !*plotPath, "Invalid plot path." );
+    FatalIf(  opts.plotPath.length() == 0, "Invalid plot path." );
     FatalIf( !challengeHex || !*challengeHex, "Invalid challenge." );
 
     const size_t lenChallenge = strlen( challengeHex );
@@ -534,7 +613,7 @@ void GetProofForChallenge( const char* plotPath, const char* challengeHex )
     HexStrToBytes( challengeHex, lenChallenge, (byte*)challenge, 32 );
 
     FilePlot plot;
-    FatalIf( !plot.Open( plotPath ), "Failed to open plot at %s.", plotPath );
+    FatalIf( !plot.Open( opts.plotPath.c_str() ), "Failed to open plot at %s.", opts.plotPath.c_str() );
     FatalIf( plot.K() != 32, "Only k32 plots are supported." );
 
     // Read F7 value
@@ -548,7 +627,11 @@ void GetProofForChallenge( const char* plotPath, const char* challengeHex )
     Span<uint64> indices( _indices, sizeof( _indices ) / sizeof( uint64 ) );    // #TODO: Should simply return the start index and count
 
     auto matches = reader.GetP7IndicesForF7( f7, indices );
-    FatalIf( matches.Length() == 0, "Could not find f7 %llu in plot", f7 );
+    if(  matches.Length() == 0 )
+    {
+        Log::Line( "Could not find f7 %llu in plot.", f7 );
+        Exit( 1 );
+    }
 
     uint64 fullProofXs[PROOF_X_COUNT];
     uint64 proof   [32]  = {};
@@ -556,6 +639,16 @@ void GetProofForChallenge( const char* plotPath, const char* challengeHex )
     uint64 p7Entries[kEntriesPerPark] = {};
 
     int64 prevP7Park = -1;
+
+    GreenReaperContext* gr = nullptr;
+    if( plot.CompressionLevel() > 0 )
+    {
+        GreenReaperConfig cfg = {};
+        cfg.threadCount = opts.threadCount;
+
+        gr = grCreateContext( &cfg );
+        FatalIf( gr == nullptr, "Failed to created decompression context." );
+    }
 
     for( uint64 i = 0; i < matches.Length(); i++ )
     {
@@ -572,9 +665,14 @@ void GetProofForChallenge( const char* plotPath, const char* challengeHex )
 
         const uint64 localP7Index = p7Index - p7Park * kEntriesPerPark;
         const uint64 t6Index      = p7Entries[localP7Index];
+    
+        auto const timer    = TimerBegin();
+        const bool gotProof = FetchProof<true>( reader, t6Index, fullProofXs, gr );
+        auto const elapsed  = TimerEndTicks( timer );
 
-        const bool gotProof = FetchProof<true>( reader, t6Index, fullProofXs );
-        
+        if( opts.gCfg->verbose )
+            Log::Line( "Proof fetch time: %02.2lf seconds ( %02.2lf ms ).", TicksToSeconds( elapsed ), TicksToNanoSeconds( elapsed ) * 0.000001 );
+
         if( gotProof )
         {
             ReorderProof( reader, fullProofXs );
@@ -707,7 +805,6 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
         });
     }
 
-    
     auto LoadBackPtrTable = [&]( const TableId table ) {
 
         Log::Line( "Loading table %u", table+1 );
@@ -726,7 +823,7 @@ UnpackedK32Plot UnpackedK32Plot::Load( IPlotFile** plotFile, ThreadPool& pool, u
             uint64 parkCount, parkOffset, parkEnd;
             GetThreadOffsets( self, plotParkCount, parkCount, parkOffset, parkEnd );
             
-            uint64 parkEntryCount;
+            uint64  parkEntryCount;
             uint128 linePoints[kEntriesPerPark];
 
             Span<Pair> tableWriter = backPointers.Slice( parkOffset * kEntriesPerPark, parkCount * kEntriesPerPark );
@@ -853,8 +950,50 @@ bool UnpackedK32Plot::FetchProof( const uint64 index, uint64 fullProofXs[PROOF_X
 }
 
 //-----------------------------------------------------------
+bool DecompressProof( const byte plotId[BB_PLOT_ID_LEN], const uint32 compressionLevel, const uint64 compressedProof[PROOF_X_COUNT], uint64 fullProofXs[PROOF_X_COUNT], GreenReaperContext* gr )
+{
+// #if _DEBUG
+//     for( uint32 i = 0; i < 32; i++ )
+//     {
+//         const uint32 x = (uint32)compressedProof[i];
+//         Log::Line( "[%-2u] %-10u ( 0x%08X )", i, x, x );
+//     }
+// #endif
+
+    bool destroyContext = false;
+    if( gr == nullptr )
+    {
+        GreenReaperConfig cfg = {};
+        cfg.threadCount = std::min( 8u, SysHost::GetLogicalCPUCount() );
+
+        gr = grCreateContext( &cfg );
+        FatalIf( gr == nullptr, "Failed to created decompression context." );
+
+        destroyContext = true;
+    }
+
+    auto info = GetCompressionInfoForLevel( compressionLevel );
+
+    GRCompressedProofRequest req = {};
+    req.compressionLevel = compressionLevel;
+    req.plotId           = plotId;
+
+    for( uint32 i = 0; i < PROOF_X_COUNT; i++ )
+        req.compressedProof[i] = (uint32)compressedProof[i];
+
+    GRProofResult r = grFetchProofForChallenge( gr, &req );
+
+    bbmemcpy_t( fullProofXs, req.fullProof, PROOF_X_COUNT );
+
+    if( destroyContext )
+        grDestroyContext( gr );
+
+    return r == GRProofResult_OK;
+}
+
+//-----------------------------------------------------------
 template<bool Use64BitLpToSquare>
-bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT] )
+bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT], GreenReaperContext* gr )
 {
     uint64 lpIndices[2][PROOF_X_COUNT];
     // memset( lpIndices, 0, sizeof( lpIndices ) );
@@ -867,8 +1006,13 @@ bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_
     // Fetch line points to back pointers going through all our tables
     // from 6 to 1, grabbing all of the x's that make up a proof.
     uint32 lookupCount = 1;
+    
+    const bool    isCompressed = plot.PlotFile().CompressionLevel() > 0;
+    const TableId endTable     = !isCompressed ? TableId::Table1 :
+                                    plot.PlotFile().CompressionLevel() < 8 ? 
+                                    TableId::Table2 : TableId::Table3;
 
-    for( TableId table = TableId::Table6; table >= TableId::Table1; table-- )
+    for( TableId table = TableId::Table6; table >= endTable; table-- )
     {
         ASSERT( lookupCount <= 32 );
 
@@ -896,8 +1040,14 @@ bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_
         // memset( lpIdxDst, 0, sizeof( uint64 ) * PROOF_X_COUNT );
     }
 
+    const uint32  finalIndex = ((uint32)(endTable - TableId::Table1)) % 2;
+    const uint64* xSource   = lpIndices[finalIndex];
+
+    if( isCompressed )
+        return DecompressProof( plot.PlotFile().PlotId(), plot.PlotFile().CompressionLevel(), xSource, fullProofXs, gr );
+
     // Full proof x's will be at the src ptr
-    memcpy( fullProofXs, lpIdxSrc, sizeof( uint64 ) * PROOF_X_COUNT );
+    memcpy( fullProofXs, xSource, sizeof( uint64 ) * PROOF_X_COUNT );
     return true;
 }
 

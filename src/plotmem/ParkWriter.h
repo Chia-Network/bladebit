@@ -5,21 +5,26 @@
 
 struct WriteParkJob
 {
-    size_t  parkSize;       // #TODO: This should be a compile-time constant?
-    uint64  parkCount;      // How many parks to write
-    uint64* linePoints;     // Sorted line points to write to the park
-    byte*   parkBuffer;     // Buffer into which the parks will be written
-    TableId tableId;        // What table are we writing this park to?
+    size_t            parkSize;       // #TODO: This should be a compile-time constant?
+    uint64            parkCount;      // How many parks to write
+    uint64*           linePoints;     // Sorted line points to write to the park
+    byte*             parkBuffer;     // Buffer into which the parks will be written
+    uint64            stubBitSize;
+    const FSE_CTable* cTable;
+    // TableId tableId;        // What table are we writing this park to?
 };
 
 // Write parks in parallel
 // Returns the total size written
 template<uint MaxJobs>
+size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoints, byte* parkBuffer, const size_t parkSize, const uint64 stubBitSize, const FSE_CTable* cTable );
+
+template<uint MaxJobs>
 size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoints, byte* parkBuffer, TableId tableId );
 
 // Write a single park.
-// Returns the offset to the next park buffer
-void WritePark( const size_t parkSize, const uint64 count, uint64* linePoints, byte* parkBuffer, TableId tableId );
+size_t WritePark( const size_t parkSize, const uint64 count, uint64* linePoints, byte* parkBuffer, const uint64 stubBitSize, const FSE_CTable* cTable );
+size_t WritePark( const size_t parkSize, const uint64 count, uint64* linePoints, byte* parkBuffer, TableId tableId );
 
 void WriteParkThread( WriteParkJob* job );
 
@@ -27,8 +32,18 @@ void WriteParkThread( WriteParkJob* job );
 template<uint MaxJobs>
 inline size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoints, byte* parkBuffer, TableId tableId )
 {
+    const size_t      parkSize    = CalculateParkSize( tableId );
+    const FSE_CTable* cTable      = CTables[(int)tableId];
+    const uint64      stubBitSize = (_K - kStubMinusBits);       // For us, it is 29 bits since K = 32
+
+    return WriteParks<MaxJobs>( pool, length, linePoints, parkBuffer, parkSize, stubBitSize, cTable );
+}
+
+//-----------------------------------------------------------
+template<uint MaxJobs>
+inline size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoints, byte* parkBuffer, const size_t parkSize, const uint64 stubBitSize, const FSE_CTable* cTable )
+{
     const uint   threadCount    = MaxJobs > pool.ThreadCount() ? pool.ThreadCount() : MaxJobs;
-    const size_t parkSize       = CalculateParkSize( tableId );
     const uint64 parkCount      = length / kEntriesPerPark;
     const uint64 parksPerThread = parkCount / threadCount;
 
@@ -48,11 +63,13 @@ inline size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoi
     {
         auto& job = jobs[i];
 
-        job.parkSize   = parkSize;
-        job.parkCount  = parksPerThread;
-        job.linePoints = threadLinePoints;
-        job.parkBuffer = threadParkBuffer;
-        job.tableId    = tableId;
+        job.parkSize    = parkSize;
+        job.parkCount   = parksPerThread;
+        job.linePoints  = threadLinePoints;
+        job.parkBuffer  = threadParkBuffer;
+        job.stubBitSize = stubBitSize;
+        job.cTable      = cTable;
+        // job.tableId    = tableId;
 
         // Assign trailer parks accross threads. hehe
         if( trailingParks )
@@ -70,7 +87,7 @@ inline size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoi
 
     // Write trailing entries if any
     if( trailingEntries )
-        WritePark( parkSize, trailingEntries, threadLinePoints, threadParkBuffer, tableId );
+        WritePark( parkSize, trailingEntries, threadLinePoints, threadParkBuffer, stubBitSize, cTable );
 
 
     const size_t sizeWritten = parkSize * ( parkCount + (trailingEntries ? 1 : 0) );
@@ -79,7 +96,17 @@ inline size_t WriteParks( ThreadPool& pool, const uint64 length, uint64* linePoi
 }
 
 //-----------------------------------------------------------
-inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePoints, byte* parkBuffer, TableId tableId )
+inline size_t WritePark( const size_t parkSize, const uint64 count, uint64* linePoints, byte* parkBuffer, TableId tableId )
+{
+    const FSE_CTable* ct            = CTables[(int)tableId];
+    const uint64       stubBitSize  = (_K - kStubMinusBits);       // For us, it is 29 bits since K = 32
+
+    return WritePark( parkSize, count, linePoints, parkBuffer, stubBitSize, ct );
+}
+
+//-----------------------------------------------------------
+inline size_t WritePark( const size_t parkSize, const uint64 count, uint64* linePoints, byte* parkBuffer, 
+                         const uint64 stubBitSize, const FSE_CTable* cTable )
 {
     ASSERT( count <= kEntriesPerPark );
 
@@ -100,7 +127,7 @@ inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePo
     }
 
     // Grab the writing location after the stubs
-    const uint64 stubBitSize      = (_K - kStubMinusBits);       // For us, it is 29 bits since K = 32
+    // const uint64 stubBitSize      = (_K - kStubMinusBits);       // For us, it is 29 bits since K = 32
     const size_t stubSectionBytes = CDiv( (kEntriesPerPark - 1) * stubBitSize, 8 );
 
     byte* deltaBytesWriter = ((byte*)writer) + stubSectionBytes;
@@ -123,7 +150,7 @@ inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePo
             if( freeBits <= stubBitSize )
             {
                 // Update the next field bits to what the stub bits that were not written into the current field
-                bits = stubBitSize - freeBits;
+                bits = (uint32)stubBitSize - freeBits;
 
                 // Write what we can (which may be nothing) into the free bits of the current field
                 field |= stub >> bits;
@@ -153,7 +180,7 @@ inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePo
             {
                 // The stub completely fits into the current field with room to spare
                 field |= stub << (freeBits - stubBitSize);
-                bits += stubBitSize;
+                bits += (uint32)stubBitSize;
             }
         }
 
@@ -162,7 +189,7 @@ inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePo
             *writer++ = Swap64( field );
 
         // Zero-out any remaining unused bytes
-        const size_t stubUsedBytes  = CDiv( (count - 1) * stubBitSize, 8 );
+        const size_t stubUsedBytes  = CDiv( (count - 1) * (size_t)stubBitSize, 8 );
         const size_t remainderBytes = stubSectionBytes - stubUsedBytes;
         
         memset( deltaBytesWriter - remainderBytes, 0, remainderBytes );
@@ -170,7 +197,6 @@ inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePo
     
     
     // Convert to small deltas
-    constexpr uint64 smallDeltaShift = (_K - kStubMinusBits);
     byte* smallDeltas = (byte*)&linePoints[1];
     
     #if DEBUG
@@ -181,8 +207,10 @@ inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePo
         // We re-write the same buffer, but since our
         // byte writer is always behind the read (uint64 size fields),
         // we don't have to worry about corrupting our current data
-        smallDeltas[i-1] = (byte)(linePoints[i] >> smallDeltaShift);
-        ASSERT( smallDeltas[i-1] < 256 );
+        const uint64 smallDelta = linePoints[i] >> stubBitSize;
+        ASSERT( smallDelta < 256 );
+
+        smallDeltas[i-1] = (byte)smallDelta;
 
         #if DEBUG
             uint sm = smallDeltas[i-1];
@@ -194,27 +222,31 @@ inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePo
             }
         #endif
     }
-    
+
     #if DEBUG
         const double averageDeltaBits = deltaBitsAccum / (double)2047;
         ASSERT( averageDeltaBits <= kMaxAverageDeltaTable1 );
     #endif
 
     // Write small deltas
+    size_t parkSizeWritten = 0;
     {
         uint16* deltaSizeWriter = (uint16*)deltaBytesWriter;
         deltaBytesWriter += 2;
 
-        const FSE_CTable* ct = CTables[(int)tableId];
+        const size_t deltasSizeAvailable = parkSize - sizeof( uint64 ) - CDiv( (count - 1) * stubBitSize, 8 );
 
         size_t deltasSize = FSE_compress_usingCTable( 
-                                deltaBytesWriter, (count-1) * 8,
-                                smallDeltas, count-1, ct );
+                                deltaBytesWriter, (count-1) * 8,    // We don't use deltasSizeAvailable so we can use the fast-path instead. 
+                                smallDeltas, count-1, cTable );     // We let it overrun the buffer into the next one and fail if so.
+
+        if( deltasSize > deltasSizeAvailable )
+            Fatal( "Overran park buffer: %llu / %llu", (deltaBytesWriter + deltasSize - parkBuffer), parkSize );
 
         if( !deltasSize )
         {
             // Deltas were NOT compressed, we have to copy them raw
-            deltasSize = (count-1);
+            deltasSize       = (count-1);
             *deltaSizeWriter = (uint16)(deltasSize | 0x8000);
             memcpy( deltaBytesWriter, smallDeltas, count-1 );
         }
@@ -226,31 +258,35 @@ inline void WritePark( const size_t parkSize, const uint64 count, uint64* linePo
 
         deltaBytesWriter += deltasSize;
 
-        const size_t parkSizeWritten = deltaBytesWriter - parkBuffer;
+        parkSizeWritten = deltaBytesWriter - parkBuffer;
 
-        if( parkSizeWritten > parkSize )
-            Fatal( "Overran park buffer for table %d.", (int)tableId + 1 );
+        // if( parkSizeWritten > parkSize )
+        //     Fatal( "Overran park buffer: %llu / %llu", parkSizeWritten, parkSize );
         
         // Zero-out any remaining bytes in the deltas section
         const size_t parkSizeRemainder = parkSize - parkSizeWritten;
 
         memset( deltaBytesWriter, 0, parkSizeRemainder );
     }
+
+    return parkSizeWritten;
 }
 
 //-----------------------------------------------------------
 inline void WriteParkThread( WriteParkJob* job )
 {
-    const size_t  parkSize  = job->parkSize;
-    const uint64  parkCount = job->parkCount;
-    const TableId tableId   = job->tableId;
+    const size_t  parkSize    = job->parkSize;
+    const uint64  parkCount   = job->parkCount;
+    const uint64  stubBitSize = job->stubBitSize;
+    const auto*   cTable      = job->cTable;
+    // const TableId tableId   = job->tableId;
 
     uint64* linePoints = job->linePoints;
     byte*   parkBuffer = job->parkBuffer;
 
     for( uint64 i = 0; i < parkCount; i++ )
     {
-        WritePark( parkSize, kEntriesPerPark, linePoints, parkBuffer, tableId );
+        WritePark( parkSize, kEntriesPerPark, linePoints, parkBuffer, stubBitSize, cTable );
         
         linePoints += kEntriesPerPark;
         parkBuffer += parkSize;

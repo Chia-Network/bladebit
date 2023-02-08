@@ -34,7 +34,7 @@ void MemPhase4::WriteP7()
 
     const uint32* lTable     = cx.t1XBuffer;          // L table is passed around in the t1XBuffer
     const uint64  entryCount = cx.entryCount[(int)TableId::Table7];
-    byte*         p7Buffer   = cx.plotWriter->AlignPointerToBlockSize<byte>( cx.p4WriteBufferWriter ); // This buffer is big enough to hold the whole park
+    byte*         p7Buffer   = cx.plotWriter->BlockAlignPtr<byte>( cx.p4WriteBufferWriter ); // This buffer is big enough to hold the whole park
     
     Log::Line( "  Writing P7." );
     auto timer = TimerBegin();
@@ -43,8 +43,10 @@ void MemPhase4::WriteP7()
     
     cx.p4WriteBufferWriter = ((byte*)p7Buffer) + sizeWritten;
     
-    if( !cx.plotWriter->WriteTable( p7Buffer, sizeWritten ) )
-        Fatal( "Failed to write P7 to disk." );
+    // #TODO: block-align written size
+    cx.plotWriter->BeginTable( PlotTable::Table7 );
+    cx.plotWriter->WriteTableData( p7Buffer, sizeWritten );
+    cx.plotWriter->EndTable();
 
     double elapsed = TimerEnd( timer );
     Log::Line( "  Finished writing P7 in %.2lf seconds.", elapsed );
@@ -56,7 +58,7 @@ void MemPhase4::WriteC1()
     MemPlotContext& cx = _context;
  
     const uint64 entryCount  = cx.entryCount[(int)TableId::Table7];
-    uint32*      writeBuffer = cx.plotWriter->AlignPointerToBlockSize<uint32>( cx.p4WriteBufferWriter );
+    uint32*      writeBuffer = cx.plotWriter->BlockAlignPtr<uint32>( cx.p4WriteBufferWriter );
 
     Log::Line( "  Writing C1 table." );
     auto timer = TimerBegin();
@@ -66,8 +68,10 @@ void MemPhase4::WriteC1()
 
     cx.p4WriteBufferWriter = ((byte*)writeBuffer) + sizeWritten;
 
-    if( !cx.plotWriter->WriteTable( writeBuffer, sizeWritten ) )
-        Fatal( "Failed to write C1 to disk." );
+    // #TODO: block-align written size
+    cx.plotWriter->BeginTable( PlotTable::C1 );
+    cx.plotWriter->WriteTableData( writeBuffer, sizeWritten );
+    cx.plotWriter->EndTable();
 
     double elapsed = TimerEnd( timer );
     Log::Line( "  Finished writing C1 table in %.2lf seconds.", elapsed );
@@ -79,7 +83,7 @@ void MemPhase4::WriteC2()
     MemPlotContext& cx = _context;
  
     const uint64 entryCount  = cx.entryCount[(int)TableId::Table7];
-    uint32*      writeBuffer = cx.plotWriter->AlignPointerToBlockSize<uint32>( cx.p4WriteBufferWriter );
+    uint32*      writeBuffer = cx.plotWriter->BlockAlignPtr<uint32>( cx.p4WriteBufferWriter );
 
     Log::Line( "  Writing C2 table." );
     auto timer = TimerBegin();
@@ -89,8 +93,10 @@ void MemPhase4::WriteC2()
 
     cx.p4WriteBufferWriter = ((byte*)writeBuffer) + sizeWritten;
 
-    if( !cx.plotWriter->WriteTable( writeBuffer, sizeWritten ) )
-        Fatal( "Failed to write C2 to disk." );
+    // #TODO: block-align written size
+    cx.plotWriter->BeginTable( PlotTable::C2 );
+    cx.plotWriter->WriteTableData( writeBuffer, sizeWritten );
+    cx.plotWriter->EndTable();
 
     double elapsed = TimerEnd( timer );
     Log::Line( "  Finished writing C2 table in %.2lf seconds.", elapsed );
@@ -102,7 +108,7 @@ void MemPhase4::WriteC3()
     MemPlotContext& cx = _context;
  
     const uint64 entryCount  = cx.entryCount[(int)TableId::Table7];
-    byte*        writeBuffer = cx.plotWriter->AlignPointerToBlockSize<byte>( cx.p4WriteBufferWriter );
+    byte*        writeBuffer = cx.plotWriter->BlockAlignPtr<byte>( cx.p4WriteBufferWriter );
 
     Log::Line( "  Writing C3 table." );
     auto timer = TimerBegin();
@@ -112,8 +118,10 @@ void MemPhase4::WriteC3()
 
     cx.p4WriteBufferWriter = ((byte*)writeBuffer) + sizeWritten;
 
-    if( !cx.plotWriter->WriteTable( writeBuffer, sizeWritten ) )
-        Fatal( "Failed to write C3 to disk." );
+    // #TODO: block-align written size
+    cx.plotWriter->BeginTable( PlotTable::C3 );
+    cx.plotWriter->WriteTableData( writeBuffer, sizeWritten );
+    cx.plotWriter->EndTable();
 
     double elapsed = TimerEnd( timer );
     Log::Line( "  Finished writing C3 table in %.2lf seconds.", elapsed );

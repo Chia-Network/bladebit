@@ -81,7 +81,7 @@ struct DiskF1
             const int64 trailingEntries = ( 1ll << _k ) - _entriesPerBucket * _numBuckets;
             
             byte key[BB_PLOT_ID_LEN] = { 1 };
-            memcpy( key + 1, _context.plotId, BB_PLOT_ID_LEN-1 );
+            memcpy( key + 1, _context.plotRequest.plotId, BB_PLOT_ID_LEN-1 );
 
             chacha8_ctx chacha;
             chacha8_keysetup( &chacha, key, 256, NULL );

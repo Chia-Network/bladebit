@@ -1,8 +1,7 @@
 #include "KeyTools.h"
 #include "util/Util.h"
 #include "util/Log.h"
-
-
+#include "BLS.h"
 
 //-----------------------------------------------------------
 bool KeyTools::HexPKeyToG1Element( const char* hexKey, bls::G1Element& pkey )
@@ -34,7 +33,7 @@ bool KeyTools::HexPKeyToG1Element( const char* hexKey, bls::G1Element& pkey )
 }
 
 //-----------------------------------------------------------
-bls::PrivateKey KeyTools::MasterSkToLocalSK( bls::PrivateKey& sk )
+bls::PrivateKey KeyTools::MasterSkToLocalSK( const bls::PrivateKey& sk )
 {
     // #SEE: chia-blockchain: derive-keys.py
     // EIP 2334 bls key derivation
@@ -52,11 +51,11 @@ bls::PrivateKey KeyTools::MasterSkToLocalSK( bls::PrivateKey& sk )
     ssk = bls::AugSchemeMPL().DeriveChildSk( ssk, localIdx );
     ssk = bls::AugSchemeMPL().DeriveChildSk( ssk, 0        );
 
-    return ssk;
+    return std::move( ssk );
 }
 
 //-----------------------------------------------------------
-void KeyTools::PrintPK( const bls::G1Element&  key )
+void KeyTools::PrintPK( const bls::G1Element& key )
 {
     std::vector<uint8_t> bytes = key.Serialize();
     Log::Line( "%s", HexToString( (byte*)bytes.data(), bytes.size() ).c_str() );

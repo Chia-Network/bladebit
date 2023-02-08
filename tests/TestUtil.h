@@ -43,3 +43,14 @@ T* LoadReferenceTable( const char* path, uint64& outEntryCount )
     outEntryCount = entryCount;
     return entries;
 }
+
+//-----------------------------------------------------------
+inline uint32 GetEnvU32( const char* name, uint32 value )
+{
+    const char* sVal = std::getenv( name );
+
+    if( sVal )
+        sscanf( sVal, "%lu",  &value );
+
+    return value;
+}

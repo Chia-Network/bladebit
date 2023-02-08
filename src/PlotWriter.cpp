@@ -67,9 +67,9 @@ bool DiskPlotWriter::BeginPlot( const char* plotFilePath, FileStream& file, cons
 
 
     const size_t paddedHeaderSize = RoundUpToNextBoundary( headerSize, (int)file.BlockSize() );
-    
+
     byte* header = _headerBuffer;
-    
+
     // Do we need to realloc?
     if( _headerSize )
     {

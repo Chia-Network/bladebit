@@ -6,12 +6,14 @@
 #include "FxSort.h"
 #include "algorithm/YSort.h"
 #include "SysHost.h"
+#include "plotting/GlobalPlotConfig.h"
+#include "plotmem/LPGen.h"
 #include <cmath>
 
 #include "DbgHelper.h"
-    
+
     bool DbgVerifySortedY( const uint64 entryCount, const uint64* yBuffer );
-    
+
 #if _DEBUG
     // #define DBG_VALIDATE_KB_GROUPS 1
 
@@ -103,33 +105,14 @@ MemPhase1::MemPhase1( MemPlotContext& context )
 void MemPhase1::WaitForPreviousPlotWriter()
 {
     // Wait until the current plot has finished writing
-    if( !_context.plotWriter->WaitUntilFinishedWriting() )
-        Fatal( "Failed to write previous plot file %s with error: %d", 
-            _context.plotWriter->FilePath().c_str(),
-            _context.plotWriter->GetError() );
+    const auto timer = TimerBegin();
+    _context.plotWriter->WaitForPlotToComplete();
+    const auto elapsed = TimerEnd( timer );
+    
+    Log::Line( "Previous plot finished writing to disk ( waited %.2lf seconds ): %s",
+        elapsed, _context.plotWriter->GetLastPlotFileName() );
 
-    const char* curname = _context.plotWriter->FilePath().c_str();
-    char* newname = new char[strlen(curname) - 3]();
-    memcpy(newname, curname, strlen(curname) - 4);
-
-    rename(curname, newname);
-
-    // Print final pointer offsets
-    Log::Line( "" );
-    Log::Line( "Previous plot %s finished writing to disk:", _context.plotWriter->FilePath().c_str() );
-    const uint64* tablePointers = _context.plotWriter->GetTablePointers();
-    for( uint i = 0; i < 7; i++ )
-    {
-        const uint64 ptr = Swap64( tablePointers[i] );
-        Log::Line( "  Table %u pointer  : %16lu ( 0x%016lx )", i+1, ptr, ptr );
-    }
-
-    for( uint i = 7; i < 10; i++ )
-    {
-        const uint64 ptr = Swap64( tablePointers[i] );
-        Log::Line( "  C%u table pointer : %16lu ( 0x%016lx )", i+1-7, ptr, ptr);
-    }
-    Log::Line( "" );
+    _context.plotWriter->DumpTables();
 
     _context.p4WriteBuffer = nullptr;
 }
@@ -169,6 +152,7 @@ void MemPhase1::Run()
 uint64 MemPhase1::GenerateF1()
 {
     MemPlotContext& cx  = _context;
+    const bool isCompressed = cx.cfg.gCfg->compressionLevel > 0;
 
     ///
     /// Init chacha key
@@ -198,7 +182,7 @@ uint64 MemPhase1::GenerateF1()
     // Generate all of the y values to a metabuffer first
     byte*   blocks  = (byte*)cx.yBuffer0;
     uint64* yBuffer = cx.yBuffer0;
-    uint32* xBuffer = cx.t1XBuffer;
+    uint32* xBuffer = isCompressed ? (uint32*)cx.t3LRBuffer : cx.t1XBuffer;  // Write to a temp buffer so we can write back as inlined x's into table 2
     uint64* yTmp    = cx.metaBuffer1;
     uint32* xTmp    = (uint32*)(yTmp + totalEntries);
 
@@ -355,6 +339,73 @@ uint64 MemPhase1::FpComputeTable( uint64 entryCount,
     return FpComputeSingleTable<tableId>( entryCount, pairBuffer, yBuffer, metaBuffer );
 }
 
+
+//-----------------------------------------------------------
+static void InlineTable2( MemPlotContext& cx, const uint64 pairCount, const Pair* pairs )
+{
+    const uint32 threadCount = cx.threadCount;
+
+    struct Job
+    {
+        uint32          id;
+        uint32          jobCount;
+        MemPlotContext* cx;
+        uint64          pairCount;
+        const Pair*     pairs;
+    };
+
+    Job jobs[MAX_THREADS];
+
+    for( uint32 i = 0; i < threadCount; i++ )
+    {
+        Job& job = jobs[i];
+        job.id          = i;
+        job.jobCount    = threadCount;
+        job.cx          = &cx;
+        job.pairCount   = pairCount;
+        job.pairs       = pairs;
+    }
+
+    cx.threadPool->RunJob<Job>( []( Job* self ) {
+        
+        const auto&  cx          = *self->cx;
+        const uint32 id          = self->id;
+        const uint32 threadCount = self->jobCount;
+        const uint64 pairCount   = self->pairCount;
+        const Pair*  pairs       = self->pairs;
+
+        const uint32 entryBits = cx.cfg.gCfg->compressedEntryBits;
+        const uint32 shift     = 32 - entryBits;
+        
+              int64 count  = (int64)(pairCount / threadCount);
+        const int64 offset = count * (int64)id;
+
+        if( id == self->jobCount -1 )
+            count += pairCount - count * threadCount;
+
+        const int64 end = offset + count;
+
+        const uint32* srcTable = (uint32*)cx.t3LRBuffer;
+              uint32* dstTable = cx.t1XBuffer;
+
+        for( int64 i = offset; i < end; i++ )
+        {
+            const Pair p = pairs[i];
+
+            const uint32 x1 = srcTable[p.left ] >> shift;
+            const uint32 x2 = srcTable[p.right] >> shift;
+
+            // Convert to linepoint
+            const uint32 x12 = (uint32)SquareToLinePoint( x2, x1 );
+            ASSERT( !(x12 & 1ul << 31 ) );
+            ASSERT( !(x12 & (1ul << (entryBits*2-1)) ) );
+
+            dstTable[i] = x12;
+        }
+
+    }, jobs, threadCount );
+}
+
 //-----------------------------------------------------------
 template<TableId tableId>
 uint64 MemPhase1::FpComputeSingleTable(
@@ -367,6 +418,8 @@ uint64 MemPhase1::FpComputeSingleTable(
     using TMetaOut = typename TableMetaType<tableId>::MetaOut;
 
     MemPlotContext& cx  = _context;
+    const bool isCompressed = cx.cfg.gCfg->compressionLevel > 0;
+
     Log::Line( "Forward propagating to table %d...", (int)tableId+1 );
 
     // yBuffer.read amd metaBuffer.read should always point
@@ -407,7 +460,7 @@ uint64 MemPhase1::FpComputeSingleTable(
     // Special case: Use taable 1's x buffer as input metadata
     if constexpr ( tableId == TableId::Table2 )
     {
-        inMetaBuffer = (uint64*)cx.t1XBuffer;
+        inMetaBuffer = isCompressed ? (uint64*)cx.t3LRBuffer : (uint64*)cx.t1XBuffer;
         ASSERT( metaBuffer.read == cx.metaBuffer0 );
     }
 
@@ -455,6 +508,9 @@ uint64 MemPhase1::FpComputeSingleTable(
             (TMetaOut*)metaBuffer.read, (TMetaOut*)metaBuffer.write,
             unsortedPairBuffer,         pairBuffer   // Write to the final pair buffer
         );
+
+        if( tableId == TableId::Table2 && isCompressed )
+            InlineTable2( cx, pairCount, pairBuffer );
 
         // DbgVerifyPairsKBCGroups( pairCount, yBuffer.write, pairBuffer );
 
@@ -527,121 +583,6 @@ void F1JobThread( F1GenJob* job )
     for( uint64 i = 0; i < entryCount; i++ )
         xBuffer[i] = (uint32)( x + i );
 }
-
-
-//-----------------------------------------------------------
-// void F1NumaJobThread( F1GenJob* job )
-// {
-//     // const NumaInfo* numa = SysHost::GetNUMAInfo();
-
-//     const uint32 pageSize           = (uint32)SysHost::GetPageSize();
-
-//     // const uint   k                  = _K;
-//     const size_t CHACHA_BLOCK_SIZE  = kF1BlockSizeBits / 8;
-//     // const uint64 totalEntries       = 1ull << k;
-//     const uint32 entriesPerBlock    = (uint32)( CHACHA_BLOCK_SIZE / sizeof( uint32 ) );
-//     const uint32 blocksPerPage      = pageSize / CHACHA_BLOCK_SIZE;
-//     const uint32 entriesPerPage32   = entriesPerBlock * blocksPerPage;
-//     const uint32 entriesPerPage64   = entriesPerPage32 / 2;
-    
-//     const uint   pageOffset         = job->startPage;
-//     const uint   pageCount          = job->pageCount;
-
-//     const uint32 pageStride         = job->threadCount;
-//     const uint32 blockStride        = pageSize         * pageStride;
-//     const uint32 entryStride32      = entriesPerPage32 * pageStride;
-//     const uint32 entryStride64      = entriesPerPage64 * pageStride;
-
-//     // #TODO: Get proper offset depending on node count. Or, figure out if we can always have
-//     //        the pages of the buffers simply start at the same location
-//     const uint32 blockStartPage    = SysHost::NumaGetNodeFromPage( job->blocks  ) == job->node ? 0 : 1;
-//     const uint32 yStartPage        = SysHost::NumaGetNodeFromPage( job->yBuffer ) == job->node ? 0 : 1;
-//     const uint32 xStartPage        = SysHost::NumaGetNodeFromPage( job->xBuffer ) == job->node ? 0 : 1;
-
-//     // const uint64 x                  = job->x;
-//     const uint64 x                  = (blockStartPage + pageOffset) * entriesPerPage32;
-//     // const uint32 xStride            = pageStride * entriesPerPage;
-
-//     byte*   blockBytes = job->blocks + (blockStartPage + pageOffset) * pageSize;
-//     uint32* blocks     = (uint32*)blockBytes;
-    
-//     uint64* yBuffer    = job->yBuffer + ( yStartPage + pageOffset ) * entriesPerPage64;
-//     uint32* xBuffer    = job->xBuffer + ( xStartPage + pageOffset ) * entriesPerPage32;
-
-//     chacha8_ctx chacha;
-//     ZeroMem( &chacha );
-
-//     chacha8_keysetup( &chacha, job->key, 256, NULL );
-
-//     for( uint64 p = 0; p < pageCount/4; p+=4 )
-//     {
-//         ASSERT( SysHost::NumaGetNodeFromPage( blockBytes ) == job->node );
-
-//         // blockBytes
-//         // Which block are we generating?
-//         const uint64 blockIdx = ( x + p * entryStride32 ) * _K / kF1BlockSizeBits;
-
-//         chacha8_get_keystream( &chacha, blockIdx,  blocksPerPage,   blockBytes );
-//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage,   blocksPerPage, blockBytes + blockStride     );
-//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*2, blocksPerPage, blockBytes + blockStride * 2 );
-//         chacha8_get_keystream( &chacha, blockIdx + blocksPerPage*3, blocksPerPage, blockBytes + blockStride * 3 );
-//         blockBytes += blockStride * 4;
-//     }
-
-//     for( uint64 p = 0; p < pageCount; p++ )
-//     {
-//         ASSERT( SysHost::NumaGetNodeFromPage( yBuffer ) == job->node );
-//         ASSERT( SysHost::NumaGetNodeFromPage( blocks  ) == job->node );
-
-//         const uint64 curX = x + p * entryStride32;
-
-//         for( uint64 i = 0; i < entriesPerPage32; i++ )
-//         {
-//             // chacha output is treated as big endian, therefore swap, as required by chiapos
-//             const uint64 y = Swap32( blocks[i] );
-//             yBuffer[i] = ( y << kExtraBits ) | ( (curX+i) >> (_K - kExtraBits) );
-//         }
-        
-//         // for( uint64 i = 0; i < 64; i++ )
-//         // {
-//         //     yBuffer[0] = ( Swap32( blocks[0] ) << kExtraBits ) | ( (curX+0) >> (_K - kExtraBits) );
-//         //     yBuffer[1] = ( Swap32( blocks[1] ) << kExtraBits ) | ( (curX+1) >> (_K - kExtraBits) );
-//         //     yBuffer[2] = ( Swap32( blocks[2] ) << kExtraBits ) | ( (curX+2) >> (_K - kExtraBits) );
-//         //     yBuffer[3] = ( Swap32( blocks[3] ) << kExtraBits ) | ( (curX+3) >> (_K - kExtraBits) );
-//         //     yBuffer[4] = ( Swap32( blocks[4] ) << kExtraBits ) | ( (curX+4) >> (_K - kExtraBits) );
-//         //     yBuffer[5] = ( Swap32( blocks[5] ) << kExtraBits ) | ( (curX+5) >> (_K - kExtraBits) );
-//         //     yBuffer[6] = ( Swap32( blocks[6] ) << kExtraBits ) | ( (curX+6) >> (_K - kExtraBits) );
-//         //     yBuffer[7] = ( Swap32( blocks[7] ) << kExtraBits ) | ( (curX+7) >> (_K - kExtraBits) );
-
-//         //     yBuffer += 8;
-//         //     blocks  += 8;
-//         // }
-
-//         // #TODO: This is wrong. We need to fill more y's before w go to the next block page.
-//         yBuffer += entryStride64;
-//         blocks  += entryStride32;
-//     }
-
-//     // Gen the x that generated the y
-//     for( uint64 p = 0; p < pageCount; p++ )
-//     {
-//         ASSERT( SysHost::NumaGetNodeFromPage( xBuffer ) == job->node );
-
-//         const uint32 curX = (uint32)(x + p * entryStride32);
-
-//         for( uint32 i = 0; i < entriesPerPage32; i++ )
-//             xBuffer[i] = curX + i;
-
-//         xBuffer += entryStride32;
-//     }
-
-//     // #TODO: Process last part
-// }
-
-
-///
-/// kBC groups & matching
-///
 
 //-----------------------------------------------------------
 uint64 MemPhase1::FpScan( const uint64 entryCount, const uint64* yBuffer, uint32* groupBoundaries, kBCJob jobs[MAX_THREADS] )

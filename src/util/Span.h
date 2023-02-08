@@ -120,13 +120,31 @@ struct Span
         ASSERT( count <= other.length );
         ASSERT( length >= count );
         
-        return memcmp( values, other.values, count * sizeof( T ) ) == 0;
+        #if _DEBUG
+            for( size_t i = 0; i < length; i++ )
+            {
+                const T a = values[i];
+                const T b = other[i];
+                if( a != b )
+                {
+                    ASSERT(0);
+                    return false;
+                }
+            }
+
+            return true;
+        #else
+            return memcmp( values, other.values, count * sizeof( T ) ) == 0;
+        #endif
     }
 
     inline bool EqualElements( const Span<T>& other ) const
     {
         if( other.length != length )
+        {
+            ASSERT(0);
             return false;
+        }
 
         return EqualElements( other, length );
     }
@@ -142,3 +160,10 @@ struct Span
 };
 
 typedef Span<uint8_t> ByteSpan;
+
+
+template<typename T>
+inline Span<T> MakeSpan( T* ptr, size_t length )
+{
+    return Span<T>( ptr, length );
+}
