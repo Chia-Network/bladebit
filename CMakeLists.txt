@@ -20,11 +20,22 @@ endif()
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version.")
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC Runtime Library")
 
-if(LINUX) 
-    set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+project(bladebit LANGUAGES C CXX ASM)
+
+if(NOT CMAKE_CUDA_COMPILER)
+    include(FindCUDAToolkit)
+
+    if(CUDAToolkit_FOUND)
+        message("Found CUDA: true")
+        message("NVCC      : ${CUDAToolkit_NVCC_EXECUTABLE}")
+        set(CMAKE_CUDA_COMPILER ${CUDAToolkit_NVCC_EXECUTABLE})
+    endif()
 endif()
 
-project(bladebit LANGUAGES C CXX ASM CUDA)
+if(CMAKE_CUDA_COMPILER)
+    enable_language(CUDA)
+endif()
+
 
 message("Config   : ${CMAKE_BUILD_TYPE}")
 message("Compiler : ${CMAKE_CXX_COMPILER_ID}")
@@ -59,7 +70,6 @@ set(BUILD_BLS_TESTS "0" CACHE STRING "")
 set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
 
-include(FindCUDAToolkit)
 
 # Threads
 find_package(Threads REQUIRED)
@@ -451,6 +461,8 @@ target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 #
 # CUDA Plotter
 #
+if(CUDAToolkit_FOUND)
+
 set(is_release "$<CONFIG:Release>")
 set(is_debug "$<CONFIG:Debug>")
 set(is_cuda "$<COMPILE_LANGUAGE:CUDA>")
@@ -460,7 +472,6 @@ set(cuda_release_c_opts ${c_opts} ${debug_c_opts})
 set(cuda_debug_c_opts ${c_opts} ${debug_c_opts})
 
 add_library(lib_bladebit_cuda 
-    # cuda/main_cuda.cpp
     cuda/CudaPlotter.cu
     cuda/CudaPlotter.h
     cuda/CudaPlotContext.h
@@ -486,10 +497,23 @@ target_compile_definitions(lib_bladebit_cuda PRIVATE THRUST_IGNORE_CUB_VERSION_C
 target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
 target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
 
-# target_compile_options(lib_bladebit_cuda PUBLIC --pre-include pch.h)
 target_compile_options(lib_bladebit_cuda PUBLIC $<${is_cuda}:--pre-include pch.h> )
 
-# target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_release}:-Xcompiler=\"${cuda_release_c_opts}\"">)
+target_compile_options(lib_bladebit_cuda PRIVATE 
+    $<${is_cuda_release}:
+        -gencode=arch=compute_52,code=sm_52 # Maxwell
+        -gencode=arch=compute_61,code=sm_61 # Pascal
+        -gencode=arch=compute_70,code=sm_70 # Volta 
+        -gencode=arch=compute_86,code=sm_86 # Ampere
+        -gencode=arch=compute_89,code=sm_89 # Ada
+    >)
+
+ target_compile_options(lib_bladebit_cuda PRIVATE 
+    $<${is_cuda_debug}:
+    -arch=native
+        # -G
+    >)
+
 # target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-Xcompiler=${cuda_debug_c_opts}">)
 # target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-G">)
 # target_compile_options(lib_bladebit_cuda PRIVATE $<${is_cuda}:-Xcompiler=/FIpch.h>)
@@ -512,10 +536,11 @@ set_target_properties(lib_bladebit_cuda bladebit_cuda PROPERTIES
     CUDA_RUNTIME_LIBRARY Static
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON  # Required under windows
+    CUDA_ARCHITECTURES OFF
 )
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
     FILES ${src_full} ${bb_headers}
 )
-
+endif() # CUDAToolkit_FOUND
