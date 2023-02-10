@@ -515,7 +515,7 @@ target_compile_options(lib_bladebit_cuda PRIVATE
     >)
 
 # target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-Xcompiler=${cuda_debug_c_opts}">)
-# target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-G">)
+target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-G">)
 # target_compile_options(lib_bladebit_cuda PRIVATE $<${is_cuda}:-Xcompiler=/FIpch.h>)
 
 # target_compile_options(lib_bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
