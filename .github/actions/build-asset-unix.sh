@@ -42,10 +42,7 @@ if [[ compile_cuda ]]; then
   exe_name=bladebit_cuda
 fi
 
-mkdir build && cd build
-cmake ..
-bash -eo pipefail ../embed-version.sh
-cmake --build . --target bladebit --config Release --target $target -j $thread_count
+mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && cmake --buid . --config Debug --target bladebit_cuda -j$(nproc --all)
 chmod +x ./bladebit
 
 if [[ $OSTYPE == 'msys'* ]] || [[ $OSTYPE == 'cygwin'* ]]; then
