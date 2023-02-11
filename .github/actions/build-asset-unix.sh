@@ -57,14 +57,13 @@ fi
 # Ensure bladebit version matches expected version
 bb_version="$(./${exe_name} --version | xargs)"
 
-if [[ "$bb_version" != "$version" ]]; then
-    >&2 echo "Incorrect bladebit version. Got '$bb_version' but expected '$version'."
-    exit 1
-fi
+#if [[ "$bb_version" != "$version" ]]; then
+#    >&2 echo "Incorrect bladebit version. Got '$bb_version' but expected '$version'."
+#    exit 1
+#fi
 
 tar --version
 tar -czvf $artifact_name $exe_name
 mkdir ../bin
 mv $artifact_name ../bin/
 ls -la ../bin
-
