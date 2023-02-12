@@ -30,12 +30,15 @@ set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules
 )
 
+set(BUILD_LOCAL "0" CACHE STRING "")
+set(BUILD_BLADEBIT_TESTS "1" CACHE STRING "")
 
 #
 # Grab Dependencies
 #
 set(platform_libs)
 
+if(NOT BUILD_LOCAL)
 # BLS
 include(FetchContent)
 
@@ -49,6 +52,12 @@ set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")
 set(BUILD_BLS_TESTS "0" CACHE STRING "")
 set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
+else()
+    find_package(sodium REQUIRED)
+    find_package(gmp REQUIRED)
+    find_package(relic REQUIRED)
+    find_package(bls REQUIRED)
+endif()
 
 # Threads
 find_package(Threads REQUIRED)
@@ -60,10 +69,11 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 endif()
 
 # Catch
-# TODO: Add configuration var to disable this
+if(BUILD_BLADEBIT_TESTS)
 include(cmake_modules/FindCatch2.cmake)
 set_target_properties(Catch2 PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set_target_properties(Catch2WithMain PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 
 # Config
@@ -157,13 +167,13 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         ${c_opts})
     
     set(tests_c_opts /DBB_TEST_MODE=1 ${tests_c_opts})
-    
-    set(link_opts 
+
+    set(link_opts
         /SUBSYSTEM:CONSOLE
         /STACK:33554432,1048576
         ${link_opts})
 
-    set(release_c_opts 
+    set(release_c_opts
         /Oi
         /O2
         /Gy
@@ -214,7 +224,7 @@ else()
 
     set(tests_c_opts -DBB_TEST_MODE=1 ${tests_c_opts})
 
-    set(release_c_opts 
+    set(release_c_opts
         -O3 #-flto
         -D_NDEBUG=1
         -DNDEBUG=1
@@ -239,7 +249,7 @@ else()
 
         # Avoid ranlib error: plugin needed to handle lto objectR "gcc-ar")
         # set(c_opts -ffat-lto-objects ${c_opts})
-        
+
         # Build with native architecture when not building release packages
         if(NOT DEFINED ENV{CI})
             set(c_opts -march=native ${c_opts})
@@ -291,7 +301,7 @@ file(GLOB_RECURSE src_tests RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     tests/*.cpp
 )
 
-file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} 
+file(GLOB_RECURSE src_dev RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     CONFIGURE_DEPENDS LIST_DIRECTORIES false
     src/sandbox/*.cpp
     src/sandbox/*.h
@@ -376,7 +386,7 @@ set(bb_include_dirs
 #     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
 #     target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
 #     target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
-    
+
 #     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
 # endmacro()
 
@@ -387,8 +397,14 @@ set_target_properties(lib_bladebit PROPERTIES
         OUTPUT_NAME bladebit
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
-target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
-target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
+if(BUILD_LOCAL)
+    target_link_libraries(lib_bladebit PUBLIC Threads::Threads ${GMP_LIBRARIES} ${sodium_LIBRARY_RELEASE} ${BLS_LIBRARY} ${RELIC_LIBRARY} ${platform_libs})
+    target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs} ${RELIC_INCLUDE_DIR} ${BLS_INCLUDE_DIR})
+else()
+    target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
+    target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
+endif()
+
 
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
 target_compile_options(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
@@ -405,21 +421,23 @@ target_link_libraries(bladebit_dev PRIVATE lib_bladebit)
 add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
 target_link_libraries(fsegen PRIVATE lib_bladebit)
 
-# add_executable(plot_tool 
-#     src/tools/PlotTools_Main.cpp 
+# add_executable(plot_tool
+#     src/tools/PlotTools_Main.cpp
 #     src/tools/PlotReader.cpp
 #     src/tools/PlotValidator.cpp
-#     src/tools/PlotComparer.cpp 
+#     src/tools/PlotComparer.cpp
 #     ${bb_headers}
 # )
 # target_link_libraries(plot_tool PRIVATE lib_bladebit)
 
 # Tests
+if(BUILD_BLADEBIT_TESTS)
 add_executable(tests ${src_tests} ${bb_headers})
 target_compile_options(tests PUBLIC $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
 target_compile_options(tests PUBLIC $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
 set_target_properties(tests PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
+endif()
 
 # Pretty source view for IDE projects
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
