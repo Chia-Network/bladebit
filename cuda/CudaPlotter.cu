@@ -97,17 +97,17 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     auto& cx = *new CudaK32PlotContext{};
     outContext = &cx;
 
-    Log::Line( "[Bladebit CUDA Plotter]" );
-    CudaInit( cx );
-
     cx.cfg  = cfg;
     cx.gCfg = cfg.gCfg;
+
+    Log::Line( "[Bladebit CUDA Plotter]" );
+    CudaInit( cx );
 
     CudaErrCheck( cudaStreamCreateWithFlags( &cx.computeStream , cudaStreamNonBlocking ) );
     CudaErrCheck( cudaStreamCreateWithFlags( &cx.computeStreamB, cudaStreamNonBlocking ) );
     CudaErrCheck( cudaStreamCreateWithFlags( &cx.computeStreamC, cudaStreamNonBlocking ) );
     CudaErrCheck( cudaStreamCreateWithFlags( &cx.computeStreamD, cudaStreamNonBlocking ) );
-    
+
     cudaEventCreateWithFlags( &cx.computeEventA, cudaEventDisableTiming );
     cudaEventCreateWithFlags( &cx.computeEventB, cudaEventDisableTiming );
     cudaEventCreateWithFlags( &cx.computeEventC, cudaEventDisableTiming );
