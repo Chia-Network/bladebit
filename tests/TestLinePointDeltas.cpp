@@ -186,7 +186,7 @@ void CalculateParkSizes( const Span<uint64> linePoints, const uint32 stubBitSize
         
         while( entries.Length() > 0 )
         {
-            const uint64 entryCount = std::min( entries.Length(), (uint64)kEntriesPerPark );
+            const uint64 entryCount = std::min((uint64) entries.Length(), (uint64)kEntriesPerPark );
             entries.SliceSize( entryCount ).CopyTo( Span<uint64>( parkEntries, entryCount ) );
             
             const size_t parkSize = WritePark( parkBufferSize*4, entryCount, parkEntries, parkBuffer, stubBitSize, cTable );
