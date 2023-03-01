@@ -256,7 +256,7 @@ void DumpLpData( Span<uint64> linePoints, const uint32 compressionLevel, const u
             // Deltafy
             for( uint64 park = parkOffset; park < parkEnd; park++ )
             {
-                const uint64 parkEntryCount = std::min( linePoints.Length(), (uint64)kEntriesPerPark );
+                const uint64 parkEntryCount = std::min( (uint64)linePoints.Length(), (uint64)kEntriesPerPark );
                 
                 uint64 prevLp = linePoints[0];
 
