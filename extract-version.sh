@@ -24,9 +24,15 @@ if [[ -n "$bb_version_suffix" ]] && [[ "${bb_version_suffix:0:1}" != "-" ]]; the
   bb_version_suffix="-${bb_version_suffix}"
 fi
 
-bb_ver_maj=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
-bb_ver_min=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
-bb_ver_rev=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  bb_ver_maj=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
+  bb_ver_min=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
+  bb_ver_rev=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
+else
+  bb_ver_maj=$(printf $version_str | sed -r -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
+  bb_ver_min=$(printf $version_str | sed -r -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
+  bb_ver_rev=$(printf $version_str | sed -r -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
+fi
 
 bb_git_commit=$GITHUB_SHA
 if [[ -z $bb_git_commit ]]; then
