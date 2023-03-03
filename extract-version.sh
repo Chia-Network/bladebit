@@ -24,16 +24,11 @@ if [[ -n "$bb_version_suffix" ]] && [[ "${bb_version_suffix:0:1}" != "-" ]]; the
   bb_version_suffix="-${bb_version_suffix}"
 fi
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  bb_ver_maj=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
-  bb_ver_min=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
-  bb_ver_rev=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
-else
-  IFS='.' read -ra version <<< "$version_str"
-  bb_ver_maj=${version[0]}
-  bb_ver_min=${version[1]}
-  bb_ver_rev=${version[2]}
-fi
+
+IFS='.' read -ra version <<< "$version_str"
+bb_ver_maj=${version[0]}
+bb_ver_min=${version[1]}
+bb_ver_rev=${version[2]}
 
 bb_git_commit=$GITHUB_SHA
 if [[ -z $bb_git_commit ]]; then
