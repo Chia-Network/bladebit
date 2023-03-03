@@ -85,6 +85,8 @@ endif()
 # Catch
 # TODO: Add configuration var to disable this
 include(cmake_modules/FindCatch2.cmake)
+include_directories(/usr/include)
+
 # set_target_properties(Catch2 PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # set_target_properties(Catch2WithMain PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
