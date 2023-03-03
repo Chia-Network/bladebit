@@ -3,7 +3,7 @@
 #include "util/Util.h"
 
 #ifdef __linux__
-    #include </usr/include/linux/random.h>
+    #include <stdlib.h>
 #else
     #include <sys/random.h>
 #endif
