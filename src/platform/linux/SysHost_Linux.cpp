@@ -4,6 +4,11 @@
 
 #include <sys/syscall.h>
 
+#ifdef __linux__
+    #define _GNU_SOURCE
+    #include <linux/random.h>
+#endif
+
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
