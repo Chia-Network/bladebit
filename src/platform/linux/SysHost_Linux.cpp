@@ -2,7 +2,7 @@
 #include "Platform.h"
 #include "util/Util.h"
 
-#include <sys/random.h>
+#include <sys/syscall.h>
 
 #include <execinfo.h>
 #include <signal.h>
@@ -274,7 +274,7 @@ void SysHost::Random( byte* buffer, size_t size )
         if( readSize > BLOCK_SIZE )
             readSize = BLOCK_SIZE;
             
-        sizeRead = getrandom( writer, readSize, 0 );
+        sizeRead = syscall(SYS_getrandom, writer, readSize, 0 );
 
         // Should never get EINTR, but docs say to check anyway.
         int err = errno;
