@@ -1,12 +1,7 @@
 #include "SysHost.h"
 #include "Platform.h"
 #include "util/Util.h"
-
-#ifndef __arm__
-    #include <sys/random.h>
-#else
-    #include <stdlib.h>
-#endif
+#include <sys/random.h>
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
