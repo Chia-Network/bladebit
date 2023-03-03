@@ -1,7 +1,13 @@
 #include "SysHost.h"
 #include "Platform.h"
 #include "util/Util.h"
-#include <sys/random.h>
+
+#ifdef __linux__
+    #include </usr/include/linux/random.h>
+#else
+    #include <sys/random.h>
+#endif
+
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
