@@ -2,11 +2,7 @@
 #include "Platform.h"
 #include "util/Util.h"
 
-#ifdef __linux__
-    #include <stdlib.h>
-#else
-    #include <sys/random.h>
-#endif
+#include <sys/random.h>
 
 #include <execinfo.h>
 #include <signal.h>
