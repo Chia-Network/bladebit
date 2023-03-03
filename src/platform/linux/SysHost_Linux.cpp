@@ -2,7 +2,7 @@
 #include "Platform.h"
 #include "util/Util.h"
 
-#include <sys/random.h>
+#include <random.h>
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
