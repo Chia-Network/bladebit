@@ -1,7 +1,8 @@
 #include "CudaPlotPhase3Internal.h"
 #include "CudaParkSerializer.h"
 #include "plotting/TableWriter.h"
-
+#include "algorithm/RadixSort.h"
+#include "plotdisk/jobs/IOJob.h"
 
 #define P3_CalculateMaxLPValue( x ) ((((uint64)(x))/2)*((uint64)(x))+x)
 #define P3_CalculateTableDivisor( p ) (P3_CalculateMaxLPValue( (uint64)(BBCU_TABLE_ENTRY_COUNT*(p)) ) / BBCU_BUCKET_COUNT)
@@ -282,16 +283,12 @@ void CudaK32PlotPhase3Step2( CudaK32PlotContext& cx )
         const uint32 nextBucket  = bucket + 1;
         const uint32 nextBucketL = bucket + 2;
 
-
         const uint32* devLTable = s2.devLTable[bucket & 1];
-        
-        // Preload next buckets
-        if( nextBucketL < BBCU_BUCKET_COUNT )
-            LoadLBucket( cx, nextBucketL );
 
+        // Preload next buckets
         if( nextBucket < BBCU_BUCKET_COUNT )
         {
-            LoadRBucket( cx, nextBucket );        
+            LoadRBucket( cx, nextBucket );
 
             UnpackLBucket( cx, nextBucket );
             s2.lMapIn.ReleaseDeviceBuffer( cx.computeStream );
@@ -303,6 +300,9 @@ void CudaK32PlotPhase3Step2( CudaK32PlotContext& cx )
             uint32* nextLTable = s2.devLTable[nextBucket & 1];
             CudaErrCheck( cudaMemcpyAsync( (uint32*)devLTable + BBCU_BUCKET_ENTRY_COUNT, nextLTable, copyCount * sizeof( uint32 ), cudaMemcpyDeviceToDevice, cx.computeStream ) );
         }
+
+        if( nextBucketL < BBCU_BUCKET_COUNT )
+            LoadLBucket( cx, nextBucketL );
 
 
         // Generate line points given the unpacked LMap as input and the RMap
@@ -621,3 +621,73 @@ void _DbgValidateOutput( CudaK32PlotContext& cx )
 
 #endif
 
+//-----------------------------------------------------------
+void DbgDumpSortedLinePoints( CudaK32PlotContext& cx )
+{
+    Log::Line( "[DEBUG] Prpaparing line ponts for writing to file." );
+    const TableId rTable = cx.table;
+
+    auto& p3 = *cx.phase3;
+    auto& s2 = p3.step2;
+
+
+    uint64* sortedLinePoints = bbcvirtallocboundednuma<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );
+    uint64* tmpLinePoints    = bbcvirtallocboundednuma<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );
+
+    uint64* writer = sortedLinePoints;
+
+    const uint64 prunedEntryCount = p3.prunedTableEntryCounts[(int)rTable];
+
+    const uint32 lpBits        = 63; // #TODO: Change when compressing here
+    const uint32 lpBucketShift = lpBits - BBC_BUCKET_BITS;
+
+    for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
+    {
+        uint64* reader = p3.hostLinePoints + bucket * P3_PRUNED_SLICE_MAX;
+
+        for( uint32 slice = 0; slice < BBCU_BUCKET_COUNT; slice ++ )
+        {
+            const size_t count = s2.prunedBucketSlices[slice][bucket];
+            bbmemcpy_t( writer, reader, count );
+
+            writer    += count;
+            reader    += P3_PRUNED_BUCKET_MAX;
+        }
+    }
+
+    // Sort
+    ThreadPool& pool = *cx.threadPool; //DbgGetThreadPool( cx );
+    RadixSort256::Sort<BB_MAX_JOBS>( pool, sortedLinePoints, tmpLinePoints, prunedEntryCount );
+
+    // Write to disk
+    {
+        char filePath[1024] = {};
+        sprintf( filePath, "%s/lp.c%u.ref", "/home/harold/plot/ref/compressed-lps", (uint32)cx.gCfg->compressionLevel );
+
+        FileStream file;
+        if( file.Open( filePath, FileMode::Open, FileAccess::Read ) )
+        {
+            Log::Line( "[DEBUG]File %s already exists. Cannot overwrite.", filePath );
+        }
+        else
+        {
+            Log::Line( "[DEBUG] Writing line points to %s", filePath );
+            file.Close();
+            file.Open( filePath, FileMode::Create, FileAccess::Write );
+
+            void* block = bbvirtalloc( file.BlockSize() );
+            int err;
+            if( !IOJob::WriteToFile( file, sortedLinePoints, prunedEntryCount * sizeof( uint64 ), block, file.BlockSize(), err ) )
+                Log::Line( "Failed to to file %s with error %d.", filePath, err );
+
+            bbvirtfree( block );
+
+            Log::Line( "[DEBUG] Wrote %llu line points", prunedEntryCount );
+        }
+
+        file.Close();
+    }
+
+    bbvirtfreebounded( sortedLinePoints );
+    bbvirtfreebounded( tmpLinePoints );
+}

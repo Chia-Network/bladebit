@@ -21,17 +21,42 @@
 
 
 /// Byte size conversions
-#define KB *(1<<10)
-#define MB *(1<<20)
-#define GB *(1<<30)
+#define KB *(1llu<<10)
+#define MB *(1llu<<20)
+#define GB *(1llu<<30)
+#define TB *(1llu<<40)
+#define PB *(1llu<<50)
 
-#define KiB *(1<<10)
-#define MiB *(1<<20)
-#define GiB *(1<<30)
+#define KiB *(1llu<<10)
+#define MiB *(1llu<<20)
+#define GiB *(1llu<<30)
+#define TiB *(1llu<<40)
+#define PiB *(1llu<<50)
 
-#define BtoKB /(1<<10)
-#define BtoMB /(1<<20)
-#define BtoGB /(1<<30)
+#define BtoKB /(1llu<<10)
+#define BtoMB /(1llu<<20)
+#define BtoGB /(1llu<<30)
+
+
+/// SI Units
+#define KBSi *(1000llu)
+#define MBSi *(1000llu KBSi )
+#define GBSi *(1000llu MBSi )
+#define TBSi *(1000llu GBSi )
+#define PBSi *(1000llu TBSi )
+
+
+#define BtoKBSi( v ) ((v) / 1000llu)
+#define BtoMBSi( v ) (BtoKBSi(v) / 1000llu)
+#define BtoGBSi( v ) (BtoMBSi(v) / 1000llu)
+#define BtoTBSi( v ) (BtoGBSi(v) / 1000llu)
+#define BtoPBSi( v ) (BtoTBSi(v) / 1000llu)
+
+#define BtoKBSiF( v ) ((v) / 1000.0)
+#define BtoMBSiF( v ) (BtoKBSiF(v) / 1000.0)
+#define BtoGBSiF( v ) (BtoMBSiF(v) / 1000.0)
+#define BtoTBSiF( v ) (BtoGBSiF(v) / 1000.0)
+#define BtoPBSiF( v ) (BtoTBSiF(v) / 1000.0)
 
 
 ///
@@ -249,6 +274,12 @@ inline T* bbcvirtalloc( size_t count )
     return bbvirtalloc<T>( sizeof( T ) * count );
 }
 
+//-----------------------------------------------------------
+inline void* bb_try_virt_alloc( size_t size )
+{
+    return SysHost::VirtualAlloc( size, false );
+}
+
 // Allocate virtual memory with protected boundary pages
 // #NOTE: Only free with bbvirtfreebounded
 //-----------------------------------------------------------
@@ -257,9 +288,7 @@ inline void* bb_try_virt_alloc_bounded( size_t size )
     const size_t pageSize = SysHost::GetPageSize();
     size = RoundUpToNextBoundaryT<size_t>( size, pageSize ) + pageSize * 2;
 
-    auto* ptr = (byte*)SysHost::VirtualAlloc( size, false );
-    if( !ptr )
-        return nullptr;
+    auto* ptr = (byte*)bb_try_virt_alloc( size );
 
     SysHost::VirtualProtect( ptr, pageSize, VProtect::NoAccess );
     SysHost::VirtualProtect( ptr + size - pageSize, pageSize, VProtect::NoAccess );
@@ -657,3 +686,25 @@ inline bool IsNumber( const char* str )
     
     return true;
 }
+
+// Offsets a string pointer to the bytes from immediately
+// following the "0x", if the string starts with such a prefix.
+// #NOTE: Assumes a null-terminated string.
+//-----------------------------------------------------------
+inline const char* Offset0xPrefix( const char* str )
+{
+    ASSERT( str );
+    if( str && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') )
+        return str+2;
+
+    return str;
+}
+
+template<typename T>
+inline void PrintBits( const T value, const uint32 bitCount )
+{
+    const uint32 shift = bitCount - 1;
+    for( uint32 i = 0; i < bitCount; i++ )
+        (value >> (shift-i)) & T(1) ? Log::Write( "1" ) : Log::Write( "0" );
+}
+

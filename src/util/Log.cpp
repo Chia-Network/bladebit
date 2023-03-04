@@ -172,6 +172,16 @@ void Log::FlushError()
     fflush( GetErrStream() );
 }
 
+//-----------------------------------------------------------
+void Log::NewLine()
+{
+    #if _WIN32
+        Log::Write( "\r\n" );
+    #else
+        Log::Write( "\n" );
+    #endif
+}
+
 
 #if DBG_LOG_ENABLE
 

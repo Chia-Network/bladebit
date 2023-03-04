@@ -3,6 +3,7 @@
 #include "plotdisk/DiskPlotter.h"
 #include "plotmem/MemPlotter.h"
 #include "plotting/PlotTools.h"
+#include "commands/Commands.h"
 #include "Version.h"
 
 #if PLATFORM_IS_UNIX
@@ -284,22 +285,27 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
         else if( cli.ArgConsume( "iotest" ) )
         {
             IOTestMain( cfg, cli );
-            exit( 0 );
+            Exit( 0 );
         }
         else if( cli.ArgConsume( "memtest" ) )
         {
             MemTestMain( cfg, cli );
-            exit( 0 );
+            Exit( 0 );
         }
         else if( cli.ArgConsume( "validate" ) )
         {
             PlotValidatorMain( cfg, cli );
-            exit( 0 );
+            Exit( 0 );
         }
         else if( cli.ArgConsume( "plotcmp" ) )
         {
             PlotCompareMain( cfg, cli );
-            exit( 0 );
+            Exit( 0 );
+        }
+        else if( cli.ArgConsume( "simulate" ) )
+        {
+            CmdSimulateMain( cfg, cli );
+            Exit( 0 );
         }
         else if( cli.ArgConsume( "help" ) )
         {
@@ -307,8 +313,10 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
             {
                 if( cli.ArgMatch( "diskplot" ) )
                     DiskPlotter::PrintUsage();
-                else if( cli.ArgMatch( "diskplot" ) )
-                    Log::Line( "bladebit -f ... -p/c ... memplot <out_dirs>" );
+                else if( cli.ArgMatch( "ramplot" ) )
+                    Log::Line( "bladebit -f ... -p/c ... ramplot <out_dirs>" );
+                else if( cli.ArgMatch( "cudaplot" ) )
+                    Log::Line( "bladebit_cuda -f ... -p/c ... cudaplot [-d=device] <out_dirs>" );
                 else if( cli.ArgMatch( "iotest" ) )
                     IOTestPrintUsage();
                 else if( cli.ArgMatch( "memtest" ) )
@@ -317,10 +325,12 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
                     PlotValidatorPrintUsage();
                 else if( cli.ArgMatch( "plotcmp" ) )
                     PlotCompareMainPrintUsage();
+                else if( cli.ArgMatch( "simulate" ) )
+                    CmdSimulateHelp();
                 else
                     Fatal( "Unknown command '%s'.", cli.Arg() );
 
-                exit( 0 );
+                Exit( 0 );
             }
 
             Log::Line( "help [<command>]" );
@@ -505,6 +515,7 @@ R"(
  iotest     : Perform a write and read test on a specified disk.
  memtest    : Perform a memory (RAM) copy test.
  validate   : Validates all entries in a plot to ensure they all evaluate to a valid proof.
+ simulate   : Simulation tool useful for compressed plot capacity.
  help       : Output this help message, or help for a specific command, if specified.
 
 [GLOBAL_OPTIONS]:

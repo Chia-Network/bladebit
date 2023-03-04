@@ -235,12 +235,29 @@ bool CliParser::ReadSize( const char* sizeText, size_t& size, const char* arg )
     const size_t suffixLength = end - suffix;
     if( suffixLength > 0 )
     {
-        if( StriCmp( "GB", suffix ) == 0 || StriCmp( "G", suffix ) == 0 )
-            multiplier = 1ull GB;
-        else if( StriCmp( "MB", suffix ) == 0 || StriCmp( "M", suffix ) == 0 )
-            multiplier = 1ull MB;
-        else if( StriCmp( "KB", suffix ) == 0 || StriCmp( "K", suffix ) == 0 )
-            multiplier = 1ull KB;
+        if( StriCmp( "GiB", suffix ) == 0 || StriCmp( "G", suffix ) == 0 )
+            multiplier = 1ull GiB;
+        else if( StriCmp( "MiB", suffix ) == 0 || StriCmp( "M", suffix ) == 0 )
+            multiplier = 1ull MiB;
+        else if( StriCmp( "KiB", suffix ) == 0 || StriCmp( "K", suffix ) == 0 )
+            multiplier = 1ull KiB;
+        else if( StriCmp( "TiB", suffix ) == 0 || StriCmp( "T", suffix ) == 0 )
+            multiplier = 1ull TiB;
+        else if( StriCmp( "PiB", suffix ) == 0 || StriCmp( "P", suffix ) == 0 )
+            multiplier = 1ull PiB;
+
+        // SI Units
+        else if( StriCmp( "PB", suffix ) == 0 )
+            multiplier = 1ull PBSi;
+        else if( StriCmp( "TB", suffix ) == 0 )
+            multiplier = 1ull TBSi;
+        else if( StriCmp( "GB", suffix ) == 0  )
+            multiplier = 1ull GBSi;
+        else if( StriCmp( "MB", suffix ) == 0 )
+            multiplier = 1ull MBSi;
+        else if( StriCmp( "KB", suffix ) == 0 )
+            multiplier = 1ull KBSi;
+
         else
         {
             Fatal( "Invalid suffix '%s' for argument '%s'", suffix, arg );

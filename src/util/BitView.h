@@ -672,7 +672,7 @@ public:
     {
         ASSERT( bitCount <= BitSize );
         const uint64 value = CPBitReader::Read64( bitCount, _fields, 0 );
-        
+
         return value;
     }
     

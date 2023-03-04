@@ -99,9 +99,9 @@ template<>
 struct CompressionLevelInfo<9>
 {
     static constexpr uint32 ENTRY_SIZE      = 8;
-    static constexpr uint32 STUB_BIT_SIZE   = 4;
-    static constexpr size_t TABLE_PARK_SIZE = 6350; //2240;
-    static constexpr double ANS_R_VALUE     = 8.60;
+    static constexpr uint32 STUB_BIT_SIZE   = 30;
+    static constexpr size_t TABLE_PARK_SIZE = 8808;
+    static constexpr double ANS_R_VALUE     = 4.54;
 };
 
 

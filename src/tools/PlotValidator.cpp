@@ -96,6 +96,8 @@ struct UnpackedK32Plot
 };
 
 
+static void VerifyFullProofStr( const ValidatePlotOptions& opts, const char* plotIdStr, const char* fullProofStr, const char* challengeStr );
+
 static void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
 
 template<bool Use64BitLpToSquare>
@@ -146,6 +148,8 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
 
     const char* challenge = nullptr;
     int64       f7        = -1;
+    const char* fullProof = nullptr;
+    const char* plotIdStr = nullptr;
 
     while( cli.HasArgs() )
     {
@@ -159,6 +163,12 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
             continue;
         else if( cli.ReadI64( f7, "--f7" ) )    // Same as proof, but the challenge is made from an f7
             continue;
+        else if( cli.ReadStr( fullProof, "--verify" ) )
+        {
+            challenge = cli.ArgConsume();
+            plotIdStr = cli.ArgConsume();
+            break;
+        }
         else if( cli.ArgConsume( "-h", "--help" ) )
         {
             PlotValidatorPrintUsage();
@@ -175,6 +185,12 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
     }
 
     // Check for f7
+    // if( challenge )
+    // {
+    //     if( sscanf( challenge, "%lld", &f7 ) == 1 )
+    //         challenge = nullptr;
+    // }
+
     if( f7 >= 0 )
     {
         challenge = new char[65];
@@ -185,6 +201,13 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
 
     const uint32 maxThreads = SysHost::GetLogicalCPUCount();
 
+    // Check for full proof verification
+    if( fullProof != nullptr )
+    {
+        VerifyFullProofStr( opts, plotIdStr, fullProof, challenge );
+        Exit( 0 );
+    }
+
     // Check for challenge
     if( challenge != nullptr )
     {
@@ -192,6 +215,7 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
         GetProofForChallenge( opts,  challenge );
         Exit( 0 );
     }
+
 
     opts.threadCount = gCfg.threadCount == 0 ? maxThreads : std::min( maxThreads, gCfg.threadCount );
     opts.startOffset = std::max( std::min( opts.startOffset / 100.f, 100.f ), 0.f );
@@ -599,11 +623,68 @@ void ValidateJob::Run()
     this->failCount = proofFailCount;
 }
 
+//-----------------------------------------------------------
+void VerifyFullProofStr( const ValidatePlotOptions& opts, const char* plotIdStr, const char* fullProofStr, const char* challengeStr )
+{
+    // #TODO: Properly implement. Only for testing at the moment.
+    FatalIf( !fullProofStr, "Invalid proof." );
+    FatalIf( !challengeStr, "Invalid challenge." );
+    FatalIf( !plotIdStr, "Invalid plot id." );
+
+    fullProofStr = Offset0xPrefix( fullProofStr );
+    challengeStr = Offset0xPrefix( challengeStr );
+    plotIdStr    = Offset0xPrefix( plotIdStr );
+
+    const size_t fpLength        = strlen( fullProofStr );
+    const size_t challengeLength = strlen( challengeStr );
+    const size_t plotIdLength    = strlen( plotIdStr );
+    FatalIf( fpLength % 16 != 0, "Invalid proof: Proof must be a multiple of 8 bytes." );
+    FatalIf( challengeLength != 32*2, "Invalid challenge: Challenge must be a 32 bytes." );
+    FatalIf( plotIdLength != 32*2, "Invalid plot id : Plot id must be a 32 bytes." );
+
+    byte  plotId        [BB_PLOT_ID_LEN];
+    byte  challengeBytes[32];
+    byte* fullProofBytes = new byte[fpLength/2];
+    
+    FatalIf( !HexStrToBytesSafe( fullProofStr, fpLength, fullProofBytes, fpLength/2 ),
+        "Could not parse full proof." );
+
+    FatalIf( !HexStrToBytesSafe( challengeStr, sizeof(challengeBytes)*2, challengeBytes, sizeof(challengeBytes) ),
+        "Could not parse challenge." );
+    
+    FatalIf( !HexStrToBytesSafe( plotIdStr, sizeof(plotId)*2, plotId, sizeof(plotId) ),
+        "Could not parse plot id." );
+
+    const uint32 k = (uint32)(fpLength / 16);
+
+    uint64 f7 = 0;
+    uint64 proofXs[PROOF_X_COUNT] = {};
+    {
+        CPBitReader f7Reader( challengeBytes, sizeof( challengeBytes ) * 8 );
+        f7 = f7Reader.Read64( k );
+    }
+    {
+        CPBitReader proofReader( fullProofBytes, fpLength/2 * 8 );
+
+        for( uint32 i = 0; i < PROOF_X_COUNT; i++ )
+            proofXs[i] = proofReader.Read64( k );
+    }
+
+    uint64 computedF7 = 0;
+    if( !ValidateFullProof( k, plotId, proofXs, computedF7 ) || computedF7 != f7 )
+    {
+        Log::Line( "Verification Failed." );
+        Exit(1);
+    }
+
+    Log::Line( "Varification Successful!" );
+}
+
 // #TODO: Support K>32
 //-----------------------------------------------------------
 void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challengeHex )
 {
-    FatalIf(  opts.plotPath.length() == 0, "Invalid plot path." );
+    FatalIf( opts.plotPath.length() == 0, "Invalid plot path." );
     FatalIf( !challengeHex || !*challengeHex, "Invalid challenge." );
 
     const size_t lenChallenge = strlen( challengeHex );
@@ -623,11 +704,9 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
     // Find this f7 in the plot file
     PlotReader reader( plot );
 
-    uint64 _indices[64] = {};
-    Span<uint64> indices( _indices, sizeof( _indices ) / sizeof( uint64 ) );    // #TODO: Should simply return the start index and count
-
-    auto matches = reader.GetP7IndicesForF7( f7, indices );
-    if(  matches.Length() == 0 )
+    uint64 p7BaseIndex = 0;
+    const uint64 matchCount = reader.GetP7IndicesForF7( f7, p7BaseIndex );
+    if(  matchCount == 0 )
     {
         Log::Line( "Could not find f7 %llu in plot.", f7 );
         Exit( 1 );
@@ -650,9 +729,9 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
         FatalIf( gr == nullptr, "Failed to created decompression context." );
     }
 
-    for( uint64 i = 0; i < matches.Length(); i++ )
+    for( uint64 i = 0; i < matchCount; i++ )
     {
-        const uint64 p7Index = matches[i];
+        const uint64 p7Index = p7BaseIndex + i;
         const uint64 p7Park  = p7Index / kEntriesPerPark;
         
         // uint64 o = reader.GetFullProofForF7Index( matches[i], proof );
@@ -981,14 +1060,14 @@ bool DecompressProof( const byte plotId[BB_PLOT_ID_LEN], const uint32 compressio
     for( uint32 i = 0; i < PROOF_X_COUNT; i++ )
         req.compressedProof[i] = (uint32)compressedProof[i];
 
-    GRProofResult r = grFetchProofForChallenge( gr, &req );
+    GRResult r = grFetchProofForChallenge( gr, &req );
 
     bbmemcpy_t( fullProofXs, req.fullProof, PROOF_X_COUNT );
 
     if( destroyContext )
         grDestroyContext( gr );
 
-    return r == GRProofResult_OK;
+    return r == GRResult_OK;
 }
 
 //-----------------------------------------------------------
@@ -1006,7 +1085,7 @@ bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_
     // Fetch line points to back pointers going through all our tables
     // from 6 to 1, grabbing all of the x's that make up a proof.
     uint32 lookupCount = 1;
-    
+
     const bool    isCompressed = plot.PlotFile().CompressionLevel() > 0;
     const TableId endTable     = !isCompressed ? TableId::Table1 :
                                     plot.PlotFile().CompressionLevel() < 8 ? 
@@ -1030,6 +1109,7 @@ bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_
             else
                 ptr = LinePointToSquare( lp );
 
+            ASSERT( ptr.x > ptr.y );
             lpIdxDst[dst+0] = ptr.y;
             lpIdxDst[dst+1] = ptr.x;
         }
@@ -1060,7 +1140,7 @@ bool ValidateFullProof( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint6
     // Convert these x's to f1 values
     {
         const uint32 xShift = k - kExtraBits;
-        
+
         // Prepare ChaCha key
         byte key[32] = { 1 };
         memcpy( key + 1, plotId, 31 );
@@ -1223,6 +1303,8 @@ void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs
 //-----------------------------------------------------------
 bool FxMatch( uint64 yL, uint64 yR )
 {
+    LoadLTargets();
+
     const uint64 groupL = yL / kBC;
     const uint64 groupR = yR / kBC;
 

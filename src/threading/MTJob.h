@@ -77,6 +77,18 @@ struct MTJobSyncT
         return _jobs[index];
     };
 
+    inline const TJob& GetNextJob() const
+    {   
+        ASSERT( !IsLastThread() );
+        return _jobs[_jobId+1];
+    };
+
+    inline const TJob& GetPrevJob() const
+    {   
+        ASSERT( !IsControlThread() );
+        return _jobs[_jobId-1];
+    };
+
     inline const TJob& LastJob() const { return _jobs[_jobCount-1]; }
 
     // For debugging
@@ -112,6 +124,9 @@ struct MTJobRunner
 
     double Run();
     double Run( uint32 threadCount );
+
+    static void RunFromInstance( ThreadPool& pool, uint32 threadCount, const TJob& jobSrc );
+    static void RunFromInstanceDynamic( ThreadPool& pool, uint32 threadCount, const TJob& jobSrc );
 
     inline TJob& operator[]( uint64 index ) { return this->_jobs[index]; }
     inline TJob& operator[]( int64  index ) { return this->_jobs[index]; }
@@ -205,6 +220,37 @@ inline void MTJobRunner<TJob, MaxJobs>::RunJobWrapper( TJob* job )
 {
     //job->Run();
     static_cast<MTJob<TJob>*>( job )->Run();
+}
+
+template<typename TJob, uint MaxJobs>
+void MTJobRunner<TJob, MaxJobs>::RunFromInstance( ThreadPool& pool, const uint32 threadCount, const TJob& jobSrc )
+{
+    FatalIf( threadCount > MaxJobs, "Too many threads for job." );
+
+    MTJobRunner<TJob> jobs( pool );
+
+    for( uint32 i = 0; i < threadCount; i++ )
+    {
+        auto& job = jobs[i];
+        job = jobSrc;
+    }
+
+    jobs.Run( threadCount );
+}
+
+template<typename TJob, uint MaxJobs>
+void MTJobRunner<TJob, MaxJobs>::RunFromInstanceDynamic( ThreadPool& pool, const uint32 threadCount, const TJob& jobSrc )
+{
+    FatalIf( threadCount > MaxJobs, "Too many threads for job." );
+
+    auto  runner = new MTJobRunner<TJob>( pool );
+    TJob* jobs   = runner->Jobs();
+
+    for( uint32 i = 0; i < threadCount; i++ )
+        jobs[i] = jobSrc;
+
+    runner->Run( threadCount );
+    delete runner;
 }
 
 

@@ -4,7 +4,7 @@
 enum class PlotVersion : uint32
 {
     v1_0 = 0,
-    v2_0 = CHIA_PLOT_VERSION_2_0_0
+    v2_0 = CHIA_PLOT_VERSION_2
 };
 
 enum class PlotFlags : uint32

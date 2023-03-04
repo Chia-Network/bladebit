@@ -3,12 +3,19 @@
 #include "threading/GenJob.h"
 #include "plotting/Tables.h"
 #include "plotting/PlotTools.h"
+#include "tools/PlotReader.h"
 #include "plotmem/LPGen.h"
 #include "ChiaConsts.h"
 #include "pos/chacha8.h"
 #include "b3/blake3.h"
 #include "algorithm/RadixSort.h"
 #include "util/jobs/SortKeyJob.h"
+#include "util/BitView.h"
+#include "util/VirtualAllocator.h"
+#include "plotting/matching/GroupScan.h"
+#include "harvesting/GreenReaper.h"
+#include <mutex>
+
 
 // Determined from the average match count at compression level 11, which was 0.288% of the bucket count * 2.
 // We round up to a reasonable percentage of 0.5%.
@@ -16,6 +23,8 @@
 static constexpr double GR_MAX_MATCHES_MULTIPLIER = 0.005;
 static constexpr uint32 GR_MAX_BUCKETS            = 32;
 static constexpr uint64 GR_MIN_TABLE_PAIRS        = 1024;
+
+static std::mutex _lTargetLock;
 
 inline static uint64 GetEntriesPerBucketForCompressionLevel( const uint32 k, const uint32 cLevel )
 {
@@ -121,11 +130,23 @@ struct ProofTable
     // }
 };
 
+// Used for qualities fetch. Line point and index.
+// Represents a line point and its original, pre-sort index.
+struct LPIndex { uint64 lp; uint32 index; };
+
 struct GreenReaperContext
 {
+    enum State
+    {
+        None      = 0,  // Awaiting a proof request or qualities request
+        Qualities = 1,  // Currently fetching qualities
+    };
+
     GreenReaperConfig config;
 
-    ThreadPool*    pool = nullptr;
+    State          state          = None;
+    ThreadPool*    pool           = nullptr;
+    size_t         allocationSize = 0;
 
     uint64         maxEntriesPerBucket;
 
@@ -135,18 +156,21 @@ struct GreenReaperContext
 
     Span<uint32>   xBuffer;
     Span<uint32>   xBufferTmp;
-    
-    Span<uint32>   sortKey; // #TODO: Remove this, can use x for it
-    
+
+    Span<uint32>   sortKey;             // #TODO: Remove this, can use x for it
+
     Span<K32Meta4> metaBuffer;
     Span<K32Meta4> metaBufferTmp;
     Span<Pair>     pairs;
     Span<Pair>     pairsTmp;
     Span<uint32>   groupsBoundaries;    // BC group boundaries
-    
+
     ProofTable     tables[7]  = {};
 
     ProofContext   proofContext;
+
+    Pair           backTraceTables[6][32] = {};
+    LPIndex        lpTables       [6][32] = {};
 };
 
 enum class ForwardPropResult
@@ -167,7 +191,24 @@ inline void ProofTable::GetLTableGroupEntries( GreenReaperContext& cx, const uin
     outMeta = MakeSpan( (TMeta*)cx.proofContext.metaLeft + _groups[group].offset, _groups[group].count );
 }
 
+struct Table1BucketContext
+{
+    GreenReaperContext* cx;
+    const byte*    plotId;
+    uint64         entriesPerBucket;
+
+    // Mutated after each bucket to point to the next
+    // free section of the buffers.
+    Span<uint64>   outY;
+    Span<K32Meta2> outMeta;
+    Span<Pair>     outPairs;
+};
+
+
 /// Internal functions
+static void SortQualityXs( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64* xs, const uint32 count );
+
+static GRResult ProcessTable1Bucket( Table1BucketContext& tcx, const uint64 x1, const uint64 x2, const uint32 groupIndex );
 static void LookupProof();
 static void FreeBucketBuffers( GreenReaperContext& cx );
 static bool ReserveBucketBuffers( GreenReaperContext& cx, uint32 k, uint32 compressionLevel );
@@ -176,7 +217,10 @@ static void GenerateF1( GreenReaperContext& cx, const byte plotId[32], const uin
 static Span<Pair> Match( GreenReaperContext& cx, const Span<uint64> yEntries, Span<Pair> outPairs, const uint32 pairOffset  );
 
 template<TableId rTable>
-static void SortTableAndFlipBuffers( GreenReaperContext& cx );
+ForwardPropResult ForwardPropTable( GreenReaperContext& cx, uint32 tableGroupCount, bool returnSuccessOnSingleMatch );
+
+template<TableId rTable>
+static void SortTableAndFlipBuffers( GreenReaperContext& cx, const uint32 groupCount );
 
 template<TableId rTable, typename TMetaIn, typename TMetaOut>
 static void GenerateFxForPairs( GreenReaperContext& cx, const Span<Pair> pairs, const Span<uint64> yIn, const Span<TMetaIn> metaIn, Span<uint64> yOut, Span<TMetaOut> outMeta );
@@ -185,8 +229,8 @@ template<TableId rTable, typename TMetaIn, typename TMetaOut>
 static void GenerateFx( const Span<Pair> pairs, const Span<uint64> yIn, const Span<TMetaIn> metaIn, Span<uint64> yOut, Span<TMetaOut> outMeta );
 
 static bool ForwardPropTables( GreenReaperContext& cx );
-// static BackPtr UnpackLinePointCompressedProof( GreenReaperContext& cx, uint32 bitsPerEntry, uint32 proofLinePoint );
 static void BacktraceProof( GreenReaperContext& cx, const TableId tableStart, uint64 proof[GR_POST_PROOF_X_COUNT] );
+
 
 ///
 /// Public API
@@ -195,7 +239,7 @@ static void BacktraceProof( GreenReaperContext& cx, const TableId tableStart, ui
 //-----------------------------------------------------------
 GreenReaperContext* grCreateContext( GreenReaperConfig* config )
 {
-    auto* context = new GreenReaperContext();
+    auto* context = new GreenReaperContext{};
     if( context == nullptr )
         return nullptr;
 
@@ -206,7 +250,9 @@ GreenReaperContext* grCreateContext( GreenReaperConfig* config )
         context->config.threadCount = std::min( 2u, SysHost::GetLogicalCPUCount() );
     }
 
-    context->pool = new ThreadPool( context->config.threadCount );
+    context->pool = new ThreadPool( context->config.threadCount, ThreadPool::Mode::Fixed,
+                                    (bool)config->disableCpuAffinity, 
+                                    (bool)config->disableCpuAffinity ? 0 : config->cpuOffset );
     if( !context->pool )
     {
         grDestroyContext( context );
@@ -231,110 +277,97 @@ void grDestroyContext( GreenReaperContext* context )
 }
 
 //-----------------------------------------------------------
-// int32_t bbHarvesterFetchProofForChallenge( GreenReaperContext* context, const uint8_t* challenge, uint8_t* outFullProof[64], uint32_t maxProofs )
-GRProofResult grFetchProofForChallenge( GreenReaperContext* cx, GRCompressedProofRequest* req )
+GRResult RequestSetup( GreenReaperContext* cx, const uint32 k, const uint32 compressionLevel )
 {
-    if( !cx || !req || !req->plotId )
-        return GRProofResult_Failed;
-
-    // #TODO: Validate entryBitCount
+    if( !cx || k != 32 || compressionLevel < 1 || compressionLevel > 9 )    // #TODO: Set named constant for max compression level
+        return GRResult_Failed;
 
     // Always make sure this has been done
-    LoadLTargets();
+    {
+    // #TODO: Make The function itself thread-safe, don't do it out here
+        _lTargetLock.lock();
+        LoadLTargets();
+        _lTargetLock.unlock();
+    }
 
-    const uint32 k                = 32;
-    const uint64 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, req->compressionLevel );
+    const uint64 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, compressionLevel );
     
     // Ensure our buffers have enough for the specified entry bit count
-    if( !ReserveBucketBuffers( *cx, k, req->compressionLevel ) )
-        return GRProofResult_OutOfMemory;
+    if( !ReserveBucketBuffers( *cx, k, compressionLevel ) )
+        return GRResult_OutOfMemory;
 
-    const uint32 numGroups = GR_POST_PROOF_CMP_X_COUNT;
-    
-    Span<uint64>   yOut     = cx->yBufferTmp;
-    Span<K32Meta2> metaOut  = cx->metaBufferTmp.template As<K32Meta2>();
-    Span<Pair>     outPairs = cx->pairs;
-    
-    for( uint32 i = 0; i < numGroups; i++ )
+    return GRResult_OK;
+}
+
+//-----------------------------------------------------------
+size_t grGetMemoryUsage( GreenReaperContext* context )
+{
+    if( !context )
+        return 0;
+
+    return context->allocationSize;
+}
+
+//-----------------------------------------------------------
+GRResult grFetchProofForChallenge( GreenReaperContext* cx, GRCompressedProofRequest* req )
+{
+    if( !req || !req->plotId )
+        return GRResult_Failed;
+
+    const uint32 k = 32;
     {
-        const uint32  xLinePoint = (uint32)req->compressedProof[i];
-        const BackPtr xs         = LinePointToSquare64( xLinePoint );
-
-        auto yEntries = cx->yBuffer;
-        auto xEntries = cx->xBuffer;
-
-        if( xs.x == 0 || xs.y == 0 )
-        {
-            ASSERT( 0 );
-            // ...
-        }
-
-        GenerateF1( *cx, req->plotId, entriesPerBucket, (uint32)xs.x, (uint32)xs.y );
-
-        // Perform matches
-        auto& table = cx->tables[1];
-        const uint32 groupIndex = i / 2;
-        if( (i & 1) == 0 )
-            table.BeginGroup( groupIndex );
-
-        const Span<Pair> pairs = Match( *cx, yEntries, outPairs, 0 );
-
-        // Expect at least one match
-        if( pairs.Length() < 1 )
-            return GRProofResult_Failed;
-
-        table.AddGroupPairs( groupIndex, (uint32)pairs.Length() );
-
-        // Perform fx for table2 pairs
-        GenerateFxForPairs<TableId::Table2>( *cx, pairs, yEntries, xEntries, yOut, metaOut );
-
-        // Inline x's into the pairs
-        {
-            const uint32 threadCount = std::min( cx->config.threadCount, (uint32)pairs.Length() );
-
-            AnonMTJob::Run( *cx->pool, threadCount, [=]( AnonMTJob* self ){
-                
-                const Span<uint32> xs          = xEntries;
-                      Span<Pair>   threadPairs = GetThreadOffsets( self, pairs );
-
-                for( uint64 i = 0; i < threadPairs.Length(); i++ )
-                {
-                    Pair p = threadPairs[i];
-                    p.left  = xs[p.left ];
-                    p.right = xs[p.right];
-
-                    threadPairs[i] = p;
-                }
-            });
-        }
-        
-        outPairs = outPairs.Slice( pairs.Length() );
-        yOut     = yOut    .Slice( pairs.Length() );
-        metaOut  = metaOut .Slice( pairs.Length() );
+        auto r = RequestSetup( cx, k, req->compressionLevel );
+        if( r != GRResult_OK )
+            return r;
     }
 
+    const uint32 numGroups        = GR_POST_PROOF_CMP_X_COUNT;
+    const uint32 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, req->compressionLevel );
 
-    // If all groups have a single match, then we have our full proof
-    bool hasProof = true;
-    
-    for( uint32 i = 0; i < numGroups / 2; i++ )
+
+    bool proofMightBeDropped = false;
+
     {
-        if( cx->tables[1]._length != 2 )
+        Table1BucketContext tcx;
+        tcx.cx               = cx;
+        tcx.plotId           = req->plotId;
+        tcx.entriesPerBucket = entriesPerBucket;
+        tcx.outY             = cx->yBufferTmp;
+        tcx.outMeta          = cx->metaBufferTmp.template As<K32Meta2>();
+        tcx.outPairs         = cx->pairs;
+
+        for( uint32 i = 0; i < numGroups; i++ )
         {
-            hasProof = false;
-            break;
+            const uint32  xLinePoint = (uint32)req->compressedProof[i];
+            const BackPtr xs         = LinePointToSquare64( xLinePoint );
+            // #if _DEBUG
+            //     Log::Write( "[%-2u] %-4llu | 0x%03x | ", i*2  , xs.y, xs.y ); PrintBits( xs.y, 17u - req->compressionLevel ); Log::NewLine();
+            //     Log::Write( "[%-2u] %-4llu | 0x%03x | ", i*2+1, xs.x, xs.x ); PrintBits( xs.x, 17u - req->compressionLevel ); Log::NewLine();
+            // #endif
+            auto yEntries = cx->yBuffer;
+            auto xEntries = cx->xBuffer;
+
+            proofMightBeDropped = proofMightBeDropped || (xs.x == 0 || xs.y == 0);
+
+                  auto&  table      = cx->tables[1];
+            const uint32 groupIndex = i / 2;
+
+            if( (i & 1) == 0 )
+                table.BeginGroup( groupIndex );
+
+            const auto r = ProcessTable1Bucket( tcx, xs.y, xs.x, groupIndex );
+
+            if( r != GRResult_OK )
+                return proofMightBeDropped ? GRResult_NoProof : GRResult_Failed;
         }
     }
 
-    if( hasProof )
+    // #TODO: Add this path, but this should never happen
+    if( cx->tables[1]._length <= 2 )
     {
-        // #TODO: Return the proof
-        Fatal( "Unimplemented" );
+        Log::Line( "[GR_WARNING] Unexpected proof match on first 2nd table." );
+        return GRResult_Failed;
     }
-
-
-    /// No proof found yet, continue on to the rest of forward propagation
-
        
     // Continue forward propagation to the next table
     const uint32 table2Length = (uint32)cx->tables[1]._length;
@@ -348,12 +381,256 @@ GRProofResult grFetchProofForChallenge( GreenReaperContext* cx, GRCompressedProo
     cx->proofContext.metaRight = cx->metaBufferTmp.Ptr();
     cx->proofContext.proof     = req->fullProof;
 
-    SortTableAndFlipBuffers<TableId::Table2>( *cx );
+    SortTableAndFlipBuffers<TableId::Table2>( *cx, 32 >> (int)TableId::Table2 );
 
-    return ForwardPropTables( *cx ) ? GRProofResult_OK : GRProofResult_Failed;
+    return ForwardPropTables( *cx ) ? GRResult_OK : 
+        proofMightBeDropped ? GRResult_NoProof : GRResult_Failed;
 }
 
-// -----------------------------------------------------------
+//-----------------------------------------------------------
+GRResult grGetFetchQualitiesXPair( GreenReaperContext* cx, GRCompressedQualitiesRequest* req )
+{
+    if( !req || !req->plotId )
+        return GRResult_Failed;
+
+    const uint32 k = 32;
+    {
+        auto r = RequestSetup( cx, k, req->compressionLevel );
+        if( r != GRResult_OK )
+            return r;
+    }
+
+    const uint32 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, req->compressionLevel );
+
+    // Begin decompression
+    Table1BucketContext tcx;
+    tcx.cx               = cx;
+    tcx.plotId           = req->plotId;
+    tcx.entriesPerBucket = entriesPerBucket;
+    tcx.outY             = cx->yBufferTmp;
+    tcx.outMeta          = cx->metaBufferTmp.template As<K32Meta2>();
+    tcx.outPairs         = cx->pairs;
+
+    uint32 xGroups[16] = {};
+    uint32 numXGroups  = 0;
+
+    // #TODO: Support more K values
+    // #TODO: Support higher compression levels
+    {
+        const BackPtr p = LinePointToSquare( ((uint128)req->xLinePoints[0].hi) << 64 | (uint128)req->xLinePoints[0].lo );
+
+        // For level < 9, we have 4 x groups inlined
+        const BackPtr x1x2 = LinePointToSquare64( p.x );
+        const BackPtr x2x3 = LinePointToSquare64( p.y );
+
+        numXGroups = 2;
+        xGroups[0] = (uint32)x1x2.x;
+        xGroups[1] = (uint32)x1x2.y;
+        xGroups[2] = (uint32)x2x3.x;
+        xGroups[3] = (uint32)x2x3.y;
+    }
+
+    if( req->compressionLevel >= 6 )
+    {
+        const BackPtr p = LinePointToSquare( ((uint128)req->xLinePoints[1].hi) << 64 | (uint128)req->xLinePoints[1].lo );
+
+        const BackPtr x1x2 = LinePointToSquare64( p.x );
+        const BackPtr x2x3 = LinePointToSquare64( p.y );
+
+        numXGroups = 4;
+        xGroups[4] = (uint32)x1x2.x;
+        xGroups[5] = (uint32)x1x2.y;
+        xGroups[6] = (uint32)x2x3.x;
+        xGroups[7] = (uint32)x2x3.y;
+    }
+
+    bool proofMightBeDropped = false;
+    for( uint32 i = 0; i < numXGroups; i++ )
+    {
+        // Gen sorted f1
+        const uint32 xIdx = i*2;
+        const uint64 x1 = xGroups[xIdx+0];
+        const uint64 x2 = xGroups[xIdx+1];
+
+        proofMightBeDropped = proofMightBeDropped || (x1 == 0 || x2 == 0);
+
+        const uint32 groupIndex = i / 2;
+        if( (i & 1) == 0 )
+            cx->tables[1].BeginGroup( groupIndex );
+
+        const auto r = ProcessTable1Bucket( tcx, x1, x2, groupIndex );
+
+        if( r != GRResult_OK )
+            return proofMightBeDropped ? GRResult_NoProof : GRResult_Failed;
+    }
+
+    if( cx->tables[1]._length == 1 )
+    {
+        // #TODO: Add this path, but this should never happen
+        Log::Line( "[GR_WARNING] Unexpected qualities match on first 2nd table." );
+        return GRResult_Failed;
+    }
+
+    // Continue forward propagation to the next table
+    cx->proofContext.leftLength  = (uint32)cx->tables[1]._length;
+
+    uint64 fullProof[GR_POST_PROOF_X_COUNT] = {};
+
+    cx->proofContext.yLeft     = cx->yBuffer.Ptr();
+    cx->proofContext.metaLeft  = cx->metaBuffer.Ptr();
+    cx->proofContext.yRight    = cx->yBufferTmp.Ptr();
+    cx->proofContext.metaRight = cx->metaBufferTmp.Ptr();
+    cx->proofContext.proof     = fullProof;
+
+    SortTableAndFlipBuffers<TableId::Table2>( *cx, numXGroups / 2 );
+
+
+    TableId matchTable = TableId::Table3;
+
+    auto fpResult = ForwardPropTable<TableId::Table3>( *cx, numXGroups /= 2, true );
+
+    if( fpResult == ForwardPropResult::Continue )
+    {
+        matchTable = TableId::Table4;
+        fpResult = ForwardPropTable<TableId::Table4>( *cx, numXGroups /= 2, true );
+    }
+    if( fpResult == ForwardPropResult::Continue )
+    {
+        matchTable = TableId::Table5;
+        fpResult = ForwardPropTable<TableId::Table5>( *cx, numXGroups /= 2, true );
+    }
+    if( fpResult == ForwardPropResult::Continue )
+    {
+        matchTable = TableId::Table6;
+        fpResult = ForwardPropTable<TableId::Table6>( *cx, numXGroups /= 2, true );
+    }
+
+    if( fpResult != ForwardPropResult::Success )
+        return proofMightBeDropped ? GRResult_NoProof : GRResult_Failed;
+
+    // If we have more than 1 group, we need to only trace back to
+    // the ones that belong to the first group
+    uint64 qualityXs[8] = {};
+
+    {
+        Pair  pairs[2][4] = {};
+        Pair* pairsIn  = pairs[0];
+        Pair* pairsOut = pairs[1];
+
+        bbmemcpy_t( pairs[0], cx->tables[(int)matchTable]._pairs, cx->tables[(int)matchTable]._length );
+
+        for( TableId rTable = matchTable; rTable > TableId::Table3; rTable-- )
+        {
+            auto& inTable  = cx->tables[(int)rTable];
+            auto& outTable = cx->tables[(int)rTable-1];
+
+            for( uint32 i = 0; i < inTable._length; i++ )
+            {
+                const auto pair = inTable._pairs[i];
+
+                pairsOut[i*2+0] = outTable._pairs[pair.left ];
+                pairsOut[i*2+1] = outTable._pairs[pair.right];
+            }
+
+            std::swap( pairsOut, pairsIn );
+        }
+
+        // From table 3, only take the pair that points to the first group
+        const Pair t3Pair = pairsIn[0].left < cx->tables[1]._groups[0].count ?
+                            pairsIn[0] : pairsIn[1];
+
+        // Grab the x's from the first group only
+        const Pair xPair0 = cx->tables[1]._pairs[t3Pair.left ];
+        const Pair xPair1 = cx->tables[1]._pairs[t3Pair.right];
+
+        qualityXs[0] = xPair0.left;
+        qualityXs[1] = xPair0.right;
+        qualityXs[2] = xPair1.left;
+        qualityXs[3] = xPair1.right;
+    }
+
+    // We need to now sort the X's on y, in order to chose the right path
+    SortQualityXs( k, req->plotId, qualityXs, 4 );
+
+    // Follow the last path, based on the challenge in our x's
+    const uint32 last5Bits      = (uint32)req->challenge[31] & 0x1f;
+    const bool   isTable1BitSet = (last5Bits & 1) == 1;
+
+    if( !isTable1BitSet )
+    {
+        req->x1 = qualityXs[0];
+        req->x2 = qualityXs[1];
+    }
+    else
+    {
+        req->x1 = qualityXs[2];
+        req->x2 = qualityXs[3];
+    }
+
+    return GRResult_OK;
+}
+
+//-----------------------------------------------------------
+GRResult ProcessTable1Bucket( Table1BucketContext& tcx, const uint64 x1, const uint64 x2, const uint32 groupIndex )
+{
+    GreenReaperContext& cx = *tcx.cx;
+
+    // #TODO: Not supported proofs, these should be droped
+    const bool proofMightBeDropped = x1 == 0 || x2 == 0 ;
+
+    // Gen F1 for both X buckets into a single bucket sorted on Y
+    GenerateF1( cx, tcx.plotId, tcx.entriesPerBucket, (uint32)x1, (uint32)x2 );
+
+    // Perform matches
+    auto yEntries = cx.yBuffer;
+    auto xEntries = cx.xBuffer;
+
+    const Span<Pair> pairs = Match( cx, yEntries, tcx.outPairs, 0 );
+
+    // Expect at least one match
+    if( pairs.Length() < 1 )
+        return proofMightBeDropped ? GRResult_NoProof: GRResult_Failed;
+
+    auto& table = cx.tables[1];
+    table.AddGroupPairs( groupIndex, (uint32)pairs.Length() );
+
+    // Perform fx for table2 pairs
+    GenerateFxForPairs<TableId::Table2>( cx, pairs, yEntries, xEntries, tcx.outY, tcx.outMeta );
+
+    // Inline x's into the pairs
+    {
+        #if SHOW_TIMINGS
+            const auto timer = TimerBegin();
+        #endif
+        const uint32 threadCount = std::min( cx.config.threadCount, (uint32)pairs.Length() );
+
+        AnonMTJob::Run( *cx.pool, threadCount, [=]( AnonMTJob* self ){
+            
+            const Span<uint32> xs          = xEntries;
+                  Span<Pair>   threadPairs = GetThreadOffsets( self, pairs );
+
+            for( uint64 i = 0; i < threadPairs.Length(); i++ )
+            {
+                Pair p = threadPairs[i];
+                p.left  = xs[p.left ];
+                p.right = xs[p.right];
+
+                threadPairs[i] = p;
+            }
+        });
+        #if SHOW_TIMINGS
+            Log::Line( "Inline x elapsed: %.3lf s", TimerEnd( timer ) );
+        #endif
+    }
+
+    tcx.outPairs = tcx.outPairs.Slice( pairs.Length() );
+    tcx.outY     = tcx.outY    .Slice( pairs.Length() );
+    tcx.outMeta  = tcx.outMeta .Slice( pairs.Length() );
+
+    return GRResult_OK;
+}
+
+//-----------------------------------------------------------
 void BacktraceProof( GreenReaperContext& cx, const TableId tableStart, uint64 proof[GR_POST_PROOF_X_COUNT] )
 {
     Pair _backtrace[2][64] = {};
@@ -412,12 +689,12 @@ void BacktraceProof( GreenReaperContext& cx, const TableId tableStart, uint64 pr
         proof[idx+1] = backTraceIn[i].right;
     }
 
-#if _DEBUG
-    Log::Line( "" );
-    Log::Line( "Recovered Proof:" );
-    for( uint32 i = 0; i < GR_POST_PROOF_X_COUNT; i++ )
-        Log::WriteLine( "[%2u]: %-10u ( 0x%08x )", i, (uint32)proof[i], (uint32)proof[i] );
-#endif
+// #if _DEBUG
+//     Log::Line( "" );
+//     Log::Line( "Recovered Proof:" );
+//     for( uint32 i = 0; i < GR_POST_PROOF_X_COUNT; i++ )
+//         Log::WriteLine( "[%2u]: %-10u ( 0x%08x )", i, (uint32)proof[i], (uint32)proof[i] );
+// #endif
 }
 
 //-----------------------------------------------------------
@@ -438,48 +715,36 @@ bool ReserveBucketBuffers( GreenReaperContext& cx, uint32 k, uint32 compressionL
         // The pair requirements ought to be much less as the number of matches we get per group is not as high.
         uint64 maxPairsPerTable = std::max( (uint64)GR_MIN_TABLE_PAIRS, GetMaxTablePairsForCompressionLevel( k, compressionLevel ) );
 
-        cx.yBufferF1        = bb_try_virt_calloc_bounded_span<uint64>  ( allocCount );
-        cx.yBuffer          = bb_try_virt_calloc_bounded_span<uint64>  ( allocCount );
-        cx.yBufferTmp       = bb_try_virt_calloc_bounded_span<uint64>  ( allocCount );
-        cx.xBuffer          = bb_try_virt_calloc_bounded_span<uint32>  ( allocCount );
-        cx.xBufferTmp       = bb_try_virt_calloc_bounded_span<uint32>  ( allocCount );
-        cx.sortKey          = bb_try_virt_calloc_bounded_span<uint32>  ( maxPairsPerTable );
-        cx.metaBuffer       = bb_try_virt_calloc_bounded_span<K32Meta4>( maxPairsPerTable );
-        cx.metaBufferTmp    = bb_try_virt_calloc_bounded_span<K32Meta4>( maxPairsPerTable );
-        cx.pairs            = bb_try_virt_calloc_bounded_span<Pair>    ( maxPairsPerTable );
-        cx.pairsTmp         = bb_try_virt_calloc_bounded_span<Pair>    ( maxPairsPerTable );
-        cx.groupsBoundaries = bb_try_virt_calloc_bounded_span<uint32>  ( allocCount );
+        VirtualAllocator alloc;
+
+        cx.yBufferF1        = alloc.TryCAllocBoundedSpan<uint64>  ( allocCount );
+        cx.yBuffer          = alloc.TryCAllocBoundedSpan<uint64>  ( allocCount );
+        cx.yBufferTmp       = alloc.TryCAllocBoundedSpan<uint64>  ( allocCount );
+        cx.xBuffer          = alloc.TryCAllocBoundedSpan<uint32>  ( allocCount );
+        cx.xBufferTmp       = alloc.TryCAllocBoundedSpan<uint32>  ( allocCount );
+        cx.sortKey          = alloc.TryCAllocBoundedSpan<uint32>  ( maxPairsPerTable );
+        cx.metaBuffer       = alloc.TryCAllocBoundedSpan<K32Meta4>( maxPairsPerTable );
+        cx.metaBufferTmp    = alloc.TryCAllocBoundedSpan<K32Meta4>( maxPairsPerTable );
+        cx.pairs            = alloc.TryCAllocBoundedSpan<Pair>    ( maxPairsPerTable );
+        cx.pairsTmp         = alloc.TryCAllocBoundedSpan<Pair>    ( maxPairsPerTable );
+        cx.groupsBoundaries = alloc.TryCAllocBoundedSpan<uint32>  ( allocCount );
 
         // Allocate proof tables
         // Table 1 needs no groups, as we write to the R table's merged group, always
         for( uint32 i = 1; i < 7; i++ )
         {
             cx.tables[i] = {};
-            cx.tables[i]._pairs    = bb_try_virt_calloc_bounded<Pair>( maxPairsPerTable );
+            cx.tables[i]._pairs    = alloc.TryCAllocBounded<Pair>( maxPairsPerTable );
             cx.tables[i]._capacity = maxPairsPerTable;
-
-            if( !cx.tables[i]._pairs )
-            {
-                FreeBucketBuffers( cx );
-                return false;
-            }
 
             // Reduce the match count for each subsequent table by nearly half
             maxPairsPerTable = std::max<uint64>( (uint64)(maxPairsPerTable * 0.6), GR_MIN_TABLE_PAIRS );
         }
 
-        if( !cx.yBufferF1.Ptr()     ||
-            !cx.yBuffer.Ptr()       || 
-            !cx.yBufferTmp.Ptr()    || 
-            !cx.xBuffer.Ptr()       || 
-            !cx.xBufferTmp.Ptr()    || 
-            !cx.sortKey.Ptr()       || 
-            !cx.metaBuffer.Ptr()    || 
-            !cx.metaBufferTmp.Ptr() || 
-            !cx.pairs.Ptr()         ||
-            !cx.pairsTmp.Ptr()      ||
-            !cx.groupsBoundaries.Ptr() )
-        {
+        cx.allocationSize = alloc.AllocSize();
+
+        if( alloc.FailCount() > 0 )
+        {   
             FreeBucketBuffers( cx );
             return false;
         }
@@ -493,6 +758,8 @@ bool ReserveBucketBuffers( GreenReaperContext& cx, uint32 k, uint32 compressionL
 //-----------------------------------------------------------
 void FreeBucketBuffers( GreenReaperContext& cx )
 {
+    cx.allocationSize = 0;
+
     bbvirtfreebounded_span( cx.yBufferF1 );
     bbvirtfreebounded_span( cx.yBuffer );
     bbvirtfreebounded_span( cx.yBufferTmp );
@@ -514,8 +781,11 @@ void FreeBucketBuffers( GreenReaperContext& cx )
 
 //-----------------------------------------------------------
 template<TableId rTable>
-inline void SortTableAndFlipBuffers( GreenReaperContext& cx )
+inline void SortTableAndFlipBuffers( GreenReaperContext& cx, const uint32 groupCount )
 {
+    #if SHOW_TIMINGS
+        const auto timer = TimerBegin();
+    #endif
     using TMeta = typename K32MetaType<rTable>::Out;
 
     ProofTable& table = cx.tables[(int)rTable];
@@ -538,8 +808,6 @@ inline void SortTableAndFlipBuffers( GreenReaperContext& cx )
     Span<uint32> keyUnsorted        = cx.xBufferTmp.SliceSize( tableLength );
     Span<uint32> keySorted          = cx.xBuffer   .SliceSize( tableLength );
 
-    const uint32 groupCount = 32 >> (int)rTable;
-
     for( uint32 i = 0; i < groupCount; i++ )
     {
         const uint32 groupLength  = table._groups[i].count;
@@ -559,7 +827,7 @@ inline void SortTableAndFlipBuffers( GreenReaperContext& cx )
         tablePairsUnsorted = tablePairsUnsorted.Slice( groupLength ); 
         tablePairsSorted   = tablePairsSorted  .Slice( groupLength );
 
-        
+
         auto kUnsorted = keyUnsorted.SliceSize( groupLength );
         auto kSorted   = keySorted  .SliceSize( groupLength );
 
@@ -575,6 +843,10 @@ inline void SortTableAndFlipBuffers( GreenReaperContext& cx )
 
     cx.proofContext.leftLength  = (uint32)tableLength;
     cx.proofContext.rightLength = (uint32)cx.tables[(int)rTable+1]._capacity;
+    
+    #if SHOW_TIMINGS
+        Log::Line( "Sort elapsed: %.3lf s", TimerEnd( timer ) );
+    #endif
 }
 
 ///
@@ -583,10 +855,11 @@ inline void SortTableAndFlipBuffers( GreenReaperContext& cx )
 //-----------------------------------------------------------
 void GenerateF1( GreenReaperContext& cx, const byte plotId[32], const uint64 bucketEntryCount, const uint32 x0, const uint32 x1 )
 {
-    const uint32 k = 32;
-    // Log::Line( " F1..." );
-    // auto timer = TimerBegin();
+    #if SHOW_TIMINGS
+        const auto timer = TimerBegin();
+    #endif
 
+    const uint32 k = 32;
     const uint32 f1BlocksPerBucket = (uint32)(bucketEntryCount * sizeof( uint32 ) / kF1BlockSize);
 
     uint32 threadCount = cx.pool->ThreadCount();
@@ -697,8 +970,33 @@ void GenerateF1( GreenReaperContext& cx, const byte plotId[32], const uint64 buc
         // }
     }
 #endif
+    
+    #if SHOW_TIMINGS
+        Log::Line( "F1 elapsed: %.3lf s", TimerEnd( timer ) );
+    #endif
 }
 
+//-----------------------------------------------------------
+void SortQualityXs( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64* x, const uint32 count )
+{
+    ASSERT( count <= 16 );
+    
+    uint128 lp[8] = {};
+    const uint32 lpCount = count / 2;
+
+    for( uint32 i = 0; i < lpCount; i++ )
+        lp[i] = SquareToLinePoint128( x[i*2], x[i*2+1] );
+
+    std::sort( &lp[0], &lp[lpCount] );
+
+    for( uint32 i = 0; i < lpCount; i++ )
+    {
+        const auto v = LinePointToSquare( lp[i] );
+
+        x[i*2]   = v.x;
+        x[i*2+1] = v.y;
+    }
+}
 
 ///
 /// Forward propagation
@@ -724,7 +1022,15 @@ inline uint64 ForwardPropTableGroup( GreenReaperContext& cx, const uint32 lGroup
     if( (lGroup & 1) == 0)
         rTable.BeginGroup( rGroup );
 
+    #if SHOW_TIMINGS
+        const auto timer = TimerBegin();
+    #endif
+    
     Span<Pair> pairs = Match( cx, yLeft, outPairs, lTable._groups[lGroup].offset );
+    
+    #if SHOW_TIMINGS
+        Log::Line( " Match elapsed: %.3lf s", TimerEnd( timer ) );
+    #endif
 
     if( pairs.Length() > yRight.Length() )
         return 0;
@@ -739,8 +1045,16 @@ inline uint64 ForwardPropTableGroup( GreenReaperContext& cx, const uint32 lGroup
         // of group-local y and meta
         yLeft    = MakeSpan( cx.proofContext.yLeft, cx.proofContext.leftLength );
         metaLeft = MakeSpan( (TMetaIn*)cx.proofContext.metaLeft, cx.proofContext.leftLength );
+        
+        #if SHOW_TIMINGS
+            const auto timer = TimerBegin();
+        #endif
 
         GenerateFxForPairs<rTableId, TMetaIn, TMetaOut>( cx, pairs, yLeft, metaLeft, yRight, metaRight );
+
+        #if SHOW_TIMINGS
+            Log::Line( " Fx elapsed: %.3lf s", TimerEnd( timer ) );
+        #endif
     }
 
     return pairs.Length();
@@ -748,8 +1062,11 @@ inline uint64 ForwardPropTableGroup( GreenReaperContext& cx, const uint32 lGroup
 
 //-----------------------------------------------------------
 template<TableId rTable>
-ForwardPropResult ForwardPropTable( GreenReaperContext& cx )
+ForwardPropResult ForwardPropTable( GreenReaperContext& cx, uint32 tableGroupCount, bool returnSuccessOnSingleMatch )
 {
+    #if SHOW_TIMINGS
+        const auto timer = TimerBegin();
+    #endif
     using TMetaOut = typename K32MetaType<rTable>::Out;
 
     auto& table = cx.tables[(int)rTable];
@@ -760,38 +1077,47 @@ ForwardPropResult ForwardPropTable( GreenReaperContext& cx )
     auto outPairs  = cx.pairs.SliceSize( table._capacity );
 
     // Fp all groups in the table
-    const uint32 groupCount = 32 >> ((int)rTable-1);
-    uint64 matchCount = 0;
+    uint64 tableMatchCount = 0;
 
-    for( uint32 i = 0; i < groupCount; i++ )
+    for( uint32 i = 0; i < tableGroupCount; i++ )
     {
-        matchCount = ForwardPropTableGroup<rTable>( cx, i, outPairs, yRight, metaRight );
+        const uint64 matchCount = ForwardPropTableGroup<rTable>( cx, i, outPairs, yRight, metaRight );
 
         if( matchCount == 0 )
             return ForwardPropResult::Failed;
 
+        tableMatchCount += matchCount;
         outPairs  = outPairs .Slice( matchCount ); 
         yRight    = yRight   .Slice( matchCount );
         metaRight = metaRight.Slice( matchCount );
     }
 
-    SortTableAndFlipBuffers<rTable>( cx );
+    SortTableAndFlipBuffers<rTable>( cx, tableGroupCount );
 
-    // Table 6 makes no group entries, it should simply have a single match
-    if( rTable == TableId::Table6 )
-        return matchCount == 1 ? ForwardPropResult::Success : ForwardPropResult::Failed;
+    // The last table makes no group entries, it should simply have a single match
+    // if( rTable == TableId::Table6 )
+    //     return tableMatchCount == 1 ? ForwardPropResult::Success : ForwardPropResult::Failed;
+
+    // When getting qualities, we may have a single match before the last table
+    // if( returnSuccessOnSingleMatch && tableMatchCount == 1 )
+    //     return ForwardPropResult::Success;
 
     // Check if we found a match already
-    bool hasProof = true;
-    
-    for( uint32 i = 0; i < groupCount / 2; i++ )
-    {
-        if( table._groups[i].count != 2 )
-        {
-            hasProof = false;
-            break;
-        }
-    }        
+    const bool hasProof = (returnSuccessOnSingleMatch && tableMatchCount == 1) || tableMatchCount == 2;
+    // bool hasProof = true;
+
+    // const uint32 groupsToCheck = tableGroupCount == 1 ? 1 : tableGroupCount / 2;
+    // for( uint32 i = 0; i < groupsToCheck; i++ )
+    // {
+    //     if( table._groups[i].count != 2 )
+    //     {
+    //         hasProof = false;
+    //         break;
+    //     }
+    // }
+    #if SHOW_TIMINGS
+        Log::Line( "FP table %u: %.3lf s", rTable+1, TimerEnd( timer ) );
+    #endif
 
     return hasProof ? ForwardPropResult::Success : ForwardPropResult::Continue;
 }
@@ -803,17 +1129,20 @@ bool ForwardPropTables( GreenReaperContext& cx )
     {
         ForwardPropResult r;
 
+        const uint32 groupCount  = 32 >> ((int)rTable-1);
+        const bool   isLastTable = rTable == TableId::Table6;
+
         switch( rTable )
         {
             // case TableId::Table2: r = ForwardPropTable<TableId::Table2>( cx ); break;
-            case TableId::Table3: r = ForwardPropTable<TableId::Table3>( cx ); break;
-            case TableId::Table4: r = ForwardPropTable<TableId::Table4>( cx ); break;
-            case TableId::Table5: r = ForwardPropTable<TableId::Table5>( cx ); break;
-            case TableId::Table6: r = ForwardPropTable<TableId::Table6>( cx ); break;
+            case TableId::Table3: r = ForwardPropTable<TableId::Table3>( cx, groupCount, isLastTable ); break;
+            case TableId::Table4: r = ForwardPropTable<TableId::Table4>( cx, groupCount, isLastTable ); break;
+            case TableId::Table5: r = ForwardPropTable<TableId::Table5>( cx, groupCount, isLastTable ); break;
+            case TableId::Table6: r = ForwardPropTable<TableId::Table6>( cx, groupCount, isLastTable ); break;
 
             default:
-                Fatal( "Unexpected table." );
-                break;
+                Log::Error( "[GR_ERROR] Unexpected table encountered %u", (uint32)rTable+1 );
+                return false;
         }
 
         switch( r )
@@ -824,9 +1153,9 @@ bool ForwardPropTables( GreenReaperContext& cx )
 
             case ForwardPropResult::Continue:
                 break;
-            
+
             default:
-                ASSERT( 0 );
+                // ASSERT( 0 );
                 return false;
         }   
     }
@@ -839,206 +1168,124 @@ bool ForwardPropTables( GreenReaperContext& cx )
 /// Matching
 ///
 //-----------------------------------------------------------
-static void ScanBCGroups( GreenReaperContext& cx, const Span<uint64> yEntries, 
-                          Span<uint32> groupBoundariesBuffer,
-                          Span<uint32> groupBoundaries[BB_MAX_JOBS], uint32& outThreadCount );
-
-static uint32 MatchJob( const uint32 id, const uint32 startIndex, const Span<uint32> groupBoundaries, const Span<uint64> yEntries, Span<Pair> pairs, const uint32 pairOffset  );
-
-Span<Pair> Match( GreenReaperContext& cx, const Span<uint64> yEntries, Span<Pair> outputPairs, const uint32 pairOffset )
+struct GRMatchJob : MTJob<GRMatchJob>
 {
-    struct Input
-    {
-        Span<uint32> groupBoundaries[BB_MAX_JOBS];
-        Span<Pair>   pairBuffer;
-        Span<uint64> yEntries;
-        uint32       pairOffset;
-    };
+    const uint64* _yBuffer;
+          uint64  _entryCount;
+    const uint32* _groupIndices;
+          uint32  _groupCount;
+          Pair*   _tmpPairs;
+          Pair*   _outPairs;
+          uint64  _maxMatches;
+          uint32  _pairOffset;
+          std::atomic<uint64>* _totalMatchCount;
 
-    struct Output
-    {
-        Span<Pair>          pairBuffer;
-        uint32              matchCounts[BB_MAX_JOBS];
-        std::atomic<uint32> pairCount = 0;
-    };
+          uint32 _matchCount;
 
-    uint32 threadCount = 0;
-    Input  input       = {};
-    input.yEntries   = yEntries;
-    input.pairBuffer = cx.pairsTmp;
-    input.pairOffset = pairOffset;
-
-    Output output = {};
-    output.pairBuffer = outputPairs;
-
-    // Re-use sort buffers for group boundaries and pairs
-    auto groupsBoundariesBuffer = cx.groupsBoundaries; //Span<uint32>( cx.xBufferTmp, cx.maxEntriesPerBucket * 2 );
-
-    // Get the group boundaries and the adjusted thread count
-    ScanBCGroups( cx, yEntries, groupsBoundariesBuffer, input.groupBoundaries, threadCount );
-    
-    GenJobRun<Input, Output>( *cx.pool, threadCount, &input, &output, []( auto* self ){
-
-        const uint32 id     = self->JobId();
-        const auto&  input  = *self->input;
-              auto&  output = *self->output;
-
-        const uint32 startIndex = id == 0 ? 0 : input.groupBoundaries[id-1][input.groupBoundaries[id-1].Length()-1];
-    
-        Span<Pair> tmpPairs = GetThreadOffsets( self, input.pairBuffer );
-
-        const uint32 matchCount = MatchJob( id, startIndex, input.groupBoundaries[id], input.yEntries, tmpPairs, input.pairOffset );
-
-        output.matchCounts[id] =  matchCount;
-        output.pairCount       += matchCount;
-        
-        // Ensure we have enough space in the output buffer
-        Span<Pair> outPairs = output.pairBuffer;
-
-        if( self->BeginLockBlock() )
-        {
-            // #TODO: Set an error, there should not be more pairs than bucket size
-            if( outPairs.Length() < output.pairCount )
-                output.pairCount = 0;
-        }
-        self->EndLockBlock();
-
-        if( matchCount )
-        {
-            uint32 copyOffset = 0;
-            for( uint32 i = 0; i < id; i++ )
-                copyOffset += output.matchCounts[i];
-
-            tmpPairs.CopyTo( outPairs.Slice( copyOffset, matchCount ), matchCount );
-        }
-    });
-
-    return output.pairBuffer.SliceSize( output.pairCount );
-}
-
+    virtual void Run() override;
+};
 
 //-----------------------------------------------------------
-void ScanBCGroups( GreenReaperContext& cx, const Span<uint64> yEntries, 
-                   Span<uint32> groupBoundariesBuffer, Span<uint32> groupBoundaries[BB_MAX_JOBS], uint32& outThreadCount )
+Span<Pair> Match( GreenReaperContext& cx, const Span<uint64> yEntries, Span<Pair> outputPairs, const uint32 pairOffset )
 {
-    uint32 startPositions[BB_MAX_JOBS] = {};
-    uint32 entryCounts   [BB_MAX_JOBS] = {};
+    // Each thread must a minimum # of entries, otherwise, single-thread it
+    uint32 groupThreadCount = std::min( cx.config.threadCount, (uint32)yEntries.Length() );
+    while( groupThreadCount > 1 && yEntries.Length() / groupThreadCount < 512 )
+        groupThreadCount--;
 
-    // Find thread start positions
-          ThreadPool& pool        = *cx.pool;
-          uint32      threadCount = pool.ThreadCount();
-    const uint32      entryCount  = (uint32)yEntries.Length();
+    // Get the group boundaries and the adjusted thread count
+    const uint64 groupCount = ScanBCGroupMT32( 
+        *cx.pool,
+        groupThreadCount,
+        yEntries.Ptr(),
+        yEntries.Length(),
+        cx.xBufferTmp.Ptr(),
+        cx.groupsBoundaries.Ptr(),
+        cx.groupsBoundaries.Length()
+    );
 
-    // Lower thread count depending on how many entries we've got
-    while( threadCount > entryCount )
-        threadCount--;
+    ASSERT( cx.pairsTmp.Length() >= outputPairs.Length() );
+    std::atomic<uint64> matchCount = 0;
 
-    if( entryCount < 4096 )
-        threadCount = 1;
+    GRMatchJob job = {};
+    job._yBuffer         = yEntries.Ptr();
+    job._entryCount      = yEntries.Length();
+    job._groupIndices    = cx.groupsBoundaries.Ptr();
+    job._groupCount      = (uint32)groupCount;
+    job._tmpPairs        = cx.pairsTmp.Ptr();
+    job._outPairs        = outputPairs.Ptr();
+    job._maxMatches      = outputPairs.Length();
+    job._pairOffset      = pairOffset;
+    job._totalMatchCount = &matchCount;
+    job._matchCount      = 0;
 
-    outThreadCount = threadCount;
+    const uint32 matchThreadCount = std::min( cx.config.threadCount, (uint32)groupCount );
+    MTJobRunner<GRMatchJob>::RunFromInstance( *cx.pool, matchThreadCount, job );
 
-    const uint32 groupBufferCapacity = (uint32)groupBoundariesBuffer.Length();
-    const uint32 groupsPerThread     = (uint32)(groupBufferCapacity / threadCount);
-    
-    // Re-use the sorting buffer for group boundaries
+    return outputPairs.SliceSize( matchCount );
+}
 
-    // Find the scan starting position
-    groupBoundaries[0]    = groupBoundariesBuffer.SliceSize( groupsPerThread );
-    groupBoundariesBuffer = groupBoundariesBuffer.Slice( groupsPerThread );
+//-----------------------------------------------------------
+static uint32 MatchJob(
+    const Span<uint64> yEntries, 
+    const uint32*      groupBoundaries,
+    const uint32       groupCount,
+          Span<Pair>   pairs, 
+    const uint32       pairOffset,
+    const uint32       id );
 
-    for( uint32 i = 1; i < threadCount; i++ )
-    {
-        uint32 count, offset, _;
-        GetThreadOffsets( i, threadCount, entryCount, count, offset, _ );
+void GRMatchJob::Run()
+{
+    uint32 groupCount, offset, _;
+    GetThreadOffsets( this, _groupCount, groupCount, offset, _ );
 
-        const uint64* start   = yEntries.Ptr();
-        const uint64* entries = start + offset;
+    uint64 maxMatches, matchOffset, __;
+    GetThreadOffsets( this, _maxMatches, maxMatches, matchOffset, __ );
 
-        uint64 curGroup = *entries / kBC;
-        while( entries > start )
-        {
-            if( entries[-1] / kBC != curGroup )
-                break;
-            --entries;
-        }
+    auto tmpPairs = Span<Pair>( _tmpPairs + matchOffset, maxMatches );
 
-        startPositions [i]    = (uint32)(uintptr_t)(entries - start);
-        entryCounts    [i-1]  = startPositions[i] - startPositions[i-1];
-        groupBoundaries[i]    = groupBoundariesBuffer.SliceSize( groupsPerThread );
-        groupBoundariesBuffer = groupBoundariesBuffer.Slice( groupsPerThread );
-    }
+    const uint32 matchCount = MatchJob( 
+        Span<uint64>( (uint64*)_yBuffer, _entryCount ),
+        _groupIndices + offset,
+        groupCount,
+        tmpPairs,
+        _pairOffset,
+        _jobId );
 
-    entryCounts[threadCount-1] = entryCount - startPositions[threadCount-1];
+    _totalMatchCount->fetch_add( matchCount, std::memory_order_relaxed );
 
-    AnonMTJob::Run( *cx.pool, threadCount, [&]( AnonMTJob* self ) {
+    _matchCount = matchCount;
+    SyncThreads();
 
-        const uint32 id = self->JobId();
+    uint64 copyOffset = 0;
+    for( uint32 i = 0; i < _jobId; i++ )
+        copyOffset += GetJob( i )._matchCount;
 
-        Span<uint32>  groups      = groupBoundaries[id];
-        const uint32  maxGroups   = (uint32)groups.Length();
-        uint32        groupCount  = 0;
-        const uint32  entryOffset = startPositions[id];
-        auto          entries     = yEntries.Slice( entryOffset, entryCounts[id] );
-
-        uint64 curGroup = entries[0] / kBC;
-        
-        uint32 i;
-        for( i = 1; i < entries.Length(); i++ )
-        {
-            const uint64 g = entries[i] / kBC;
-
-            if( curGroup != g )
-            {
-                FatalIf( groupCount >= maxGroups, "Group count exceeded." );
-                groups[groupCount++] = entryOffset + i;
-                curGroup = g;
-            }
-        }
-
-        // Add the end location of the last R group
-        if( !self->IsLastThread() )
-        {
-            FatalIf( groupCount >= maxGroups-1, "Group count exceeded." );  // Need 2 places for the last ghost group
-            groups[groupCount] = startPositions[id+1];                      // Where our last usable group ends
-            groupCount += 2;
-        }
-        else
-        {
-            FatalIf( groupCount >= maxGroups, "Group count exceeded." );
-            groups[groupCount++] = (uint32)yEntries.Length();
-        }
-
-        groups.length       = groupCount;
-        groupBoundaries[id] = groups;
-    });
-
-    // Add the ghost groups, which tells us where the last R group
-    // of a group ends (only for non-last threads)
-    for( uint32 i = 0; i < threadCount-1; i++ )
-    {
-        auto& group = groupBoundaries[i];
-        group[group.Length()-1] = (uint32)groupBoundaries[i+1][0];
-    }
+    bbmemcpy_t( _outPairs + copyOffset, tmpPairs.Ptr(), matchCount );
 }
 
 // #TODO: Add SIMD optimization
 //-----------------------------------------------------------
-uint32 MatchJob( const uint32 id, const uint32 startIndex, const Span<uint32> groupBoundaries, const Span<uint64> yEntries, Span<Pair> pairs, const uint32 pairOffset )
+uint32 MatchJob(
+    const Span<uint64> yEntries, 
+    const uint32*      groupBoundaries,
+    const uint32       groupCount,
+          Span<Pair>   pairs, 
+    const uint32       pairOffset,
+    const uint32       id )
 {
-    // const uint32 id         = self->JobId();
-    const uint32 groupCount = (uint32)groupBoundaries.Length() - 1; // Ignore the extra ghost group
-    const uint32 maxPairs   = (uint32)pairs.Length();
+    // const uint32 groupCount = (uint32)groupBoundaries.Length();
+    const uint32 maxPairs = (uint32)pairs.Length();
 
     uint32 pairCount = 0;
 
     uint8  rMapCounts [kBC];
     uint16 rMapIndices[kBC];
 
-    uint64 groupLStart = startIndex;
+    uint64 groupLStart = groupBoundaries[0];
     uint64 groupL      = yEntries[groupLStart] / kBC;
 
-    for( uint32 i = 0; i < groupCount; i++ )
+    for( uint32 i = 1; i <= groupCount; i++ )
     {
         const uint64 groupRStart = groupBoundaries[i];
         const uint64 groupR      = yEntries[groupRStart] / kBC;
@@ -1080,7 +1327,7 @@ uint32 MatchJob( const uint32 id, const uint32 startIndex, const Span<uint32> gr
 
                 for( int iK = 0; iK < kExtraBitsPow; iK++ )
                 {
-                    const uint64 targetR = L_targets[parity][localL][iK];
+                    const uint16 targetR = L_targets[parity][localL][iK];
 
                     // for( uint j = 0; j < rMapCounts[targetR]; j++ )
                     if( rMapCounts[targetR] > 0 )
@@ -1091,17 +1338,19 @@ uint32 MatchJob( const uint32 id, const uint32 startIndex, const Span<uint32> gr
                             ASSERT( iL < iR );
 
                             // Add a new pair
-                            FatalIf( pairCount >= maxPairs, "Too many pairs found." );
+                            if( pairCount >= maxPairs )
+                            {
+                                // #TODO: Set error
+                                ASSERT( 0 );
+                                return pairCount;
+                            }
 
                             Pair& pair = pairs[pairCount++];
                             pair.left  = (uint32)iL + pairOffset;
                             pair.right = (uint32)iR + pairOffset;
-                            // Log::Line( "M: %-8u, %8u : %-12llu, %-12llu", pair.left, pair.right, yL, yEntries[iR] );
                         }
                     }
                 }
-
-                //NEXT_L:;
             }
         }
         // Else: Not an adjacent group, skip to next one.
@@ -1118,7 +1367,6 @@ uint32 MatchJob( const uint32 id, const uint32 startIndex, const Span<uint32> gr
 ///
 /// Fx
 ///
-
 //-----------------------------------------------------------
 template<TableId rTable, typename TMetaIn, typename TMetaOut>
 void GenerateFxForPairs( GreenReaperContext& cx, const Span<Pair> pairs, const Span<uint64> yIn, const Span<TMetaIn> metaIn, Span<uint64> yOut, Span<TMetaOut> metaOut )
@@ -1264,4 +1512,3 @@ inline void GenerateFx( const Span<Pair> pairs, const Span<uint64> yIn, const Sp
         }
     }
 }
-

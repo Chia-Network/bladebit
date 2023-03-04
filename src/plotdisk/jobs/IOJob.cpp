@@ -49,7 +49,7 @@ bool IOJob::RunIOJob( bool write,
     threadCount = std::max( 1u, std::min( threadCount, pool.ThreadCount() ) );
 
     // For small writes use a single thread
-    const size_t minWrite = std::max( blockSize, (size_t)16 MB );
+    const size_t minWrite = std::max( blockSize, (size_t)(16 MiB) );
 
     if( size <= minWrite || threadCount == 1 )
     {

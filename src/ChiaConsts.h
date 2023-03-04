@@ -72,8 +72,8 @@ const double kRValues[7] = { 4.7, 2.75, 2.75, 2.7, 2.6, 2.45 };
 #define kPOSMagic          "Proof of Space Plot"
 #define kFormatDescription "v1.0"
 
-#define CHIA_PLOT_V2_MAGIC       0x544F4C50ul   // "PLOT"
-#define CHIA_PLOT_VERSION_2_0_0  ((2ul*10000) + (0ul * 100) + 0)
+#define CHIA_PLOT_V2_MAGIC  0x544F4C50ul   // "PLOT"
+#define CHIA_PLOT_VERSION_2 2
 
 #define BB_PLOT_ID_LEN 32
 #define BB_PLOT_ID_HEX_LEN (BB_PLOT_ID_LEN * 2)
@@ -88,12 +88,15 @@ const double kRValues[7] = { 4.7, 2.75, 2.75, 2.7, 2.6, 2.45 };
 
 #define BB_PLOT_PROOF_X_COUNT 64
 
+#define BB_CHIA_CHALLENGE_SIZE 32
+#define BB_CHIA_QUALITY_SIZE   32
 
 
 // Initializes L_targets table
 //-----------------------------------------------------------
 inline void LoadLTargets()
 {
+    // #TODO: Fix this as it is not thread-safe
     static bool _initialized = false;
 
     if( _initialized )

@@ -44,7 +44,11 @@ TEST_CASE( "line-point-deltas", "[sandbox]" )
 
     // byte* parkBuffer = (byte*)malloc( defaultParkSize * 4 );
 
-    for( uint32 cLevel = 1; cLevel < 8; cLevel++ )
+          uint32 cLevel    = GetEnvU32( "bb-clevel", 1 );
+    const uint32 endCLevel = GetEnvU32( "bb-end-clevel", 9 );
+    const uint32 k         = 32;
+
+    for( ; cLevel <= endCLevel; cLevel++ )
     {
         Log::Line( "[Level %u]", cLevel );
         Log::Line( " Loading line points" );
@@ -55,26 +59,26 @@ TEST_CASE( "line-point-deltas", "[sandbox]" )
 
         LpData lpData = {};
 
-        const uint32 entryBitSize = (17 - cLevel) * 2;  // entry size raw * 2
-              uint32 stubBitSize  = entryBitSize - 4;   // - 4 because each line (x0, x1) is linepointed, then
-                                                        // each (xlp0, xlp1) is also linepointed in table 3.
+        const uint32 xBitSize     = (17 - cLevel);
+        const uint32 entryBitSize = xBitSize * 2;
+              uint32 stubBitSize  = k-1;    // Delta average should be k size, so remove 1 bit for small delta
 
         double rValue = 0;
-        
+
         Log::Line( " Calculating for entries of %u bits", entryBitSize/2 );
         for( ;; )
         {
             DumpLpData( linePoints, cLevel, stubBitSize, lpData );
-            
+
             const double averageBits = lpData.deltaTotalBits / double(linePoints.Length()-1);
             Log::Line( " [Stub bit size: %u]", stubBitSize );
-            Log::Line( "  Average delta bit count : %.2lf", averageBits );
-            Log::Line( "  Max delta bits          : %llu" , lpData.deltaBitsMax );
-            Log::Line( "  Min delta bits          : %llu" , lpData.deltaBitsMin );
-            Log::Line( "  Max delta value         : %llu" , lpData.deltaMax     );
-            Log::Line( "  Min delta value         : %llu" , lpData.deltaMin     );
-            Log::Line( "  Max delta park          : %llu" , lpData.deltaMaxPark );
-            Log::Line( "  Min delta park          : %llu" , lpData.deltaMinPark );
+            Log::Line( "  Average delta bit count : %.2lf", averageBits          );
+            Log::Line( "  Max delta bits          : %llu" , lpData.deltaBitsMax  );
+            Log::Line( "  Min delta bits          : %llu" , lpData.deltaBitsMin  );
+            Log::Line( "  Max delta value         : %llu" , lpData.deltaMax      );
+            Log::Line( "  Min delta value         : %llu" , lpData.deltaMin      );
+            Log::Line( "  Max delta park          : %llu" , lpData.deltaMaxPark  );
+            Log::Line( "  Min delta park          : %llu" , lpData.deltaMinPark  );
             Log::Line( "  N overflowed 256-bits   : %llu" , lpData.overflowCount );
             Log::WriteLine( "" );
 
@@ -83,7 +87,7 @@ TEST_CASE( "line-point-deltas", "[sandbox]" )
                 stubBitSize++;
                 break;
             }
-            
+
             stubBitSize--;
             rValue = lpData.deltaTotalBits / double(linePoints.Length()-1); 
         }
@@ -93,7 +97,7 @@ TEST_CASE( "line-point-deltas", "[sandbox]" )
         Log::Line( " [Calculating ANS value]" );
 
         size_t deltasSize = defaultDeltasSize;
-        
+
 
         const size_t stubBytes = CDiv( (kEntriesPerPark-1) * stubBitSize, 8 );
         size_t currentParkSize  = stubBytes + defaultDeltasSize;
@@ -339,14 +343,30 @@ void DumpLpData( Span<uint64> linePoints, const uint32 compressionLevel, const u
 Span<uint64> LoadLpTableForCompressionLevel( const uint compressionLevel )
 {
     char filePath[1024] = {};
-    sprintf( filePath, "%st2.lp.c%u.ref", BB_DP_DBG_REF_DIR "compressed-lps/", compressionLevel );
+
+    if( compressionLevel < 9 )
+        sprintf( filePath, "%st2.lp.c%u.ref", BB_DP_DBG_REF_DIR "compressed-lps/", compressionLevel );
+    else
+        sprintf( filePath, "%slp.c%u.ref", BB_DP_DBG_REF_DIR "compressed-lps/", compressionLevel );
 
     size_t byteCount = 0;
     int err = 0;
     uint64* linePoints = (uint64*)IOJob::ReadAllBytesDirect( filePath, err, byteCount );
     
     FatalIf( !linePoints, "Failed to load line points from '%s' with error %d", filePath, err );
-    return Span<uint64>( linePoints, byteCount / sizeof( uint64 ) );
+
+    // Get the line point count
+    int64 count = (int64)(byteCount / sizeof( uint64 ));
+    for( int64 i = count-2; i >= 0; i-- )
+    {
+        if( linePoints[i] > linePoints[i+1] )
+        {
+            count = i+1;
+            break;
+        }
+    }
+
+    return Span<uint64>( linePoints, (size_t)count );
 }
 
 //-----------------------------------------------------------

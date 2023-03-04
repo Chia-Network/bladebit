@@ -21,6 +21,7 @@ static void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32Allo
     static void DbgValidateRMap( CudaK32PlotContext& cx );
     static void DbgValidateIndices( CudaK32PlotContext& cx );
     void DbgLoadLMap( CudaK32PlotContext& cx );
+    void DbgDumpSortedLinePoints( CudaK32PlotContext& cx );
 #endif
 
 
@@ -594,6 +595,7 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
 #if _DEBUG
     // DbgValidateIndices( cx );
     // DbgValidateStep2Output( cx );
+    // DbgDumpSortedLinePoints( cx );
 #endif
 }
 

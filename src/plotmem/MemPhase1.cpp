@@ -707,11 +707,11 @@ uint64 MemPhase1::FpScan( const uint64 entryCount, const uint64* yBuffer, uint32
 
         // Add a trailing end index so that we can test against it
         job.groupBoundaries[job.groupCount] = jobs[i+1].groupBoundaries[0];
-        
+
         groupCount += job.groupCount;
     }
     groupCount += jobs[threadCount-1].groupCount;
-        
+
     // Let the last job know where its R group
     auto& lastJob = jobs[threadCount-1];
 

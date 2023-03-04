@@ -3,7 +3,7 @@
 #include "BLS.h"
 
 #define CHIA_PUZZLE_HASH_SIZE   32
-#define CHIA_ADDRESS_MAX_LENGTH 63 // 4 (hrp) + 1 (divisor) + 52 (data) + 6 (checksum)
+#define CHIA_ADDRESS_MAX_LENGTH 63 // 4 (hrp) + 1 (separator) + 52 (data) + 6 (checksum)
                                    // hrp is either xch or txch
 
  #define CHIA_ADDRESS_LENGTH         62

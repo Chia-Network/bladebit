@@ -203,8 +203,8 @@ bool PlotWriter::BeginPlotInternal( PlotVersion version,
         byte* headerWriter = _writeBuffer.Ptr();
         
         // The start of the header buffer should be 4-byte aligned, so we can do this
-        *((uint32*)headerWriter) = (uint32)CHIA_PLOT_V2_MAGIC;      headerWriter += 4;  // magic
-        *((uint32*)headerWriter) = (uint32)CHIA_PLOT_VERSION_2_0_0; headerWriter += 4;  // file version
+        *((uint32*)headerWriter) = (uint32)CHIA_PLOT_V2_MAGIC;  headerWriter += 4;  // magic
+        *((uint32*)headerWriter) = (uint32)CHIA_PLOT_VERSION_2; headerWriter += 4;  // file version
 
         // Plot Id
         memcpy( headerWriter, plotId, 32 );

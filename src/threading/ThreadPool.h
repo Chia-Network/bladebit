@@ -20,7 +20,7 @@ public:
                     // as there are jobs available.
     };
 
-    ThreadPool( uint threadCount, Mode mode = Mode::Fixed, bool disableAffinity = false );
+    ThreadPool( uint threadCount, Mode mode = Mode::Fixed, bool disableAffinity = false, uint32 cpuOffset = 0);
     ~ThreadPool();
 
     void RunJob( JobFunc func, void* data, uint count, size_t dataSize );

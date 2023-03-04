@@ -16,16 +16,20 @@ typedef struct GreenReaperContext GreenReaperContext;
 typedef struct GreenReaperConfig
 {
     uint32_t threadCount;
+    uint32_t cpuOffset;
+    grBool   disableCpuAffinity;
 
 } GreenReaperConfig;
 
-typedef enum GRProofResult
+typedef enum GRResult
 {
-    GRProofResult_Failed      = 0,
-    GRProofResult_OK          = 1,
-    GRProofResult_OutOfMemory = 2,
+    GRResult_Failed       = 0,
+    GRResult_OK           = 1,
+    GRResult_OutOfMemory  = 2,
+    GRResult_NoProof      = 3,  // A dropped proof due to line point compression
 
-} GRProofResult;
+} GRResult;
+
 
 // Timings expressed in nanoseconds
 // typedef struct GRProofTimings
@@ -44,7 +48,6 @@ typedef struct GRCompressedProofRequest
         uint64_t fullProof      [GR_POST_PROOF_X_COUNT];
     };
 
-    
           uint32_t  compressionLevel;
     const uint8_t*  plotId;
 
@@ -54,12 +57,38 @@ typedef struct GRCompressedProofRequest
           
 } GRCompressedProofRequest;
 
+typedef struct GRLinePoint
+{
+    uint64_t hi;  // High-order bytes
+    uint64_t lo;  // Low-order bytes
+} GRLinePoint;
 
+typedef struct GRCompressedQualitiesRequest
+{
+    // Input
+    const uint8_t*  plotId;
+    const uint8_t*  challenge;
+    uint32_t        compressionLevel;
+    GRLinePoint     xLinePoints[2];     // Line points with compressed x's
+
+    // Output
+    uint64_t        x1, x2;             // Output x qualities
+
+} GRCompressedQualitiesRequest;
+
+///
+/// API
+///
 GreenReaperContext* grCreateContext( GreenReaperConfig* config );
 void                grDestroyContext( GreenReaperContext* context );
 
+// Full proof of space request given a challenge
+GRResult grFetchProofForChallenge( GreenReaperContext* context, GRCompressedProofRequest* req );
 
-GRProofResult grFetchProofForChallenge( GreenReaperContext* context, GRCompressedProofRequest* req );
+// Request plot qualities for a challenge
+GRResult grGetFetchQualitiesXPair( GreenReaperContext* context, GRCompressedQualitiesRequest* req );
+
+size_t grGetMemoryUsage( GreenReaperContext* context );
 
 
 #ifdef __cplusplus

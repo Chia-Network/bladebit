@@ -20,7 +20,7 @@ TEST_CASE( "plot-writer", "[sandbox]" )
 {
     PlotWriter writer;
 
-    // byte plotId[32];
+    byte plotId[32];
 
     const size_t blockSize  = 4096;
     const size_t totalCount = ( 6ull GiB ) / sizeof( uint32 );
