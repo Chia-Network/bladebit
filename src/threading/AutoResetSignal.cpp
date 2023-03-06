@@ -1,6 +1,7 @@
 #include "AutoResetSignal.h"
 #include "util/Util.h"
 #include "util/Log.h"
+#include <sys/errno.h>
 
 #if PLATFORM_IS_WINDOWS
     #include <Windows.h>

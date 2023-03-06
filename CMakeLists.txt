@@ -85,6 +85,8 @@ endif()
 # Catch
 # TODO: Add configuration var to disable this
 include(cmake_modules/FindCatch2.cmake)
+include_directories(/usr/include)
+
 # set_target_properties(Catch2 PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # set_target_properties(Catch2WithMain PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
@@ -131,11 +133,55 @@ if((NOT DEFINED ENV{CI}) AND (NOT DEFINED CACHE{bb_version_embedded}))
         set(cmd_ver bash.exe)
     endif()
 
-    execute_process(COMMAND ${cmd_ver} extract-version.sh major    OUTPUT_VARIABLE bb_ver_maj    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} extract-version.sh minor    OUTPUT_VARIABLE bb_ver_min    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} extract-version.sh revision OUTPUT_VARIABLE bb_ver_rev    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} extract-version.sh suffix   OUTPUT_VARIABLE bb_ver_suffix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} extract-version.sh commit   OUTPUT_VARIABLE bb_ver_commit WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(
+        COMMAND ${cmd_ver} extract-version.sh major
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE bb_ver_maj
+        RESULT_VARIABLE result_maj
+    )
+    if(result_maj)
+        message(FATAL_ERROR "Failed to extract major version")
+    endif()
+
+    execute_process(
+        COMMAND ${cmd_ver} extract-version.sh minor
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE bb_ver_min
+        RESULT_VARIABLE result_min
+    )
+    if(result_min)
+        message(FATAL_ERROR "Failed to extract minor version")
+    endif()
+
+    execute_process(
+        COMMAND ${cmd_ver} extract-version.sh revision
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE bb_ver_rev
+        RESULT_VARIABLE result_rev
+    )
+    if(result_rev)
+        message(FATAL_ERROR "Failed to extract revision")
+    endif()
+
+    execute_process(
+        COMMAND ${cmd_ver} extract-version.sh suffix
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE bb_ver_suffix
+        RESULT_VARIABLE result_suffix
+    )
+    if(result_suffix)
+        message(FATAL_ERROR "Failed to extract suffix")
+    endif()
+
+    execute_process(
+        COMMAND ${cmd_ver} extract-version.sh commit
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE bb_ver_commit
+        RESULT_VARIABLE result_commit
+    )
+    if(result_commit)
+        message(FATAL_ERROR "Failed to extract commit")
+    endif()
 
     # Remove trailing whitespace incurred in windows gitbash
     string(STRIP "${bb_ver_maj}"    bb_ver_maj)

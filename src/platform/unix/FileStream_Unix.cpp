@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/errno.h>
 
 //----------------------------------------------------------
 bool FileStream::Open( const char* path, FileMode mode, FileAccess access, FileFlags flags )
