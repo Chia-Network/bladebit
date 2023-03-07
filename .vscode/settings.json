@@ -4,11 +4,9 @@
         "nominmax"
     ],
     "files.associations": {
-        "*.sd": "yaml",
-        "*.userprefs": "xml",
-        "*.make": "makefile",
         "Fastfile": "ruby",
         "*.plist": "xml",
+        "*.sd": "yaml",
         "*.json": "jsonc",
         "*.ir": "llvm",
         "*.qs": "javascript",
@@ -112,7 +110,8 @@
         "stop_token": "cpp",
         "queue": "cpp",
         "__memory": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "__bits": "cpp"
     },
     "cSpell.words": [
         "Ryzen"

@@ -186,6 +186,9 @@
             "name"         : "Tests",
             
             "type"          : "cppdbg",
+            "osx": {
+                "MIMode": "lldb",
+            },
             "request"       : "launch",
             "stopAtEntry"   : false,
             "cwd"           : "${workspaceFolder}",
@@ -217,7 +220,8 @@
                 // "bucket-slice-write"
                 // "line-point-deltas"
                 // "compressed-plot-proof"
-                "compressed-plot-qualities"
+                // "compressed-plot-qualities"
+                "macos-threads"
             ]
         }
 

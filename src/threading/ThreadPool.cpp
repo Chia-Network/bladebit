@@ -56,12 +56,6 @@ ThreadPool::~ThreadPool()
     for( uint i = 0; i < _threadCount; i++ )
         _threads[i].WaitForExit();
 
-    // #TODO: Implement for apple
-    #if __APPLE__
-        #error Thread::WaitForExit() not implemented on macOS
-    #endif
-    
-
     delete[] _threads;
     delete[] _threadData;
     
