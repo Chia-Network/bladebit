@@ -171,7 +171,7 @@ void DumpCompressedPlotCapacity( const Config& cfg, const uint32 k, const uint32
 {
     // Calculate farm size for this compression level
     const size_t plotSize  = CalculatePlotSizeBytes( k, compressionLevel );
-    const uint64 plotCount = cfg.maxLookupTime / fetchAverageSecs * cfg.filterBits;
+    const uint64 plotCount = (uint64)(cfg.maxLookupTime / fetchAverageSecs * cfg.filterBits);
 
     const size_t farmSizeBytes = plotCount * plotSize;
     const size_t farmSizeTB    = BtoTBSi( farmSizeBytes );
@@ -202,7 +202,7 @@ size_t CalculatePlotSizeBytes( const uint32 k, const uint32 compressionLevel )
     size_t tableSizes[7] = {};
     for( uint32 table = (uint32)TableId::Table2; table <= (uint32)TableId::Table7; table++ )
     {
-        const uint64 prunedEntryCount = tableEntryCount * tablePrunedFactors[table];
+        const uint64 prunedEntryCount = (uint64)(tableEntryCount * tablePrunedFactors[table]);
         const uint64 parkCount        = CDiv( prunedEntryCount, kEntriesPerPark );
 
         tableSizes[table] = parkCount * parkSizes[table];

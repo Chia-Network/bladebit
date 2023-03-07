@@ -118,7 +118,7 @@
     ],
     "C_Cpp.errorSquiggles": "Enabled",
     "cmake.configureOnOpen": true,
-    "cmake.generator": "Unix Makefiles"
+    // "cmake.generator": "Unix Makefiles"
     // "cmake.generator": "Visual Studio 17 2022"
 
 }

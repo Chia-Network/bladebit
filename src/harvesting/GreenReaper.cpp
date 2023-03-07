@@ -322,7 +322,8 @@ GRResult grFetchProofForChallenge( GreenReaperContext* cx, GRCompressedProofRequ
     }
 
     const uint32 numGroups        = GR_POST_PROOF_CMP_X_COUNT;
-    const uint32 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, req->compressionLevel );
+    const uint64 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, req->compressionLevel );
+    ASSERT( entriesPerBucket <= 0xFFFFFFFF );
 
 
     bool proofMightBeDropped = false;
@@ -400,7 +401,8 @@ GRResult grGetFetchQualitiesXPair( GreenReaperContext* cx, GRCompressedQualities
             return r;
     }
 
-    const uint32 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, req->compressionLevel );
+    const uint64 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, req->compressionLevel );
+    ASSERT( entriesPerBucket <= 0xFFFFFFFF );
 
     // Begin decompression
     Table1BucketContext tcx;
@@ -1193,15 +1195,18 @@ Span<Pair> Match( GreenReaperContext& cx, const Span<uint64> yEntries, Span<Pair
     while( groupThreadCount > 1 && yEntries.Length() / groupThreadCount < 512 )
         groupThreadCount--;
 
+    ASSERT( yEntries.length <= 0xFFFFFFFF );
+    ASSERT( cx.groupsBoundaries.length <= 0xFFFFFFFF );
+
     // Get the group boundaries and the adjusted thread count
     const uint64 groupCount = ScanBCGroupMT32( 
         *cx.pool,
         groupThreadCount,
         yEntries.Ptr(),
-        yEntries.Length(),
+        (uint32)yEntries.Length(),
         cx.xBufferTmp.Ptr(),
         cx.groupsBoundaries.Ptr(),
-        cx.groupsBoundaries.Length()
+        (uint32)cx.groupsBoundaries.Length()
     );
 
     ASSERT( cx.pairsTmp.Length() >= outputPairs.Length() );
