@@ -18,39 +18,36 @@ Thread::Thread( size_t stackSize )
 
     _state.store( ThreadState::ReadyToRun, std::memory_order_release );
 
-#if PLATFORM_IS_UNIX
-
     pthread_attr_t  attr;
     
     int r = pthread_attr_init( &attr );
-    if( r ) Fatal( "pthread_attr_init() failed." );
+    PanicIf( r, "pthread_attr_init() failed with error %d.", r );
     
     r = pthread_attr_setstacksize( &attr, stackSize );
-    if( r ) Fatal( "pthread_attr_setstacksize() failed." );
+    PanicIf( r, "pthread_attr_setstacksize() failed with error %d.", r );
 
-    // Initialize suspended mode signal
+    // Initialize suspended mode signal and exit signals
     r = pthread_cond_init(  &_launchCond,  NULL );
-    if( r ) Fatal( "pthread_cond_init() failed." );
+    PanicIf( r, "pthread_cond_init() failed with error %d.", r );
 
     r = pthread_mutex_init( &_launchMutex, NULL );
-    if( r ) Fatal( "pthread_mutex_init() failed." );
+    PanicIf( r, "pthread_mutex_init() failed with error %d.", r );
+
+    r = pthread_cond_init(  &_exitCond,  NULL );
+    PanicIf( r, "pthread_cond_init() failed with error %d.", r );
+
+    r = pthread_mutex_init( &_exitMutex, NULL );
+    PanicIf( r, "pthread_mutex_init() failed with error %d.", r );
     
     r = pthread_create( &_threadId, &attr, (PthreadFunc)&Thread::ThreadStarterUnix, this );
-    if( r ) Fatal( "pthread_create() failed." );
+    PanicIf( r, "pthread_create() failed with error %d.", r );
     
     r = pthread_attr_destroy( &attr );
-    if( r ) Fatal( "pthread_attr_destroy() failed." );
-
-#elif PLATFORM_IS_WINDOWS
-    
-
-#else
-    #error Not implemented
-#endif
+    PanicIf( r, "pthread_attr_destroy() failed with error %d.", r );
 }
 
 //-----------------------------------------------------------
-Thread::Thread() : Thread( 8 MB )
+Thread::Thread() : Thread( 8 MiB )
 {
 }
 
@@ -62,18 +59,22 @@ Thread::~Thread()
     if( !didExit )
     {
         // Thread should have exited already
-        #if PLATFORM_IS_UNIX
-            pthread_cancel( _threadId );
+        ASSERT( 0 );
+        
+        pthread_cancel( _threadId );
 
-            pthread_mutex_destroy( &_launchMutex );
-            pthread_cond_destroy ( &_launchCond );
+        pthread_mutex_destroy( &_launchMutex );
+        pthread_cond_destroy ( &_launchCond );
 
-            ZeroMem( &_launchMutex );
-            ZeroMem( &_launchCond  );
-        #else
-            #error Unimplemented
-        #endif
+        ZeroMem( &_launchMutex );
+        ZeroMem( &_launchCond  );
     }
+
+    pthread_mutex_destroy( &_exitMutex );
+    pthread_cond_destroy ( &_exitCond );
+
+    ZeroMem( &_exitMutex );
+    ZeroMem( &_exitCond  );
 
     _threadId = 0;
 }
@@ -105,24 +106,23 @@ void Thread::Run( ThreadRunner runner, void* param )
                                     std::memory_order_release,
                                     std::memory_order_relaxed ) )
     {
-        // Another thread ran us first.
+        // Another thread preempted us.
         return;
     }
     
     _runner   = runner;
     _runParam = param;
 
-    #if PLATFORM_IS_UNIX
-        // Signal thread to resume
-        int r = pthread_mutex_lock( &_launchMutex );
-        if( r ) Fatal( "pthread_mutex_lock() failed." );
 
-        r = pthread_cond_signal( &_launchCond );
-        if( r ) Fatal( "pthread_cond_signal() failed." );
+    // Signal thread to resume
+    int r = pthread_mutex_lock( &_launchMutex );
+    PanicIf( r, "pthread_mutex_lock() failed with error %d.", r );
 
-        r = pthread_mutex_unlock( &_launchMutex );
-        if( r ) Fatal( "pthread_mutex_unlock() failed." );
-    #endif
+    r = pthread_cond_signal( &_launchCond );
+    PanicIf( r, "pthread_cond_signal() failed with error %d.", r );
+
+    r = pthread_mutex_unlock( &_launchMutex );
+    PanicIf( r, "pthread_mutex_unlock() failed with error %d.", r );
 }
 
 
@@ -160,43 +160,60 @@ bool Thread::WaitForExit( long milliseconds )
     if( state == ThreadState::Exited )
         return true;
 
-    #if PLATFORM_IS_UNIX
-        
-        int r;
+    // Immediate return?
+    if( milliseconds == 0 || state != ThreadState::Running )
+        return false;
 
-        if( milliseconds > 0 )
-        {   
-            // #TODO: Support on apple with a condition variable and mutex pair
-            #if __APPLE__
-                return false;
-            #else
-                long seconds = milliseconds / 1000;
-                milliseconds -= seconds * 1000;
+    int r = 0;
+    int waitResult = 0;
 
-                struct timespec abstime;
+    if( milliseconds > 0 )
+    {
+        int r = pthread_mutex_lock( &_exitMutex );
+        PanicIf( r, "pthread_mutex_lock() failed with error %d.", r );
 
-                if( clock_gettime( CLOCK_REALTIME, &abstime ) == -1 )
-                {
-                    ASSERT( 0 );
-                    return false;
-                }
-
-                abstime.tv_sec  += seconds;
-                abstime.tv_nsec += milliseconds * 1000000;
-
-                r = pthread_timedjoin_np( _threadId, NULL, &abstime );
-                ASSERT( !r || r == ETIMEDOUT );
-            #endif
-        }
-        else
+        state = _state.load( std::memory_order_relaxed );
+        if( state != ThreadState::Exited )
         {
-            r = pthread_join( _threadId, NULL );
+            struct timespec abstime = {};
+            
+            long seconds = milliseconds / 1000;
+            milliseconds -= seconds * 1000;
+
+            #if !__APPLE__
+                r = clock_gettime( CLOCK_REALTIME, &abstime );
+                PanicIf( r, "clock_gettime() failed with error %d", r );
+            #endif
+
+            abstime.tv_sec  += seconds;
+            abstime.tv_nsec += milliseconds * 1000000l;
+
+            // #NOTE: On macOS it seems that using absolute time (pthread_cond_timedwait) with anything 
+            //        less than 1 second is invalid, therefore we use this variant which works with
+            //        smaller wait times.
+            #if __APPLE__
+                waitResult = pthread_cond_timedwait_relative_np( &_exitCond, &_exitMutex, &abstime );
+            #else
+                waitResult = pthread_cond_timedwait( &_exitCond, &_exitMutex, &abstime );
+            #endif
+            if( waitResult != 0 && waitResult != ETIMEDOUT ) 
+                Panic( "pthread_cond_timedwait() failed with error %d.", waitResult );
         }
 
-        return r == 0;
-    #else
-        #error Unimplemented
-    #endif
+        r = pthread_mutex_unlock( &_exitMutex );
+        PanicIf( r, "pthread_mutex_unlock() failed with error %d.", r );
+
+        state = _state.load( std::memory_order_relaxed );
+        if( waitResult == ETIMEDOUT && state != ThreadState::Exited )
+            return false;
+    }
+
+    void* ret = nullptr;
+    r = pthread_join( _threadId, &ret ); 
+    ASSERT( !r ); (void)r;
+    ASSERT( _state.load( std::memory_order_relaxed ) == ThreadState::Exited );
+
+    return true;
 }
 
 // Starts up a thread.
@@ -204,18 +221,21 @@ bool Thread::WaitForExit( long milliseconds )
 void* Thread::ThreadStarterUnix( Thread* t )
 {
     // On Linux, it suspends it until it is signaled to run.
-    int r = pthread_mutex_lock( &t->_launchMutex );
-    if( r ) Fatal( "pthread_mutex_lock() failed." );
-
-    while( t->_state.load( std::memory_order_relaxed ) == ThreadState::ReadyToRun )
     {
-        r = pthread_cond_wait( &t->_launchCond, &t->_launchMutex );
-        if( r ) Fatal( "pthread_cond_wait() failed." );
-        break;
-    }
+        int r = pthread_mutex_lock( &t->_launchMutex );
+        PanicIf( r, "pthread_mutex_lock() failed with error %d.", r );
 
-    r = pthread_mutex_unlock( &t->_launchMutex );
-    if( r ) Fatal( "pthread_mutex_unlock() failed." );
+        if( t->_state.load( std::memory_order_relaxed ) == ThreadState::ReadyToRun )
+        {
+            r = pthread_cond_wait( &t->_launchCond, &t->_launchMutex );
+            PanicIf( r, "pthread_cond_wait() failed with error %d.", r );
+        }
+
+        r = pthread_mutex_unlock( &t->_launchMutex );
+        PanicIf( r, "pthread_mutex_unlock() failed with error %d.", r );
+
+        ASSERT( t->_state.load( std::memory_order_acquire ) == ThreadState::Running );
+    }
 
     pthread_mutex_destroy( &t->_launchMutex );
     pthread_cond_destroy ( &t->_launchCond  );
@@ -226,11 +246,23 @@ void* Thread::ThreadStarterUnix( Thread* t )
     // Run the thread function
     t->_runner( t->_runParam );
 
-    // Thread has exited
-    t->_state.store( ThreadState::Exited, std::memory_order_release );
-    
-    // TODO: Signal if waiting to be joined
-    pthread_exit( nullptr );
+
+    // Signal if waiting to be joined
+    {
+        int r = pthread_mutex_lock( &t->_exitMutex );
+        PanicIf( r, "pthread_mutex_lock() failed with error %d.", r );
+
+        // Thread has exited
+        t->_state.store( ThreadState::Exited, std::memory_order_release );
+
+        r = pthread_cond_signal( &t->_exitCond );
+        PanicIf( r, "pthread_cond_signal() failed with error %d.", r );
+
+        r = pthread_mutex_unlock( &t->_exitMutex );
+        PanicIf( r, "pthread_mutex_unlock() failed with error %d.", r );
+    }
+
+    // pthread_exit( nullptr );
     
     return nullptr;
 }

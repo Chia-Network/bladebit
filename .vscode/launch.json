@@ -187,6 +187,9 @@
             "name"         : "Tests",
             
             "type"          : "cppdbg",
+            "osx": {
+                "MIMode": "lldb",
+            },
             "request"       : "launch",
             "stopAtEntry"   : false,
             "cwd"           : "${workspaceFolder}",
@@ -219,6 +222,7 @@
                 "line-point-deltas"
                 // "compressed-plot-proof"
                 // "compressed-plot-qualities"
+                "macos-threads"
             ]
         }
 

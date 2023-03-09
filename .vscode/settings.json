@@ -4,11 +4,9 @@
         "nominmax"
     ],
     "files.associations": {
-        "*.sd": "yaml",
-        "*.userprefs": "xml",
-        "*.make": "makefile",
         "Fastfile": "ruby",
         "*.plist": "xml",
+        "*.sd": "yaml",
         "*.json": "jsonc",
         "*.ir": "llvm",
         "*.qs": "javascript",
@@ -112,14 +110,15 @@
         "stop_token": "cpp",
         "queue": "cpp",
         "__memory": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "__bits": "cpp"
     },
     "cSpell.words": [
         "Ryzen"
     ],
     "C_Cpp.errorSquiggles": "Enabled",
     "cmake.configureOnOpen": true,
-    "cmake.generator": "Unix Makefiles"
+    // "cmake.generator": "Unix Makefiles"
     // "cmake.generator": "Visual Studio 17 2022"
 
 }
