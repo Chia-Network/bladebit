@@ -44,8 +44,8 @@ TEST_CASE( "line-point-deltas", "[sandbox]" )
 
     // byte* parkBuffer = (byte*)malloc( defaultParkSize * 4 );
 
-          uint32 cLevel    = GetEnvU32( "bb-clevel", 1 );
-    const uint32 endCLevel = GetEnvU32( "bb-end-clevel", 9 );
+          uint32 cLevel    = GetEnvU32( "bb_clevel", 1 );
+    const uint32 endCLevel = GetEnvU32( "bb_end_clevel", 9 );
     const uint32 k         = 32;
 
     for( ; cLevel <= endCLevel; cLevel++ )
@@ -94,6 +94,9 @@ TEST_CASE( "line-point-deltas", "[sandbox]" )
 
 
         // Now try to determine a more reasonable ANS encoding value
+        Log::NewLine();
+        Log::Line( " Selected sub bit size: %u", stubBitSize );
+        Log::NewLine();
         Log::Line( " [Calculating ANS value]" );
 
         size_t deltasSize = defaultDeltasSize;
@@ -344,9 +347,9 @@ Span<uint64> LoadLpTableForCompressionLevel( const uint compressionLevel )
 {
     char filePath[1024] = {};
 
-    if( compressionLevel < 9 )
-        sprintf( filePath, "%st2.lp.c%u.ref", BB_DP_DBG_REF_DIR "compressed-lps/", compressionLevel );
-    else
+    // if( compressionLevel < 9 )
+    //     sprintf( filePath, "%st2.lp.c%u.ref", BB_DP_DBG_REF_DIR "compressed-lps/", compressionLevel );
+    // else
         sprintf( filePath, "%slp.c%u.ref", BB_DP_DBG_REF_DIR "compressed-lps/", compressionLevel );
 
     size_t byteCount = 0;

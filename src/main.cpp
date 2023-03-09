@@ -170,7 +170,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
             continue;
         else if( cli.ReadStr( cfg.plotIdStr, "-i", "--plot-id" ) )
             continue;
-        else if( cli.ArgConsume( "--compress" ) )
+        else if( cli.ArgConsume( "-z", "--compress" ) )
         {
             cfg.compressionLevel = 1;   // Default to lowest compression
 
@@ -537,10 +537,10 @@ R"(
                         Use this if you are creating OG plots.
                         Only used if a pool contract address is not specified.
 
- --compress [level]   : Compress the plot. Optionally pass a compression level parameter.
+ -z,--compress [level]: Compress the plot. Optionally pass a compression level parameter.
                         If no level parameter is passed, the default compression level of 1 is used.
-                        You can set a compression level from 0 to 6.
-                        Where 0 means no compression, and 6 is the highest compression.
+                        Current compression levels supported are from 0 to 7 (inclusive).
+                        Where 0 means no compression, and 7 is the highest compression.
                         Higher compression means smaller plots, but more CPU usage during harvesting.
  
  --benchmark          : Enables benchmark mode. This is meant to test plotting without
