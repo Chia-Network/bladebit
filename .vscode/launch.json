@@ -132,14 +132,19 @@
             "preLaunchTask" : "build_cuda_debug",
 
             "program": "${workspaceFolder}/build/bladebit_cuda",
-    
+            
             //                 "-c", "xch1uf48n3f50xrs7zds0uek9wp9wmyza6crnex6rw8kwm3jnm39y82q5mvps6",
             // "-i", "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73",    // Yes overflow
             // "--memo", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef207d52406afa2b6d7d92ea778f407205bd9dca40816c1b1cacfca2a6612b93eb",
             
             "args": 
-            // "-w --benchmark --compress 9 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot ~/plot/tmp"
             "-w --compress 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot ~/plot/tmp"
+            
+            "windows": {
+                "type": "cppvsdbg",
+                "program": "${workspaceFolder}/build/Debug/bladebit_cuda.exe",
+                "args": "--benchmark --compress 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot D:/"
+            }
         },
 
         {
@@ -219,7 +224,7 @@
                 // "F1Disk"
                 // "PairsAndMap"
                 // "bucket-slice-write"
-                "line-point-deltas"
+                // "line-point-deltas"
                 // "compressed-plot-proof"
                 // "compressed-plot-qualities"
                 "macos-threads"
