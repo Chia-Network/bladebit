@@ -30,14 +30,14 @@ jobs:
       #   run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
       - name: Cache CUDA Installation
-        id: cache-cuda
+        id: cache-cuda-ubuntu
         uses: actions/cache@v3
         with:
           path: /usr/local/cuda*
           key: ${{ runner.os }}-cuda-${{ hashFiles('**/cuda.lock') }}
 
       - name: Install CUDA Prerequisites
-        if: steps.cache-cuda.outputs.cache-hit != 'true'
+        if: steps.cache-cuda-ubuntu.outputs.cache-hit != 'true'
         run: |
             distro=ubuntu2004
             arch=x86_64
@@ -95,14 +95,14 @@ jobs:
       #     .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
       - name: Cache CUDA Installation
-        id: cache-cuda
+        id: cache-cuda-centos
         uses: actions/cache@v3
         with:
           path: /usr/local/cuda*
           key: ${{ runner.os }}-cuda-${{ hashFiles('**/cuda.lock') }}
 
       - name: Install CUDA Prerequisites
-        if: steps.cache-cuda.outputs.cache-hit != 'true'
+        if: steps.cache-cuda-centos.outputs.cache-hit != 'true'
         run: |
           distro=rhel8
           arch=x86_64
