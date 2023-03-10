@@ -61,7 +61,7 @@ inline uint32 GetEnvU32( const char* name, uint32 value )
     const char* sVal = std::getenv( name );
 
     if( sVal )
-        sscanf( sVal, "%lu",  &value );
+        sscanf( sVal, "%u",  &value );
 
     return value;
 }

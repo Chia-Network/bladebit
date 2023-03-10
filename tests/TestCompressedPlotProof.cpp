@@ -143,8 +143,6 @@ TEST_CASE( "compressed-plot-qualities", "[sandbox][plots]" )
         ENSURE( gr );
     }
 
-    GRQualitiesTree qTree = {};
-
     const uint32 last5Bits = (uint32)challenge[31] & 0x1f;
 
     PlotReader reader( filePlot );
@@ -363,7 +361,7 @@ bool GetProofForChallenge( PlotReader& reader, const uint32 f7, uint64 fullProof
         // else
         //     gotProof = FetchProof<true>( reader, t6Index, fullProofXs );
 
-        if( reader.FetchProof( t6Index, fullProofXs ) )
+        if( reader.FetchProof( t6Index, fullProofXs ) == ProofFetchResult::OK )
         {
             // #TODO: reorder it
             return true;

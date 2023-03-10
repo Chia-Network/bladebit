@@ -5,10 +5,10 @@
 struct ScanJob : MTJob<ScanJob>
 {
     const uint64* _yBuffer;
-          uint64  _entryCount;
+          uint32  _entryCount;
           uint32* _groupIndices;
           uint32* _finalGroupIndices;
-          uint64  _maxGroups;
+          uint32  _maxGroups;
           std::atomic<uint64>* _totalGroupCount;
           std::atomic<uint32>* _jobAddSequence;
 
@@ -24,7 +24,7 @@ uint64 ScanBCGroupThread32(
     const uint64  scanStart,
     const uint64  scanEnd,
     uint32*       groupIndices,
-    const uint64  maxGroups,
+    const uint32  maxGroups,
     const uint32  jobId )
 {
     ASSERT( yBuffer );
@@ -65,10 +65,10 @@ uint64 ScanBCGroupMT32(
     ThreadPool&   pool, 
           uint32  threadCount,
     const uint64* yBuffer,
-    const uint64  entryCount,
+    const uint32  entryCount,
           uint32* tmpGroupIndices,
           uint32* outGroupIndices,
-    const uint64  maxGroups
+    const uint32  maxGroups
     )
 {
     threadCount = std::min( (uint32)entryCount, threadCount );
@@ -78,6 +78,7 @@ uint64 ScanBCGroupMT32(
 
     std::atomic<uint64> groupCount = 0;
 
+    ASSERT( entryCount <= 0xFFFFFFFF );
     ScanJob job = {};
     job._yBuffer           = yBuffer;
     job._entryCount        = entryCount;
@@ -94,7 +95,7 @@ uint64 ScanBCGroupMT32(
 void ScanJob::Run()
 {
     // First get the starting index for each thread
-    uint64 count, offset, _;
+    uint32 count, offset, _;
     GetThreadOffsets( this, _entryCount, count, offset, _ );
     
     // Find the start of our current group
@@ -117,7 +118,7 @@ void ScanJob::Run()
     const uint64 end = this->IsLastThread() ? _entryCount : this->GetNextJob()._startOffset;
     ASSERT( end > offset );
 
-    uint64 maxGroups, groupOffset;
+    uint32 maxGroups, groupOffset;
     GetThreadOffsets( this, _maxGroups, maxGroups, groupOffset, _ );
 
     uint32* groupIndices = _groupIndices + groupOffset;
@@ -127,7 +128,7 @@ void ScanJob::Run()
     maxGroups--;
 
     uint64 groupCount = 1 + ScanBCGroupThread32( _yBuffer, offset, end, groupIndices+1, maxGroups, _jobId );
-    
+
     // Copy groups into contiguous buffer
     _groupCount = groupCount;
     SyncThreads();

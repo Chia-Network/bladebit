@@ -124,7 +124,7 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
         cx.downloadDirect = cfg.disableDirectDownloads ? false : true;
     #else
         // #TODO: One windows, check if we have enough memory, if so, default to true.
-        cx.downloadDirect = false;
+        cx.downloadDirect = true ;//false;
     #endif
 
     cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
@@ -1069,16 +1069,19 @@ void AllocBuffers( CudaK32PlotContext& cx )
     #if _DEBUG
         cx.hostBufferTables = bbvirtallocboundednuma<byte>( cx.hostTableAllocSize );
     #else
-        if( cx.downloadDirect )
+        #if !_WIN32
+        // if( cx.downloadDirect )
             CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
-        else
-        {
-            // #TODO: On windows, first check if we have enough shared memory (512G)? 
-            //        and attempt to alloc that way first. Otherwise, use intermediate pinned buffers.
+        // else
+        // {
+        //     // #TODO: On windows, first check if we have enough shared memory (512G)? 
+        //     //        and attempt to alloc that way first. Otherwise, use intermediate pinned buffers.
+        #else
             cx.hostBufferTables = bbvirtallocboundednuma<byte>( cx.hostTableAllocSize );
-        }
+        #endif
+        // }
     #endif
-    
+
     //CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
 
     cx.hostBufferTemp = nullptr;

@@ -26,27 +26,27 @@ template<>
 struct CompressionLevelInfo<1>
 {
     static constexpr uint32 ENTRY_SIZE      = 16;
-    static constexpr uint32 STUB_BIT_SIZE   = 28;
-    static constexpr size_t TABLE_PARK_SIZE = 8316;
-    static constexpr double ANS_R_VALUE     = 5.66;
+    static constexpr uint32 STUB_BIT_SIZE   = 29;
+    static constexpr size_t TABLE_PARK_SIZE = 8336;
+    static constexpr double ANS_R_VALUE     = 2.51;
 };
 
 template<>
 struct CompressionLevelInfo<2>
 {
     static constexpr uint32 ENTRY_SIZE      = 15;
-    static constexpr uint32 STUB_BIT_SIZE   = 24;
-    static constexpr size_t TABLE_PARK_SIZE = 7350;
-    static constexpr double ANS_R_VALUE     = 7.55;
+    static constexpr uint32 STUB_BIT_SIZE   = 25;
+    static constexpr size_t TABLE_PARK_SIZE = 7360;
+    static constexpr double ANS_R_VALUE     = 3.44;
 };
 
 template<>
 struct CompressionLevelInfo<3>
 {
     static constexpr uint32 ENTRY_SIZE      = 14;
-    static constexpr uint32 STUB_BIT_SIZE   = 20;
-    static constexpr size_t TABLE_PARK_SIZE = 6350; //6337;
-    static constexpr double ANS_R_VALUE     = 8.89;
+    static constexpr uint32 STUB_BIT_SIZE   = 21;
+    static constexpr size_t TABLE_PARK_SIZE = 6352;
+    static constexpr double ANS_R_VALUE     = 4.36;
 };
 
 template<>
