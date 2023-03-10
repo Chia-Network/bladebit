@@ -502,12 +502,12 @@ target_compile_options(lib_bladebit_cuda PUBLIC $<${is_cuda}:--pre-include pch.h
 target_compile_options(lib_bladebit_cuda PRIVATE 
     $<${is_cuda_release}:
         -arch=compute_52
-        -gencode=arch=compute_52,code=sm_52      # Maxwell
-        -gencode=arch=compute_61,code=sm_60      # Pascal
-        -gencode=arch=compute_70,code=sm_70      # Volta 
-        -gencode=arch=compute_75,code=compute_75 # Turing (JIT-only)
-        -gencode=arch=compute_87,code=sm_80      # Ampere
-        -gencode=arch=compute_89,code=sm_89      # Ada
+        -gencode=arch=compute_52,code=sm_52                             # Maxwell
+        -gencode=arch=compute_60,code=[compute_60,sm_60,sm_61,sm_62]    # Pascal
+        -gencode=arch=compute_70,code=sm_70                             # Volta 
+        -gencode=arch=compute_75,code=compute_75                        # Turing (JIT-only)
+        -gencode=arch=compute_80,code=[sm_80,sm_86,sm_87]               # Ampere
+        -gencode=arch=compute_89,code=sm_89                             # Ada
     >)
 
  target_compile_options(lib_bladebit_cuda PRIVATE 
