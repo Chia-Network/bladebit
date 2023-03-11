@@ -1,7 +1,8 @@
 name: Build Release Assets
 on:
   push:
-    branches: ['*']
+    branches:
+      - '**'
   workflow_dispatch:
 
 jobs:
@@ -11,25 +12,25 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Cache apt packages
+      - name: Get Version Number
+        id: version_number
+        run: .github/actions/get-version.sh ubuntu x86-64
+
+      - name: Cache apt Prerequisites
         id: cache-apt
         uses: actions/cache@v3
         with:
           path: /var/cache/apt/archives/*.deb
           key: ${{ runner.os }}-apt-${{ hashFiles('**/apt.lock') }}
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh ubuntu x86-64
-
-      - name: Install Prerequisites
+      - name: Install apt Prerequisites
         if: steps.cache-apt.outputs.cache-hit != 'true'
         run: sudo apt install -y libgmp-dev libnuma-dev
 
       # - name: Build
       #   run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      - name: Cache CUDA Installation
+      - name: Cache CUDA Prerequisites
         id: cache-cuda-ubuntu
         uses: actions/cache@v3
         with:
@@ -72,29 +73,38 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Cache dnf packages
+      - name: Get Version Number
+        id: version_number
+        run: .github/actions/get-version.sh centos x86-64
+
+      - name: Cache dnf Prerequisites
         id: cache-dnf
         uses: actions/cache@v3
         with:
           path: /var/cache/dnf
           key: ${{ runner.os }}-dnf-${{ hashFiles('**/dnf.lock') }}
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh centos x86-64
-
-      - name: Install Prerequisites
+      - name: Install dnf Prerequisites
         if: steps.cache-dnf.outputs.cache-hit != 'true'
         run: |
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git wget subscription-manager
+          dnf install -y \
+            gcc-toolset-9-gcc \
+            gcc-toolset-9-gcc-c++ \
+            cmake \
+            gmp-devel \
+            numactl-devel \
+            make \
+            git \
+            wget \
+            subscription-manager
 
       # - name: Build
       #   run: |
       #     source /opt/rh/gcc-toolset-9/enable
       #     .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      - name: Cache CUDA Installation
+
+      - name: Cache CUDA Prerequisites
         id: cache-cuda-centos
         uses: actions/cache@v3
         with:
