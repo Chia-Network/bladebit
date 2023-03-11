@@ -1,6 +1,18 @@
 #pragma once
 #include "ChiaConsts.h"
 #include "util/KeyTools.h"
+#include "util/BitView.h"
+
+#define PROOF_X_COUNT       64
+#define MAX_K_SIZE          50
+#define MAX_META_MULTIPLIER 4
+#define MAX_Y_BIT_SIZE      ( MAX_K_SIZE + kExtraBits )
+#define MAX_META_BIT_SIZE   ( MAX_K_SIZE * MAX_META_MULTIPLIER )
+#define MAX_FX_BIT_SIZE     ( MAX_Y_BIT_SIZE + MAX_META_BIT_SIZE + MAX_META_BIT_SIZE )
+
+typedef Bits<MAX_Y_BIT_SIZE>    YBits;
+typedef Bits<MAX_META_BIT_SIZE> MetaBits;
+typedef Bits<MAX_FX_BIT_SIZE>   FxBits;
 
 typedef unsigned FSE_CTable;
 typedef unsigned FSE_DTable;

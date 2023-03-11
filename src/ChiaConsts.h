@@ -91,6 +91,8 @@ const double kRValues[7] = { 4.7, 2.75, 2.75, 2.7, 2.6, 2.45 };
 #define BB_CHIA_CHALLENGE_SIZE 32
 #define BB_CHIA_QUALITY_SIZE   32
 
+#define BB_CHIA_K_MAX_VALUE    50
+
 
 // Initializes L_targets table
 //-----------------------------------------------------------
