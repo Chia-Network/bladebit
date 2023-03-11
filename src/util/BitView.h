@@ -38,6 +38,14 @@ public:
     }
 
     //-----------------------------------------------------------
+    inline uint64 Read64At( const uint64 position, const uint32 bitCount )
+    {
+        ASSERT( position + bitCount <= _sizeBits );
+        const uint64 value = Read64( bitCount, _fields, position, _sizeBits );
+        return value;
+    }
+
+    //-----------------------------------------------------------
     inline uint128 Read128Aligned( const uint32 bitCount )
     {
         const uint128 value = Read128Aligned( bitCount, (uint64*)_fields, _position, _sizeBits );

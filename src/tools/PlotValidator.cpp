@@ -3,9 +3,9 @@
 #include "util/Log.h"
 #include "util/BitView.h"
 #include "io/FileStream.h"
-#include "PlotTools.h"
 #include "PlotReader.h"
 #include "plotting/PlotTools.h"
+#include "plotting/PlotValidation.h"
 #include "plotmem/LPGen.h"
 #include "pos/chacha8.h"
 #include "b3/blake3.h"
@@ -18,22 +18,36 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 
-#define PROOF_X_COUNT       64
-#define MAX_K_SIZE          48
-#define MAX_META_MULTIPLIER 4
-#define MAX_Y_BIT_SIZE      ( MAX_K_SIZE + kExtraBits )
-#define MAX_META_BIT_SIZE   ( MAX_K_SIZE * MAX_META_MULTIPLIER )
-#define MAX_FX_BIT_SIZE     ( MAX_Y_BIT_SIZE + MAX_META_BIT_SIZE + MAX_META_BIT_SIZE )
-
 #define COLOR_NONE       "\033[0m"
 #define COLOR_RED        "\033[31m"
 #define COLOR_GREEN      "\033[32m"
 #define COLOR_RED_BOLD   "\033[1m\033[31m"
 #define COLOR_GREEN_BOLD "\033[1m\033[32m"
 
-typedef Bits<MAX_Y_BIT_SIZE>    YBits;
-typedef Bits<MAX_META_BIT_SIZE> MetaBits;
-typedef Bits<MAX_FX_BIT_SIZE>   FxBits;
+struct ValidatePlotOptions
+{
+    struct GlobalPlotConfig* gCfg;
+
+    std::string plotPath    = "";
+    bool        inRAM       = false;
+    bool        unpacked    = false;
+    uint32      threadCount = 0;
+    float       startOffset = 0.0f; // Offset percent at which to start
+};
+
+
+
+// #define PROOF_X_COUNT       64
+// #define MAX_K_SIZE          50
+// #define MAX_META_MULTIPLIER 4
+// #define MAX_Y_BIT_SIZE      ( MAX_K_SIZE + kExtraBits )
+// #define MAX_META_BIT_SIZE   ( MAX_K_SIZE * MAX_META_MULTIPLIER )
+// #define MAX_FX_BIT_SIZE     ( MAX_Y_BIT_SIZE + MAX_META_BIT_SIZE + MAX_META_BIT_SIZE )
+
+
+// typedef Bits<MAX_Y_BIT_SIZE>    YBits;
+// typedef Bits<MAX_META_BIT_SIZE> MetaBits;
+// typedef Bits<MAX_FX_BIT_SIZE>   FxBits;
 
 // #TODO: Add C1 & C2 table validation
 
@@ -104,12 +118,10 @@ template<bool Use64BitLpToSquare>
 static bool FetchProof( PlotReader& plot, uint64 t6LPIndex, uint64 fullProofXs[PROOF_X_COUNT], GreenReaperContext* gr = nullptr );
 
 static void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challengeHex );
-static bool ValidateFullProof( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64& outF7 );
 static void ReorderProof( PlotReader& plot, uint64 fullProofXs[PROOF_X_COUNT] );
 static void GetProofF1( uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint64 fullProofXs[PROOF_X_COUNT], uint64 fx[PROOF_X_COUNT] );
 static bool DecompressProof( const byte plotId[BB_PLOT_ID_LEN], const uint32 compressionLevel, const uint64 compressedProof[PROOF_X_COUNT], uint64 fullProofXs[PROOF_X_COUNT], GreenReaperContext* gr = nullptr );
 
-static uint64 BytesToUInt64( const byte bytes[8] );
 static uint64 SliceUInt64FromBits( const byte* bytes, uint32 bitOffset, uint32 bitCount );
 
 static bool FxMatch( uint64 yL, uint64 yR );
@@ -697,9 +709,11 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
     FatalIf( !plot.Open( opts.plotPath.c_str() ), "Failed to open plot at %s.", opts.plotPath.c_str() );
     FatalIf( plot.K() != 32, "Only k32 plots are supported." );
 
+    const uint32 k = plot.K();
+
     // Read F7 value
     CPBitReader f7Reader( (byte*)challenge, sizeof( challenge ) * 8 );
-    const uint32 f7 = (uint32)f7Reader.Read64( 32 );
+    const uint64 f7 = f7Reader.Read64( k );
 
     // Find this f7 in the plot file
     PlotReader reader( plot );
@@ -708,7 +722,7 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
     const uint64 matchCount = reader.GetP7IndicesForF7( f7, p7BaseIndex );
     if(  matchCount == 0 )
     {
-        Log::Line( "Could not find f7 %llu in plot.", f7 );
+        Log::Line( "Could not find f7 %llu in plot.", (llu)f7 );
         Exit( 1 );
     }
 
@@ -754,6 +768,10 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
 
         if( gotProof )
         {
+            uint64 computedF7 = 0;
+            const bool valid = ValidateFullProof( plot.K(), plot.PlotId(), fullProofXs, computedF7 );
+            ASSERT( valid && computedF7 == f7 );
+
             ReorderProof( reader, fullProofXs );
 
             BitWriter writer( proof, sizeof( proof ) * 8 );
@@ -1381,20 +1399,6 @@ void FxGen( const TableId table, const uint32 k,
 
         outMeta = MetaBits( hashBytes + startByte, metaBits, startBit );
     }
-}
-
-//-----------------------------------------------------------
-/// Convertes 8 bytes to uint64 and endian-swaps it.
-/// This takes any byte alignment, so that bytes does
-/// not have to be aligned to 64-bit boundary.
-/// This is for compatibility for how chiapos extracts
-/// bytes into integers.
-//-----------------------------------------------------------
-inline uint64 BytesToUInt64( const byte bytes[8] )
-{
-    uint64 tmp;
-    memcpy( &tmp, bytes, sizeof( uint64 ) );
-    return Swap64( tmp );
 }
 
 //-----------------------------------------------------------
