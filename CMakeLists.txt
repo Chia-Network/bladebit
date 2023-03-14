@@ -309,9 +309,10 @@ else()
         # set(c_opts -ffat-lto-objects ${c_opts})
         
         # Build with native architecture when not building release packages
-        if(NOT DEFINED ENV{CI})
-            set(c_opts -march=native ${c_opts})
-        endif()
+        # NOTE: Disabled for now to avoid issue when building chiapos wheels
+        # if(NOT DEFINED ENV{CI})
+        #     set(c_opts -march=native ${c_opts})
+        # endif()
 
     # Clang
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
