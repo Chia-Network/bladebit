@@ -277,26 +277,47 @@ void grDestroyContext( GreenReaperContext* context )
 }
 
 //-----------------------------------------------------------
+GRResult grPreallocateForCompressionLevel( GreenReaperContext* context, const uint32_t k, const uint32_t maxCompressionLevel )
+{
+    if( context == nullptr )
+        return GRResult_Failed;
+
+    if( k != 32 )
+        return GRResult_Failed;
+
+    // #TODO: Set named constant for max compression level
+    if( maxCompressionLevel > 7 )
+        return GRResult_Failed;
+
+    if( maxCompressionLevel == 0 )
+        return GRResult_OK;
+
+    // Ensure our buffers have enough for the specified entry bit count
+    if( !ReserveBucketBuffers( *context, k, maxCompressionLevel ) )
+        return GRResult_OutOfMemory;
+
+    return GRResult_OK;
+}
+
+//-----------------------------------------------------------
 GRResult RequestSetup( GreenReaperContext* cx, const uint32 k, const uint32 compressionLevel )
 {
-    if( !cx || k != 32 || compressionLevel < 1 || compressionLevel > 9 )    // #TODO: Set named constant for max compression level
+    if( compressionLevel == 0 )
         return GRResult_Failed;
+
+    const GRResult r = grPreallocateForCompressionLevel( cx, k, compressionLevel );
+    if( r != GRResult_OK )    
+        return r;
 
     // Always make sure this has been done
     {
-    // #TODO: Make The function itself thread-safe, don't do it out here
+        // #TODO: Make The function itself thread-safe, don't do it out here
         _lTargetLock.lock();
         LoadLTargets();
         _lTargetLock.unlock();
     }
 
-    const uint64 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, compressionLevel );
-    
-    // Ensure our buffers have enough for the specified entry bit count
-    if( !ReserveBucketBuffers( *cx, k, compressionLevel ) )
-        return GRResult_OutOfMemory;
-
-    return GRResult_OK;
+    return r;
 }
 
 //-----------------------------------------------------------
