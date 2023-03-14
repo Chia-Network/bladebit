@@ -82,6 +82,9 @@ typedef struct GRCompressedQualitiesRequest
 GreenReaperContext* grCreateContext( GreenReaperConfig* config );
 void                grDestroyContext( GreenReaperContext* context );
 
+// Preallocate context's in-memory buffers to support a maximum compression level
+GRResult grPreallocateForCompressionLevel( GreenReaperContext* context, uint32_t k, uint32_t maxCompressionLevel );
+
 // Full proof of space request given a challenge
 GRResult grFetchProofForChallenge( GreenReaperContext* context, GRCompressedProofRequest* req );
 
