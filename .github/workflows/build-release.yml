@@ -21,7 +21,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: /var/cache/apt/archives/*.deb
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/apt.lock') }}
+          key: ${{ runner.os }}-apt
 
       - name: Install apt Prerequisites
         if: steps.cache-apt.outputs.cache-hit != 'true'
@@ -35,7 +35,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: /usr/local/cuda*
-          key: ${{ runner.os }}-cuda-${{ hashFiles('**/cuda.lock') }}
+          key: ${{ runner.os }}-cuda-ubuntu
 
       - name: Install CUDA Prerequisites
         if: steps.cache-cuda-ubuntu.outputs.cache-hit != 'true'
@@ -82,7 +82,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: /var/cache/dnf
-          key: ${{ runner.os }}-dnf-${{ hashFiles('**/dnf.lock') }}
+          key: ${{ runner.os }}-dnf
 
       - name: Install dnf Prerequisites
         if: steps.cache-dnf.outputs.cache-hit != 'true'
@@ -109,7 +109,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: /usr/local/cuda*
-          key: ${{ runner.os }}-cuda-${{ hashFiles('**/cuda.lock') }}
+          key: ${{ runner.os }}-cuda-centos
 
       - name: Install CUDA Prerequisites
         if: steps.cache-cuda-centos.outputs.cache-hit != 'true'
