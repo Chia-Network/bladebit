@@ -21,15 +21,11 @@ jobs:
       # - name: Build
       #   run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      - name: Install CUDA Prerequisites
-        run: |
-            distro=ubuntu2004
-            arch=x86_64
-            sudo apt-key del 7fa2af80
-            wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
-            sudo dpkg -i cuda-keyring_1.0-1_all.deb
-            sudo apt-get update
-            sudo apt-get install cuda
+      - name: Setup Cuda Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.9
+        id: cuda-toolkit
+        with:
+          cuda: '12.1.0'
 
       - name: Build CUDA
         run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
@@ -70,23 +66,11 @@ jobs:
       #     source /opt/rh/gcc-toolset-9/enable
       #     .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      - name: Install CUDA Prerequisites
-        run: |
-          distro=rhel8
-          arch=x86_64
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-          # subscription-manager repos --enable=rhel-8-for-x86_64-appstream-rpms
-          # subscription-manager repos --enable=rhel-8-for-x86_64-baseos-rpms
-          # subscription-manager repos --enable=codeready-builder-for-rhel-8-x86_64-rpms
-          # rpm --erase gpg-pubkey-7fa2af80*
-          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
-          dnf clean expire-cache
-          dnf module install -y nvidia-driver:latest-dkms
-          dnf install -y cuda
-          ls -la /usr/local/
-          ls -la /usr/local/cuda/
-          # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
-          # sh cuda_12.0.1_525.85.12_linux.run
+      - name: Setup Cuda Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.9
+        id: cuda-toolkit
+        with:
+          cuda: '12.1.0'
 
       - name: Build CUDA
         run: |
