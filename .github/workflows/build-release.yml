@@ -1,7 +1,7 @@
 name: Build Release Assets
 on:
   push:
-    branches: ['*']
+    branches: ['**']
   workflow_dispatch:
 
 jobs:
