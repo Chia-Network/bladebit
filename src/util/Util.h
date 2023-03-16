@@ -535,6 +535,14 @@ const char HEX_TO_BIN[256] = {
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 };
 
+
+//-----------------------------------------------------------
+inline bool IsHexChar( const char c )
+{
+    if( c < '0' || c > 'f' ) return false;
+    return c <= '9' || c >= 'a' || ( c >= 'A' && c <= 'B' );
+}
+
 //-----------------------------------------------------------
 inline void HexStrToBytes( const char* str, const size_t strSize,
                            byte* dst, size_t dstSize )

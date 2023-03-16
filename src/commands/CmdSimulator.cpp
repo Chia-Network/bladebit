@@ -3,10 +3,11 @@
 #include "tools/PlotReader.h"
 #include "threading/MTJob.h"
 #include "harvesting/GreenReaper.h"
+#include "plotting/f1/F1Gen.h"
 
-static constexpr double SECS_PER_DAY             = 24 * 60 * 60;
-static constexpr double CHALLENGE_INTERVAL       = 9.375;
-static constexpr uint32 CHALLENGES_PER_DAY       = (uint32)(SECS_PER_DAY / CHALLENGE_INTERVAL);
+static constexpr double SECS_PER_DAY       = 24 * 60 * 60;
+static constexpr double CHALLENGE_INTERVAL = 9.375;
+static constexpr uint32 CHALLENGES_PER_DAY = (uint32)(SECS_PER_DAY / CHALLENGE_INTERVAL);
 
 enum class SubCommand
 {
@@ -16,19 +17,19 @@ enum class SubCommand
 
 struct Config
 {
-    GlobalPlotConfig* gCfg    = nullptr;
-    SubCommand  subcommand    = SubCommand::Farm;
-    const char* plotPath      = "";
-    uint64      fetchCount    = 100;
-    uint32      parallelCount = 1;
-    size_t      farmSize      = 1 TBSi;
-    double      maxLookupTime = 8.0;
-    uint32      filterBits    = 512;
-    uint32      partials      = 300;
-    bool        powerUsage    = false;
+    GlobalPlotConfig* gCfg      = nullptr;
+    SubCommand  subcommand      = SubCommand::Farm;
+    const char* plotPath        = "";
+    uint64      fetchCount      = 100;
+    uint32      parallelCount   = 1;
+    double      maxLookupTime   = 8.0;
+    uint32      filterBits      = 512;
+    uint32      partials        = 300;
+    bool        powerUsage      = false;
+    size_t      farmSize        = 0;
+    byte        randomSeed[BB_PLOT_ID_LEN] = {};
 
     // Internally set
-    // bool        hasFarmSize   = false;
     double      partialRatio  = 0;
 
 
@@ -61,6 +62,9 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
     Config cfg = {};
     cfg.gCfg = &gCfg;
 
+    // Set initial random seed for F7s
+    SysHost::Random( (byte*)&cfg.randomSeed, sizeof( cfg.randomSeed ) );
+
     while( cli.HasArgs() )
     {
         if( cli.ArgConsume( "-h", "--help" ) )
@@ -74,11 +78,8 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         else if( cli.ReadU32( cfg.filterBits, "-f", "--filter" ) ) continue;
         else if( cli.ReadU32( cfg.partials, "--partials" ) ) continue;
         else if( cli.ReadSwitch( cfg.powerUsage, "--power" ) ) continue;
-        // else if( cli.ReadSize( cfg.farmSize, "-s", "--size" ) )
-        // {
-        //     cfg.hasFarmSize = true;
-        //     continue;
-        // }
+        else if( cli.ReadSize( cfg.farmSize, "-s", "--size" ) ) continue;
+        else if( cli.ReadHexStrAsBytes( cfg.randomSeed, sizeof( cfg.randomSeed ), "--seed" ) ) continue;
         // else if( cli.ArgConsume( "power" ) )
         // {
         //     cfg.subcommand = SubCommand::Farm;
@@ -111,7 +112,7 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
     FatalIf( cfg.filterBits < 1, "Invalid filter bits value of %u.", cfg.filterBits );
     FatalIf( cfg.parallelCount * (uint64)gCfg.threadCount > MAX_THREADS, 
         "Too many thread combination (%llu) between -t and -p", cfg.parallelCount * (llu)gCfg.threadCount );
-    
+
     if( cfg.powerUsage && cfg.parallelCount > 1 )
     {
         Log::Line( "Power Simulation Info: Increasing the number of fetches requested times the number of contexts %llu -> %llu.",
@@ -139,6 +140,7 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
     FatalIf( compressionLevel < 1, "The plot %s is not compressed.", cfg.plotPath );
 
     Log::Line( "[Simulator for harvester farm capacity for K%2u C%u plots]", plot->K(), compressionLevel );
+    Log::Line( " Random seed: 0x%s", BytesToHexStdString( cfg.randomSeed, sizeof( cfg.randomSeed ) ).c_str() );
     Log::Line( " Simulating..." );
     Log::NewLine();
 
@@ -193,7 +195,7 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         
         if( fetchMaxSecs >= cfg.maxLookupTime )
         {
-            Log::Line( "*** Warning *** : Your wost plot lookup time of %.3lf was over the maximum set of %.3lf.", 
+            Log::Line( "*** Warning *** : Your worst plot lookup time of %.3lf was over the maximum set of %.3lf.", 
                 fetchMaxSecs, cfg.maxLookupTime );
         }
 
@@ -299,10 +301,13 @@ void SimulatorJob::Run()
         cfg->jobsMemoryUsed = grGetMemoryUsage( reader.GetDecompressorContext() );
 }
 
-void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const uint32 partialCount )
+void SimulatorJob::RunFarm( PlotReader& reader, const uint64 challengeCount, const uint32 partialCount )
 {
-    const uint64 startF7 = fetchCount * JobId();
-    const size_t f7Size  = CDiv( reader.PlotFile().K(), 8 );
+    const uint64 plotsPerChallenge = 1;
+
+    const uint32 k      = reader.PlotFile().K();
+    const size_t f7Size = CDiv( k, 8 );
+    
 
     Duration totalFetchDuration     = Duration::zero();
     Duration totalFullProofDuration = Duration::zero();
@@ -319,62 +324,95 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const u
         HexStrToBytes( challengeStr, sizeof( challenge )*2, challenge, sizeof( challenge ) );
     }
 
-    const int64 partialInterval = partialCount == 0 ? std::numeric_limits<int64>::max() : (int64)std::min( fetchCount, fetchCount / partialCount );
+    const int64 partialInterval = partialCount == 0 ? std::numeric_limits<int64>::max() : (int64)std::min( challengeCount, challengeCount / partialCount );
           int64 nextPartial     = partialCount == 0 ? std::numeric_limits<int64>::max() : 1;
 
-    for( uint64 f7 = startF7; f7 < startF7 + fetchCount; f7++ )
+    const uint64 f7Mask = (1ull << k) - 1;
+          uint64 prevF7 = (uint64)_jobId & f7Mask;
+
+    for( uint64 n = 0; n < challengeCount; n++ )
     {
-        // Embed f7 into challenge as BE
-        for( size_t i = 0; i < f7Size; i++ )
-            challenge[i] = (byte)(f7 >> ((f7Size - i - 1) * 8));
-        const auto timer = TimerBegin();
+        // How many plots are we simulating for this challenge?
+        // When doing maximum farm simulation, we only try 1,
+        // as we are simply calculating the maximum capacity based
+        // on lookup times. However, when simulating for power,
+        // we need to know how many plots would pass the filter per challenge
+        // given a hypothetical farm.
+        const auto challengeStartTime = TimerBegin();
 
-        // Read indices for F7
-              uint64 p7IndexBase = 0;
-        const uint64 matchCount  = reader.GetP7IndicesForF7( f7, p7IndexBase );
-
-        const bool fetchFullProof = --nextPartial <= 0;
-        if( fetchFullProof )
-            nextPartial = partialInterval;
-
-        for( uint64 i = 0; i < matchCount; i++ )
+        for( uint64 p = 0; p < plotsPerChallenge; p++ )
         {
-            uint64 p7Entry;
-            FatalIf( ! reader.ReadP7Entry( p7IndexBase + i, p7Entry ), 
-                "Failed to read P7 entry at %llu. (F7 = %llu)", (llu)p7IndexBase + i, (llu)f7 );
+            const uint64 f7 = F1GenSingleForK( k, cfg->randomSeed, prevF7 ) & f7Mask;
+            prevF7 = f7;
 
-            ProofFetchResult rQ, rP = ProofFetchResult::OK;
+            // Fetch from plot
+            
+            // Embed f7 into challenge as BE
+            for( size_t i = 0; i < f7Size; i++ )
+                challenge[i] = (byte)(f7 >> ((f7Size - i - 1) * 8));
+            const auto timer = TimerBegin();
 
-            rQ = reader.FetchQualityForP7Entry( p7Entry, challenge, quality );
+            // Read indices for F7
+                    uint64 p7IndexBase = 0;
+            const uint64 matchCount  = reader.GetP7IndicesForF7( f7, p7IndexBase );
+
+            const bool fetchFullProof = --nextPartial <= 0;
             if( fetchFullProof )
-                rP = reader.FetchProof( p7Entry, fullProofXs );
+                nextPartial = partialInterval;
 
-            const auto errR = rQ != ProofFetchResult::OK ? rQ : rP;
-            if( errR != ProofFetchResult::OK )
+            uint64 fullProofsForMatchCount = matchCount;
+
+            for( uint64 i = 0; i < matchCount; i++ )
             {
-                FatalIf( errR == ProofFetchResult::Error, "Error while fetching proof for F7 %llu.", (llu)f7 );
-                FatalIf( errR == ProofFetchResult::CompressionError, "Decompression error while fetching proof for F7 %llu.", (llu)f7 );
+                uint64 p7Entry;
+                FatalIf( !reader.ReadP7Entry( p7IndexBase + i, p7Entry ), 
+                    "Failed to read P7 entry at %llu. (F7 = %llu)", (llu)p7IndexBase + i, (llu)f7 );
+
+                ProofFetchResult rQ, rP = ProofFetchResult::OK;
+
+                rQ = reader.FetchQualityForP7Entry( p7Entry, challenge, quality );
+                if( fetchFullProof )
+                {
+                    rP = reader.FetchProof( p7Entry, fullProofXs );
+                    if( rP == ProofFetchResult::NoProof )
+                        fullProofsForMatchCount--;
+                }
+
+                const auto errR = rQ != ProofFetchResult::OK ? rQ : rP;
+                if( errR != ProofFetchResult::OK )
+                {
+                    FatalIf( errR == ProofFetchResult::Error, "Error while fetching proof for F7 %llu.", (llu)f7 );
+                    FatalIf( errR == ProofFetchResult::CompressionError, "Decompression error while fetching proof for F7 %llu.", (llu)f7 );
+                }
             }
-        }
 
-        const auto elapsed = TimerEndTicks( timer );
-        totalFetchDuration += elapsed;
+            const auto elapsed = TimerEndTicks( timer );
+            totalFetchDuration += elapsed;
 
-        if( fetchFullProof )
-        {
-            totalFullProofDuration += elapsed;
-            nFullProofsRequested++;
+            if( fetchFullProof )
+            {
+                totalFullProofDuration += elapsed;
+                nFullProofsRequested++;
 
-            if( matchCount > 0 )
+                // if( matchCount > 0 )
                 minFetchDurationNano = std::min( minFetchDurationNano, (uint64)TicksToNanoSeconds( elapsed ) );
+            }
+            
+            maxFetchDurationNano = std::max( maxFetchDurationNano, (uint64)TicksToNanoSeconds( elapsed ) );
         }
-        
-        maxFetchDurationNano = std::max( maxFetchDurationNano, (uint64)TicksToNanoSeconds( elapsed ) );
-        
-        // Wait for next proof when in power usage mode
+
         if( cfg->powerUsage )
         {
-            Thread::Sleep( (long)(CHALLENGE_INTERVAL * 1000.0) );
+            // Wait for next challenge when in power usage simulation mode
+            const double challengeTimeElapsed = TimerEnd( challengeStartTime );
+
+            // #TODO: Count missed challenges
+            double timeUntilNextChallenge = CHALLENGE_INTERVAL - challengeTimeElapsed;
+            if( timeUntilNextChallenge < 0.0 )
+                timeUntilNextChallenge = std::fmod( challengeTimeElapsed, CHALLENGE_INTERVAL );
+
+            if( timeUntilNextChallenge >= 0.01 )
+                Thread::Sleep( (long)(timeUntilNextChallenge * 1000.0) );
         }
     }
 
