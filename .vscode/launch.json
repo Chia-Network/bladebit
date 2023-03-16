@@ -262,7 +262,8 @@
                 // "0x00000037ff04b8ee9355068689bd558eafe07cc7af47ad1574b074fc34d6913a", "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835",
 
                 // // "--f7", "2534554965", "~/plot/tmp/plot-k32-2022-10-18-22-25-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
-                // "--f7", "2476", 
+                // "-t", "16", "validate", "--f7", "11", "~/plot/tmp/plot-k32-c07-2023-03-16-11-49-7732c75d9f3b5ad1fc804bb7429121e334bd4f25f9bbbb76ef0370b5a0e80aae.plot"
+
                 // "/home/harold/plot/tmp/plot-k32-c07-2023-02-08-17-35-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
                 // "~/plot/tmp/plot-k32-2023-02-08-17-39-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
                 // //  "~/plot/tmp/plot-k32-c04-2023-01-29-03-29-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
@@ -274,7 +275,8 @@
                 // // "/home/harold/plot/tmp/plot-k32-c04-2023-01-31-23-15-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
                 
                 // Simulation
-                "-t", "1", "simulate", "-p", "12", "-n", "260", "-s", "18TB", "~/plot/tmp/plot-k32-c01-2023-03-03-18-40-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                "-t", "1", "simulate", "-p", "16", "-n", "1000", "~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                // "-t", "30", "simulate", "-p", "2", "-n", "600", "~/plot/tmp/plot-k32-c07-2023-03-16-11-49-7732c75d9f3b5ad1fc804bb7429121e334bd4f25f9bbbb76ef0370b5a0e80aae.plot"
                 
                 // "-m",
                 // "-u", "~/plot/tmp/plot-k32-2022-10-26-23-58-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",

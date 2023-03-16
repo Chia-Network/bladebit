@@ -25,10 +25,10 @@ struct Config
     double      maxLookupTime = 8.0;
     uint32      filterBits    = 512;
     uint32      partials      = 300;
-
+    bool        powerUsage    = false;
 
     // Internally set
-    bool        hasFarmSize   = false;
+    // bool        hasFarmSize   = false;
     double      partialRatio  = 0;
 
 
@@ -41,6 +41,10 @@ struct SimulatorJob : MTJob<SimulatorJob>
     Config*                cfg;
     Span<FilePlot>         plots;
     std::atomic<uint64>*   totalTimeNano;
+    std::atomic<uint64>*   totalFullProofTimeNano;
+    std::atomic<uint64>*   maxFetchTimeNano;
+    std::atomic<uint64>*   minFPFetchTimeNano;
+    std::atomic<uint64>*   nFullProofsRequested;
     uint32                 decompressorThreadCount;
 
     virtual void Run() override;
@@ -69,12 +73,13 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         else if( cli.ReadF64( cfg.maxLookupTime, "-l", "--lookup" ) ) continue;
         else if( cli.ReadU32( cfg.filterBits, "-f", "--filter" ) ) continue;
         else if( cli.ReadU32( cfg.partials, "--partials" ) ) continue;
-        else if( cli.ReadSize( cfg.farmSize, "-s", "--size" ) )
-        {
-            cfg.hasFarmSize = true;
-            continue;
-        }
-        // else if( cli.ArgConsume( "farm" ) )
+        else if( cli.ReadSwitch( cfg.powerUsage, "--power" ) ) continue;
+        // else if( cli.ReadSize( cfg.farmSize, "-s", "--size" ) )
+        // {
+        //     cfg.hasFarmSize = true;
+        //     continue;
+        // }
+        // else if( cli.ArgConsume( "power" ) )
         // {
         //     cfg.subcommand = SubCommand::Farm;
             
@@ -101,11 +106,26 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         }
     }
 
-    FatalIf( cfg.fetchCount    < 1   , "Invalid iteration count of %u.", cfg.fetchCount );
+    FatalIf( cfg.fetchCount < 1, "Invalid iteration count of %u.", cfg.fetchCount );
     FatalIf( cfg.maxLookupTime <= 0.0, "Invalid max lookup time of %lf.", cfg.maxLookupTime );
-    FatalIf( cfg.fetchCount < 1, "Invalid filter bits value of %u.", cfg.filterBits );
+    FatalIf( cfg.filterBits < 1, "Invalid filter bits value of %u.", cfg.filterBits );
     FatalIf( cfg.parallelCount * (uint64)gCfg.threadCount > MAX_THREADS, 
         "Too many thread combination (%llu) between -t and -p", cfg.parallelCount * (llu)gCfg.threadCount );
+    
+    if( cfg.powerUsage && cfg.parallelCount > 1 )
+    {
+        Log::Line( "Power Simulation Info: Increasing the number of fetches requested times the number of contexts %llu -> %llu.",
+                    (llu)cfg.fetchCount, (llu)cfg.fetchCount * cfg.parallelCount );
+        cfg.fetchCount *= cfg.parallelCount;
+    }
+
+    // Lower the parallel count until all instances have at least 1 lookup
+    if( cfg.parallelCount > cfg.fetchCount )
+    {
+        Log::Line( "Warning: Limiting parallel context count to %u, as it must be <= than the fetch count of %llu",
+            cfg.parallelCount, (llu)cfg.fetchCount );
+        cfg.parallelCount = (uint32)cfg.fetchCount;
+    }
 
 
     FilePlot* plot = new FilePlot[cfg.parallelCount];
@@ -113,21 +133,24 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
     {
         if( !plot[i].Open( cfg.plotPath ) )
             Fatal( "Failed to open plot file at '%s' with error %d.", cfg.plotPath, plot[i].GetError() );
-
     }
 
     const uint32 compressionLevel = plot[0].CompressionLevel();
     FatalIf( compressionLevel < 1, "The plot %s is not compressed.", cfg.plotPath );
 
-    Log::Line( "[Harvester farm capacity for K%2u C%u plots]", plot->K(), compressionLevel );
-    Log::Line( " Testing..." );
+    Log::Line( "[Simulator for harvester farm capacity for K%2u C%u plots]", plot->K(), compressionLevel );
+    Log::Line( " Simulating..." );
     Log::NewLine();
 
 
     ThreadPool pool( cfg.parallelCount, ThreadPool::Mode::Fixed, true );
 
     const uint32 decompressorThreadCount = std::min( gCfg.threadCount == 0 ? 8 : gCfg.threadCount, SysHost::GetLogicalCPUCount() );
-    std::atomic<uint64> totalTimeNano = 0;
+    std::atomic<uint64> totalTimeNano          = 0;
+    std::atomic<uint64> totalFullProofTimeNano = 0;
+    std::atomic<uint64> maxFetchTimeNano       = 0;
+    std::atomic<uint64> minFPFetchTimeNano     = std::numeric_limits<uint64>::max();
+    std::atomic<uint64> nFullProofsRequested   = 0;
 
     {
         SimulatorJob job = {};
@@ -135,33 +158,50 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         job.plots                   = Span<FilePlot>( plot, cfg.parallelCount );
         job.totalTimeNano           = &totalTimeNano;
         job.decompressorThreadCount = decompressorThreadCount;
+        job.totalFullProofTimeNano  = &totalFullProofTimeNano;
+        job.maxFetchTimeNano        = &maxFetchTimeNano;
+        job.minFPFetchTimeNano      = &minFPFetchTimeNano;
+        job.nFullProofsRequested    = &nFullProofsRequested;
 
         MTJobRunner<SimulatorJob>::RunFromInstance( pool, cfg.parallelCount, job );
     }
 
-    const uint64 fetchCountAdjusted = CDiv( cfg.fetchCount, cfg.parallelCount ) * cfg.parallelCount;
+    // Report
+    {
+        const uint64 fetchCountAdjusted = CDiv( cfg.fetchCount, cfg.parallelCount ) * cfg.parallelCount;
 
-    const uint64 totalTimeNanoAdjusted = totalTimeNano / cfg.parallelCount;
-    const uint64 fetchAverageNano      = totalTimeNanoAdjusted / fetchCountAdjusted;
-    const double fetchAverageSecs      = NanoSecondsToSeconds( fetchAverageNano );
+        const uint64 actualPartials        = nFullProofsRequested;//(uint32)(cfg.partials * (cfg.fetchCount / (double)CHALLENGES_PER_DAY) );
+        const uint64 totalTimeNanoAdjusted = totalTimeNano / cfg.parallelCount;
+        const uint64 fetchAverageNano      = fetchCountAdjusted == 0 ? 0 : totalTimeNanoAdjusted / fetchCountAdjusted;
+        const double fetchAverageSecs      = NanoSecondsToSeconds( fetchAverageNano );
+        const double fetchMaxSecs          = NanoSecondsToSeconds( maxFetchTimeNano );
+        const double fetchFpAverageSecs    = actualPartials > 0 ? NanoSecondsToSeconds( totalFullProofTimeNano / actualPartials ) : 0;
+        const size_t memoryUsed            = cfg.jobsMemoryUsed * cfg.parallelCount;
 
-    const uint32 actualPartials        = (uint32)(cfg.partials * (cfg.fetchCount / (double)CHALLENGES_PER_DAY) );
-    const size_t memoryUsed            = cfg.jobsMemoryUsed * cfg.parallelCount;
+        Log::Line( " Context count                 : %llu", (llu)cfg.parallelCount );
+        Log::Line( " Thread per context instance   : %llu", (llu)gCfg.threadCount );
+        Log::Line( " Memory used                   : %.1lfMiB ( %.1lfGiB )", (double)memoryUsed BtoMB, (double)memoryUsed BtoGB );
+        Log::Line( " Challenge count               : %llu", (llu)cfg.fetchCount );
+        Log::Line( " Filter bits                   : %u", cfg.filterBits );
+        Log::Line( " Effective partials            : %u ( %.2lf%% )", actualPartials, actualPartials / (double)cfg.fetchCount );
+        Log::Line( " Total time elapsed            : %.3lf seconds", NanoSecondsToSeconds( totalTimeNanoAdjusted ) );
+        Log::Line( " Average time per plot lookup  : %.3lf seconds", fetchAverageSecs );
+        Log::Line( " Worst plot lookup lookup time : %.3lf seconds", fetchMaxSecs );
+        Log::Line( " Average full proof lookup time: %.3lf seconds", fetchFpAverageSecs );
+        Log::Line( " Fastest full proof lookup time: %.3lf seconds", actualPartials == 0 ? 0.0 : NanoSecondsToSeconds( minFPFetchTimeNano ) );
+        Log::NewLine();
+        
+        if( fetchMaxSecs >= cfg.maxLookupTime )
+        {
+            Log::Line( "*** Warning *** : Your wost plot lookup time of %.3lf was over the maximum set of %.3lf.", 
+                fetchMaxSecs, cfg.maxLookupTime );
+        }
 
-    Log::Line( " Context count               : %llu", (llu)cfg.parallelCount );
-    Log::Line( " Thread per context instance : %llu", (llu)gCfg.threadCount );
-    Log::Line( " Memory used                 : %.1lfMiB ( %.1lfGiB )", (double)memoryUsed BtoMB, (double)memoryUsed BtoGB );
-    Log::Line( " Challenge count             : %llu", (llu)cfg.fetchCount );
-    Log::Line( " Filter bits                 : %u", cfg.filterBits );
-    Log::Line( " Effective partials          : %u ( %.2lf%% )", actualPartials, actualPartials / (double)cfg.fetchCount );
-    Log::Line( " Total time elapsed          : %.3lf seconds", NanoSecondsToSeconds( totalTimeNanoAdjusted ) );
-    Log::Line( " Average time per plot lookup: %.3lf seconds", fetchAverageSecs );
-    Log::NewLine();
-
-    // Calculate farm size for this compression level
-    Log::Line( " %10s | %-10s | %-10s | %-10s ", "compression", "plot count", "size TB", "size PB" );
-    Log::Line( "------------------------------------------------" );
-    DumpCompressedPlotCapacity( cfg, plot->K(), compressionLevel, fetchAverageSecs );
+        // Calculate farm size for this compression level
+        Log::Line( " %10s | %-10s | %-10s | %-10s ", "compression", "plot count", "size TB", "size PB" );
+        Log::Line( "------------------------------------------------" );
+        DumpCompressedPlotCapacity( cfg, plot->K(), compressionLevel, fetchAverageSecs );
+    }
 
     Log::NewLine();
     Exit( 0 );
@@ -235,15 +275,20 @@ void SimulatorJob::Run()
     reader.ConfigDecompressor( decompressorThreadCount, cfg->gCfg->disableCpuAffinity, decompressorThreadCount * JobId() );
 
     const double challengeRatio = cfg->fetchCount / (double)CHALLENGES_PER_DAY;
-    const uint32 actualPartials = (uint32)(cfg->partials * challengeRatio);
+    const uint64 actualPartials = (uint64)(cfg->partials * challengeRatio);
 
-    const uint64 fetchPerInstance    = CDiv( cfg->fetchCount, cfg->parallelCount );
-    const uint32 partialsPerInstance = CDiv( actualPartials, cfg->parallelCount );
+    uint64 fetchCountForJob, partialsForJob;
+    {
+        uint64 _;
+        GetThreadOffsets( this, cfg->fetchCount, fetchCountForJob, _, _  );
+        GetThreadOffsets( this, actualPartials, partialsForJob, _, _  );
+        ASSERT( fetchCountForJob > 0 );
+    }
 
     switch( cfg->subcommand )
     {
         case SubCommand::Farm:
-            RunFarm( reader, fetchPerInstance, partialsPerInstance );
+            RunFarm( reader, fetchCountForJob, (uint32)partialsForJob );
             break;
     
         default:
@@ -259,7 +304,11 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const u
     const uint64 startF7 = fetchCount * JobId();
     const size_t f7Size  = CDiv( reader.PlotFile().K(), 8 );
 
-    Duration totalFetchDuration = NanoSeconds::zero();
+    Duration totalFetchDuration     = Duration::zero();
+    Duration totalFullProofDuration = Duration::zero();
+    uint64   maxFetchDurationNano   = 0;
+    uint64   minFetchDurationNano   = std::numeric_limits<uint64>::max();
+    uint64   nFullProofsRequested   = 0;
 
     uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] = {};
     byte   quality    [BB_CHIA_QUALITY_SIZE]  = {};
@@ -270,8 +319,8 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const u
         HexStrToBytes( challengeStr, sizeof( challenge )*2, challenge, sizeof( challenge ) );
     }
 
-    const int64 partialInterval = (int64)std::min( fetchCount, fetchCount / partialCount );
-          int64 nextPartial     = partialInterval;
+    const int64 partialInterval = partialCount == 0 ? std::numeric_limits<int64>::max() : (int64)std::min( fetchCount, fetchCount / partialCount );
+          int64 nextPartial     = partialCount == 0 ? std::numeric_limits<int64>::max() : 1;
 
     for( uint64 f7 = startF7; f7 < startF7 + fetchCount; f7++ )
     {
@@ -284,7 +333,7 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const u
               uint64 p7IndexBase = 0;
         const uint64 matchCount  = reader.GetP7IndicesForF7( f7, p7IndexBase );
 
-        const bool fetchFullProof = nextPartial-- <= 0;
+        const bool fetchFullProof = --nextPartial <= 0;
         if( fetchFullProof )
             nextPartial = partialInterval;
 
@@ -310,9 +359,42 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const u
 
         const auto elapsed = TimerEndTicks( timer );
         totalFetchDuration += elapsed;
+
+        if( fetchFullProof )
+        {
+            totalFullProofDuration += elapsed;
+            nFullProofsRequested++;
+
+            if( matchCount > 0 )
+                minFetchDurationNano = std::min( minFetchDurationNano, (uint64)TicksToNanoSeconds( elapsed ) );
+        }
+        
+        maxFetchDurationNano = std::max( maxFetchDurationNano, (uint64)TicksToNanoSeconds( elapsed ) );
+        
+        // Wait for next proof when in power usage mode
+        if( cfg->powerUsage )
+        {
+            Thread::Sleep( (long)(CHALLENGE_INTERVAL * 1000.0) );
+        }
     }
 
-    *totalTimeNano += (uint64)TicksToNanoSeconds( totalFetchDuration );
+    *this->totalTimeNano          += (uint64)TicksToNanoSeconds( totalFetchDuration );
+    *this->totalFullProofTimeNano += (uint64)TicksToNanoSeconds( totalFullProofDuration );
+    *this->nFullProofsRequested   += nFullProofsRequested;
+
+    {
+        uint64 curMaxFetch = this->maxFetchTimeNano->load( std::memory_order_relaxed );
+        while( curMaxFetch < maxFetchDurationNano && 
+            !this->maxFetchTimeNano->compare_exchange_weak( curMaxFetch, maxFetchDurationNano, 
+                                                            std::memory_order_release, std::memory_order_relaxed ) );
+    }
+
+    {
+        uint64 curMinFetch = this->minFPFetchTimeNano->load( std::memory_order_relaxed );
+        while( curMinFetch > minFetchDurationNano && 
+            !this->minFPFetchTimeNano->compare_exchange_weak( curMinFetch, minFetchDurationNano, 
+                                                              std::memory_order_release, std::memory_order_relaxed ) );
+    }
 }
 
 

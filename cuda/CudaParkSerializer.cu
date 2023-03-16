@@ -193,8 +193,6 @@ __global__ void CudaCompressC3Park( const uint32 parkCount, uint32* f7Entries, b
 
     byte* deltaWriter = (byte*)f7Entries;
 
-    uint32 i = 0;
-
     // Convert to deltas
 
     // f7Entries must always start at an interval of kCheckpoint1Interval
@@ -202,7 +200,7 @@ __global__ void CudaCompressC3Park( const uint32 parkCount, uint32* f7Entries, b
     uint32 prevF7 = *f7Entries;
     
     #pragma unroll
-    for( uint64 i = 1; i < kCheckpoint1Interval; i++ )
+    for( uint32 i = 1; i < kCheckpoint1Interval; i++ )
     {
         const uint32 f7    = f7Entries[i];
         const uint32 delta = f7 - prevF7;

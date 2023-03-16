@@ -1115,7 +1115,8 @@ ForwardPropResult ForwardPropTable( GreenReaperContext& cx, uint32 tableGroupCou
         metaRight = metaRight.Slice( matchCount );
     }
 
-    SortTableAndFlipBuffers<rTable>( cx, tableGroupCount );
+    const uint32 groupsToFlip = std::max( 1u, tableGroupCount / 2 );
+    SortTableAndFlipBuffers<rTable>( cx, groupsToFlip );
 
     // The last table makes no group entries, it should simply have a single match
     // if( rTable == TableId::Table6 )
