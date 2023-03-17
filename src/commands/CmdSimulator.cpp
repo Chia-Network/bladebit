@@ -195,8 +195,8 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         // Log::Line( " Quality only lookups            : %u ( %.2lf%% )", actualQualitiesOnly, actualQualitiesOnly / (double)cfg.fetchCount );
         Log::Line( " Total time elapsed              : %.3lf seconds", NanoSecondsToSeconds( totalTimeNanoAdjusted ) );
         Log::Line( " Average time per plot lookup    : %.3lf seconds", fetchAverageSecs );
-        Log::Line( " Average quality only lookup time: %.3lf seconds", fetchAverageQualitiesOnly );
-        Log::Line( " Worst plot lookup lookup time   : %.3lf seconds", fetchMaxSecs );
+        Log::Line( " Average quality-only lookup time: %.3lf seconds", fetchAverageQualitiesOnly );
+        Log::Line( " Worst plot lookup time          : %.3lf seconds", fetchMaxSecs );
         Log::Line( " Average full proof lookup time  : %.3lf seconds", fetchFpAverageSecs );
         Log::Line( " Fastest full proof lookup time  : %.3lf seconds", actualPartials == 0 ? 0.0 : NanoSecondsToSeconds( minFPFetchTimeNano ) );
         Log::NewLine();
