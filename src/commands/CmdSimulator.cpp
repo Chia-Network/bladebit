@@ -42,9 +42,11 @@ struct SimulatorJob : MTJob<SimulatorJob>
     Span<FilePlot>         plots;
     std::atomic<uint64>*   totalTimeNano;
     std::atomic<uint64>*   totalFullProofTimeNano;
+    std::atomic<uint64>*   totalQualitiesTimeNano;
     std::atomic<uint64>*   maxFetchTimeNano;
     std::atomic<uint64>*   minFPFetchTimeNano;
     std::atomic<uint64>*   nFullProofsRequested;
+    std::atomic<uint64>*   nQualitiesOnlyRequested;
     uint32                 decompressorThreadCount;
 
     virtual void Run() override;
@@ -146,11 +148,13 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
     ThreadPool pool( cfg.parallelCount, ThreadPool::Mode::Fixed, true );
 
     const uint32 decompressorThreadCount = std::min( gCfg.threadCount == 0 ? 8 : gCfg.threadCount, SysHost::GetLogicalCPUCount() );
-    std::atomic<uint64> totalTimeNano          = 0;
-    std::atomic<uint64> totalFullProofTimeNano = 0;
-    std::atomic<uint64> maxFetchTimeNano       = 0;
-    std::atomic<uint64> minFPFetchTimeNano     = std::numeric_limits<uint64>::max();
-    std::atomic<uint64> nFullProofsRequested   = 0;
+    std::atomic<uint64> totalTimeNano           = 0;
+    std::atomic<uint64> totalFullProofTimeNano  = 0;
+    std::atomic<uint64> totalQualitiesTimeNano  = 0;
+    std::atomic<uint64> maxFetchTimeNano        = 0;
+    std::atomic<uint64> minFPFetchTimeNano      = std::numeric_limits<uint64>::max();
+    std::atomic<uint64> nFullProofsRequested    = 0;
+    std::atomic<uint64> nQualitiesOnlyRequested = 0;
 
     {
         SimulatorJob job = {};
@@ -159,9 +163,11 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         job.totalTimeNano           = &totalTimeNano;
         job.decompressorThreadCount = decompressorThreadCount;
         job.totalFullProofTimeNano  = &totalFullProofTimeNano;
+        job.totalQualitiesTimeNano  = &totalQualitiesTimeNano;
         job.maxFetchTimeNano        = &maxFetchTimeNano;
         job.minFPFetchTimeNano      = &minFPFetchTimeNano;
         job.nFullProofsRequested    = &nFullProofsRequested;
+        job.nQualitiesOnlyRequested = &nQualitiesOnlyRequested;
 
         MTJobRunner<SimulatorJob>::RunFromInstance( pool, cfg.parallelCount, job );
     }
@@ -170,31 +176,36 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
     {
         const uint64 fetchCountAdjusted = CDiv( cfg.fetchCount, cfg.parallelCount ) * cfg.parallelCount;
 
-        const uint64 actualPartials        = nFullProofsRequested;//(uint32)(cfg.partials * (cfg.fetchCount / (double)CHALLENGES_PER_DAY) );
-        const uint64 totalTimeNanoAdjusted = totalTimeNano / cfg.parallelCount;
-        const uint64 fetchAverageNano      = fetchCountAdjusted == 0 ? 0 : totalTimeNanoAdjusted / fetchCountAdjusted;
-        const double fetchAverageSecs      = NanoSecondsToSeconds( fetchAverageNano );
-        const double fetchMaxSecs          = NanoSecondsToSeconds( maxFetchTimeNano );
-        const double fetchFpAverageSecs    = actualPartials > 0 ? NanoSecondsToSeconds( totalFullProofTimeNano / actualPartials ) : 0;
-        const size_t memoryUsed            = cfg.jobsMemoryUsed * cfg.parallelCount;
+        const uint64 actualPartials            = nFullProofsRequested;//(uint32)(cfg.partials * (cfg.fetchCount / (double)CHALLENGES_PER_DAY) );
+        const uint64 totalTimeNanoAdjusted     = totalTimeNano / cfg.parallelCount;
+        const uint64 fetchAverageNano          = fetchCountAdjusted == 0 ? 0 : totalTimeNanoAdjusted / fetchCountAdjusted;
+        const uint64 actualQualitiesOnly       = nQualitiesOnlyRequested;
+        const double fetchAverageSecs          = NanoSecondsToSeconds( fetchAverageNano );
+        const double fetchAverageQualitiesOnly = nQualitiesOnlyRequested > 0 ?  NanoSecondsToSeconds( totalQualitiesTimeNano / nQualitiesOnlyRequested ) : 0;
+        const double fetchMaxSecs              = NanoSecondsToSeconds( maxFetchTimeNano );
+        const double fetchFpAverageSecs        = actualPartials > 0 ? NanoSecondsToSeconds( totalFullProofTimeNano / actualPartials ) : 0;
+        const size_t memoryUsed                = cfg.jobsMemoryUsed * cfg.parallelCount;
 
-        Log::Line( " Context count                 : %llu", (llu)cfg.parallelCount );
-        Log::Line( " Thread per context instance   : %llu", (llu)gCfg.threadCount );
-        Log::Line( " Memory used                   : %.1lfMiB ( %.1lfGiB )", (double)memoryUsed BtoMB, (double)memoryUsed BtoGB );
-        Log::Line( " Challenge count               : %llu", (llu)cfg.fetchCount );
-        Log::Line( " Filter bits                   : %u", cfg.filterBits );
-        Log::Line( " Effective partials            : %u ( %.2lf%% )", actualPartials, actualPartials / (double)cfg.fetchCount );
-        Log::Line( " Total time elapsed            : %.3lf seconds", NanoSecondsToSeconds( totalTimeNanoAdjusted ) );
-        Log::Line( " Average time per plot lookup  : %.3lf seconds", fetchAverageSecs );
-        Log::Line( " Worst plot lookup lookup time : %.3lf seconds", fetchMaxSecs );
-        Log::Line( " Average full proof lookup time: %.3lf seconds", fetchFpAverageSecs );
-        Log::Line( " Fastest full proof lookup time: %.3lf seconds", actualPartials == 0 ? 0.0 : NanoSecondsToSeconds( minFPFetchTimeNano ) );
+        Log::Line( " Context count                   : %llu", (llu)cfg.parallelCount );
+        Log::Line( " Thread per context instance     : %llu", (llu)gCfg.threadCount );
+        Log::Line( " Memory used                     : %.1lfMiB ( %.1lfGiB )", (double)memoryUsed BtoMB, (double)memoryUsed BtoGB );
+        Log::Line( " Challenge count                 : %llu", (llu)cfg.fetchCount );
+        Log::Line( " Filter bits                     : %u", cfg.filterBits );
+        Log::Line( " Effective partials              : %u ( %.2lf%% )", actualPartials, actualPartials / (double)cfg.fetchCount );
+        // Log::Line( " Quality only lookups            : %u ( %.2lf%% )", actualQualitiesOnly, actualQualitiesOnly / (double)cfg.fetchCount );
+        Log::Line( " Total time elapsed              : %.3lf seconds", NanoSecondsToSeconds( totalTimeNanoAdjusted ) );
+        Log::Line( " Average time per plot lookup    : %.3lf seconds", fetchAverageSecs );
+        Log::Line( " Average quality only lookup time: %.3lf seconds", fetchAverageQualitiesOnly );
+        Log::Line( " Worst plot lookup lookup time   : %.3lf seconds", fetchMaxSecs );
+        Log::Line( " Average full proof lookup time  : %.3lf seconds", fetchFpAverageSecs );
+        Log::Line( " Fastest full proof lookup time  : %.3lf seconds", actualPartials == 0 ? 0.0 : NanoSecondsToSeconds( minFPFetchTimeNano ) );
         Log::NewLine();
         
         if( fetchMaxSecs >= cfg.maxLookupTime )
         {
-            Log::Line( "*** Warning *** : Your wost plot lookup time of %.3lf was over the maximum set of %.3lf.", 
+            Log::Line( "*** Warning *** : Your worst plot lookup time of %.3lf was over the maximum set of %.3lf.", 
                 fetchMaxSecs, cfg.maxLookupTime );
+            Log::NewLine();
         }
 
         // Calculate farm size for this compression level
@@ -304,11 +315,13 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const u
     const uint64 startF7 = fetchCount * JobId();
     const size_t f7Size  = CDiv( reader.PlotFile().K(), 8 );
 
-    Duration totalFetchDuration     = Duration::zero();
-    Duration totalFullProofDuration = Duration::zero();
-    uint64   maxFetchDurationNano   = 0;
-    uint64   minFetchDurationNano   = std::numeric_limits<uint64>::max();
-    uint64   nFullProofsRequested   = 0;
+    Duration totalFetchDuration      = Duration::zero();
+    Duration totalFullProofDuration  = Duration::zero();
+    Duration totalQualitiesDuration  = Duration::zero();
+    uint64   maxFetchDurationNano    = 0;
+    uint64   minFetchDurationNano    = std::numeric_limits<uint64>::max();
+    uint64   nFullProofsRequested    = 0;
+    uint64   nQualitiesOnlyRequested = 0;
 
     uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] = {};
     byte   quality    [BB_CHIA_QUALITY_SIZE]  = {};
@@ -368,6 +381,10 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const u
             if( matchCount > 0 )
                 minFetchDurationNano = std::min( minFetchDurationNano, (uint64)TicksToNanoSeconds( elapsed ) );
         }
+        else {
+            totalQualitiesDuration += elapsed;
+            nQualitiesOnlyRequested++;
+        }
         
         maxFetchDurationNano = std::max( maxFetchDurationNano, (uint64)TicksToNanoSeconds( elapsed ) );
         
@@ -378,9 +395,11 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 fetchCount, const u
         }
     }
 
-    *this->totalTimeNano          += (uint64)TicksToNanoSeconds( totalFetchDuration );
-    *this->totalFullProofTimeNano += (uint64)TicksToNanoSeconds( totalFullProofDuration );
-    *this->nFullProofsRequested   += nFullProofsRequested;
+    *this->totalTimeNano           += (uint64)TicksToNanoSeconds( totalFetchDuration );
+    *this->totalFullProofTimeNano  += (uint64)TicksToNanoSeconds( totalFullProofDuration );
+    *this->totalQualitiesTimeNano  += (uint64)TicksToNanoSeconds( totalQualitiesDuration );
+    *this->nFullProofsRequested    += nFullProofsRequested;
+    *this->nQualitiesOnlyRequested += nQualitiesOnlyRequested;
 
     {
         uint64 curMaxFetch = this->maxFetchTimeNano->load( std::memory_order_relaxed );
