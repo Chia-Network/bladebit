@@ -276,7 +276,8 @@
                 // // "/home/harold/plot/tmp/plot-k32-c04-2023-01-31-23-15-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
                 
                 // Simulation
-                "-t", "1", "simulate", "-p", "16", "-n", "1000", "~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                "-t", "1", "simulate", "--seed", "b8e9ec6bc179ae6ba5f5c3483f7501db32879efa84b62001d27601a540dca5ff", 
+                    "-p", "16", "-n", "1", "--power", "45", "--size", "4PB", "~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
                 // "-t", "30", "simulate", "-p", "2", "-n", "600", "~/plot/tmp/plot-k32-c07-2023-03-16-11-49-7732c75d9f3b5ad1fc804bb7429121e334bd4f25f9bbbb76ef0370b5a0e80aae.plot"
                 
                 // "-m",

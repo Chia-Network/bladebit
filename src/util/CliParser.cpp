@@ -311,7 +311,7 @@ size_t CliParser::ReadSize()
 }
 
 //-----------------------------------------------------------
-bool CliParser::ReadHexStr( const char*& hexStr, const size_t maxStrLength, const char* paramA, const char* paramB = nullptr  )
+bool CliParser::ReadHexStr( const char*& hexStr, const size_t maxStrLength, const char* paramA, const char* paramB )
 {
     if( !ReadStr( hexStr, paramA, paramB ) )
         return false;
@@ -335,7 +335,7 @@ bool CliParser::ReadHexStr( const char*& hexStr, const size_t maxStrLength, cons
 }
     
 //-----------------------------------------------------------
-bool CliParser::ReadHexStrAsBytes( byte* bytes, size_t maxBytes, const char* paramA, const char* paramB = nullptr  )
+bool CliParser::ReadHexStrAsBytes( byte* bytes, size_t maxBytes, const char* paramA, const char* paramB )
 {
     const char* hexStr = nullptr;
     if( !ReadHexStr( hexStr, maxBytes*2, paramA, paramB ) )
