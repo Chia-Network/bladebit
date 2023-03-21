@@ -16,20 +16,6 @@ jobs:
         shell: bash
         run: .github/actions/get-version.sh windows x86-64
 
-      - name: Cache Vcpkg packages
-        id: cache-vcpkg
-        uses: actions/cache@v2
-        with:
-          path: |
-            C:/vcpkg/installed
-          key: ${{ runner.os }}-vcpkg-gmp
-
-      - name: Install GMP via VCPKG
-        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
-        working-directory: C:/vcpkg
-        run : |
-          vcpkg install gmp:x64-windows-static
-
       - name: Cache CUDA
         id: cache-cuda
         uses: actions/cache@v2
@@ -47,9 +33,6 @@ jobs:
         run: |
           echo "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "CUDA_PATH_V12_0=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "VCPKG_INSTALLED_DIR=${{ runner.workspace }}/vcpkg/installed" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "LIBRARY_PATH=${{ runner.workspace }}/vcpkg/installed/x64-windows-static/lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "INCLUDE_PATH=${{ runner.workspace }}/vcpkg/installed/x64-windows-static/include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build CUDA
         shell: bash
