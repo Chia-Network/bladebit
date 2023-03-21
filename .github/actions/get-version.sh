@@ -29,7 +29,7 @@ if [[ "$os" == "windows" ]]; then
     ext="zip"
 fi
 
-echo "::set-output name=BB_VERSION::$version"
-echo "::set-output name=BB_ARTIFACT_NAME::bladebit-v${version}-${os}-${arch}.${ext}"
-echo "::set-output name=BB_ARTIFACT_NAME_CUDA::bladebit-cuda-v${version}-${os}-${arch}.${ext}"
+echo "BB_VERSION=$version"
+echo "BB_ARTIFACT_NAME=bladebit-v${version}-${os}-${arch}.${ext}"
+echo "BB_ARTIFACT_NAME_CUDA1bladebit-cuda-v${version}-${os}-${arch}.${ext}"
 

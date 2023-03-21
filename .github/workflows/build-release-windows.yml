@@ -1,0 +1,43 @@
+name: Build Release (Windows)
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  build-windows-x86-64:
+    runs-on: windows-2019
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Get Version Number
+        id: version_number
+        shell: bash
+        run: .github/actions/get-version.sh windows x86-64
+
+      - name: Install Prerequisites
+        run: |
+          choco install gmp
+          choco install msinttypes
+
+      - name: Install CUDA Prerequisites
+        run: choco install cuda -y
+
+      - name: Set Up Environment Variables
+        run: |
+          echo "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.4" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "CUDA_PATH_V11_4=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.4" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LIBRARY_PATH=C:\tools\gmp\lib;C:\tools\msinttypes\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "INCLUDE_PATH=C:\tools\gmp\include;C:\tools\msinttypes\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build CUDA
+        shell: bash
+        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+
+      - name: Upload Artifact CUDA Windows x86-64
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+          if-no-files-found: error
