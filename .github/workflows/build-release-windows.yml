@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-windows-x86-64:
-    runs-on: windows-2019
+    runs-on: windows-latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -18,18 +18,15 @@ jobs:
 
       - name: Install Prerequisites
         run: |
-          choco install gmp
-          choco install msinttypes
-
-      - name: Install CUDA Prerequisites
-        run: choco install cuda -y
+          choco install gmp -y
+          choco install cuda -y
 
       - name: Set Up Environment Variables
         run: |
           echo "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.4" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "CUDA_PATH_V11_4=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.4" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "LIBRARY_PATH=C:\tools\gmp\lib;C:\tools\msinttypes\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "INCLUDE_PATH=C:\tools\gmp\include;C:\tools\msinttypes\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LIBRARY_PATH=C:\tools\gmp\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "INCLUDE_PATH=C:\tools\gmp\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build CUDA
         shell: bash
