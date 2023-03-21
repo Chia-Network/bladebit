@@ -17,10 +17,8 @@ jobs:
         run: .github/actions/get-version.sh windows x86-64
 
       - name: Install Vcpkg and GMP
-        uses: lukka/run-vcpkg@v10
-        with:
-          vcpkgArguments: gmp
-          vcpkgDirectory: ${{ runner.workspace }}/vcpkg
+        run : |
+          vcpkg install gmp:x64-windows-static
 
       - name: Cache CUDA
         id: cache-cuda
