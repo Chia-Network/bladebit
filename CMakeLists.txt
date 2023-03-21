@@ -70,6 +70,15 @@ set(BUILD_BLS_TESTS "0" CACHE STRING "")
 set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
 FetchContent_MakeAvailable(bls)
 
+# gmp
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(gmp REQUIRED IMPORTED_TARGET gmp)
+target_link_libraries(main PkgConfig::gmp)
+
+# gmpxx
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(gmpxx REQUIRED IMPORTED_TARGET gmpxx)
+target_link_libraries(main PkgConfig::gmpxx)
 
 # Threads
 find_package(Threads REQUIRED)
