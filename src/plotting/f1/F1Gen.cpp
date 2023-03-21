@@ -24,7 +24,7 @@ uint64 F1GenSingleForK( const uint32 k, const byte plotId[BB_PLOT_ID_LEN], uint6
     const uint64 blockIdx    = x * k / kF1BlockSizeBits; 
     const uint64 blockEndIdx = (x * k + k - 1) / kF1BlockSizeBits; 
     
-    const uint32 nBlocks = blockEndIdx - blockIdx + 1;
+    const uint32 nBlocks = (uint32)(blockEndIdx - blockIdx + 1);
 
     chacha8_get_keystream( &chacha, blockIdx, nBlocks, blocks );
 
