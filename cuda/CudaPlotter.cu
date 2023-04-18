@@ -127,9 +127,9 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
         cx.downloadDirect = true ;//false;
     #endif
 
-    cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
-    if( cx.gCfg->benchmarkMode )
-        cx.plotWriter->EnableDummyMode();
+    // cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
+    // if( cx.gCfg->benchmarkMode )
+    //     cx.plotWriter->EnableDummyMode();
 
     cx.plotFence  = new Fence();
 
@@ -206,6 +206,11 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     // Only start profiling from here (don't profile allocations)
     CudaErrCheck( cudaProfilerStart() );
 
+    ASSERT( cx.plotWriter == nullptr );
+    cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
+    if( cx.gCfg->benchmarkMode )
+        cx.plotWriter->EnableDummyMode();
+
     FatalIf( !cx.plotWriter->BeginPlot( cfg.gCfg->compressionLevel > 0 ? PlotVersion::v2_0 : PlotVersion::v1_0, 
             req.outDir, req.plotFileName, req.plotId, req.memo, req.memoSize, cfg.gCfg->compressionLevel ), 
         "Failed to open plot file with error: %d", cx.plotWriter->GetError() );
@@ -225,6 +230,9 @@ void CudaK32Plotter::Run( const PlotRequest& req )
         cx.plotWriter->DumpTables();
     }
     Log::Line( "" );
+
+    delete cx.plotWriter;
+    cx.plotWriter = nullptr;
 }
 
 //-----------------------------------------------------------
