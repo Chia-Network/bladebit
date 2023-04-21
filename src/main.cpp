@@ -474,6 +474,9 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
 
     FatalIf( plotter == nullptr, "No plotter type chosen." );
 
+    // #TODO: Remove when C8 compression values added.
+    FatalIf( cfg.compressionLevel == 8, "Compression level 8 is not currently supported." );
+
     // Parse plotter-specific CLI
     plotter->ParseCLI( cfg, cli );
     

@@ -41,7 +41,7 @@ template<typename T>
 static void UploadBucketToGpu( CudaK32PlotContext& context, TableId table, const uint32* hostPtr, T* devPtr, uint64 bucket, uint64 stride );
 static void LoadAndSortBucket( CudaK32PlotContext& cx, const uint32 bucket );
 
-void CudaK32Match( CudaK32PlotContext& cx, const uint32* devY, cudaStream_t stream, cudaEvent_t event );
+void CudaMatchBucketizedK32( CudaK32PlotContext& cx, const uint32* devY, cudaStream_t stream, cudaEvent_t event );
 
 // Defined in FxCuda.cu
 void GenFx( CudaK32PlotContext& cx, const uint32* devYIn, const uint32* devMetaIn, cudaStream_t stream );
@@ -500,7 +500,7 @@ void FpTableBucket( CudaK32PlotContext& cx, const uint32 bucket )
     }
 
     // Match pairs
-    CudaK32Match( cx, devYSorted, mainStream, nullptr );
+    CudaMatchBucketizedK32( cx, devYSorted, mainStream, nullptr );
 
     // Inline input x's or compressed x's
     if( isLTableInlineable )

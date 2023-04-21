@@ -27,6 +27,8 @@ struct Config
     size_t      farmSize        = 0;
     byte        randomSeed[BB_PLOT_ID_LEN] = {};
     double      powerSimSeconds = -1;
+    bool        noCuda          = false;
+    int32       cudaDevice      = 0;
 
     // Internally set
     double      partialRatio  = 0;
@@ -89,6 +91,7 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         }
         else if( cli.ReadSize( cfg.farmSize, "-s", "--size" ) ) continue;
         else if( cli.ReadHexStrAsBytes( cfg.randomSeed, sizeof( cfg.randomSeed ), "--seed" ) ) continue;
+        else if( cli.ReadSwitch( cfg.noCuda, "--no-cuda" ) ) continue;
         else
             break;
     }
@@ -119,6 +122,14 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         Log::Line( "Warning: Limiting parallel context count to %u, as it must be <= than the fetch count of %llu",
             cfg.parallelCount, (llu)cfg.fetchCount );
         cfg.parallelCount = (uint32)cfg.fetchCount;
+    }
+
+    // #TODO: Make sure there's a cuda device present
+    // With cuda, only support a single context and thread
+    if( !cfg.noCuda )
+    {
+        cfg.gCfg->threadCount = 1;
+        cfg.parallelCount = 1;
     }
 
 
@@ -281,7 +292,25 @@ void SimulatorJob::Run()
     FilePlot& plot = plots[JobId()];
 
     PlotReader reader( plot );
-    reader.ConfigDecompressor( decompressorThreadCount, cfg->gCfg->disableCpuAffinity, decompressorThreadCount * JobId() );
+
+    {
+        GreenReaperConfig grCfg = {};
+        grCfg.threadCount        = decompressorThreadCount;
+        grCfg.cpuOffset          = decompressorThreadCount * JobId();
+        grCfg.disableCpuAffinity = cfg->gCfg->disableCpuAffinity;
+        grCfg.gpuRequest         = cfg->noCuda ? GRGpuRequestKind_None : GRGpuRequestKind_FirstAvailable;
+        grCfg.gpuDeviceIndex     = cfg->cudaDevice;
+
+        auto* grContext = grCreateContext( &grCfg );
+        FatalIf( !grContext, "Failed to create decompression context." );
+
+        if( grCfg.gpuRequest != GRGpuRequestKind_None && !(bool)grHasGpuDecompresser( grContext ) )
+            Log::Line( "Warning: No GPU device decompresser selected. Falling back to CPU-based simulation." );
+
+        reader.AssignDecompressionContext( grContext );
+    }
+    // reader.ConfigDecompressor( decompressorThreadCount, cfg->gCfg->disableCpuAffinity, decompressorThreadCount * JobId() );
+
 
     const double challengeRatio = cfg->fetchCount / (double)CHALLENGES_PER_DAY;
     const uint64 actualPartials = (uint64)(cfg->partials * challengeRatio);
@@ -489,6 +518,8 @@ OPTIONS:
  --power <seconds>        : Time in seconds to run power simulation. -n is set automatically in this mode.
  -s, --size <size>        : Size of farm. Only used when `--power` is set.
  --seed <hex>             : 64 char hex string to use as a random seed for challenges.
+ --no-cuda                : Don't use CUDA for decompression.
+ -d, --device <index>     : Cuda device index. (default = 0)
 )";
 
 void CmdSimulateHelp()

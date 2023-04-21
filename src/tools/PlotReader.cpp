@@ -726,7 +726,9 @@ ProofFetchResult PlotReader::DecompressProof( const uint64 compressedProof[BB_PL
     req.plotId           = _plot.PlotId();
     req.compressionLevel = compressionLevel;
 
-    for( uint32 i = 0; i < BB_PLOT_PROOF_X_COUNT/2; i++ )
+    const uint32 compressedProofCount = compressionLevel < 9 ? PROOF_X_COUNT / 2 : PROOF_X_COUNT / 4;
+
+    for( uint32 i = 0; i < compressedProofCount; i++ )
         req.compressedProof[i] = (uint32)compressedProof[i];
 
     const GRResult r = grFetchProofForChallenge( gr, &req );
@@ -919,6 +921,19 @@ bool PlotReader::LoadC2Entries()
 
     bbvirtfreebounded( buffer );
     return true;
+}
+
+//-----------------------------------------------------------
+void PlotReader::AssignDecompressionContext( struct GreenReaperContext* context )
+{
+    ASSERT( context );
+    if( !context)
+        return;
+
+    if( _grContext )
+        grDestroyContext( _grContext );
+    
+    _grContext = context;
 }
 
 //-----------------------------------------------------------

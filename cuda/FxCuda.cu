@@ -1,4 +1,5 @@
 #include "CudaPlotContext.h"
+#include "CudaFx.h"
 
 #define CU_FX_THREADS_PER_BLOCK 256
 
@@ -124,6 +125,189 @@ enum class FxVariant
     InlineTable1,
     Compressed
 };
+
+//-----------------------------------------------------------
+template<TableId rTable>
+__global__ void HarvestFxK32Kernel( 
+    uint64*       yOut, 
+    void*         metaOutVoid,
+    const uint32  matchCount, 
+    const Pair*   pairsIn, 
+    const uint64* yIn,
+    const void*   metaInVoid
+)
+{
+    const uint32 id  = threadIdx.x;
+    const uint32 gid = (uint32)(blockIdx.x * blockDim.x + id);
+
+    if( gid >= matchCount )
+        return;
+
+    using TMetaIn  = typename K32MetaType<rTable>::In;
+    using TMetaOut = typename K32MetaType<rTable>::Out;
+
+    constexpr size_t MetaInMulti  = TableMetaIn <rTable>::Multiplier;
+    constexpr size_t MetaOutMulti = TableMetaOut<rTable>::Multiplier;
+
+
+    const uint32 k           = BBCU_K;
+    const uint32 ySize       = k + kExtraBits;
+    const uint32 yExtraBits  = MetaOutMulti == 0 ? 0 : kExtraBits;
+    const uint32 yShift      = 64 - (k + yExtraBits);
+    
+    const uint32 metaSize    = k * MetaInMulti;
+    const uint32 metaSizeLR  = metaSize * 2;
+    const uint32 inputSize   = CuCDiv( ySize + metaSizeLR, 8 );
+
+
+    //  uint64 yMask   = (1ull << (k+yExtraBits)) - 1;
+
+    // const uint32 matchCount = *pMatchCount;
+
+    const TMetaIn*  metaIn  = (TMetaIn*)metaInVoid;
+          TMetaOut* metaOut = (TMetaOut*)metaOutVoid;
+
+    // Gen fx and meta
+    uint64   oy;
+    TMetaOut ometa;
+    
+    {
+        uint64 input [8];
+        uint64 output[4];
+
+        const Pair pair = pairsIn[gid];
+        
+        // CUDA_ASSERT( pair.left  < entryCount );
+        // CUDA_ASSERT( pair.right < entryCount );
+
+        const uint64 y = yIn[pair.left];
+
+        if constexpr( MetaInMulti == 1 )
+        {
+            const uint64 l = metaIn[pair.left ];
+            const uint64 r = metaIn[pair.right];
+
+            const uint64 i0 = y << 26 | l >> 6;
+            const uint64 i1 = l << 58 | r << 26;
+
+            input[0] = CuBSwap64( i0 );
+            input[1] = CuBSwap64( i1 );
+            input[2] = 0;
+            input[3] = 0;
+            input[4] = 0;
+            input[5] = 0;
+            input[6] = 0;
+            input[7] = 0;
+
+            if constexpr( MetaOutMulti == 2 )
+                ometa = l << 32 | r;
+        }
+        else if constexpr ( MetaInMulti == 2 )
+        {
+            const uint64 l = metaIn[pair.left ];
+            const uint64 r = metaIn[pair.right];
+
+            input[0] = CuBSwap64( y << 26 | l >> 38 );
+            input[1] = CuBSwap64( l << 26 | r >> 38 );
+            input[2] = CuBSwap64( r << 26 );
+            input[3] = 0;
+            input[4] = 0;
+            input[5] = 0;
+            input[6] = 0;
+            input[7] = 0;
+
+            if constexpr ( MetaOutMulti == 4 )
+            {
+                ometa.m0 = l;
+                ometa.m1 = r;
+            }
+        }
+        else if constexpr ( MetaInMulti == 3 )
+        {
+            const uint64 l0 = metaIn[pair.left ].m0;
+            const uint64 l1 = metaIn[pair.left ].m1 & 0xFFFFFFFF;
+            const uint64 r0 = metaIn[pair.right].m0;
+            const uint64 r1 = metaIn[pair.right].m1 & 0xFFFFFFFF;
+            
+            input[0] = CuBSwap64( y  << 26 | l0 >> 38 );
+            input[1] = CuBSwap64( l0 << 26 | l1 >> 6  );
+            input[2] = CuBSwap64( l1 << 58 | r0 >> 6  );
+            input[3] = CuBSwap64( r0 << 58 | r1 << 26 );
+            input[4] = 0;
+            input[5] = 0;
+            input[6] = 0;
+            input[7] = 0;
+        }
+        else if constexpr ( MetaInMulti == 4 )
+        {
+            const K32Meta4 l = metaIn[pair.left ];
+            const K32Meta4 r = metaIn[pair.right];
+
+            input[0] = CuBSwap64( y    << 26 | l.m0 >> 38 );
+            input[1] = CuBSwap64( l.m0 << 26 | l.m1 >> 38 );
+            input[2] = CuBSwap64( l.m1 << 26 | r.m0 >> 38 );
+            input[3] = CuBSwap64( r.m0 << 26 | r.m1 >> 38 );
+            input[4] = CuBSwap64( r.m1 << 26 );
+            input[5] = 0;
+            input[6] = 0;
+            input[7] = 0;
+        }
+
+        B3Round( inputSize );
+
+        uint32* out = (uint32*)output;
+        out[0] = state[0] ^ state[8];
+        out[1] = state[1] ^ state[9];
+
+        oy = CuBSwap64( *output ) >> yShift;
+
+        // Save output metadata
+        if constexpr ( MetaOutMulti == 2 && MetaInMulti == 3 )
+        {
+            out[2] = state[2] ^ state[10];
+            out[3] = state[3] ^ state[11];
+
+            const uint64 h0 = CuBSwap64( output[0] );
+            const uint64 h1 = CuBSwap64( output[1] );
+
+            ometa = h0 << ySize | h1 >> 26;
+        }
+        else if constexpr ( MetaOutMulti == 3 )
+        {
+            out[2] = state[2] ^ state[10];
+            out[3] = state[3] ^ state[11];
+            out[4] = state[4] ^ state[12];
+            out[5] = state[5] ^ state[13];
+
+            const uint64 h0 = CuBSwap64( output[0] );
+            const uint64 h1 = CuBSwap64( output[1] );
+            const uint64 h2 = CuBSwap64( output[2] );
+
+            ometa.m0 = h0 << ySize | h1 >> 26;
+            ometa.m1 = ((h1 << 6) & 0xFFFFFFC0) | h2 >> 58;
+        }
+        else if constexpr ( MetaOutMulti == 4 && MetaInMulti != 2 )
+        {
+            out[2] = state[2] ^ state[10];
+            out[3] = state[3] ^ state[11];
+            out[4] = state[4] ^ state[12];
+            out[5] = state[5] ^ state[13];
+
+            const uint64 h0 = CuBSwap64( output[0] );
+            const uint64 h1 = CuBSwap64( output[1] );
+            const uint64 h2 = CuBSwap64( output[2] );
+
+            ometa.m0 = h0 << ySize | h1 >> 26;
+            ometa.m1 = h1 << 38    | h2 >> 26;
+        }
+    }
+
+    // OK to store the value now
+    yOut[gid] = oy;
+
+    if constexpr ( MetaOutMulti > 0 )
+        metaOut[gid] = ometa;
+}
 
 //-----------------------------------------------------------
 template<FxVariant Variant, TableId rTable>
@@ -445,3 +629,53 @@ void GenFx( CudaK32PlotContext& cx, const uint32* devYIn, const uint32* devMetaI
         GenFxForTable<FxVariant::Compressed>( cx, devYIn, devMetaIn, stream );
 }
 
+//-----------------------------------------------------------
+void CudaFxHarvestK32(
+    const TableId table,
+    uint64*       devYOut, 
+    void*         devMetaOut,
+    const uint32  matchCount, 
+    const Pair*   devPairsIn, 
+    const uint64* devYIn,
+    const void*   devMetaIn,
+    cudaStream_t  stream )
+{
+    ASSERT( devYIn );
+    ASSERT( devMetaIn );
+    ASSERT( devYOut );
+    ASSERT( table == TableId::Table7 || devMetaOut );
+    ASSERT( devPairsIn );
+    ASSERT( matchCount );
+
+    const uint32 kthreads = 256;
+    const uint32 kblocks  = CDiv( matchCount, kthreads );
+
+    #define KERN_ARGS devYOut, devMetaOut, matchCount, devPairsIn, devYIn, devMetaIn
+    #undef KERN_ARG
+
+    switch( table )
+    {
+        case TableId::Table2:
+            HarvestFxK32Kernel<TableId::Table2><<<kblocks, kthreads, 0, stream>>>( KERN_ARGS );
+            break;
+        case TableId::Table3:
+            HarvestFxK32Kernel<TableId::Table3><<<kblocks, kthreads, 0, stream>>>( KERN_ARGS );
+            break;
+        case TableId::Table4:
+            HarvestFxK32Kernel<TableId::Table4><<<kblocks, kthreads, 0, stream>>>( KERN_ARGS );
+            break;
+        case TableId::Table5:
+            HarvestFxK32Kernel<TableId::Table5><<<kblocks, kthreads, 0, stream>>>( KERN_ARGS );
+            break;
+        case TableId::Table6:
+            HarvestFxK32Kernel<TableId::Table6><<<kblocks, kthreads, 0, stream>>>( KERN_ARGS );
+            break;
+        case TableId::Table7:
+            HarvestFxK32Kernel<TableId::Table7><<<kblocks, kthreads, 0, stream>>>( KERN_ARGS );
+            break;
+    
+        default:
+            Panic( "Unexpected table.");
+            break;
+    }
+}

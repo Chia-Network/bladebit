@@ -5,6 +5,7 @@
     "version": "0.2.0",
     "configurations": [
 
+
         {
             "name"          : "Bladebit RAM",
             "type"          : "cppdbg",
@@ -138,12 +139,44 @@
             // "--memo", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef207d52406afa2b6d7d92ea778f407205bd9dca40816c1b1cacfca2a6612b93eb",
             
             "args": 
-            "-w --compress 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot ~/plot/tmp"
+            "-w --compress 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot ~/plot/tmp",
             
             "windows": {
                 "type": "cppvsdbg",
                 "program": "${workspaceFolder}/build/Debug/bladebit_cuda.exe",
                 "args": "--benchmark --compress 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot D:/"
+            }
+        },
+
+        {
+            "name"       : "CUDA Harvest Test",
+
+            "type"          : "cuda-gdb",
+            "request"       : "launch",
+            "stopAtEntry"   : false,
+            "cwd"           : "${workspaceFolder}",
+            // "preLaunchTask" : "build_cuda_debug",
+            // "program": "${workspaceFolder}/build/bladebit_cuda",
+            
+            "preLaunchTask" : "build_debug",
+            "program": "${workspaceFolder}/build/bladebit",
+            
+            //                 "-c", "xch1uf48n3f50xrs7zds0uek9wp9wmyza6crnex6rw8kwm3jnm39y82q5mvps6",
+            // "-i", "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73",    // Yes overflow
+            // "--memo", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef207d52406afa2b6d7d92ea778f407205bd9dca40816c1b1cacfca2a6612b93eb",
+
+            // "args": "-t 1 validate --cuda --f7 0 ~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+            // "args": "validate --cuda --f7 0 ~/plot/tmp/plot-k32-c07-2023-03-16-11-49-7732c75d9f3b5ad1fc804bb7429121e334bd4f25f9bbbb76ef0370b5a0e80aae.plot",
+            // "args": "validate --cuda --f7 0 ~/plot/tmp/plot-k32-c09-2023-04-19-16-12-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+            
+            // "args": "-t 1 simulate -n 5000 -p 4  ~/plot/tmp/plot-k32-c07-2023-04-13-16-08-330fbf677f78641061c93312c1a7ffa28138739b69975f3b874df6acc3e76378.plot",
+            // "args": "-t 16 simulate -n 10 ~/plot/tmp/plot-k32-c09-2023-04-19-16-12-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+            "args": "-t 16 simulate -n 10 ~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+
+            "windows": {
+                "type": "cppvsdbg",
+                "program": "${workspaceFolder}/build/Debug/bladebit_cuda.exe",
+                // "args": "--benchmark --compress 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot D:/"
             }
         },
 

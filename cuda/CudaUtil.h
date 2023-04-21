@@ -39,6 +39,22 @@
     (((x)>> 8) & 0x00000000FF000000ull) \
 )
 
+#if _DEBUG
+    #define CUDA_ASSERT( expr ) assert( (expr) )
+#else
+    #define CUDA_ASSERT( expr ) 
+#endif
+
+struct CudaPlotInfo
+{
+    uint16 k;
+    uint16 bucketCount;
+    uint16 yBits;
+    uint16 bucketBits;
+    uint32 bucketCapacity;
+    uint32 sliceCapacity;
+    uint32 metaMaxSizeBytes;
+};
 
 
 inline void CudaErrCheck( cudaError_t err )
@@ -78,4 +94,36 @@ inline void CudaFatalCheckMsg( cudaError_t err, const char* msg, ... )
     va_start( args, msg );
     CudaFatalCheckMsgV( err, msg, args );
     va_end( args );
+}
+
+template<typename T>
+inline cudaError_t CudaCallocT( T*& ptr, const size_t count )
+{
+    return cudaMalloc( &ptr, count * sizeof( T ) );
+}
+
+template<typename T>
+inline cudaError_t CudaSafeFree( T*& ptr )
+{
+    if( ptr ) 
+    {
+        cudaError_t r = cudaFree( (void*)ptr );
+        ptr = nullptr;
+        return r;
+    }
+
+    return cudaSuccess;
+}
+
+template<typename T>
+inline cudaError_t CudaSafeFreeHost( T*& ptr )
+{
+    if( ptr ) 
+    {
+        cudaError_t r = cudaFreeHost( (void*)ptr );
+        ptr = nullptr;
+        return r;
+    }
+
+    return cudaSuccess;
 }

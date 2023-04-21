@@ -58,9 +58,7 @@ void CmdPlotsCheckMain( GlobalPlotConfig& gCfg, CliParser& cli )
     PlotReader reader( plot );
     reader.ConfigDecompressor( threadCount, gCfg.disableCpuAffinity );
 
-
     const uint32 k = plot.K();
-
 
     byte AlignAs(8) seed[BB_PLOT_ID_LEN] = {};
     SysHost::Random( seed, sizeof( seed ) );

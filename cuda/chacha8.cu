@@ -30,7 +30,7 @@
     b = ROTATE(XOR(b, c), 7)
 
 
-// 128 threads per cuda block, each thread will do one chia block
+// 128 threads per cuda block, each thread will do one chacha block
 #define CHACHA_BLOCKS_PER_CUDA_BLOCK 128ull
 
 //-----------------------------------------------------------

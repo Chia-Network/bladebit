@@ -209,6 +209,13 @@ void MemPlotter::Run( const PlotRequest& request )
 //-----------------------------------------------------------
 void MemPlotter::BeginPlotFile( const PlotRequest& request )
 {
+    // Re-create the serializer for now to workaround multiple-run serializer bug 
+    if( _context.plotWriter )
+    {
+        delete _context.plotWriter;
+        _context.plotWriter = nullptr;
+    }
+
     if( !_context.plotWriter )
         _context.plotWriter = new PlotWriter();
     
