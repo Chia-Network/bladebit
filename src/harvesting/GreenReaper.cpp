@@ -294,7 +294,7 @@ size_t grGetMemoryUsage( GreenReaperContext* context )
 }
 
 //-----------------------------------------------------------
-grBool grHasGpuDecompresser( GreenReaperContext* context )
+grBool grHasGpuDecompressor( GreenReaperContext* context )
 {
     return (grBool)(context != nullptr && context->cudaThresher != nullptr );
 }

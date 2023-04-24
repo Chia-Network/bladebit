@@ -541,7 +541,7 @@ target_compile_options(bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug
 target_compile_options(bladebit_cuda PRIVATE ${bb_c_opts})
 target_link_libraries(bladebit_cuda PRIVATE lib_bladebit_cuda)
 
-set_target_properties(lib_bladebit_cuda bladebit_cuda PROPERTIES 
+set_target_properties(lib_bladebit_cuda_core lib_bladebit_cuda bladebit_cuda PROPERTIES 
     MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
     CUDA_RUNTIME_LIBRARY Static
     CUDA_SEPARABLE_COMPILATION ON
@@ -553,4 +553,4 @@ set_target_properties(lib_bladebit_cuda bladebit_cuda PROPERTIES
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
     FILES ${src_full} ${bb_headers}
 )
-endif() # CUDAToolkit_FOUND
+endif()

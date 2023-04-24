@@ -756,7 +756,7 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
         gr = grCreateContext( &cfg );
         FatalIf( gr == nullptr, "Failed to created decompression context." );
 
-        if( opts.useCuda && !(bool)grHasGpuDecompresser( gr ) )
+        if( opts.useCuda && !(bool)grHasGpuDecompressor( gr ) )
             Log::Line( "Warning: No GPU device selected. Falling back to CPU-based validation." );
     }
 
