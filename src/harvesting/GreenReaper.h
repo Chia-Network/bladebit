@@ -104,8 +104,8 @@ GRResult grGetFetchQualitiesXPair( GreenReaperContext* context, GRCompressedQual
 
 size_t grGetMemoryUsage( GreenReaperContext* context );
 
-/// Returns true if the context has a Gpu-based decompresser created.
-grBool grHasGpuDecompresser( GreenReaperContext* context );
+/// Returns true if the context has a Gpu-based decompressor created.
+grBool grHasGpuDecompressor( GreenReaperContext* context );
 
 
 #ifdef __cplusplus

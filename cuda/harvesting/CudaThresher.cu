@@ -704,7 +704,7 @@ public:
 };
 
 
-IThresher *CudaThresherFactory::Create( GreenReaperConfig& config )
+IThresher* CudaThresherFactory::Create( GreenReaperConfig& config )
 {
     ASSERT( config.gpuRequest != GRGpuRequestKind_None );
 

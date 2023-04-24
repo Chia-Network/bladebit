@@ -5,7 +5,7 @@
 struct GreenReaperContext;
 struct Pair;
 
-/// A decompresser interface
+/// Plot decompression interface
 class IThresher
 {
 public:
