@@ -2,7 +2,10 @@
 #include "Platform.h"
 #include "util/Util.h"
 
-#include <sys/random.h>
+
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
@@ -257,9 +260,12 @@ void SysHost::DumpStackTrace()
 }
 
 //-----------------------------------------------------------
-void SysHost::Random( byte* buffer, size_t size )
-{
-    // See: https://man7.org/linux/man-pages/man2/getrandom.2.html
+void SysHost::Random(byte* buffer, size_t size) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd == -1) {
+        // handle the error
+        Fatal("Failed to open /dev/urandom.");
+    }
 
     ssize_t sizeRead;
     byte* writer = buffer;
@@ -272,16 +278,16 @@ void SysHost::Random( byte* buffer, size_t size )
         size_t readSize = (size_t)(end - writer);
         if( readSize > BLOCK_SIZE )
             readSize = BLOCK_SIZE;
-            
-        sizeRead = getrandom( writer, readSize, 0 );
+        sizeRead = read(fd, writer, readSize);
 
-        // Should never get EINTR, but docs say to check anyway.
-        int err = errno;
-        if( sizeRead < 0 && err != EINTR )
-            Fatal( "getrandom syscall failed with error %d.", err );
+        if (sizeRead < 0) {
+            Fatal("read failed with error %d.", errno);
+        }
 
         writer += (size_t)sizeRead;
     }
+
+    close(fd);
 }
 
 // #NOTE: This is not thread-safe

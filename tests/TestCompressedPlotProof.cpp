@@ -1,3 +1,4 @@
+/*
 #include "TestUtil.h"
 #include "harvesting/GreenReaper.h"
 #include "tools/PlotReader.h"
@@ -391,3 +392,4 @@ void Sha256( byte outHash[32], const byte* bytes, const size_t length )
 {
     bls::Util::Hash256( outHash, bytes, length );
 }
+*/

@@ -193,7 +193,7 @@ void CalculateParkSizes( const Span<uint64> linePoints, const uint32 stubBitSize
         
         while( entries.Length() > 0 )
         {
-            const uint64 entryCount = std::min( entries.Length(), (size_t)kEntriesPerPark );
+            const uint64 entryCount = std::min( (size_t) entries.Length(), (size_t)kEntriesPerPark );
             entries.SliceSize( entryCount ).CopyTo( Span<uint64>( parkEntries, entryCount ) );
             
             const size_t parkSize = WritePark( parkBufferSize*4, entryCount, parkEntries, parkBuffer, stubBitSize, cTable );
@@ -263,7 +263,7 @@ void DumpLpData( Span<uint64> linePoints, const uint32 compressionLevel, const u
             // Deltafy
             for( uint64 park = parkOffset; park < parkEnd; park++ )
             {
-                const uint64 parkEntryCount = std::min( linePoints.Length(), (size_t)kEntriesPerPark );
+                const uint64 parkEntryCount = std::min( (size_t)linePoints.Length(), (size_t)kEntriesPerPark );
                 
                 uint64 prevLp = linePoints[0];
 

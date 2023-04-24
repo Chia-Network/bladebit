@@ -3,7 +3,9 @@
 #include "util/Log.h"
 
 #if PLATFORM_IS_WINDOWS
-    #include <Windows.h>
+    #include <windows.h>
+#else
+    #include <sys/errno.h>
 #endif
 
 //-----------------------------------------------------------
