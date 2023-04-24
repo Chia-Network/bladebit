@@ -122,6 +122,10 @@ public:
 
     bool ReadSize( const char* sizeText, size_t& size, const char* arg = "" );
 
+    bool ReadHexStr( const char*& hexStr, size_t maxStrLength, const char* paramA, const char* paramB = nullptr  );
+    
+    bool ReadHexStrAsBytes( byte* bytes, size_t maxBytes, const char* paramA, const char* paramB = nullptr  );
+
     size_t ReadSize( const char* arg );
 
     size_t ReadSize();

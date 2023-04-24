@@ -34,11 +34,6 @@
 
 static constexpr uint32 CU_MAX_BC_GROUP_BOUNDARIES = ( BBCU_BUCKET_ENTRY_COUNT / 210 ); // Should be enough for all threads
 
-#if _DEBUG
-    #define CUDA_ASSERT( expr ) assert( (expr) )
-#else
-    #define CUDA_ASSERT( expr ) 
-#endif
 
 static_assert( BBCU_BUCKET_ALLOC_ENTRY_COUNT / BBCU_BUCKET_COUNT == BBCU_MAX_SLICE_ENTRY_COUNT );
 

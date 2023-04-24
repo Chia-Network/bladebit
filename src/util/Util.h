@@ -19,6 +19,12 @@
     #error Byte swapping intrinsics not configured for this compiler.
 #endif
 
+#if defined(__GNUC__)
+    #define AlignAs(bytes) __attribute__( (aligned((bytes))) )
+#elif defined(_MSC_VER)
+    #define AlignAs(bytes) __declspec( align((bytes)) )
+#endif
+
 
 /// Byte size conversions
 #define KB *(1llu<<10)
@@ -529,6 +535,14 @@ const char HEX_TO_BIN[256] = {
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 };
 
+
+//-----------------------------------------------------------
+inline bool IsHexChar( const char c )
+{
+    if( c < '0' || c > 'f' ) return false;
+    return c <= '9' || c >= 'a' || ( c >= 'A' && c <= 'B' );
+}
+
 //-----------------------------------------------------------
 inline void HexStrToBytes( const char* str, const size_t strSize,
                            byte* dst, size_t dstSize )
@@ -662,7 +676,7 @@ inline std::vector<uint8_t> BytesConcat( std::vector<uint8_t> a, std::vector<uin
     return a;
 }
 
-std::string HexToString( const byte* bytes, size_t length );
+std::string BytesToHexStdString( const byte* bytes, size_t length );
 std::vector<uint8_t> HexStringToBytes( const char* hexStr );
 std::vector<uint8_t> HexStringToBytes( const std::string& hexStr );
 
@@ -706,5 +720,24 @@ inline void PrintBits( const T value, const uint32 bitCount )
     const uint32 shift = bitCount - 1;
     for( uint32 i = 0; i < bitCount; i++ )
         (value >> (shift-i)) & T(1) ? Log::Write( "1" ) : Log::Write( "0" );
+}
+
+//-----------------------------------------------------------
+/// Convertes 8 bytes to uint64 and endian-swaps it.
+/// This takes any byte alignment, so that bytes does
+/// not have to be aligned to 64-bit boundary.
+/// This is for compatibility for how chiapos extracts
+/// bytes into integers.
+//-----------------------------------------------------------
+inline uint64 BytesToUInt64( const byte bytes[8] )
+{
+    uint64 tmp;
+
+    if( (((uintptr_t)&bytes[0]) & 7) == 0 ) // Is address 8-byte aligned?
+        tmp = *(uint64*)&bytes[0];
+    else
+        memcpy( &tmp, bytes, sizeof( uint64 ) );
+
+    return Swap64( tmp );
 }
 

@@ -71,7 +71,12 @@ uint64 ScanBCGroupMT32(
     const uint32  maxGroups
     )
 {
-    threadCount = std::min( (uint32)entryCount, threadCount );
+    // Each thread must a minimum # of entries, otherwise, reduce threads until have enough
+    const uint64 minEntriesPerThreads = 10000;
+
+    threadCount = std::min( threadCount, entryCount);
+    while( threadCount > 1 && entryCount / threadCount < minEntriesPerThreads )
+        threadCount--;
 
     if( maxGroups < threadCount || maxGroups < 3 )
         return 0;

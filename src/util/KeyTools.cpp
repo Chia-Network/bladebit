@@ -58,14 +58,14 @@ bls::PrivateKey KeyTools::MasterSkToLocalSK( const bls::PrivateKey& sk )
 void KeyTools::PrintPK( const bls::G1Element& key )
 {
     std::vector<uint8_t> bytes = key.Serialize();
-    Log::Line( "%s", HexToString( (byte*)bytes.data(), bytes.size() ).c_str() );
+    Log::Line( "%s", BytesToHexStdString( (byte*)bytes.data(), bytes.size() ).c_str() );
 }
 
 //-----------------------------------------------------------
 void KeyTools::PrintSK( const bls::PrivateKey& key )
 {
     std::vector<uint8_t> bytes = key.Serialize();
-    Log::Line( "%s", HexToString( (byte*)bytes.data(), bytes.size() ).c_str() );
+    Log::Line( "%s", BytesToHexStdString( (byte*)bytes.data(), bytes.size() ).c_str() );
 }
 
 

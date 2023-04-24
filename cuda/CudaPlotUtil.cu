@@ -36,7 +36,6 @@ __global__ void SortByKey( const uint32 entryCount, const uint32* key, const T* 
     output[gid] = input[key[gid]];
 }
 
-
 //-----------------------------------------------------------
 template<typename T>
 void CudaK32PlotSortByKey( const uint32 entryCount, const uint32* devKey, const T* devInput, T* devOutput, cudaStream_t stream, bool synchronize )
@@ -66,3 +65,60 @@ template void CudaK32PlotSortByKey<K32Meta3>( const uint32 entryCount, const uin
 template void CudaK32PlotSortByKey<K32Meta4>( const uint32 entryCount, const uint32* devKey, const K32Meta4* devInput, K32Meta4* devOutput, cudaStream_t stream, bool synchronize );
 template void CudaK32PlotSortByKey<Pair>( const uint32 entryCount, const uint32* devKey, const Pair* devInput, Pair* devOutput, cudaStream_t stream, bool synchronize );
 
+
+__global__ void K32InlineXsIntoPairsKernel( const uint32 entryCount, Pair* outPairs, const Pair* inPairs, const uint32* xs )
+{
+    const uint32 gid = blockIdx.x * blockDim.x + threadIdx.x;
+    if( gid >= entryCount )
+        return;
+
+    const Pair pair = inPairs[gid];
+
+    Pair inlined;
+    inlined.left  = xs[pair.left ];
+    inlined.right = xs[pair.right];
+    CUDA_ASSERT( inlined.left || inlined.right );
+
+    outPairs[gid] = inlined;
+}
+
+void CudaK32InlineXsIntoPairs(
+    const uint32  entryCount,
+          Pair*   devOutPairs,
+    const Pair*   devInPairs,
+    const uint32* devXs,
+    cudaStream_t  stream )
+{
+    const uint32 kthreads = 256;
+    const uint32 kblocks  = CDivT( entryCount, kthreads );
+
+    K32InlineXsIntoPairsKernel<<<kblocks, kthreads, 0, stream>>>(
+        entryCount, devOutPairs, devInPairs, devXs );
+}
+
+
+__global__ void K3ApplyPairOffsetKernel( const uint32 entryCount, const uint32 offset, Pair* outPairs, const Pair* inPairs )
+{
+    const uint32 gid = blockIdx.x * blockDim.x + threadIdx.x;
+    if( gid >= entryCount )
+        return;
+
+    Pair pair = inPairs[gid];
+    pair.left  += offset;
+    pair.right += offset;
+
+    outPairs[gid] = pair;
+}
+void CudaK32ApplyPairOffset(
+    const uint32 entryCount,
+    const uint32 offset,
+          Pair*  devOutPairs,
+    const Pair*  devInPairs,
+    cudaStream_t stream )
+{
+    const uint32 kthreads = 256;
+    const uint32 kblocks  = CDivT( entryCount, kthreads );
+
+    K3ApplyPairOffsetKernel<<<kblocks, kthreads, 0, stream>>>(
+        entryCount, offset, devOutPairs, devInPairs );
+}

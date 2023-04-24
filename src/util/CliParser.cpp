@@ -309,3 +309,40 @@ size_t CliParser::ReadSize()
     NextArg();
     return size;
 }
+
+//-----------------------------------------------------------
+bool CliParser::ReadHexStr( const char*& hexStr, const size_t maxStrLength, const char* paramA, const char* paramB )
+{
+    if( !ReadStr( hexStr, paramA, paramB ) )
+        return false;
+    
+    size_t len = strlen( hexStr );
+    if( len >= 2 && hexStr[0] == '0' && hexStr[0] == 'x' )
+    {
+        hexStr += 2;
+        len -= 2;
+    }
+
+    FatalIf( len == 0, "Expected a hexadecimal string for parameter '%s'.", _argv[_i-1] );
+    FatalIf( len < maxStrLength, "Hexadecimal string '%s' for parameter '%s' is too long.", hexStr, _argv[_i-1] );
+
+    for( size_t i = 0; i < len; i++ )
+    {
+        FatalIf( !IsHexChar( hexStr[i] ), "Expected a hexadecimal string for parameter '%s'.", _argv[_i-1] );
+    }
+
+    return true;
+}
+    
+//-----------------------------------------------------------
+bool CliParser::ReadHexStrAsBytes( byte* bytes, size_t maxBytes, const char* paramA, const char* paramB )
+{
+    const char* hexStr = nullptr;
+    if( !ReadHexStr( hexStr, maxBytes*2, paramA, paramB ) )
+        return false;
+
+    FatalIf( !HexStrToBytesSafe( hexStr, strlen( hexStr ), bytes, maxBytes ),
+        "Failed to parse hexadecimal string for parameter '%s'.",  _argv[_i-1] );
+
+    return true;
+}

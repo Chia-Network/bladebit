@@ -41,7 +41,7 @@ template<typename T>
 static void UploadBucketToGpu( CudaK32PlotContext& context, TableId table, const uint32* hostPtr, T* devPtr, uint64 bucket, uint64 stride );
 static void LoadAndSortBucket( CudaK32PlotContext& cx, const uint32 bucket );
 
-void CudaK32Match( CudaK32PlotContext& cx, const uint32* devY, cudaStream_t stream, cudaEvent_t event );
+void CudaMatchBucketizedK32( CudaK32PlotContext& cx, const uint32* devY, cudaStream_t stream, cudaEvent_t event );
 
 // Defined in FxCuda.cu
 void GenFx( CudaK32PlotContext& cx, const uint32* devYIn, const uint32* devMetaIn, cudaStream_t stream );
@@ -127,9 +127,9 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
         cx.downloadDirect = true ;//false;
     #endif
 
-    cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
-    if( cx.gCfg->benchmarkMode )
-        cx.plotWriter->EnableDummyMode();
+    // cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
+    // if( cx.gCfg->benchmarkMode )
+    //     cx.plotWriter->EnableDummyMode();
 
     cx.plotFence  = new Fence();
 
@@ -206,6 +206,11 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     // Only start profiling from here (don't profile allocations)
     CudaErrCheck( cudaProfilerStart() );
 
+    ASSERT( cx.plotWriter == nullptr );
+    cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
+    if( cx.gCfg->benchmarkMode )
+        cx.plotWriter->EnableDummyMode();
+
     FatalIf( !cx.plotWriter->BeginPlot( cfg.gCfg->compressionLevel > 0 ? PlotVersion::v2_0 : PlotVersion::v1_0, 
             req.outDir, req.plotFileName, req.plotId, req.memo, req.memoSize, cfg.gCfg->compressionLevel ), 
         "Failed to open plot file with error: %d", cx.plotWriter->GetError() );
@@ -225,6 +230,9 @@ void CudaK32Plotter::Run( const PlotRequest& req )
         cx.plotWriter->DumpTables();
     }
     Log::Line( "" );
+
+    delete cx.plotWriter;
+    cx.plotWriter = nullptr;
 }
 
 //-----------------------------------------------------------
@@ -492,7 +500,7 @@ void FpTableBucket( CudaK32PlotContext& cx, const uint32 bucket )
     }
 
     // Match pairs
-    CudaK32Match( cx, devYSorted, mainStream, nullptr );
+    CudaMatchBucketizedK32( cx, devYSorted, mainStream, nullptr );
 
     // Inline input x's or compressed x's
     if( isLTableInlineable )

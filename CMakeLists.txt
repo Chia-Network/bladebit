@@ -445,68 +445,54 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 endif()
 
 
-# macro(config_proj tgt)
-#     message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
-#     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-#     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-#     target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
-#     target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
-    
-#     target_include_directories(${tgt} PRIVATE ${bb_include_dirs})
-# endmacro()
+ macro(config_bladebit_proj tgt)
+     message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
+     target_link_libraries(${tgt} PUBLIC Threads::Threads bls ${platform_libs})
+     target_include_directories(${tgt} PUBLIC ${bb_include_dirs})
+
+     target_compile_definitions(${tgt} PUBLIC $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
+     target_compile_definitions(${tgt} PUBLIC $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
+
+     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+     target_compile_options(${tgt} PRIVATE ${bb_c_opts})
+
+     target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
+     target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
+ endmacro()
 
 # BladeBit
-add_library(lib_bladebit ${bb_sources} ${bb_headers} src/plotdisk/k32/FpMatchBounded.inl src/plotdisk/k32/F1Bounded.inl)
-
-set_target_properties(lib_bladebit PROPERTIES
-    OUTPUT_NAME bladebit
+add_library(lib_bladebit ${bb_sources} ${bb_headers}
+    cuda/harvesting/CudaThresherDummy.cpp # Dummy CudaThresher factory
 )
-target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
-target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
+set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit )
+config_bladebit_proj(lib_bladebit)
+#target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
+#target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
+#
+#target_compile_definitions(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
+#target_compile_definitions(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
+#
+#target_compile_options(lib_bladebit PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
+#target_compile_options(lib_bladebit PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
+#target_compile_options(lib_bladebit PRIVATE ${bb_c_opts})
+#
+#target_link_options(lib_bladebit PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
+#target_link_options(lib_bladebit PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
 
-target_compile_definitions(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
-target_compile_definitions(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
-#target_compile_definitions(lib_bladebit PUBLIC BLAKE3_NO_SSE41=1)
 
-target_compile_options(lib_bladebit PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-target_compile_options(lib_bladebit PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-target_compile_options(lib_bladebit PRIVATE ${bb_c_opts})
-
-target_link_options(lib_bladebit PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
-target_link_options(lib_bladebit PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
-
-add_executable(bladebit ${bb_headers} src/main.cpp src/plotdisk/k32/FxBounded.inl)
+add_executable(bladebit ${bb_headers} src/main.cpp)
 target_compile_options(bladebit PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
 target_compile_options(bladebit PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
 target_compile_options(bladebit PRIVATE ${bb_c_opts})
 target_link_libraries(bladebit PRIVATE lib_bladebit)
 
-#add_executable(bladebit_dev  EXCLUDE_FROM_ALL src/sandbox/sandbox_main.cpp ${src_dev} ${bb_headers})
-#target_link_libraries(bladebit_dev PRIVATE lib_bladebit)
 
-# Tools
-#add_executable(fsegen src/tools/FSETableGenerator.cpp ${bb_sources} ${bb_headers})
-#target_link_libraries(fsegen PRIVATE lib_bladebit)
-
-# add_executable(plot_tool 
-#     src/tools/PlotTools_Main.cpp 
-#     src/tools/PlotReader.cpp
-#     src/tools/PlotValidator.cpp
-#     src/tools/PlotComparer.cpp 
-#     ${bb_headers}
-# )
-# target_link_libraries(plot_tool PRIVATE lib_bladebit)
-
-# Tests
-
-if(BLADEBIT_ENABLE_TESTS)
-    add_executable(tests ${src_tests} ${bb_headers})
-    target_compile_options(tests PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
-    target_compile_options(tests PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
-    target_compile_options(tests PRIVATE ${bb_c_opts})
-    # set_target_properties(tests PROPERTIES MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>)
-    target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
-endif()
+add_executable(tests ${src_tests} ${bb_headers})
+target_compile_options(tests PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
+target_compile_options(tests PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
+target_compile_options(tests PRIVATE ${bb_c_opts})
+target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 
 
 #
@@ -522,7 +508,18 @@ set(is_cuda_debug "$<AND:${is_cuda},${is_debug}>")
 set(cuda_release_c_opts ${c_opts} ${debug_c_opts})
 set(cuda_debug_c_opts ${c_opts} ${debug_c_opts})
 
-add_library(lib_bladebit_cuda 
+add_library(lib_bladebit_cuda_core ${bb_sources} ${bb_headers}
+#        src/plotdisk/k32/FpMatchBounded.inl src/plotdisk/k32/F1Bounded.inl
+        )
+set_target_properties(lib_bladebit_cuda_core PROPERTIES OUTPUT_NAME bladebit_cuda_core )
+config_bladebit_proj(lib_bladebit_cuda_core)
+target_compile_definitions(lib_bladebit_cuda_core PUBLIC
+    BB_CUDA_ENABLED=1
+    THRUST_IGNORE_CUB_VERSION_CHECK=1)
+target_include_directories(lib_bladebit_cuda_core PRIVATE SYSTEM cuda)
+target_link_libraries(lib_bladebit_cuda_core PUBLIC CUDA::cudart_static CUDA::cuda_driver)
+
+add_library(lib_bladebit_cuda
     cuda/CudaPlotter.cu
     cuda/CudaPlotter.h
     cuda/CudaPlotContext.h
@@ -534,17 +531,24 @@ add_library(lib_bladebit_cuda
     cuda/CudaParkSerializer.h
     cuda/CudaParkSerializer.cu
     cuda/chacha8.cu
-    cuda/MatchCuda.cu
+    cuda/CudaF1.h
+    cuda/CudaF1.cu
+    cuda/CudaMatch.h
+    cuda/CudaMatch.cu
+    cuda/CudaFx.h
     cuda/FxCuda.cu
     cuda/CudaUtil.h
     cuda/CudaPlotUtil.cu
     cuda/GpuStreams.h
     cuda/GpuStreams.cpp
+
+    # Harvester
+    cuda/harvesting/CudaThresher.cu
 )
 
 target_include_directories(lib_bladebit_cuda PUBLIC ${bb_include_dirs} src cuda)
 target_include_directories(lib_bladebit_cuda PRIVATE SYSTEM cuda)
-target_compile_definitions(lib_bladebit_cuda PRIVATE THRUST_IGNORE_CUB_VERSION_CHECK=1)
+#target_compile_definitions(lib_bladebit_cuda PRIVATE THRUST_IGNORE_CUB_VERSION_CHECK=1)
 target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
 target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
 
@@ -561,9 +565,11 @@ target_compile_options(lib_bladebit_cuda PRIVATE
 
  target_compile_options(lib_bladebit_cuda PRIVATE 
     $<${is_cuda_debug}:
-    -arch=native
-        # -G
-    >)
+    # -arch=native
+
+    -G
+    >
+ )
 
 # target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-Xcompiler=${cuda_debug_c_opts}">)
 # target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-G">)
@@ -571,12 +577,12 @@ target_compile_options(lib_bladebit_cuda PRIVATE
 
 # target_compile_options(lib_bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
 # target_compile_options(lib_bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-target_link_libraries(lib_bladebit_cuda PUBLIC lib_bladebit CUDA::cudart_static CUDA::cuda_driver)
+target_link_libraries(lib_bladebit_cuda PUBLIC lib_bladebit_cuda_core)
 
 
 add_executable(bladebit_cuda ${bb_headers} src/main.cpp)
 
-target_compile_definitions(bladebit_cuda PUBLIC BB_CUDA_ENABLED=1)
+#target_compile_definitions(bladebit_cuda PUBLIC BB_CUDA_ENABLED=1)
 target_compile_options(bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
 target_compile_options(bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
 target_compile_options(bladebit_cuda PRIVATE ${bb_c_opts})

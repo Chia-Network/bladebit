@@ -13,11 +13,21 @@ typedef int32_t grBool;
 
 typedef struct GreenReaperContext GreenReaperContext;
 
+/// How to select GPU for harvesting.
+typedef enum GRGpuRequestKind
+{
+    GRGpuRequestKind_None = 0,        // Disable GPU harvesting.
+    GRGpuRequestKind_FirstAvailable,  // Select the device specified, or the first available, if any. If no device is available it defaults to CPU harvesting.
+    GRGpuRequestKind_ExactDevice,     // Select the specified device only. If none is available, it is an error.
+} GRGpuRequestKind;
+
 typedef struct GreenReaperConfig
 {
-    uint32_t threadCount;
-    uint32_t cpuOffset;
-    grBool   disableCpuAffinity;
+    uint32_t         threadCount;
+    uint32_t         cpuOffset;
+    grBool           disableCpuAffinity;
+    GRGpuRequestKind gpuRequest;         // What kind of GPU to select for harvesting.
+    uint32_t         gpuDeviceIndex;     // Which device index to use (0 by default)
 
 } GreenReaperConfig;
 
@@ -76,22 +86,26 @@ typedef struct GRCompressedQualitiesRequest
 
 } GRCompressedQualitiesRequest;
 
+
 ///
 /// API
 ///
 GreenReaperContext* grCreateContext( GreenReaperConfig* config );
 void                grDestroyContext( GreenReaperContext* context );
 
-// Preallocate context's in-memory buffers to support a maximum compression level
+/// Preallocate context's in-memory buffers to support a maximum compression level
 GRResult grPreallocateForCompressionLevel( GreenReaperContext* context, uint32_t k, uint32_t maxCompressionLevel );
 
-// Full proof of space request given a challenge
+/// Full proof of space request given a challenge
 GRResult grFetchProofForChallenge( GreenReaperContext* context, GRCompressedProofRequest* req );
 
-// Request plot qualities for a challenge
+/// Request plot qualities for a challenge
 GRResult grGetFetchQualitiesXPair( GreenReaperContext* context, GRCompressedQualitiesRequest* req );
 
 size_t grGetMemoryUsage( GreenReaperContext* context );
+
+/// Returns true if the context has a Gpu-based decompresser created.
+grBool grHasGpuDecompresser( GreenReaperContext* context );
 
 
 #ifdef __cplusplus

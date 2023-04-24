@@ -307,6 +307,11 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
             CmdSimulateMain( cfg, cli );
             Exit( 0 );
         }
+        else if( cli.ArgConsume( "check" ) )
+        {
+            CmdPlotsCheckMain( cfg, cli );
+            Exit( 0 );
+        }
         else if( cli.ArgConsume( "help" ) )
         {
             if( cli.HasArgs() )
@@ -327,6 +332,8 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
                     PlotCompareMainPrintUsage();
                 else if( cli.ArgMatch( "simulate" ) )
                     CmdSimulateHelp();
+                else if( cli.ArgMatch( "check" ) )
+                    CmdPlotsCheckHelp();
                 else
                     Fatal( "Unknown command '%s'.", cli.Arg() );
 
@@ -467,6 +474,9 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
 
     FatalIf( plotter == nullptr, "No plotter type chosen." );
 
+    // #TODO: Remove when C8 compression values added.
+    FatalIf( cfg.compressionLevel == 8, "Compression level 8 is not currently supported." );
+
     // Parse plotter-specific CLI
     plotter->ParseCLI( cfg, cli );
     
@@ -516,6 +526,7 @@ R"(
  memtest    : Perform a memory (RAM) copy test.
  validate   : Validates all entries in a plot to ensure they all evaluate to a valid proof.
  simulate   : Simulation tool useful for compressed plot capacity.
+ check      : Check and validate random proofs in a plot.
  help       : Output this help message, or help for a specific command, if specified.
 
 [GLOBAL_OPTIONS]:

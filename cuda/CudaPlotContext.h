@@ -310,6 +310,20 @@ void CudaK32PlotGenSortKey( const uint32 entryCount, uint32* devKey, cudaStream_
 template<typename T>
 void CudaK32PlotSortByKey( const uint32 entryCount, const uint32* devKey, const T* devInput, T* devOutput, cudaStream_t stream = nullptr, bool synchronize = false );
 
+void CudaK32InlineXsIntoPairs(
+    const uint32  entryCount,
+          Pair*   devOutPairs,
+    const Pair*   devInPairs,
+    const uint32* devXs,
+    cudaStream_t  stream );
+
+void CudaK32ApplyPairOffset(
+    const uint32 entryCount,
+    const uint32 offset,
+          Pair*  devOutPairs,
+    const Pair*  devInPairs,
+    cudaStream_t stream );
+
 ///
 /// Phase 2
 ///
