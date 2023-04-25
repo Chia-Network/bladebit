@@ -49,6 +49,6 @@ public:
 class CudaThresherFactory
 {
 public:
-    static IThresher* Create( struct GreenReaperConfig& config );
+    static IThresher* Create( const struct GreenReaperConfig& config );
 };
 

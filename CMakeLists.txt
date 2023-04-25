@@ -232,7 +232,7 @@ if(MSVC)
 else()
 
     # *Nix
-    set(c_opts --include=pch.h -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
+    set(c_opts -Wall -Wno-comment -Wno-unknown-pragmas -g ${c_opts})
 
     set(tests_c_opts -DBB_TEST_MODE=1 ${tests_c_opts})
 
@@ -391,60 +391,50 @@ set(bb_include_dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-set(bb_c_opts)
+macro(config_bladebit_proj tgt)
+    # message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
+    target_link_libraries(${tgt} PUBLIC Threads::Threads bls ${platform_libs})
+    target_include_directories(${tgt} PUBLIC ${bb_include_dirs})
 
-if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
-    set(bb_c_opts ${bb_c_opts} /FIpch.h )
-endif()
+    target_compile_definitions(${tgt} PUBLIC 
+        $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>
+        $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>
+    )
+    
+    target_compile_options(${tgt} PRIVATE 
+        --include=pch.h
+        ${c_opts}
+        $<$<CONFIG:Release>:${release_c_opts}>
+        $<$<CONFIG:Debug>:${debug_c_opts}>
+        $<$<CXX_COMPILER_ID:MSVC>:/FIpch.h>
+        
+    )
 
-
- macro(config_bladebit_proj tgt)
-     message("Configuring target ${tgt}:${CMAKE_BUILD_TYPE}.")
-     target_link_libraries(${tgt} PUBLIC Threads::Threads bls ${platform_libs})
-     target_include_directories(${tgt} PUBLIC ${bb_include_dirs})
-
-     target_compile_definitions(${tgt} PUBLIC $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
-     target_compile_definitions(${tgt} PUBLIC $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
-
-     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-     target_compile_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-     target_compile_options(${tgt} PRIVATE ${bb_c_opts})
-
-     target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
-     target_link_options(${tgt} PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
+    target_link_options(${tgt} PRIVATE
+        $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>
+        $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>
+    )
  endmacro()
-
-# BladeBit
+ 
+# Bladebit
 add_library(lib_bladebit ${bb_sources} ${bb_headers}
     cuda/harvesting/CudaThresherDummy.cpp # Dummy CudaThresher factory
 )
 set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit )
 config_bladebit_proj(lib_bladebit)
-#target_link_libraries(lib_bladebit PUBLIC Threads::Threads bls ${platform_libs})
-#target_include_directories(lib_bladebit PUBLIC ${bb_include_dirs})
-#
-#target_compile_definitions(lib_bladebit PUBLIC $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
-#target_compile_definitions(lib_bladebit PUBLIC $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
-#
-#target_compile_options(lib_bladebit PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-#target_compile_options(lib_bladebit PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-#target_compile_options(lib_bladebit PRIVATE ${bb_c_opts})
-#
-#target_link_options(lib_bladebit PRIVATE $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>)
-#target_link_options(lib_bladebit PRIVATE $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>)
-
 
 add_executable(bladebit ${bb_headers} src/main.cpp)
-target_compile_options(bladebit PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-target_compile_options(bladebit PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-target_compile_options(bladebit PRIVATE ${bb_c_opts})
+config_bladebit_proj(bladebit)
 target_link_libraries(bladebit PRIVATE lib_bladebit)
 
 # Tests
 add_executable(tests ${src_tests} ${bb_headers})
-target_compile_options(tests PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts} ${tests_c_opts}>)
-target_compile_options(tests PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts} ${tests_c_opts}>)
-target_compile_options(tests PRIVATE ${bb_c_opts})
+target_compile_options(tests PRIVATE 
+    ${c_opts}
+    $<$<CONFIG:Release>:${release_c_opts}>
+    $<$<CONFIG:Debug>:${debug_c_opts}>
+    ${tests_c_opts}
+)
 target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 
 
@@ -456,6 +446,7 @@ if(CUDAToolkit_FOUND)
 set(is_release "$<CONFIG:Release>")
 set(is_debug "$<CONFIG:Debug>")
 set(is_cuda "$<COMPILE_LANGUAGE:CUDA>")
+set(is_c_cpp $<COMPILE_LANGUAGE:CXX,C>)
 set(is_cuda_release "$<AND:${is_cuda},${is_release}>")
 set(is_cuda_debug "$<AND:${is_cuda},${is_debug}>")
 set(cuda_release_c_opts ${c_opts} ${debug_c_opts})
@@ -497,6 +488,7 @@ add_library(lib_bladebit_cuda
 
     # Harvester
     cuda/harvesting/CudaThresher.cu
+    cuda/harvesting/CudaThresherFactory.cpp
 )
 
 target_include_directories(lib_bladebit_cuda PUBLIC ${bb_include_dirs} src cuda)
@@ -507,7 +499,7 @@ target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_defs}
 
 target_compile_options(lib_bladebit_cuda PUBLIC $<${is_cuda}:--pre-include pch.h> )
 
-target_compile_options(lib_bladebit_cuda PRIVATE 
+target_compile_options(lib_bladebit_cuda PUBLIC 
     $<${is_cuda_release}:
         -gencode=arch=compute_52,code=sm_52 # Maxwell
         -gencode=arch=compute_61,code=sm_61 # Pascal
@@ -554,3 +546,79 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src
     FILES ${src_full} ${bb_headers}
 )
 endif()
+
+
+# Harvester library
+add_library(lib_bladebit_harvester SHARED
+
+    src/pch.cpp
+
+    src/PlotContext.cpp
+    src/threading/AutoResetSignal.cpp
+    src/threading/Fence.cpp
+    src/threading/Semaphore.cpp
+    src/threading/ThreadPool.cpp
+    src/harvesting/GreenReaper.cpp
+    src/plotting/PlotTools.cpp
+    src/plotting/PlotWriter.cpp
+    src/plotting/Compression.cpp
+
+    cuda/harvesting/CudaThresher.cu
+    cuda/harvesting/CudaThresherFactory.cpp
+    cuda/FxCuda.cu
+    cuda/CudaF1.cu
+    cuda/CudaMatch.cu
+    cuda/CudaPlotUtil.cu
+
+    $<$<PLATFORM_ID:Windows>:
+        src/platform/win32/SysHost_Win32.cpp
+        src/platform/unix/FileStream_Win32.cpp
+        src/platform/unix/Thread_Win32.cpp
+    >
+
+    $<$<PLATFORM_ID:Linux>:
+        src/platform/linux/SysHost_Linux.cpp
+    >
+
+    $<$<PLATFORM_ID:Darwin>:
+        src/platform/macos/SysHost_Macos.cpp
+    >
+
+    $<$<PLATFORM_ID:Darwin,Linux>:
+        src/platform/unix/FileStream_Unix.cpp
+        src/platform/unix/Thread_Unix.cpp
+    >
+)
+
+set_target_properties(lib_bladebit_harvester PROPERTIES 
+    MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
+    CUDA_RUNTIME_LIBRARY Static
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    CUDA_ARCHITECTURES OFF
+)
+
+target_include_directories(lib_bladebit_harvester PUBLIC ${bb_include_dirs} src cuda)
+target_include_directories(lib_bladebit_harvester PRIVATE SYSTEM cuda)
+
+target_compile_features(lib_bladebit_harvester PRIVATE cxx_std_17)
+
+target_compile_options(lib_bladebit_harvester PRIVATE 
+    ${c_opts}
+    $<$<CONFIG:Release>:${release_c_opts}>
+    $<$<CONFIG:Debug>:${debug_c_opts}>
+    $<${is_cuda}:
+        --pre-include pch.h
+    >
+    $<${is_c_cpp}:
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:--include=pch.h>
+        $<$<CXX_COMPILER_ID:MSVC>:/FIpch.h>
+    >
+)
+
+target_compile_definitions(lib_bladebit_harvester PRIVATE
+    BB_CUDA_ENABLED=1
+    THRUST_IGNORE_CUB_VERSION_CHECK=1
+)
+
+target_link_libraries(lib_bladebit_harvester Threads::Threads bls ${platform_libs})

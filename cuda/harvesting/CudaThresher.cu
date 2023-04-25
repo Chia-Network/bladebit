@@ -87,8 +87,8 @@ class CudaThresher : public IThresher
     Timings      _timings = {};
 
 public:
-    CudaThresher( GreenReaperConfig& config, int deviceId )
-        : _config( config )
+    CudaThresher( const GreenReaperConfig& config, int deviceId )
+        : _config  ( config )
         , _deviceId( deviceId )
     {}
 
@@ -704,7 +704,7 @@ public:
 };
 
 
-IThresher* CudaThresherFactory::Create( GreenReaperConfig& config )
+IThresher* CudaThresherFactory_Private( const GreenReaperConfig& config )
 {
     ASSERT( config.gpuRequest != GRGpuRequestKind_None );
 
