@@ -571,6 +571,7 @@ add_library(lib_bladebit_harvester SHARED
     src/plotdisk/DiskBufferQueue.cpp
     src/plotdisk/jobs/IOJob.cpp
 
+    src/bech32/segwit_addr.c
 
     cuda/harvesting/CudaThresher.cu
     cuda/harvesting/CudaThresherFactory.cpp
