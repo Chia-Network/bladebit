@@ -20,7 +20,7 @@ void* GenFSETable( const double rValue, size_t* outTableSize, const bool compres
     
     size_t      err = 0;
     FSE_CTable* ct  = nullptr;
-    FSE_CTable* dt  = nullptr;
+    FSE_DTable* dt  = nullptr;
 
     if( compress )
     {
@@ -29,7 +29,7 @@ void* GenFSETable( const double rValue, size_t* outTableSize, const bool compres
     }
     else
     {
-        ct  = FSE_createDTable( tableLog );
+        dt  = FSE_createDTable( tableLog );
         err = FSE_buildDTable( ct, nCount.data(), maxSymbolValue, tableLog );
     }
     
@@ -45,7 +45,7 @@ void* GenFSETable( const double rValue, size_t* outTableSize, const bool compres
             *outTableSize = FSE_DTABLE_SIZE( tableLog );
     }
 
-    return ct;
+    return compress ? ct : dt;
 }
 
 //-----------------------------------------------------------

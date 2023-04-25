@@ -484,7 +484,7 @@ add_library(lib_bladebit_cuda
     cuda/CudaUtil.h
     cuda/CudaPlotUtil.cu
     cuda/GpuStreams.h
-    cuda/GpuStreams.cpp
+    cuda/GpuStreams.cu
 
     # Harvester
     cuda/harvesting/CudaThresher.cu
@@ -553,6 +553,8 @@ add_library(lib_bladebit_harvester SHARED
 
     src/pch.cpp
 
+    src/util/Log.cpp
+    src/util/Util.cpp
     src/PlotContext.cpp
     src/threading/AutoResetSignal.cpp
     src/threading/Fence.cpp
@@ -560,8 +562,13 @@ add_library(lib_bladebit_harvester SHARED
     src/threading/ThreadPool.cpp
     src/harvesting/GreenReaper.cpp
     src/plotting/PlotTools.cpp
+    src/plotting/FSETableGenerator.cpp
     src/plotting/PlotWriter.cpp
     src/plotting/Compression.cpp
+    src/plotting/matching/GroupScan.cpp
+    src/plotdisk/DiskBufferQueue.cpp
+    src/plotdisk/jobs/IOJob.cpp
+
 
     cuda/harvesting/CudaThresher.cu
     cuda/harvesting/CudaThresherFactory.cpp
@@ -569,6 +576,9 @@ add_library(lib_bladebit_harvester SHARED
     cuda/CudaF1.cu
     cuda/CudaMatch.cu
     cuda/CudaPlotUtil.cu
+
+    # TODO: Remove this, ought not be needed in harvester
+    cuda/GpuStreams.cu
 
     $<$<PLATFORM_ID:Windows>:
         src/platform/win32/SysHost_Win32.cpp
@@ -591,6 +601,8 @@ add_library(lib_bladebit_harvester SHARED
 )
 
 set_target_properties(lib_bladebit_harvester PROPERTIES 
+    OUTPUT_NAME bladebit_harvester
+
     MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
     CUDA_RUNTIME_LIBRARY Static
     CUDA_SEPARABLE_COMPILATION ON
