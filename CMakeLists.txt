@@ -555,6 +555,7 @@ add_library(lib_bladebit_harvester SHARED
 
     src/util/Log.cpp
     src/util/Util.cpp
+    src/io/HybridStream.cpp
     src/PlotContext.cpp
     src/threading/AutoResetSignal.cpp
     src/threading/Fence.cpp
@@ -566,6 +567,7 @@ add_library(lib_bladebit_harvester SHARED
     src/plotting/PlotWriter.cpp
     src/plotting/Compression.cpp
     src/plotting/matching/GroupScan.cpp
+    src/util/KeyTools.cpp
     src/plotdisk/DiskBufferQueue.cpp
     src/plotdisk/jobs/IOJob.cpp
 
