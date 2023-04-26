@@ -4,10 +4,10 @@
 #include "threading/Fence.h"
 #include "threading/ThreadPool.h"
 #include "threading/MTJob.h"
+#include "plotting/WorkHeap.h"
 #include "plotting/Tables.h"
 #include "plotting/PlotWriter.h"
 #include "FileId.h"
-#include "plotdisk/DiskPlotConfig.h"
 
 class Thread;
 class IIOTransform;
@@ -240,6 +240,19 @@ public:
     void CommitCommands();
 
 // Helpers
+    // Obtain a buffer allocated from the work heap.
+    // May block until there's a buffer available if there was none.
+    // This assumes a single consumer.
+    inline byte* GetBuffer( size_t size, bool blockUntilFreeBuffer = true )
+    { 
+        return _workHeap.Alloc( size, 1 /*_blockSize*/, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
+    }
+
+    inline byte* GetBuffer( const size_t size, const size_t alignment, bool blockUntilFreeBuffer = true )
+    { 
+        return _workHeap.Alloc( size, alignment, blockUntilFreeBuffer, &_ioBufferWaitTime ); 
+    }
+
     #if _DEBUG || BB_TEST_MODE
         // const Span<Span<size_t>> SliceSizes( const FileId fileId ) const { return _files[(int)fileId].sliceSizes; }
     #endif
@@ -261,6 +274,8 @@ public:
 
     inline size_t BlockSize() const { return _blockSize; }
     size_t BlockSize( FileId fileId ) const;
+    
+    inline const WorkHeap& Heap() const { return _workHeap; }
 
     inline size_t PlotHeaderSize() const { return _plotHeaderSize; }
 
@@ -417,6 +432,8 @@ private:
     std::string      _workDir2;     // Temporary 2 directory in which we will store our short-live, high-req I/O temporary files
     std::string      _plotDir;      // Temporary plot directory
     std::string      _plotFullName; // Full path of the plot file without '.tmp'
+
+    WorkHeap         _workHeap;     // Reserved memory for performing plot work and I/O // #TODO: Remove this
     
     // Handles to all files needed to create a plot
     FileSet          _files[(size_t)FileId::_COUNT];

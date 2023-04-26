@@ -90,6 +90,15 @@ include(cmake_modules/FindCatch2.cmake)
 
 
 # Config
+set(is_release "$<CONFIG:Release>")
+set(is_debug "$<CONFIG:Debug>")
+set(is_cuda "$<COMPILE_LANGUAGE:CUDA>")
+set(is_c_cpp $<COMPILE_LANGUAGE:CXX,C>)
+set(is_cuda_release "$<AND:${is_cuda},${is_release}>")
+set(is_cuda_debug "$<AND:${is_cuda},${is_debug}>")
+set(cuda_release_c_opts ${c_opts} ${debug_c_opts})
+set(cuda_debug_c_opts ${c_opts} ${debug_c_opts})
+
 set(c_opts)
 set(link_opts)
 
@@ -182,7 +191,7 @@ if(MSVC)
         /wd4514
         /wd4626
         /wd5027
-        )
+    )
     
     set(tests_c_opts /DBB_TEST_MODE=1 ${tests_c_opts})
     
@@ -200,7 +209,7 @@ if(MSVC)
 
     set(debug_c_opts ${debug_c_opts}
         /Od
-        )
+    )
 
     set(dev_c_opts 
         ${dev_c_opts})
@@ -401,30 +410,43 @@ macro(config_bladebit_proj tgt)
         $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>
     )
     
-    target_compile_options(${tgt} PRIVATE 
-        --include=pch.h
+    target_compile_options(${tgt} PRIVATE
         ${c_opts}
         $<$<CONFIG:Release>:${release_c_opts}>
         $<$<CONFIG:Debug>:${debug_c_opts}>
-        $<$<CXX_COMPILER_ID:MSVC>:/FIpch.h>
-        
+        $<${is_cuda}:
+            --pre-include pch.h
+        >
+        $<${is_c_cpp}:
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:--include=pch.h>
+            $<$<CXX_COMPILER_ID:MSVC>:/FIpch.h>
+        >
     )
 
     target_link_options(${tgt} PRIVATE
         $<$<CONFIG:Release>:${link_opts} ${release_link_opts}>
         $<$<CONFIG:Debug>:${link_opts} ${debug_link_opts}>
     )
+
+    set_target_properties(${tgt} PROPERTIES 
+        MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
+        CUDA_RUNTIME_LIBRARY Static
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+        CUDA_ARCHITECTURES OFF
+    )
  endmacro()
- 
+
 # Bladebit
-add_library(lib_bladebit ${bb_sources} ${bb_headers}
-    cuda/harvesting/CudaThresherDummy.cpp # Dummy CudaThresher factory
-)
-set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit )
+add_library(lib_bladebit ${bb_sources} ${bb_headers})
+#     cuda/harvesting/CudaThresherDummy.cpp # Dummy CudaThresher factory
+# )
+set_target_properties(lib_bladebit PROPERTIES OUTPUT_NAME bladebit)
 config_bladebit_proj(lib_bladebit)
 
-add_executable(bladebit ${bb_headers} src/main.cpp)
+add_executable(bladebit ${bb_headers} src/main.cpp cuda/harvesting/CudaThresherDummy.cpp)
 config_bladebit_proj(bladebit)
+
 target_link_libraries(bladebit PRIVATE lib_bladebit)
 
 # Tests
@@ -443,19 +465,8 @@ target_link_libraries(tests PRIVATE lib_bladebit Catch2::Catch2WithMain)
 #
 if(CUDAToolkit_FOUND)
 
-set(is_release "$<CONFIG:Release>")
-set(is_debug "$<CONFIG:Debug>")
-set(is_cuda "$<COMPILE_LANGUAGE:CUDA>")
-set(is_c_cpp $<COMPILE_LANGUAGE:CXX,C>)
-set(is_cuda_release "$<AND:${is_cuda},${is_release}>")
-set(is_cuda_debug "$<AND:${is_cuda},${is_debug}>")
-set(cuda_release_c_opts ${c_opts} ${debug_c_opts})
-set(cuda_debug_c_opts ${c_opts} ${debug_c_opts})
-
-add_library(lib_bladebit_cuda_core ${bb_sources} ${bb_headers}
-#        src/plotdisk/k32/FpMatchBounded.inl src/plotdisk/k32/F1Bounded.inl
-        )
-set_target_properties(lib_bladebit_cuda_core PROPERTIES OUTPUT_NAME bladebit_cuda_core )
+add_library(lib_bladebit_cuda_core ${bb_sources} ${bb_headers})
+set_target_properties(lib_bladebit_cuda_core PROPERTIES OUTPUT_NAME bladebit_cuda_core)
 config_bladebit_proj(lib_bladebit_cuda_core)
 target_compile_definitions(lib_bladebit_cuda_core PUBLIC
     BB_CUDA_ENABLED=1
@@ -490,14 +501,19 @@ add_library(lib_bladebit_cuda
     cuda/harvesting/CudaThresher.cu
     cuda/harvesting/CudaThresherFactory.cpp
 )
+config_bladebit_proj(lib_bladebit_cuda)
+target_include_directories(lib_bladebit_cuda 
+    PUBLIC ${bb_include_dirs} src cuda
+    PRIVATE SYSTEM cuda)
 
-target_include_directories(lib_bladebit_cuda PUBLIC ${bb_include_dirs} src cuda)
-target_include_directories(lib_bladebit_cuda PRIVATE SYSTEM cuda)
+target_compile_definitions(lib_bladebit_cuda PRIVATE 
+    ${c_defs}
+    $<$<CONFIG:Release>:${release_c_defs}>
+    $<$<CONFIG:Debug>:${debug_c_defs}>
+)
+
+target_compile_definitions(lib_bladebit_cuda PRIVATE )
 #target_compile_definitions(lib_bladebit_cuda PRIVATE THRUST_IGNORE_CUB_VERSION_CHECK=1)
-target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_defs} ${release_c_defs}>)
-target_compile_definitions(lib_bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_defs} ${debug_c_defs}>)
-
-target_compile_options(lib_bladebit_cuda PUBLIC $<${is_cuda}:--pre-include pch.h> )
 
 target_compile_options(lib_bladebit_cuda PUBLIC 
     $<${is_cuda_release}:
@@ -508,29 +524,27 @@ target_compile_options(lib_bladebit_cuda PUBLIC
         -gencode=arch=compute_89,code=sm_89 # Ada
     >)
 
- target_compile_options(lib_bladebit_cuda PRIVATE 
-    $<${is_cuda_debug}:
-    # -arch=native
-
-    -G
-    >
+ target_compile_options(lib_bladebit_cuda
+    PUBLIC 
+        $<${is_cuda}:--pre-include pch.h>
+    PRIVATE 
+        $<${is_cuda_debug}:
+            # -arch=native
+            -G
+        >
  )
-
-# target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-Xcompiler=${cuda_debug_c_opts}">)
-# target_compile_options(lib_bladebit_cuda PRIVATE "$<${is_cuda_debug}:-G">)
-# target_compile_options(lib_bladebit_cuda PRIVATE $<${is_cuda}:-Xcompiler=/FIpch.h>)
-
-# target_compile_options(lib_bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-# target_compile_options(lib_bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
 target_link_libraries(lib_bladebit_cuda PUBLIC lib_bladebit_cuda_core)
 
-
 add_executable(bladebit_cuda ${bb_headers} src/main.cpp)
+config_bladebit_proj(bladebit_cuda)
 
 #target_compile_definitions(bladebit_cuda PUBLIC BB_CUDA_ENABLED=1)
-target_compile_options(bladebit_cuda PRIVATE $<$<CONFIG:Release>:${c_opts} ${release_c_opts}>)
-target_compile_options(bladebit_cuda PRIVATE $<$<CONFIG:Debug>:${c_opts} ${debug_c_opts}>)
-target_compile_options(bladebit_cuda PRIVATE ${bb_c_opts})
+target_compile_options(bladebit_cuda PRIVATE
+    ${c_opts}
+    $<$<CONFIG:Release>:${release_c_opts}>
+    $<$<CONFIG:Debug>:${debug_c_opts}>
+)
+
 target_link_libraries(bladebit_cuda PRIVATE lib_bladebit_cuda)
 
 set_target_properties(lib_bladebit_cuda_core lib_bladebit_cuda bladebit_cuda PROPERTIES 
@@ -545,8 +559,6 @@ set_target_properties(lib_bladebit_cuda_core lib_bladebit_cuda bladebit_cuda PRO
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src 
     FILES ${src_full} ${bb_headers}
 )
-endif()
-
 
 # Harvester library
 add_library(lib_bladebit_harvester SHARED
@@ -569,6 +581,7 @@ add_library(lib_bladebit_harvester SHARED
     src/plotting/matching/GroupScan.cpp
     src/util/KeyTools.cpp
     src/plotdisk/DiskBufferQueue.cpp
+    src/plotting/WorkHeap.cpp
     src/plotdisk/jobs/IOJob.cpp
 
     src/bech32/segwit_addr.c
@@ -637,3 +650,5 @@ target_compile_definitions(lib_bladebit_harvester PRIVATE
 )
 
 target_link_libraries(lib_bladebit_harvester Threads::Threads bls ${platform_libs})
+
+endif() # CUDAToolkit_FOUND

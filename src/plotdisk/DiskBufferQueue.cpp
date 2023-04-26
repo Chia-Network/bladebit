@@ -26,6 +26,7 @@ DiskBufferQueue::DiskBufferQueue(
     : _workDir1      ( workDir1 )
     , _workDir2      ( workDir2 )
     , _plotDir       ( plotDir  )
+    , _workHeap      ( workBufferSize, workBuffer )
     // , _threadPool    ( ioThreadCount, ThreadPool::Mode::Fixed, true )
     , _dispatchThread()
     , _deleterThread ()
@@ -85,6 +86,12 @@ size_t DiskBufferQueue::BlockSize( FileId fileId ) const
 {
     ASSERT( _files[(int)fileId].files[0] );
     return _files[(int)fileId].files[0]->BlockSize();
+}
+
+//-----------------------------------------------------------
+void DiskBufferQueue::ResetHeap( const size_t heapSize, void* heapBuffer )
+{
+    _workHeap.ResetHeap( heapSize, heapBuffer );
 }
 
 //-----------------------------------------------------------
@@ -485,6 +492,12 @@ void DiskBufferQueue::TruncateBucket( FileId id, const ssize_t position )
     cmd->truncateBucket.position = position;
 }
 
+//-----------------------------------------------------------
+void DiskBufferQueue::CompletePendingReleases()
+{
+    _workHeap.CompletePendingReleases();
+}
+
 #if _DEBUG
 //-----------------------------------------------------------
 void DiskBufferQueue::DebugWriteSliceSizes( const TableId table, const FileId fileId )
@@ -663,6 +676,7 @@ void DiskBufferQueue::ExecuteCommand( Command& cmd )
             #if DBG_LOG_ENABLE
                 Log::Debug( "[DiskBufferQueue] ^ Cmd ReleaseBuffer: 0x%p", cmd.releaseBuffer.buffer );
             #endif
+            _workHeap.Release( cmd.releaseBuffer.buffer );
         break;
 
         case Command::SignalFence:
