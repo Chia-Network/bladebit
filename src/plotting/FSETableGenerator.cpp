@@ -30,7 +30,7 @@ void* GenFSETable( const double rValue, size_t* outTableSize, const bool compres
     else
     {
         dt  = FSE_createDTable( tableLog );
-        err = FSE_buildDTable( ct, nCount.data(), maxSymbolValue, tableLog );
+        err = FSE_buildDTable( dt, nCount.data(), maxSymbolValue, tableLog );
     }
     
     FatalIf( FSE_isError( err ), "Failed to generate FSE compression table with error: %s", FSE_getErrorName( err ) );

@@ -4,8 +4,6 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
-
         {
             "name"          : "Bladebit RAM",
             "type"          : "cppdbg",
@@ -155,11 +153,11 @@
             "request"       : "launch",
             "stopAtEntry"   : false,
             "cwd"           : "${workspaceFolder}",
-            // "preLaunchTask" : "build_cuda_debug",
-            // "program": "${workspaceFolder}/build/bladebit_cuda",
+            "preLaunchTask" : "build_cuda_debug",
+            "program": "${workspaceFolder}/build/bladebit_cuda",
             
-            "preLaunchTask" : "build_debug",
-            "program": "${workspaceFolder}/build/bladebit",
+            // "preLaunchTask" : "build_debug",
+            // "program": "${workspaceFolder}/build/bladebit",
             
             //                 "-c", "xch1uf48n3f50xrs7zds0uek9wp9wmyza6crnex6rw8kwm3jnm39y82q5mvps6",
             // "-i", "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73",    // Yes overflow
@@ -171,7 +169,14 @@
             
             // "args": "-t 1 simulate -n 5000 -p 4  ~/plot/tmp/plot-k32-c07-2023-04-13-16-08-330fbf677f78641061c93312c1a7ffa28138739b69975f3b874df6acc3e76378.plot",
             // "args": "-t 16 simulate -n 10 ~/plot/tmp/plot-k32-c09-2023-04-19-16-12-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
-            "args": "-t 16 simulate -n 10 ~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+            // "args": "-t 16 simulate -n 10 ~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+            // "args": "validate --cuda --quality 4 ~/plot/tmp/plot-k32-c07-2023-04-13-16-08-330fbf677f78641061c93312c1a7ffa28138739b69975f3b874df6acc3e76378.plot",
+            // "args": "validate --cuda --f7 4 ~/plot/tmp/plot-k32-c07-2023-04-13-16-08-330fbf677f78641061c93312c1a7ffa28138739b69975f3b874df6acc3e76378.plot",
+
+            "args": "validate --quality 4 ~/plot/tmp/plot-k32-c07-2023-04-13-16-08-330fbf677f78641061c93312c1a7ffa28138739b69975f3b874df6acc3e76378.plot",
+            // "args": "validate --cuda --quality 4 ~/plot/tmp/plot-k32-c07-2023-04-13-16-08-330fbf677f78641061c93312c1a7ffa28138739b69975f3b874df6acc3e76378.plot",
+
+            // "args": "validate --quality 4 ~/plot/tmp/plot-k32-2023-04-26-20-24-330fbf677f78641061c93312c1a7ffa28138739b69975f3b874df6acc3e76378.plot",
 
             "windows": {
                 "type": "cppvsdbg",
@@ -264,7 +269,6 @@
             ]
         }
 
-
         ,{
             "name"       : "Plot Tool",
             
@@ -291,6 +295,7 @@
                 
                 // "-t", "1", "validate", "--f7", "324", "~/plot/tmp/plot-k32-c01-2023-02-13-22-21-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
                 // "validate", "--f7", "7", "~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+                "validate", "--cuda", "--f7", "4", "~/plot/tmp/plot-k32-c07-2023-04-13-16-08-330fbf677f78641061c93312c1a7ffa28138739b69975f3b874df6acc3e76378.plot",
                 
                 // "--verify", "0x7d7ceb24ca25bac5f4c59b4400b23585bff254efa5b78f3085192e399fc74fdaab630f2cd74ea733eb9b82a5bc5582e8fd075c0591b2eef12adae264159a8eeeae5808202d1a10cffd1a0fcb64b1f43cd3941987cf606ba01434d43715cbe1773f01fe74288110606b2cd90063f01f0eca3ba515a2fb2a011ea73d7da3148895e046b09c3d393cad44411fe57671290e4f34ed7d2aafe6788effde2c965b814158a1fe1109b67cf2f9849dfa55568d68e3e5fa24605269499f30b61cb889b6256256e467de963c25d7fb47e6a4119f2f8719ec9acbd82f7d95b8196660fe43165490255730ddf870a4e48da1ea2050fef4608d7321d6a3eede07744d8847858d", 
                 // "0x00000037ff04b8ee9355068689bd558eafe07cc7af47ad1574b074fc34d6913a", "c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835",

@@ -584,6 +584,9 @@ GRResult grGetFetchQualitiesXPair( GreenReaperContext* cx, GRCompressedQualities
         Pair* pairsIn  = pairs[0];
         Pair* pairsOut = pairs[1];
 
+        if( cx->cudaThresher )
+            bbmemcpy_t( cx->tables[(int)matchTable]._pairs, cx->pairs.Ptr(), cx->tables[(int)matchTable]._length );
+
         bbmemcpy_t( pairs[0], cx->tables[(int)matchTable]._pairs, cx->tables[(int)matchTable]._length );
 
         for( TableId rTable = matchTable; rTable > TableId::Table3; rTable-- )

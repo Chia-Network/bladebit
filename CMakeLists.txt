@@ -499,7 +499,7 @@ add_library(lib_bladebit_cuda
 
     # Harvester
     cuda/harvesting/CudaThresher.cu
-    cuda/harvesting/CudaThresherFactory.cpp
+    cuda/harvesting/CudaThresherFactory.cu
 )
 config_bladebit_proj(lib_bladebit_cuda)
 target_include_directories(lib_bladebit_cuda 
@@ -587,7 +587,7 @@ add_library(lib_bladebit_harvester SHARED
     src/bech32/segwit_addr.c
 
     cuda/harvesting/CudaThresher.cu
-    cuda/harvesting/CudaThresherFactory.cpp
+    cuda/harvesting/CudaThresherFactory.cu
     cuda/FxCuda.cu
     cuda/CudaF1.cu
     cuda/CudaMatch.cu
