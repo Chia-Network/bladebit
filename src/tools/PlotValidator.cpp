@@ -813,7 +813,6 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
 
         auto const elapsed  = TimerEndTicks( timer );
 
-
         if( opts.gCfg->verbose )
         {
             Log::Line( "%s fetch time: %02.2lf seconds ( %02.2lf ms ).", qualityOnly ? "Quality" : "Proof",
