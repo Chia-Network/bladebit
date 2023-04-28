@@ -651,7 +651,7 @@ target_compile_definitions(lib_bladebit_harvester PRIVATE
 
 target_link_libraries(lib_bladebit_harvester
     PRIVATE Threads::Threads bls ${platform_libs}
-    PUBLIC CUDA::cudart_static CUDA::cuda_driver
+    CUDA::cudart_static CUDA::cuda_driver
 )
 
 endif() # CUDAToolkit_FOUND
