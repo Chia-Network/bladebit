@@ -580,7 +580,7 @@ add_library(lib_bladebit_harvester SHARED
 )
 
 set_target_properties(lib_bladebit_harvester PROPERTIES 
-    OUTPUT_NAME bladebit_harvester
+    # LIBRARY_OUTPUT_NAME bladebit_harvester
 
     MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
     CUDA_RUNTIME_LIBRARY Static
