@@ -4,6 +4,9 @@ on:
     branches: ['*']
   workflow_dispatch:
 
+env:
+  CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
+
 jobs:
   build-ubuntu-x86-64:
     runs-on: ubuntu-20.04
