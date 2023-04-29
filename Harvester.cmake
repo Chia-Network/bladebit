@@ -1,3 +1,4 @@
+
 add_library(bladebit_harvester SHARED
 
     src/pch.cpp
@@ -23,15 +24,21 @@ add_library(bladebit_harvester SHARED
 
     src/bech32/segwit_addr.c
 
-    cuda/harvesting/CudaThresher.cu
-    cuda/harvesting/CudaThresherFactory.cu
-    cuda/FxCuda.cu
-    cuda/CudaF1.cu
-    cuda/CudaMatch.cu
-    cuda/CudaPlotUtil.cu
+    $<${have_cuda}:
+        cuda/harvesting/CudaThresher.cu
+        cuda/harvesting/CudaThresherFactory.cu
+        cuda/FxCuda.cu
+        cuda/CudaF1.cu
+        cuda/CudaMatch.cu
+        cuda/CudaPlotUtil.cu
 
-    # TODO: Remove this, ought not be needed in harvester
-    cuda/GpuStreams.cu
+        # TODO: Remove this, ought not be needed in harvester
+        cuda/GpuStreams.cu
+    >
+
+    $<$<NOT:${have_cuda}>:
+        cuda/harvesting/CudaThresherDummy.cpp
+    >
 
     $<$<PLATFORM_ID:Windows>:
         src/platform/win32/SysHost_Win32.cpp
@@ -53,41 +60,51 @@ add_library(bladebit_harvester SHARED
     >
 )
 
-set_target_properties(bladebit_harvester PROPERTIES 
-    EXCLUDE_FROM_ALL ON
-    MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
-    CUDA_RUNTIME_LIBRARY Static
-    CUDA_SEPARABLE_COMPILATION ON
-    CUDA_RESOLVE_DEVICE_SYMBOLS ON
-    CUDA_ARCHITECTURES OFF
+
+target_include_directories(bladebit_harvester PRIVATE
+    src
+    $<${have_cuda}:
+        cuda
+        SYSTEM cuda
+    >
 )
-
-
-target_include_directories(bladebit_harvester PUBLIC ${bb_include_dirs} src cuda)
-target_include_directories(bladebit_harvester PRIVATE SYSTEM cuda)
 
 target_compile_features(bladebit_harvester PRIVATE cxx_std_17)
-
-target_compile_options(bladebit_harvester PRIVATE 
-    ${c_opts}
-    $<$<CONFIG:Release>:${release_c_opts}>
-    $<$<CONFIG:Debug>:${debug_c_opts}>
-    $<${is_cuda}:
-        --pre-include pch.h
-    >
-    $<${is_c_cpp}:
-        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:--include=pch.h>
-        $<$<CXX_COMPILER_ID:MSVC>:/FIpch.h>
-    >
-)
 
 target_compile_definitions(bladebit_harvester PRIVATE
     BB_CUDA_ENABLED=1
     THRUST_IGNORE_CUB_VERSION_CHECK=1
 )
 
-target_link_libraries(bladebit_harvester
-    PRIVATE Threads::Threads bls ${platform_libs}
-    CUDA::cudart_static CUDA::cuda_driver
+target_compile_options(bladebit_harvester PRIVATE 
+    ${preinclude_pch}
+
+    $<${have_cuda}:
+        ${cuda_archs}
+    >
 )
 
+target_link_libraries(bladebit_harvester PRIVATE 
+    bladebit_config 
+    Threads::Threads
+    bls
+
+    $<$<PLATFORM_ID:Linux>:
+        ${NUMA_LIBRARY}
+    >
+
+    $<${have_cuda}:
+        CUDA::cudart CUDA::cuda_driver
+    >
+)
+
+if(CUDAToolkit_FOUND)
+    set_target_properties(bladebit_harvester PROPERTIES 
+        EXCLUDE_FROM_ALL ON
+        MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
+        CUDA_RUNTIME_LIBRARY Dynamic
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+        CUDA_ARCHITECTURES OFF
+    )
+endif()

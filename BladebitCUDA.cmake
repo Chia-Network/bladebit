@@ -34,9 +34,13 @@ target_compile_definitions(bladebit_cuda PUBLIC
     BB_CUDA_ENABLED=1
     THRUST_IGNORE_CUB_VERSION_CHECK=1)
 
-target_compile_options(bladebit_cuda PRIVATE 
+target_compile_options(bladebit_cuda PRIVATE
+    ${cuda_archs}
+
+    $<${is_cuda_release}:
+    >
+
     $<${is_cuda_debug}:
-        # -arch=native
         -G
     >
  )
@@ -48,14 +52,5 @@ set_target_properties(bladebit_cuda PROPERTIES
     CUDA_RUNTIME_LIBRARY Static
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
-    # CUDA_ARCHITECTURES OFF
+    CUDA_ARCHITECTURES OFF
 )
-
-# target_compile_options(lib_bladebit_cuda PUBLIC 
-#     $<${is_cuda_release}:
-#         -gencode=arch=compute_52,code=sm_52 # Maxwell
-#         -gencode=arch=compute_61,code=sm_61 # Pascal
-#         -gencode=arch=compute_70,code=sm_70 # Volta 
-#         -gencode=arch=compute_86,code=sm_86 # Ampere
-#         -gencode=arch=compute_89,code=sm_89 # Ada
-#     >)

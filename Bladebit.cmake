@@ -11,7 +11,7 @@ target_compile_options(bladebit_core PUBLIC ${preinclude_pch})
 target_link_libraries(bladebit_core PUBLIC 
     Threads::Threads
     bls
-    
+
     $<$<PLATFORM_ID:Linux>:
         ${NUMA_LIBRARY}
     >
@@ -22,6 +22,7 @@ add_executable(bladebit
     cuda/harvesting/CudaThresherDummy.cpp)
 
 target_link_libraries(bladebit PRIVATE bladebit_core)
+
 
 # Sources
 set(src_uint128
@@ -60,9 +61,9 @@ set(src_blake3
     src/b3/blake3_portable.c
     
     $<${is_x86}:
-        src/b3/blake3_sse41.c
-        src/b3/blake3_avx2.c
-        src/b3/blake3_avx512.c
+        # src/b3/blake3_sse41.c
+        # src/b3/blake3_avx2.c
+        # src/b3/blake3_avx512.c
 
         $<$<PLATFORM_ID:Linux>:
             src/b3/blake3_avx2_x86-64_unix.S
