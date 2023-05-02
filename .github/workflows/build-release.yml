@@ -108,7 +108,9 @@ jobs:
           pushd build-harvester
           cmake .. -DCMAKE_BUILD_TYPE=Release 
           
+          echo "ls -la CMakeFiles/bladebit_harvester.dir/"
           ls -la CMakeFiles/bladebit_harvester.dir/
+          echo "cat CMakeFiles/bladebit_harvester.dir/build.make"
           cat CMakeFiles/bladebit_harvester.dir/build.make
 
           cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
