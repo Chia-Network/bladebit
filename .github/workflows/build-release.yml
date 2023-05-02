@@ -83,20 +83,23 @@ jobs:
 
           echo 'whoami'
           whoami
+          
           rm -f /usr/bin/cmake
-          mkdir -p /usr/local/bin
-          chmod +wr /usr/local/bin
+
+          cmake_prefix=$(pwd)/cmake
+          mkdir -p ${cmake_prefix}
+          export PATH=${cmake_prefix}:$PATH
 
           echo '$PATH'
           echo $PATH
 
-          echo 'ls -la /usr/local/bin/'
-          ls -la /usr/local/bin/
+          echo 'ls -la ${cmake_prefix}'
+          ls -la ${cmake_prefix}
 
-          yes | sh cmake.sh --skip-license --prefix=/usr/local/bin | cat
+          yes | sh cmake.sh --skip-license --prefix=${cmake_prefix} | cat
 
-          echo 'ls -la /usr/local/bin/'
-          ls -la /usr/local/bin/
+          echo 'ls -la ${cmake_prefix}'
+          ls -la ${cmake_prefix}
           echo 'Cmake Info:'
           which cmake
           cmake --version
