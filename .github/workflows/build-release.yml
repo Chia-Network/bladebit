@@ -96,13 +96,13 @@ jobs:
           echo 'ls -la ${cmake_prefix}'
           ls -la ${cmake_prefix}
 
+          set -x
           yes | sh cmake.sh --skip-license --prefix=${cmake_prefix} | cat
-
           echo 'ls -la ${cmake_prefix}'
           ls -la ${cmake_prefix}
           echo 'Cmake Info:'
           which cmake
-          cmake --version
+          # cmake --version
 
       # - name: Build
       #   run: |
