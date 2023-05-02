@@ -81,7 +81,7 @@ jobs:
           fi
 
           rm -f /usr/bin/cmake
-          sh cmake.sh | cat
+          yes | sh cmake.sh | cat
           echo 'Cmake Info:'
           which cmake
           cmake --version
