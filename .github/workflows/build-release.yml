@@ -81,7 +81,7 @@ jobs:
           fi
 
           rm -f /usr/bin/cmake
-          yes | sh cmake.sh --skip-license --prefix=dir /usr/local/bin | cat
+          yes | sh cmake.sh --skip-license --prefix=/usr/local/bin | cat
           echo 'Cmake Info:'
           which cmake
           cmake --version
