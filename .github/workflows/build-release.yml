@@ -70,14 +70,11 @@ jobs:
                          gmp-devel numactl-devel make git wget subscription-manager
 
           # Get CMake
-          # ref_cmake_sha256='bc0d8be9f37670139ef69af5109e9066351201567b8d4fa52794bf40878cd612'
           ref_cmake_sha256='39e1c2eccda989b0d000dc5f4ee2cb031bdda799163780d855acc0bd9eda9d92'
 
           cmake_name='cmake-3.23.3-linux-x86_64'
-          # curl -L https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3-linux-x86_64.sh > cmake.sh
           curl -L https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3-linux-x86_64.tar.gz > cmake.tar.gz
 
-          # cmake_sh_sha256=$(sha256sum cmake.sh | cut -f1 -d' ')
           cmake_sh_sha256=$(sha256sum cmake.tar.gz | cut -f1 -d' ')
           if [[ "${ref_cmake_sha256}" != "${cmake_sh_sha256}" ]]; then
               2>&1 echo "sha256 mismatch!: "
@@ -86,17 +83,11 @@ jobs:
               exit 1
           fi
 
-          echo 'whoami'
-          whoami
-          
-          rm -f /usr/bin/cmake
-          rm -f /usr/local/bin/cmake
+          rm -f /usr/bin/cmake && rm -f /usr/local/bin/cmake
           mkdir -p /usr/local/bin
           mkdir -p /usr/local/share
 
-          set -x
           cmake_prefix=$(pwd)/${cmake_name}
-          # mkdir -p ${cmake_prefix}
           tar -xzvf cmake.tar.gz
           ls -la
           ls -la ${cmake_prefix}
@@ -104,22 +95,10 @@ jobs:
           cp -r ${cmake_prefix}/bin/* /usr/local/bin/
           cp -r ${cmake_prefix}/share/* /usr/local/share/
 
-          # export PATH=${cmake_prefix}/bin:$PATH
-
-          # echo '$PATH'
-          # echo $PATH
-
-          # echo 'ls -la ${cmake_prefix}'
-          # ls -la ${cmake_prefix}
-
-          # set -x
-          # yes | sh cmake.sh --skip-license --prefix=${cmake_prefix} | cat
-          # echo 'ls -la ${cmake_prefix}'
-          # ls -la ${cmake_prefix}
           echo 'Cmake Info:'
           which cmake
           cmake --version
-          
+
           echo 'Done.'
           exit 0
 
@@ -165,13 +144,6 @@ jobs:
           mkdir -p build-harvester
           pushd build-harvester
           cmake .. -DCMAKE_BUILD_TYPE=Release 
-          
-          echo "ls -la CMakeFiles/bladebit_harvester.dir/"
-          ls -la CMakeFiles/bladebit_harvester.dir/
-          echo "cat -n CMakeFiles/bladebit_harvester.dir/build.make"
-          cat -n CMakeFiles/bladebit_harvester.dir/build.make
-          echo "cat -n CMakeFiles/bladebit_harvester.dir/dlink.txt"
-          cat -n CMakeFiles/bladebit_harvester.dir/dlink.txt
 
           cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
           cmake --install . --prefix harvester_dist
@@ -188,6 +160,9 @@ jobs:
           mv harvester_dist/green_reaper/bladebit_harvester-centos-x86-64.tar.gz ./
           sha256sum bladebit_harvester-centos-x86-64.tar.gz > bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
           ls -la
+          cat bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
+
+          echo "harvester_artifact_path=$(pwd)/bladebit_harvester-centos-x86-64.tar.*" >> $GITHUB_ENV
 
           popd
           ls -la
@@ -211,9 +186,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: bladebit_harvester-centos-x86-64
-          path: |
-            ${{ github.workspace }}/build-harvester/bladebit_harvester-centos-x86-64.tar.gz
-            ${{ github.workspace }}/build-harvester/bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
+          path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
   # build-ubuntu-arm64:
