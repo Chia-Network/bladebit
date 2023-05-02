@@ -72,7 +72,7 @@ jobs:
           ref_cmake_sha256='bc0d8be9f37670139ef69af5109e9066351201567b8d4fa52794bf40878cd612'
 
           curl -L https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3-linux-x86_64.sh > cmake.sh
-          cmake_sh_sha256=$(sha1sum -a 256 cmake.sh | cut -f1 -d' ')
+          cmake_sh_sha256=$(sha256sum cmake.sh | cut -f1 -d' ')
           if [[ "${ref_cmake_sha256}" != "${cmake_sh_sha256}" ]]; then
               2>&1 echo "sha256 mismatch!: "
               2>&1 echo "Got     : '${cmake_sh_sha256}'"
