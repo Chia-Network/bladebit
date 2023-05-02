@@ -55,7 +55,6 @@ jobs:
     runs-on: ubuntu-20.04
     container:
       image: quay.io/centos/centos:stream8
-    strategy:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
