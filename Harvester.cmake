@@ -1,4 +1,3 @@
-
 add_library(bladebit_harvester SHARED
 
     src/pch.cpp
@@ -60,6 +59,14 @@ add_library(bladebit_harvester SHARED
     >
 )
 
+set_property(TARGET bladebit_harvester PROPERTY PUBLIC_HEADER 
+    src/harvesting/GreenReaper.h 
+    src/harvesting/GreenReaperPortable.h)
+
+install(TARGETS bladebit_harvester
+    LIBRARY DESTINATION green_reaper/lib
+    PUBLIC_HEADER DESTINATION green_reaper/include
+)
 
 target_include_directories(bladebit_harvester PRIVATE
     src
