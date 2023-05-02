@@ -101,8 +101,8 @@ jobs:
           ls -la
           ls -la ${cmake_prefix}
 
-          cp ${cmake_prefix}/bin/* /usr/local/bin/
-          cp ${cmake_prefix}/share/* /usr/local/share/
+          cp -r ${cmake_prefix}/bin/* /usr/local/bin/
+          cp -r ${cmake_prefix}/share/* /usr/local/share/
 
           # export PATH=${cmake_prefix}/bin:$PATH
 
