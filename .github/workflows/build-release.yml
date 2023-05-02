@@ -55,6 +55,7 @@ jobs:
     runs-on: ubuntu-20.04
     container:
       image: quay.io/centos/centos:stream8
+    strategy:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -97,7 +98,36 @@ jobs:
           export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
           export PATH=/usr/local/cuda/bin:$PATH
           .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
-      
+
+      - name: Build Harvester
+        run: |
+          source /opt/rh/gcc-toolset-9/enable
+          export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+          export PATH=/usr/local/cuda/bin:$PATH
+          
+          mkdir -p build-harvester
+          pushd build-harvester
+          cmake .. -DCMAKE_BUILD_TYPE=Release 
+          cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
+          cmake --install . --prefix harvester_dist
+
+          pushd harvester_dist/green_reaper
+          artifact_files=$(find . -name '*.*' | cut -c3-)
+          shasum -a 256 ${artifact_files} > sha256checksum
+          artifact_files="${artifact_files} sha256checksum"
+
+          tar --version
+          tar -czvf bladebit_harvester-centos-x86-64.tar.gz ${artifact_files}
+
+          popd
+          mv harvester_dist/green_reaper/bladebit_harvester-centos-x86-64.tar.gz ./
+          shasum -a 256 bladebit_harvester-centos-x86-64.tar.gz > bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
+          ls -la
+
+          popd
+          ls -la
+
+
       # - name: Upload Artifact CentOS x86-64
       #   uses: actions/upload-artifact@v3
       #   with:
@@ -105,11 +135,20 @@ jobs:
       #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
       #     if-no-files-found: error
 
-      - name: Upload CUDA Artifact CentOS x86-64
+      # - name: Upload CUDA Artifact CentOS x86-64
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+      #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+      #     if-no-files-found: error
+
+      - name: Upload Harvester Artifact CentOS x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+          name: bladebit_harvester-centos-x86-64
+          path: |
+            ${{ github.workspace }}/build-harvester/bladebit_harvester-centos-x86-64.tar.gz
+            ${{ github.workspace }}/build-harvester/bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
           if-no-files-found: error
 
   # build-ubuntu-arm64:

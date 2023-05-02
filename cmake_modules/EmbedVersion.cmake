@@ -9,11 +9,11 @@ if((NOT DEFINED ENV{CI}) AND (NOT DEFINED CACHE{bb_version_embedded}))
         set(cmd_ver bash.exe)
     endif()
 
-    execute_process(COMMAND ${cmd_ver} ../extract-version.sh major    OUTPUT_VARIABLE bb_ver_maj    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} ../extract-version.sh minor    OUTPUT_VARIABLE bb_ver_min    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} ../extract-version.sh revision OUTPUT_VARIABLE bb_ver_rev    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} ../extract-version.sh suffix   OUTPUT_VARIABLE bb_ver_suffix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} ../extract-version.sh commit   OUTPUT_VARIABLE bb_ver_commit WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} ${CMAKE_CURRENT_SOURCE_DIR}/extract-version.sh major    OUTPUT_VARIABLE bb_ver_maj    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} ${CMAKE_CURRENT_SOURCE_DIR}/extract-version.sh minor    OUTPUT_VARIABLE bb_ver_min    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} ${CMAKE_CURRENT_SOURCE_DIR}/extract-version.sh revision OUTPUT_VARIABLE bb_ver_rev    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} ${CMAKE_CURRENT_SOURCE_DIR}/extract-version.sh suffix   OUTPUT_VARIABLE bb_ver_suffix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${cmd_ver} ${CMAKE_CURRENT_SOURCE_DIR}/extract-version.sh commit   OUTPUT_VARIABLE bb_ver_commit WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
 
     # Remove trailing whitespace incurred in windows gitbash
     string(STRIP "${bb_ver_maj}"    bb_ver_maj)
