@@ -8,48 +8,48 @@ env:
   CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
 
 jobs:
-  build-ubuntu-x86-64:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+  # build-ubuntu-x86-64:
+  #   runs-on: ubuntu-20.04
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh ubuntu x86-64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh ubuntu x86-64
 
-      - name: Install Prerequisites
-        run: sudo apt install -y libgmp-dev libnuma-dev
+  #     - name: Install Prerequisites
+  #       run: sudo apt install -y libgmp-dev libnuma-dev
 
-      # - name: Build
-      #   run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }} --version ${{steps.version_number.outputs.BB_VERSION}}
+  #     # - name: Build
+  #     #   run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      - name: Install CUDA Prerequisites
-        run: |
-            distro=ubuntu2004
-            arch=x86_64
-            sudo apt-key del 7fa2af80
-            wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
-            sudo dpkg -i cuda-keyring_1.0-1_all.deb
-            sudo apt-get update
-            sudo apt-get install cuda
+  #     - name: Install CUDA Prerequisites
+  #       run: |
+  #           distro=ubuntu2004
+  #           arch=x86_64
+  #           sudo apt-key del 7fa2af80
+  #           wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
+  #           sudo dpkg -i cuda-keyring_1.0-1_all.deb
+  #           sudo apt-get update
+  #           sudo apt-get install cuda
 
-      - name: Build CUDA
-        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+  #     - name: Build CUDA
+  #       run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      # - name: Upload Artifact Ubuntu x86-64
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-      #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-      #     if-no-files-found: error
+  #     # - name: Upload Artifact Ubuntu x86-64
+  #     #   uses: actions/upload-artifact@v3
+  #     #   with:
+  #     #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #     #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #     #     if-no-files-found: error
 
-      - name: Upload Artifact CUDA Ubuntu x86-64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
+  #     # - name: Upload Artifact CUDA Ubuntu x86-64
+  #     #   uses: actions/upload-artifact@v3
+  #     #   with:
+  #     #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+  #     #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+  #     #     if-no-files-found: error
 
   build-centos-x86-64:
     runs-on: ubuntu-20.04
@@ -91,12 +91,12 @@ jobs:
           # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
           # sh cuda_12.0.1_525.85.12_linux.run
 
-      - name: Build CUDA
-        run: |
-          source /opt/rh/gcc-toolset-9/enable
-          export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
-          export PATH=/usr/local/cuda/bin:$PATH
-          .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+      # - name: Build CUDA
+      #   run: |
+      #     source /opt/rh/gcc-toolset-9/enable
+      #     export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+      #     export PATH=/usr/local/cuda/bin:$PATH
+      #     .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
       - name: Build Harvester
         run: |
@@ -107,6 +107,10 @@ jobs:
           mkdir -p build-harvester
           pushd build-harvester
           cmake .. -DCMAKE_BUILD_TYPE=Release 
+          
+          ls -la CMakeFiles/bladebit_harvester.dir/
+          cat CMakeFiles/bladebit_harvester.dir/build.make
+
           cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
           cmake --install . --prefix harvester_dist
 
