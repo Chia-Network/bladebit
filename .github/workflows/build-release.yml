@@ -178,7 +178,7 @@ jobs:
 
           pushd harvester_dist/green_reaper
           artifact_files=$(find . -name '*.*' | cut -c3-)
-          shasum -a 256 ${artifact_files} > sha256checksum
+          sha256sum ${artifact_files} > sha256checksum
           artifact_files="${artifact_files} sha256checksum"
 
           tar --version
@@ -186,7 +186,7 @@ jobs:
 
           popd
           mv harvester_dist/green_reaper/bladebit_harvester-centos-x86-64.tar.gz ./
-          shasum -a 256 bladebit_harvester-centos-x86-64.tar.gz > bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
+          sha256sum bladebit_harvester-centos-x86-64.tar.gz > bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
           ls -la
 
           popd
