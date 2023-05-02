@@ -112,6 +112,8 @@ jobs:
           ls -la CMakeFiles/bladebit_harvester.dir/
           echo "cat -n CMakeFiles/bladebit_harvester.dir/build.make"
           cat -n CMakeFiles/bladebit_harvester.dir/build.make
+          echo "cat -n CMakeFiles/bladebit_harvester.dir/dlink.txt"
+          cat -n CMakeFiles/bladebit_harvester.dir/dlink.txt
 
           cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
           cmake --install . --prefix harvester_dist
