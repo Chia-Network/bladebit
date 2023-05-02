@@ -70,10 +70,15 @@ jobs:
                          gmp-devel numactl-devel make git wget subscription-manager
 
           # Get CMake
-          ref_cmake_sha256='bc0d8be9f37670139ef69af5109e9066351201567b8d4fa52794bf40878cd612'
+          # ref_cmake_sha256='bc0d8be9f37670139ef69af5109e9066351201567b8d4fa52794bf40878cd612'
+          ref_cmake_sha256='39e1c2eccda989b0d000dc5f4ee2cb031bdda799163780d855acc0bd9eda9d92'
 
-          curl -L https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3-linux-x86_64.sh > cmake.sh
-          cmake_sh_sha256=$(sha256sum cmake.sh | cut -f1 -d' ')
+          cmake_name='cmake-3.23.3-linux-x86_64'
+          # curl -L https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3-linux-x86_64.sh > cmake.sh
+          curl -L https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3-linux-x86_64.tar.gz > cmake.tar.gz
+
+          # cmake_sh_sha256=$(sha256sum cmake.sh | cut -f1 -d' ')
+          cmake_sh_sha256=$(sha256sum cmake.tar.gz | cut -f1 -d' ')
           if [[ "${ref_cmake_sha256}" != "${cmake_sh_sha256}" ]]; then
               2>&1 echo "sha256 mismatch!: "
               2>&1 echo "Got     : '${cmake_sh_sha256}'"
@@ -86,23 +91,27 @@ jobs:
           
           rm -f /usr/bin/cmake
 
-          cmake_prefix=$(pwd)/cmake
-          mkdir -p ${cmake_prefix}
-          export PATH=${cmake_prefix}:$PATH
+          cmake_prefix=$(pwd)/${cmake_name}
+          # mkdir -p ${cmake_prefix}
+          tar -xzvf cmake.tar.gz
+          ls -la
+          ls -la ${cmake_prefix}
+
+          export PATH=${cmake_prefix}/bin:$PATH
 
           echo '$PATH'
           echo $PATH
 
-          echo 'ls -la ${cmake_prefix}'
-          ls -la ${cmake_prefix}
+          # echo 'ls -la ${cmake_prefix}'
+          # ls -la ${cmake_prefix}
 
-          set -x
-          yes | sh cmake.sh --skip-license --prefix=${cmake_prefix} | cat
-          echo 'ls -la ${cmake_prefix}'
-          ls -la ${cmake_prefix}
+          # set -x
+          # yes | sh cmake.sh --skip-license --prefix=${cmake_prefix} | cat
+          # echo 'ls -la ${cmake_prefix}'
+          # ls -la ${cmake_prefix}
           echo 'Cmake Info:'
           which cmake
-          # cmake --version
+          cmake --version
 
       # - name: Build
       #   run: |
