@@ -90,17 +90,24 @@ jobs:
           whoami
           
           rm -f /usr/bin/cmake
+          rm -f /usr/local/bin/cmake
+          mkdir -p /usr/local/bin
+          mkdir -p /usr/local/share
 
+          set -x
           cmake_prefix=$(pwd)/${cmake_name}
           # mkdir -p ${cmake_prefix}
           tar -xzvf cmake.tar.gz
           ls -la
           ls -la ${cmake_prefix}
 
-          export PATH=${cmake_prefix}/bin:$PATH
+          cp ${cmake_prefix}/bin/* /usr/local/bin/
+          cp ${cmake_prefix}/share/* /usr/local/share/
 
-          echo '$PATH'
-          echo $PATH
+          # export PATH=${cmake_prefix}/bin:$PATH
+
+          # echo '$PATH'
+          # echo $PATH
 
           # echo 'ls -la ${cmake_prefix}'
           # ls -la ${cmake_prefix}
@@ -112,29 +119,32 @@ jobs:
           echo 'Cmake Info:'
           which cmake
           cmake --version
+          
+          echo 'Done.'
+          exit 0
 
       # - name: Build
       #   run: |
       #     source /opt/rh/gcc-toolset-9/enable
       #     .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
-      - name: Install CUDA Prerequisites
-        run: |
-          distro=rhel8
-          arch=x86_64
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-          # subscription-manager repos --enable=rhel-8-for-x86_64-appstream-rpms
-          # subscription-manager repos --enable=rhel-8-for-x86_64-baseos-rpms
-          # subscription-manager repos --enable=codeready-builder-for-rhel-8-x86_64-rpms
-          # rpm --erase gpg-pubkey-7fa2af80*
-          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
-          dnf clean expire-cache
-          dnf module install -y nvidia-driver:latest-dkms
-          dnf install -y cuda
-          ls -la /usr/local/
-          ls -la /usr/local/cuda/
-          # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
-          # sh cuda_12.0.1_525.85.12_linux.run
+      # - name: Install CUDA Prerequisites
+      #   run: |
+      #     distro=rhel8
+      #     arch=x86_64
+      #     dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+      #     # subscription-manager repos --enable=rhel-8-for-x86_64-appstream-rpms
+      #     # subscription-manager repos --enable=rhel-8-for-x86_64-baseos-rpms
+      #     # subscription-manager repos --enable=codeready-builder-for-rhel-8-x86_64-rpms
+      #     # rpm --erase gpg-pubkey-7fa2af80*
+      #     dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+      #     dnf clean expire-cache
+      #     dnf module install -y nvidia-driver:latest-dkms
+      #     dnf install -y cuda
+      #     ls -la /usr/local/
+      #     ls -la /usr/local/cuda/
+      #     # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
+      #     # sh cuda_12.0.1_525.85.12_linux.run
 
       # - name: Build CUDA
       #   run: |
@@ -148,6 +158,9 @@ jobs:
           source /opt/rh/gcc-toolset-9/enable
           export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
           export PATH=/usr/local/cuda/bin:$PATH
+
+          echo 'cmake --version'
+          cmake --version
           
           mkdir -p build-harvester
           pushd build-harvester
