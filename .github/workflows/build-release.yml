@@ -84,8 +84,9 @@ jobs:
           echo 'whoami'
           whoami
           rm -f /usr/bin/cmake
-          yes | sh cmake.sh --skip-license --prefix=/usr/bin | cat
+          echo 'ls -la /usr/bin/'
           ls -la /usr/bin/
+          yes | sh cmake.sh --skip-license --prefix=/usr/bin | cat
           # ls -la /usr/local/bin
 
           echo 'Cmake Info:'
