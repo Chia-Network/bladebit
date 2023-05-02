@@ -74,6 +74,7 @@ target_compile_features(bladebit_harvester PRIVATE cxx_std_17)
 target_compile_definitions(bladebit_harvester PRIVATE
     BB_CUDA_ENABLED=1
     THRUST_IGNORE_CUB_VERSION_CHECK=1
+    GR_EXPORT=1
 )
 
 target_compile_options(bladebit_harvester PRIVATE 

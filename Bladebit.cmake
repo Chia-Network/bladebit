@@ -6,6 +6,10 @@ target_include_directories(bladebit_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_compile_definitions(bladebit_core PUBLIC
+    GR_NO_IMPORT=1
+)
+
 target_compile_options(bladebit_core PUBLIC ${preinclude_pch})
 
 target_link_libraries(bladebit_core PUBLIC 

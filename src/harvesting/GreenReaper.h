@@ -1,15 +1,34 @@
 #pragma once 
 #include <stdint.h>
 
+#ifdef GR_EXPORT
+    #ifdef _WIN32
+        #define GR_API __declspec(dllexport)
+    #else
+        #define GR_API __attribute__ ((visibility("default")))
+    #endif
+#elif !defined( GR_NO_IMPORT )
+    #ifdef _WIN32
+        #define GR_API __declspec(dllimport)
+    #else
+        #define GR_API
+    #endif
+#else
+    #define GR_API
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#define GR_API_VERSION 1
 
 #define GR_POST_PROOF_X_COUNT 64
 #define GR_POST_PROOF_CMP_X_COUNT (GR_POST_PROOF_X_COUNT/2)
 
-typedef int32_t grBool;
+typedef int32_t GRBool;
+#define GR_FALSE 0
+#define GR_TRUE  1
 
 typedef struct GreenReaperContext GreenReaperContext;
 
@@ -21,22 +40,28 @@ typedef enum GRGpuRequestKind
     GRGpuRequestKind_ExactDevice,     // Select the specified device only. If none is available, it is an error.
 } GRGpuRequestKind;
 
+typedef uint32_t GRGpuRequestKind_t;
+
 typedef struct GreenReaperConfig
 {
-    uint32_t         threadCount;
-    uint32_t         cpuOffset;
-    grBool           disableCpuAffinity;
-    GRGpuRequestKind gpuRequest;         // What kind of GPU to select for harvesting.
-    uint32_t         gpuDeviceIndex;     // Which device index to use (0 by default)
+    uint32_t           apiVersion;
+    uint32_t           threadCount;
+    uint32_t           cpuOffset;
+    GRBool             disableCpuAffinity;
+    GRGpuRequestKind_t gpuRequest;         // What kind of GPU to select for harvesting.
+    uint32_t           gpuDeviceIndex;     // Which device index to use (0 by default)
 
+    uint32_t           _reserved[16];      // Reserved for future use
 } GreenReaperConfig;
 
 typedef enum GRResult
 {
-    GRResult_Failed       = 0,
-    GRResult_OK           = 1,
-    GRResult_OutOfMemory  = 2,
-    GRResult_NoProof      = 3,  // A dropped proof due to line point compression
+    GRResult_Failed        = 0,
+    GRResult_OK            = 1,
+    GRResult_OutOfMemory   = 2,
+    GRResult_NoProof       = 3,  // A dropped proof due to line point compression
+    GRResult_WrongVersion  = 4,
+    GRResult_InvalidGPU    = 5,  // Invalid or missing GPU selection. (When GRGpuRequestKind_ExactDevice is used.)
 
 } GRResult;
 
@@ -54,7 +79,7 @@ typedef enum GRResult
 typedef struct GRCompressedProofRequest
 {
     union {
-        uint32_t compressedProof[GR_POST_PROOF_CMP_X_COUNT];   // Corresponds to the x buckets in line points form
+        uint64_t compressedProof[GR_POST_PROOF_CMP_X_COUNT];   // Corresponds to the x buckets in line points form
         uint64_t fullProof      [GR_POST_PROOF_X_COUNT];
     };
 
@@ -86,27 +111,48 @@ typedef struct GRCompressedQualitiesRequest
 
 } GRCompressedQualitiesRequest;
 
+typedef struct GRApiV1
+{
+    GRResult (*CreateContext)( GreenReaperContext** outContext, GreenReaperConfig* config, size_t configStructSize );
+    void     (*DestroyContext)( GreenReaperContext* context );
+    GRResult (*PreallocateForCompressionLevel)( GreenReaperContext* context, uint32_t k, uint32_t maxCompressionLevel );
+    GRResult (*FetchProofForChallenge)( GreenReaperContext* context, GRCompressedProofRequest* req );
+    GRResult (*GetFetchQualitiesXPair)( GreenReaperContext* context, GRCompressedQualitiesRequest* req );
+    size_t   (*GetMemoryUsage)( GreenReaperContext* context );
+    GRBool   (*HasGpuDecompressor)( GreenReaperContext* context );
+
+} GRApiV1;
+
+typedef GRApiV1 GRApi;
+
 
 ///
 /// API
 ///
-GreenReaperContext* grCreateContext( GreenReaperConfig* config );
-void                grDestroyContext( GreenReaperContext* context );
+
+/// Populate an API object with all the current API's functions.
+/// A single API version is ever supported per binary.
+GR_API GRResult grPopulateApi( GRApi* api, size_t apiStructSize, int apiVersion );
+
+/// Create a decompression context
+GR_API GRResult grCreateContext( GreenReaperContext** outContext, GreenReaperConfig* config, size_t configStructSize );
+
+/// Destroy decompression context
+GR_API void grDestroyContext( GreenReaperContext* context );
 
 /// Preallocate context's in-memory buffers to support a maximum compression level
-GRResult grPreallocateForCompressionLevel( GreenReaperContext* context, uint32_t k, uint32_t maxCompressionLevel );
+GR_API GRResult grPreallocateForCompressionLevel( GreenReaperContext* context, uint32_t k, uint32_t maxCompressionLevel );
 
 /// Full proof of space request given a challenge
-GRResult grFetchProofForChallenge( GreenReaperContext* context, GRCompressedProofRequest* req );
+GR_API GRResult grFetchProofForChallenge( GreenReaperContext* context, GRCompressedProofRequest* req );
 
 /// Request plot qualities for a challenge
-GRResult grGetFetchQualitiesXPair( GreenReaperContext* context, GRCompressedQualitiesRequest* req );
+GR_API GRResult grGetFetchQualitiesXPair( GreenReaperContext* context, GRCompressedQualitiesRequest* req );
 
-size_t grGetMemoryUsage( GreenReaperContext* context );
+GR_API size_t grGetMemoryUsage( GreenReaperContext* context );
 
 /// Returns true if the context has a Gpu-based decompressor created.
-grBool grHasGpuDecompressor( GreenReaperContext* context );
-
+GR_API GRBool grHasGpuDecompressor( GreenReaperContext* context );
 
 #ifdef __cplusplus
 }

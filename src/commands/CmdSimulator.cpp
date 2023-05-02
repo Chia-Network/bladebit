@@ -294,14 +294,16 @@ void SimulatorJob::Run()
 
     {
         GreenReaperConfig grCfg = {};
+        grCfg.apiVersion         = GR_API_VERSION;
         grCfg.threadCount        = decompressorThreadCount;
         grCfg.cpuOffset          = decompressorThreadCount * JobId();
         grCfg.disableCpuAffinity = cfg->gCfg->disableCpuAffinity;
         grCfg.gpuRequest         = cfg->noCuda ? GRGpuRequestKind_None : GRGpuRequestKind_FirstAvailable;
         grCfg.gpuDeviceIndex     = cfg->cudaDevice;
 
-        auto* grContext = grCreateContext( &grCfg );
-        FatalIf( !grContext, "Failed to create decompression context." );
+        GreenReaperContext* grContext = nullptr;
+        const auto result = grCreateContext( &grContext, &grCfg, sizeof( GreenReaperConfig ) );
+        FatalIf( !grContext, "Failed to create decompression context with error %d.", (int)result );
 
         if( grCfg.gpuRequest != GRGpuRequestKind_None && !(bool)grHasGpuDecompressor( grContext ) )
             Log::Line( "Warning: No GPU device decompressor selected. Falling back to CPU-based simulation." );

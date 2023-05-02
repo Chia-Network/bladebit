@@ -23,7 +23,7 @@ TEST_CASE( "compressed-plot-proof", "[sandbox][plots]" )
     const uint32 f7 = 7;
     
     uint64 fullProofXs    [GR_POST_PROOF_X_COUNT];
-    uint32 compressedProof[GR_POST_PROOF_CMP_X_COUNT] = {};
+    uint64 compressedProof[GR_POST_PROOF_CMP_X_COUNT] = {};
     
     ENSURE( GetProofForChallenge( reader, f7, fullProofXs ) );
 

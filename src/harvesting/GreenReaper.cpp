@@ -219,14 +219,47 @@ static void BacktraceProof( GreenReaperContext& cx, const TableId tableStart, ui
 /// Public API
 ///
 //-----------------------------------------------------------
-GreenReaperContext* grCreateContext( GreenReaperConfig* config )
+GRResult grPopulateApi( GRApi* api, const size_t apiStructSize, const int apiVersion )
 {
+    if( api == nullptr )
+        return GRResult_Failed;
+
+    if( apiVersion != GR_API_VERSION )
+        return GRResult_WrongVersion;
+
+    if( apiStructSize != sizeof( GRApi ) )
+        return GRResult_WrongVersion;
+
+    api->CreateContext                  = &grCreateContext;
+    api->DestroyContext                 = &grDestroyContext;
+    api->PreallocateForCompressionLevel = &grPreallocateForCompressionLevel;
+    api->FetchProofForChallenge         = &grFetchProofForChallenge;
+    api->GetFetchQualitiesXPair         = &grGetFetchQualitiesXPair;
+    api->GetMemoryUsage                 = &grGetMemoryUsage;
+    api->HasGpuDecompressor             = &grHasGpuDecompressor;
+
+    return GRResult_OK;
+}
+
+//-----------------------------------------------------------
+GRResult grCreateContext( GreenReaperContext** outContext, 
+                          GreenReaperConfig* config,
+                          const size_t configStructSize )
+{
+    if( outContext == nullptr )
+        return GRResult_Failed;
+
     auto* context = new GreenReaperContext{};
     if( context == nullptr )
-        return nullptr;
+        return GRResult_OutOfMemory;
 
     if( config )
+    {
+        if( configStructSize != sizeof( GreenReaperConfig ) || config->apiVersion != GR_API_VERSION )
+            return GRResult_WrongVersion;
+
         context->config = *config;
+    }
     else
     {
         context->config.threadCount = std::min( 2u, SysHost::GetLogicalCPUCount() );
@@ -238,7 +271,7 @@ GreenReaperContext* grCreateContext( GreenReaperConfig* config )
     if( !context->pool )
     {
         grDestroyContext( context );
-        return nullptr;
+        return GRResult_OutOfMemory;
     }
 
     if( config->gpuRequest != GRGpuRequestKind_None )
@@ -247,11 +280,12 @@ GreenReaperContext* grCreateContext( GreenReaperConfig* config )
         if( context->cudaThresher == nullptr && config->gpuRequest == GRGpuRequestKind_ExactDevice )
         {
             grDestroyContext( context );
-            return nullptr;
+            return GRResult_InvalidGPU;
         }
     }
 
-    return context;
+    *outContext = context;
+    return GRResult_OK;
 }
 
 //-----------------------------------------------------------
@@ -294,9 +328,9 @@ size_t grGetMemoryUsage( GreenReaperContext* context )
 }
 
 //-----------------------------------------------------------
-grBool grHasGpuDecompressor( GreenReaperContext* context )
+GRBool grHasGpuDecompressor( GreenReaperContext* context )
 {
-    return (grBool)(context != nullptr && context->cudaThresher != nullptr );
+    return (context != nullptr && context->cudaThresher != nullptr ) ? GR_TRUE : GR_FALSE;
 }
 
 //-----------------------------------------------------------

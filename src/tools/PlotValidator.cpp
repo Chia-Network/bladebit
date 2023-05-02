@@ -771,13 +771,14 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
     if( plot.CompressionLevel() > 0 )
     {
         GreenReaperConfig cfg = {};
+        cfg.apiVersion  = GR_API_VERSION;
         cfg.threadCount = opts.threadCount;
 
         if( opts.useCuda )
             cfg.gpuRequest = GRGpuRequestKind_FirstAvailable;
 
-        gr = grCreateContext( &cfg );
-        FatalIf( gr == nullptr, "Failed to created decompression context." );
+        auto result = grCreateContext( &gr, &cfg, sizeof( GreenReaperConfig ) );
+        FatalIf( result != GRResult_OK, "Failed to created decompression context with error %d.", (int)result );
 
         if( opts.useCuda && !(bool)grHasGpuDecompressor( gr ) )
             Log::Line( "Warning: No GPU device selected. Falling back to CPU-based validation." );
@@ -1121,11 +1122,12 @@ bool DecompressProof( const byte plotId[BB_PLOT_ID_LEN], const uint32 compressio
     if( gr == nullptr )
     {
         GreenReaperConfig cfg = {};
+        cfg.apiVersion  = GR_API_VERSION;
         cfg.threadCount = std::min( 8u, SysHost::GetLogicalCPUCount() );
 
-        gr = grCreateContext( &cfg );
-        FatalIf( gr == nullptr, "Failed to created decompression context." );
-
+        auto result = grCreateContext( &gr, &cfg, sizeof( GreenReaperConfig ) );
+    
+        FatalIf( result != GRResult_OK, "Failed to created decompression context with error %d.", (int)result );
         destroyContext = true;
     }
 
@@ -1138,7 +1140,7 @@ bool DecompressProof( const byte plotId[BB_PLOT_ID_LEN], const uint32 compressio
     const uint32 compressedProofCount = compressionLevel < 9 ? PROOF_X_COUNT / 2 : PROOF_X_COUNT / 4;
 
     for( uint32 i = 0; i < compressedProofCount; i++ )
-        req.compressedProof[i] = (uint32)compressedProof[i];
+        req.compressedProof[i] = compressedProof[i];
 
     const GRResult r = grFetchProofForChallenge( gr, &req );
 

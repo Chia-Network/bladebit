@@ -113,6 +113,8 @@ option(BB_ENABLE_TESTS "Enable tests." OFF)
 
 option(NO_CUDA_HARVESTER "Explicitly disable CUDA in the bladebit_harvester target." OFF)
 
+option(NO_EMBED_VERSION "Disable embedding the version when building locall (non-CI)." OFF)
+
 #
 # Internal Config
 #
@@ -136,6 +138,11 @@ endif()
 # Targets
 #
 include(Config.cmake)
+
+if(NOT BB_IS_DEPENDENCY)
+    include(cmake_modules/EmbedVersion.cmake)
+endif()
+
 include(Bladebit.cmake)
 set_target_properties(bladebit_core bladebit PROPERTIES EXCLUDE_FROM_ALL $<BOOL:${BB_IS_DEPENDENCY}>)
 
