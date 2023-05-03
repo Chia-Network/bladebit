@@ -22,7 +22,7 @@ jobs:
   #       run: sudo apt install -y libgmp-dev libnuma-dev
 
   #     # - name: Build
-  #     #   run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }} --version ${{steps.version_number.outputs.BB_VERSION}}
+  #     #   run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
   #     - name: Install CUDA Prerequisites
   #       run: |
@@ -35,20 +35,20 @@ jobs:
   #           sudo apt-get install cuda
 
   #     - name: Build CUDA
-  #       run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
   #     # - name: Upload Artifact Ubuntu x86-64
   #     #   uses: actions/upload-artifact@v3
   #     #   with:
-  #     #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #     #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #     #     name: ${{ env.BB_ARTIFACT_NAME }}
+  #     #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
   #     #     if-no-files-found: error
 
   #     # - name: Upload Artifact CUDA Ubuntu x86-64
   #     #   uses: actions/upload-artifact@v3
   #     #   with:
-  #     #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
-  #     #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+  #     #     name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+  #     #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
   #     #     if-no-files-found: error
 
   build-centos-x86-64:
@@ -105,7 +105,7 @@ jobs:
       # - name: Build
       #   run: |
       #     source /opt/rh/gcc-toolset-9/enable
-      #     .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+      #     .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
 
       - name: Install CUDA Prerequisites
         run: |
@@ -130,7 +130,7 @@ jobs:
           source /opt/rh/gcc-toolset-9/enable
           export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
           export PATH=/usr/local/cuda/bin:$PATH
-          .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+          .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
 
       - name: Build Harvester
         run: |
@@ -171,15 +171,15 @@ jobs:
       # - name: Upload Artifact CentOS x86-64
       #   uses: actions/upload-artifact@v3
       #   with:
-      #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-      #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+      #     name: ${{ env.BB_ARTIFACT_NAME }}
+      #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
       #     if-no-files-found: error
 
       - name: Upload CUDA Artifact CentOS x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
-          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
       - name: Upload Harvester Artifact CentOS x86-64
@@ -211,13 +211,13 @@ jobs:
   #         apt install -y build-essential git libgmp-dev libnuma-dev
 
   #     - name: Build
-  #       run: .github/actions/build-asset-unix.sh --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+  #       run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
   #     - name: Upload Artifact Ubuntu ARM64
   #       uses: actions/upload-artifact@v3
   #       with:
-  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         name: ${{ env.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
   #         if-no-files-found: error
 
   # build-centos-arm64:
@@ -239,8 +239,8 @@ jobs:
 
   #     - name: Build
   #       env:
-  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #         BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{env.BB_VERSION}}
   #       run: |
   #         source /opt/rh/gcc-toolset-9/enable
   #         .github/actions/build-asset-unix.sh
@@ -248,8 +248,8 @@ jobs:
   #     - name: Upload Artifact CentOS ARM64
   #       uses: actions/upload-artifact@v3
   #       with:
-  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         name: ${{ env.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
   #         if-no-files-found: error
 
   # build-windows-x86-64:
@@ -266,8 +266,8 @@ jobs:
   #     - name: Build
   #       shell: bash
   #       env:
-  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #         BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{env.BB_VERSION}}
   #       run: |
           
   #         mkdir build && cd build
@@ -293,8 +293,8 @@ jobs:
   #     - name: Upload Artifact Windows x86-64
   #       uses: actions/upload-artifact@v3
   #       with:
-  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         name: ${{ env.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
   #         if-no-files-found: error
 
   # build-macos-arm64:
@@ -315,15 +315,15 @@ jobs:
 
   #     - name: Build
   #       env:
-  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #         BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{env.BB_VERSION}}
   #       run: .github/actions/build-asset-unix.sh
 
   #     - name: Upload Artifact macOS arm64
   #       uses: actions/upload-artifact@v3
   #       with:
-  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         name: ${{ env.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
   #         if-no-files-found: error
 
   # build-macos-x86-64:
@@ -344,13 +344,13 @@ jobs:
 
   #     - name: Build
   #       env:
-  #         BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+  #         BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{env.BB_VERSION}}
   #       run: .github/actions/build-asset-unix.sh
 
   #     - name: Upload Artifact macOS x86-64
   #       uses: actions/upload-artifact@v3
   #       with:
-  #         name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
-  #         path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+  #         name: ${{ env.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
   #         if-no-files-found: error
