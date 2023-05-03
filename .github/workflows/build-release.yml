@@ -125,12 +125,12 @@ jobs:
           # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
           # sh cuda_12.0.1_525.85.12_linux.run
 
-      # - name: Build CUDA
-      #   run: |
-      #     source /opt/rh/gcc-toolset-9/enable
-      #     export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
-      #     export PATH=/usr/local/cuda/bin:$PATH
-      #     .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
+      - name: Build CUDA
+        run: |
+          source /opt/rh/gcc-toolset-9/enable
+          export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+          export PATH=/usr/local/cuda/bin:$PATH
+          .github/actions/build-asset-unix.sh --cuda --artifact ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }} --version ${{steps.version_number.outputs.BB_VERSION}}
 
       - name: Build Harvester
         run: |
@@ -175,12 +175,12 @@ jobs:
       #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
       #     if-no-files-found: error
 
-      # - name: Upload CUDA Artifact CentOS x86-64
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
-      #     path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
-      #     if-no-files-found: error
+      - name: Upload CUDA Artifact CentOS x86-64
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME_CUDA }}
+          if-no-files-found: error
 
       - name: Upload Harvester Artifact CentOS x86-64
         uses: actions/upload-artifact@v3
