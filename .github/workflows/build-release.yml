@@ -151,18 +151,21 @@ jobs:
           pushd harvester_dist/green_reaper
           artifact_files=$(find . -name '*.*' | cut -c3-)
           sha256sum ${artifact_files} > sha256checksum
+          
           artifact_files="${artifact_files} sha256checksum"
+          artifact_base_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
+          artifact_name=${artifact_base_name}.tar.gz
 
           tar --version
-          tar -czvf bladebit_harvester-centos-x86-64.tar.gz ${artifact_files}
+          tar -czvf ${artifact_name} ${artifact_files}
 
           popd
-          mv harvester_dist/green_reaper/bladebit_harvester-centos-x86-64.tar.gz ./
-          sha256sum bladebit_harvester-centos-x86-64.tar.gz > bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
+          mv harvester_dist/green_reaper/${artifact_name} ./
+          sha256sum ${artifact_name} > ${artifact_name}.sha256.txt
           ls -la
-          cat bladebit_harvester-centos-x86-64.tar.gz.sha256.txt
+          cat ${artifact_name}.sha256.txt
 
-          echo "harvester_artifact_path=$(pwd)/bladebit_harvester-centos-x86-64.tar.*" >> $GITHUB_ENV
+          echo "harvester_artifact_path=$(pwd)/${artifact_base_name}.*" >> $GITHUB_ENV
 
           popd
           ls -la
