@@ -65,7 +65,7 @@ fi
 
 tar --version
 tar -czvf $artifact_name $exe_name
-mkdir ../bin
+mkdir -p ../bin
 mv $artifact_name ../bin/
 ls -la ../bin
 
