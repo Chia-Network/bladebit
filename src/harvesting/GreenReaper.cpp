@@ -237,6 +237,7 @@ GRResult grPopulateApi( GRApi* api, const size_t apiStructSize, const int apiVer
     api->GetFetchQualitiesXPair         = &grGetFetchQualitiesXPair;
     api->GetMemoryUsage                 = &grGetMemoryUsage;
     api->HasGpuDecompressor             = &grHasGpuDecompressor;
+    api->GetCompressionInfo             = &grGetCompressionInfo;
 
     return GRResult_OK;
 }
@@ -331,6 +332,30 @@ size_t grGetMemoryUsage( GreenReaperContext* context )
 GRBool grHasGpuDecompressor( GreenReaperContext* context )
 {
     return (context != nullptr && context->cudaThresher != nullptr ) ? GR_TRUE : GR_FALSE;
+}
+
+//-----------------------------------------------------------
+GRResult grGetCompressionInfo( GRCompressionInfo* outInfo, const size_t infoStructSize, 
+                               const uint32_t k, const uint32_t compressionLevel )
+{
+    if( infoStructSize != sizeof( GRCompressionInfo ) )
+        return GRResult_WrongVersion;
+
+    if( outInfo == nullptr 
+        || k != 32
+        || compressionLevel < 1
+        || compressionLevel > 9 )
+    {
+        return GRResult_InvalidArg;
+    }
+
+    auto c = GetCompressionInfoForLevel( compressionLevel );
+    outInfo->entrySizeBits = c.entrySizeBits;
+    outInfo->subtSizeBits  = c.subtSizeBits;
+    outInfo->tableParkSize = c.tableParkSize;
+    outInfo->ansRValue     = c.ansRValue;
+
+    return GRResult_OK;
 }
 
 //-----------------------------------------------------------

@@ -62,9 +62,17 @@ typedef enum GRResult
     GRResult_NoProof       = 3,  // A dropped proof due to line point compression
     GRResult_WrongVersion  = 4,
     GRResult_InvalidGPU    = 5,  // Invalid or missing GPU selection. (When GRGpuRequestKind_ExactDevice is used.)
+    GRResult_InvalidArg    = 6,  // An invalid argument was passed.
 
 } GRResult;
 
+typedef struct GRCompressionInfo
+{
+    uint32_t entrySizeBits;
+    uint32_t subtSizeBits;
+    size_t   tableParkSize;
+    double   ansRValue;
+} GRCompressionInfo;
 
 // Timings expressed in nanoseconds
 // typedef struct GRProofTimings
@@ -120,6 +128,7 @@ typedef struct GRApiV1
     GRResult (*GetFetchQualitiesXPair)( GreenReaperContext* context, GRCompressedQualitiesRequest* req );
     size_t   (*GetMemoryUsage)( GreenReaperContext* context );
     GRBool   (*HasGpuDecompressor)( GreenReaperContext* context );
+    GRResult (*GetCompressionInfo)( GRCompressionInfo* outInfo, size_t infoStructSize, uint32_t k, uint32_t compressionLevel );
 
 } GRApiV1;
 
@@ -153,6 +162,8 @@ GR_API size_t grGetMemoryUsage( GreenReaperContext* context );
 
 /// Returns true if the context has a Gpu-based decompressor created.
 GR_API GRBool grHasGpuDecompressor( GreenReaperContext* context );
+
+GR_API GRResult grGetCompressionInfo( GRCompressionInfo* outInfo, size_t infoStructSize, uint32_t k, uint32_t compressionLevel );
 
 #ifdef __cplusplus
 }

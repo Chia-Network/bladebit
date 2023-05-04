@@ -36,6 +36,9 @@ jobs:
             sudo apt-get update
             sudo apt-get install cuda
 
+      - name: Build Bladebit CUDA
+        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
+
       - name: Build Harvester
         run: |
           artifact_name=green_reaper-v${{ env.BB_VERSION }}-ubuntu-x86-64
@@ -43,9 +46,6 @@ jobs:
           
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester-linux.sh "${artifact_name}"
-
-      - name: Build Bladebit CUDA
-        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
       - name: Upload Bladebit Artifact
         uses: actions/upload-artifact@v3
