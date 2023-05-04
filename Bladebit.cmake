@@ -8,6 +8,7 @@ target_include_directories(bladebit_core PUBLIC
 
 target_compile_definitions(bladebit_core PUBLIC
     GR_NO_IMPORT=1
+    BB_NUMA_ENABLED=1
 )
 
 target_compile_options(bladebit_core PUBLIC ${preinclude_pch})
@@ -277,6 +278,7 @@ set(src_bladebit
     src/commands/Commands.h
     src/commands/CmdPlotCheck.cpp
     src/commands/CmdSimulator.cpp
+    src/commands/CmdCheckCUDA.cpp
 
     src/harvesting/GreenReaper.cpp
     src/harvesting/GreenReaper.h

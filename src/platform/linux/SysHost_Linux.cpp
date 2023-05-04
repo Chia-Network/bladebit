@@ -7,10 +7,13 @@
 #include <signal.h>
 #include <atomic>
 #include <errno.h>
-#include <numa.h>
-#include <numaif.h>
 #include <stdio.h>
 #include <mutex>
+
+#if BB_NUMA_ENABLED
+    #include <numa.h>
+    #include <numaif.h>
+#endif
 
 // #if _DEBUG
     #include "util/Log.h"
@@ -288,6 +291,9 @@ void SysHost::Random( byte* buffer, size_t size )
 //-----------------------------------------------------------
 const NumaInfo* SysHost::GetNUMAInfo()
 {
+#if !BB_NUMA_ENABLED
+    return nullptr;
+#else
     if( numa_available() == -1 )
         return nullptr;
 
@@ -358,12 +364,15 @@ const NumaInfo* SysHost::GetNUMAInfo()
     }
 
     return info;
+#endif // BB_NUMA_ENABLED
 }
 
 //-----------------------------------------------------------
 void SysHost::NumaAssignPages( void* ptr, size_t size, uint node )
 {
+#if BB_NUMA_ENABLED
     numa_tonode_memory( ptr, size, (int)node );
+#endif
 }
 
 //-----------------------------------------------------------
@@ -373,6 +382,7 @@ bool SysHost::NumaSetThreadInterleavedMode()
     if( !numa )
         return false;
     
+#if BB_NUMA_ENABLED
     const size_t MASK_SIZE = 128;
     unsigned long mask[MASK_SIZE];
     memset( mask, 0xFF, sizeof( mask ) );
@@ -391,6 +401,7 @@ bool SysHost::NumaSetThreadInterleavedMode()
     #endif
 
     return r == 0;
+#endif // BB_NUMA_ENABLED
 }
 
 //-----------------------------------------------------------
@@ -400,6 +411,7 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
     if( !numa )
         return false;
 
+#if BB_NUMA_ENABLED
     const size_t MASK_SIZE = 128;
     unsigned long mask[MASK_SIZE];
     memset( mask, 0xFF, sizeof( mask ) );
@@ -418,6 +430,7 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
     #endif
 
     return r == 0;
+#endif // BB_NUMA_ENABLED
 }
 
 //-----------------------------------------------------------
@@ -427,6 +440,7 @@ int SysHost::NumaGetNodeFromPage( void* ptr )
     if( !numa )
         return -1;
 
+#if BB_NUMA_ENABLED
     int node = -1;
     int r = numa_move_pages( 0, 1, &ptr, nullptr, &node, 0 );
 
@@ -442,4 +456,5 @@ int SysHost::NumaGetNodeFromPage( void* ptr )
     }
 
     return node;
+#endif // BB_NUMA_ENABLED
 }

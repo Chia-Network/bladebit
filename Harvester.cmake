@@ -97,20 +97,22 @@ target_link_libraries(bladebit_harvester PRIVATE
     Threads::Threads
     bls
 
-    $<$<PLATFORM_ID:Linux>:
-        ${NUMA_LIBRARY}
+    $<${have_cuda}:
+        CUDA::cudart_static
     >
 
-    $<${have_cuda}:
-        CUDA::cudart CUDA::cuda_driver
-    >
+    INTERFACE
+        $<$<PLATFORM_ID:Linux>:
+            # ${NUMA_LIBRARY}
+            dl
+        >
 )
 
 if(CUDAToolkit_FOUND)
     set_target_properties(bladebit_harvester PROPERTIES 
         EXCLUDE_FROM_ALL ON
         MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
-        CUDA_RUNTIME_LIBRARY Dynamic
+        CUDA_RUNTIME_LIBRARY Static
         CUDA_SEPARABLE_COMPILATION ON
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
         CUDA_ARCHITECTURES OFF

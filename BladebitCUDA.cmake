@@ -32,7 +32,8 @@ target_include_directories(bladebit_cuda PRIVATE src cuda SYSTEM cuda)
 
 target_compile_definitions(bladebit_cuda PUBLIC
     BB_CUDA_ENABLED=1
-    THRUST_IGNORE_CUB_VERSION_CHECK=1)
+    THRUST_IGNORE_CUB_VERSION_CHECK=1
+)
 
 target_compile_options(bladebit_cuda PRIVATE
     ${cuda_archs}
@@ -45,7 +46,7 @@ target_compile_options(bladebit_cuda PRIVATE
     >
  )
 
-target_link_libraries(bladebit_cuda PRIVATE bladebit_core CUDA::cudart_static CUDA::cuda_driver)
+target_link_libraries(bladebit_cuda PRIVATE bladebit_core CUDA::cudart_static)# CUDA::cuda_driver)
 
 set_target_properties(bladebit_cuda PROPERTIES 
     MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
