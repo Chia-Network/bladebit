@@ -21,9 +21,9 @@ jobs:
       - name: Install Prerequisites
         run: |
             sudo apt install -y libgmp-dev libnuma-dev
-            bash .github/actions/install-cmake-linux.sh
+            sudo bash .github/actions/install-cmake-linux.sh
 
-      - name: Build
+      - name: Build Bladebit
         run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
       - name: Install CUDA Prerequisites
@@ -38,14 +38,20 @@ jobs:
 
       - name: Build Harvester
         run: |
+          export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+          export PATH=/usr/local/cuda/bin:$PATH
+
           artifact_name=green_reaper-v${{ env.BB_VERSION }}-ubuntu-x86-64
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester-linux.sh "${artifact_name}"
 
-      - name: Build CUDA
-        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
+      - name: Build Bladebit CUDA
+        run: |
+          export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+          export PATH=/usr/local/cuda/bin:$PATH
+          .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
       - name: Upload Bladebit Artifact
         uses: actions/upload-artifact@v3
@@ -121,8 +127,8 @@ jobs:
       - name: Build Harvester
         run: |
           source /opt/rh/gcc-toolset-9/enable
-          # export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
-          # export PATH=/usr/local/cuda/bin:$PATH
+          export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+          export PATH=/usr/local/cuda/bin:$PATH
 
           artifact_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV

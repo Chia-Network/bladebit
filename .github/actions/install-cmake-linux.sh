@@ -22,8 +22,8 @@ tar -xzvf cmake.tar.gz
 ls -la
 ls -la ${cmake_prefix}
 
-sudo cp -r ${cmake_prefix}/bin/* /usr/local/bin/
-sudo cp -r ${cmake_prefix}/share/* /usr/local/share/
+cp -r ${cmake_prefix}/bin/* /usr/local/bin/
+cp -r ${cmake_prefix}/share/* /usr/local/share/
 
 echo 'Cmake Info:'
 which cmake
