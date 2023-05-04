@@ -37,7 +37,7 @@ gcc --version
 
 exe_name=bladebit
 target=bladebit
-if [[ compile_cuda ]]; then
+if [[ compile_cuda -eq 1 ]]; then
   target=bladebit_cuda
   exe_name=bladebit_cuda
 fi
