@@ -88,7 +88,7 @@ jobs:
 
           bash .github/actions/install-cmake-linux.sh
 
-      - name: Build
+      - name: Build Bladebit
         run: |
           source /opt/rh/gcc-toolset-9/enable
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
@@ -111,7 +111,7 @@ jobs:
           # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
           # sh cuda_12.0.1_525.85.12_linux.run
 
-      - name: Build CUDA
+      - name: Build Bladebit CUDA
         run: |
           source /opt/rh/gcc-toolset-9/enable
           .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}

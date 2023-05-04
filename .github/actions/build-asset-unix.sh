@@ -47,7 +47,7 @@ mkdir build-${target} && cd build-${target}
 cmake .. -DCMAKE_BUILD_TYPE=Release
 bash -eo pipefail ../embed-version.sh
 cmake --build . --config Release --target $target -j $thread_count
-chmod +x ./bladebit
+chmod +x ./${exe_name}
 
 if [[ $OSTYPE == 'msys'* ]] || [[ $OSTYPE == 'cygwin'* ]]; then
   ls -la Release
