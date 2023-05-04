@@ -19,7 +19,9 @@ jobs:
   #       run: .github/actions/get-version.sh ubuntu x86-64
 
   #     - name: Install Prerequisites
-  #       run: sudo apt install -y libgmp-dev libnuma-dev
+  #       run: |
+  #           sudo apt install -y libgmp-dev libnuma-dev
+  #           bash .github/actions/install-cmake-linux.sh
 
   #     # - name: Build
   #     #   run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
@@ -44,12 +46,19 @@ jobs:
   #     #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
   #     #     if-no-files-found: error
 
-  #     # - name: Upload Artifact CUDA Ubuntu x86-64
-  #     #   uses: actions/upload-artifact@v3
-  #     #   with:
-  #     #     name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-  #     #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-  #     #     if-no-files-found: error
+  #     - name: Upload Artifact CUDA Ubuntu x86-64
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+  #         if-no-files-found: error
+
+  #     - name: Upload Harvester Artifact CentOS x86-64
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: green_reaper-ubuntu-x86-64
+  #         path: ${{ env.harvester_artifact_path }}
+  #         if-no-files-found: error
 
   build-centos-x86-64:
     runs-on: ubuntu-20.04
@@ -69,38 +78,7 @@ jobs:
           dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
                          gmp-devel numactl-devel make git wget subscription-manager
 
-          # Get CMake
-          ref_cmake_sha256='39e1c2eccda989b0d000dc5f4ee2cb031bdda799163780d855acc0bd9eda9d92'
-
-          cmake_name='cmake-3.23.3-linux-x86_64'
-          curl -L https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3-linux-x86_64.tar.gz > cmake.tar.gz
-
-          cmake_sh_sha256=$(sha256sum cmake.tar.gz | cut -f1 -d' ')
-          if [[ "${ref_cmake_sha256}" != "${cmake_sh_sha256}" ]]; then
-              2>&1 echo "sha256 mismatch!: "
-              2>&1 echo "Got     : '${cmake_sh_sha256}'"
-              2>&1 echo "Expected: '${ref_cmake_sha256}'"
-              exit 1
-          fi
-
-          rm -f /usr/bin/cmake && rm -f /usr/local/bin/cmake
-          mkdir -p /usr/local/bin
-          mkdir -p /usr/local/share
-
-          cmake_prefix=$(pwd)/${cmake_name}
-          tar -xzvf cmake.tar.gz
-          ls -la
-          ls -la ${cmake_prefix}
-
-          cp -r ${cmake_prefix}/bin/* /usr/local/bin/
-          cp -r ${cmake_prefix}/share/* /usr/local/share/
-
-          echo 'Cmake Info:'
-          which cmake
-          cmake --version
-
-          echo 'Done.'
-          exit 0
+          bash .github/actions/install-cmake-linux.sh
 
       # - name: Build
       #   run: |
@@ -135,41 +113,14 @@ jobs:
       - name: Build Harvester
         run: |
           source /opt/rh/gcc-toolset-9/enable
-          export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
-          export PATH=/usr/local/cuda/bin:$PATH
+          # export CMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+          # export PATH=/usr/local/cuda/bin:$PATH
 
-          echo 'cmake --version'
-          cmake --version
+          artifact_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
+          echo "artifact_name=${artifact_name}" >> $GITHUB_ENV
           
-          mkdir -p build-harvester
-          pushd build-harvester
-          cmake .. -DCMAKE_BUILD_TYPE=Release 
-
-          cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
-          cmake --install . --prefix harvester_dist
-
-          pushd harvester_dist/green_reaper
-          artifact_files=$(find . -name '*.*' | cut -c3-)
-          sha256sum ${artifact_files} > sha256checksum
-          
-          artifact_files="${artifact_files} sha256checksum"
-          artifact_base_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
-          artifact_name=${artifact_base_name}.tar.gz
-
-          tar --version
-          tar -czvf ${artifact_name} ${artifact_files}
-
-          popd
-          mv harvester_dist/green_reaper/${artifact_name} ./
-          sha256sum ${artifact_name} > ${artifact_name}.sha256.txt
-          ls -la
-          cat ${artifact_name}.sha256.txt
-
-          echo "harvester_artifact_path=$(pwd)/${artifact_base_name}.*" >> $GITHUB_ENV
-
-          popd
-          ls -la
-
+          # emits env.harvester_artifact_path
+          bash .github/actions/build-harvester-linux.sh "${artifact_name}"
 
       # - name: Upload Artifact CentOS x86-64
       #   uses: actions/upload-artifact@v3
@@ -188,7 +139,7 @@ jobs:
       - name: Upload Harvester Artifact CentOS x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: bladebit_harvester-centos-x86-64
+          name: green_reaper-centos-x86-64
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
