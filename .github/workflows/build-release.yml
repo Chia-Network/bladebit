@@ -8,57 +8,65 @@ env:
   CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
 
 jobs:
-  # build-ubuntu-x86-64:
-  #   runs-on: ubuntu-20.04
-  #   steps:
-  #     - name: Checkout Repo
-  #       uses: actions/checkout@v3
+  build-ubuntu-x86-64:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
 
-  #     - name: Get Version Number
-  #       id: version_number
-  #       run: .github/actions/get-version.sh ubuntu x86-64
+      - name: Get Version Number
+        id: version_number
+        run: .github/actions/get-version.sh ubuntu x86-64
 
-  #     - name: Install Prerequisites
-  #       run: |
-  #           sudo apt install -y libgmp-dev libnuma-dev
-  #           bash .github/actions/install-cmake-linux.sh
+      - name: Install Prerequisites
+        run: |
+            sudo apt install -y libgmp-dev libnuma-dev
+            bash .github/actions/install-cmake-linux.sh
 
-  #     # - name: Build
-  #     #   run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
+      - name: Build
+        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
-  #     - name: Install CUDA Prerequisites
-  #       run: |
-  #           distro=ubuntu2004
-  #           arch=x86_64
-  #           sudo apt-key del 7fa2af80
-  #           wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
-  #           sudo dpkg -i cuda-keyring_1.0-1_all.deb
-  #           sudo apt-get update
-  #           sudo apt-get install cuda
+      - name: Install CUDA Prerequisites
+        run: |
+            distro=ubuntu2004
+            arch=x86_64
+            sudo apt-key del 7fa2af80
+            wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
+            sudo dpkg -i cuda-keyring_1.0-1_all.deb
+            sudo apt-get update
+            sudo apt-get install cuda
 
-  #     - name: Build CUDA
-  #       run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
+      - name: Build Harvester
+        run: |
+          artifact_name=green_reaper-v${{ env.BB_VERSION }}-ubuntu-x86-64
+          echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
+          
+          # emits env.harvester_artifact_path
+          bash .github/actions/build-harvester-linux.sh "${artifact_name}"
 
-  #     # - name: Upload Artifact Ubuntu x86-64
-  #     #   uses: actions/upload-artifact@v3
-  #     #   with:
-  #     #     name: ${{ env.BB_ARTIFACT_NAME }}
-  #     #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-  #     #     if-no-files-found: error
+      - name: Build CUDA
+        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
-  #     - name: Upload Artifact CUDA Ubuntu x86-64
-  #       uses: actions/upload-artifact@v3
-  #       with:
-  #         name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-  #         if-no-files-found: error
+      - name: Upload Bladebit Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
 
-  #     - name: Upload Harvester Artifact CentOS x86-64
-  #       uses: actions/upload-artifact@v3
-  #       with:
-  #         name: green_reaper-ubuntu-x86-64
-  #         path: ${{ env.harvester_artifact_path }}
-  #         if-no-files-found: error
+      - name: Upload Bladebit CUDA Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+          if-no-files-found: error
+
+      - name: Upload Harvester Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.harvester_artifact_name }}
+          path: ${{ env.harvester_artifact_path }}
+          if-no-files-found: error
 
   build-centos-x86-64:
     runs-on: ubuntu-20.04
@@ -80,10 +88,10 @@ jobs:
 
           bash .github/actions/install-cmake-linux.sh
 
-      # - name: Build
-      #   run: |
-      #     source /opt/rh/gcc-toolset-9/enable
-      #     .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
+      - name: Build
+        run: |
+          source /opt/rh/gcc-toolset-9/enable
+          .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
 
       - name: Install CUDA Prerequisites
         run: |
@@ -117,29 +125,29 @@ jobs:
           # export PATH=/usr/local/cuda/bin:$PATH
 
           artifact_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
-          echo "artifact_name=${artifact_name}" >> $GITHUB_ENV
+          echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester-linux.sh "${artifact_name}"
 
-      # - name: Upload Artifact CentOS x86-64
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     name: ${{ env.BB_ARTIFACT_NAME }}
-      #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-      #     if-no-files-found: error
+      - name: Upload Bladebit Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
 
-      - name: Upload CUDA Artifact CentOS x86-64
+      - name: Upload Bladebit CUDA Artifact
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
-      - name: Upload Harvester Artifact CentOS x86-64
+      - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: green_reaper-centos-x86-64
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
