@@ -18,7 +18,7 @@ cmake --version
 
 mkdir -p build-harvester
 pushd build-harvester
-cmake .. -DCMAKE_BUILD_TYPE=Release 
+cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 
 cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
 cmake --install . --prefix harvester_dist
