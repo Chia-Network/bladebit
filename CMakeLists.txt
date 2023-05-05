@@ -69,33 +69,6 @@ endif()
 
 
 #
-# Dependencies
-#
-include(FetchContent)
-
-# BLS
-FetchContent_Declare(
-  bls
-  GIT_REPOSITORY https://github.com/Chia-Network/bls-signatures.git
-  GIT_TAG        1.0.10
-  EXCLUDE_FROM_ALL ${BB_IS_DEPENDENCY}
-)
-
-set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")
-set(BUILD_BLS_TESTS "0" CACHE STRING "")
-set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
-FetchContent_MakeAvailable(bls)
-
-# Threads
-find_package(Threads REQUIRED)
-
-# NUMA
-if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    find_package(NUMA REQUIRED)
-    set(platform_libs ${NUMA_LIBRARY})
-endif()
-
-#
 # Options
 #
 option(BENCHMARK_MODE "Enable benchmark mode for memplot. No final plot is written." OFF)
@@ -110,10 +83,39 @@ endif()
 
 # NOTE: These are mostly sandbox test environment, not proper tests
 option(BB_ENABLE_TESTS "Enable tests." OFF)
-
 option(NO_CUDA_HARVESTER "Explicitly disable CUDA in the bladebit_harvester target." OFF)
-
 option(NO_EMBED_VERSION "Disable embedding the version when building locall (non-CI)." OFF)
+option(BB_HARVESTER_ONLY "Enable only the harvester target." OFF)
+
+
+#
+# Dependencies
+#
+include(FetchContent)
+
+# Threads
+find_package(Threads REQUIRED)
+
+if(NOT ${BB_HARVESTER_ONLY})
+    # BLS
+    FetchContent_Declare(
+    bls
+    GIT_REPOSITORY https://github.com/Chia-Network/bls-signatures.git
+    GIT_TAG        1.0.10
+    EXCLUDE_FROM_ALL ${BB_IS_DEPENDENCY}
+    )
+
+    set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")
+    set(BUILD_BLS_TESTS "0" CACHE STRING "")
+    set(BUILD_BLS_BENCHMARKS "0" CACHE STRING "")
+    FetchContent_MakeAvailable(bls)
+
+    # NUMA
+    if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+        find_package(NUMA REQUIRED)
+        set(platform_libs ${NUMA_LIBRARY})
+    endif()
+endif() # BB_HARVESTER_ONLY
 
 #
 # Internal Config
@@ -139,21 +141,23 @@ endif()
 #
 include(Config.cmake)
 
-if(NOT BB_IS_DEPENDENCY)
-    include(cmake_modules/EmbedVersion.cmake)
-endif()
+if(NOT ${BB_HARVESTER_ONLY})
+    if(NOT BB_IS_DEPENDENCY)
+        include(cmake_modules/EmbedVersion.cmake)
+    endif()
 
-include(Bladebit.cmake)
-set_target_properties(bladebit_core bladebit PROPERTIES EXCLUDE_FROM_ALL $<BOOL:${BB_IS_DEPENDENCY}>)
+    include(Bladebit.cmake)
+    set_target_properties(bladebit_core bladebit PROPERTIES EXCLUDE_FROM_ALL $<BOOL:${BB_IS_DEPENDENCY}>)
 
-if(CUDAToolkit_FOUND)
-    include(BladebitCUDA.cmake)
-    set_target_properties(bladebit_cuda PROPERTIES EXCLUDE_FROM_ALL $<BOOL:${BB_IS_DEPENDENCY}>)
+    if(CUDAToolkit_FOUND)
+        include(BladebitCUDA.cmake)
+        set_target_properties(bladebit_cuda PROPERTIES EXCLUDE_FROM_ALL $<BOOL:${BB_IS_DEPENDENCY}>)
+    endif()
 endif()
 
 include(Harvester.cmake)
 
-if(BB_ENABLE_TESTS)
+if(${BB_ENABLE_TESTS} AND NOT ${BB_HARVESTER_ONLY})
     include(Tests.cmake)
 endif()
 

@@ -95,7 +95,6 @@ target_compile_options(bladebit_harvester PRIVATE
 target_link_libraries(bladebit_harvester PRIVATE 
     bladebit_config 
     Threads::Threads
-    # bls
 
     $<${have_cuda}:
         CUDA::cudart_static
@@ -104,7 +103,7 @@ target_link_libraries(bladebit_harvester PRIVATE
     INTERFACE
         $<$<PLATFORM_ID:Linux>:
             # ${NUMA_LIBRARY}
-            dl
+            # dl
         >
 )
 

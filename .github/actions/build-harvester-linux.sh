@@ -5,13 +5,14 @@ artifact_name=green_reaper.tar.gz
 
 while true; do
   case $1 in
-    --artifact_name)
+    --artifact)
         shift && artifact_name=$1 || exit 1
     ;;
   esac
   shift || break
 done
 
+echo "Harvester artifact: ${artifact_name}"
 echo 'cmake --version'
 cmake --version
 

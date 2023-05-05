@@ -45,7 +45,7 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester-linux.sh "${artifact_name}"
+          bash .github/actions/build-harvester-linux.sh --artifact "${artifact_name}"
 
       - name: Upload Bladebit Artifact
         uses: actions/upload-artifact@v3
