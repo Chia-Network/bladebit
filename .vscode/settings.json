@@ -111,7 +111,9 @@
         "queue": "cpp",
         "__memory": "cpp",
         "filesystem": "cpp",
-        "__bits": "cpp"
+        "__bits": "cpp",
+        "csignal": "cpp",
+        "cfenv": "cpp"
     },
     "cSpell.words": [
         "Ryzen"

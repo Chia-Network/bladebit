@@ -36,12 +36,12 @@ jobs:
             sudo apt-get update
             sudo apt-get install cuda
 
-      - name: Build Bladebit CUDA
-        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
+      # - name: Build Bladebit CUDA
+      #   run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
       - name: Build Harvester
         run: |
-          artifact_name=green_reaper-v${{ env.BB_VERSION }}-ubuntu-x86-64
+          artifact_name=green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
           # emits env.harvester_artifact_path
@@ -54,12 +54,12 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
-      - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
+      # - name: Upload Bladebit CUDA Artifact
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+      #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+      #     if-no-files-found: error
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -68,84 +68,84 @@ jobs:
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
-  build-centos-x86-64:
-    runs-on: ubuntu-20.04
-    container:
-      image: quay.io/centos/centos:stream8
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+  # build-centos-x86-64:
+  #   runs-on: ubuntu-20.04
+  #   container:
+  #     image: quay.io/centos/centos:stream8
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh centos x86-64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh centos x86-64
 
-      - name: Install Prerequisites
-        run: |
-          set -eo pipefail
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         gmp-devel numactl-devel make git wget subscription-manager
+  #     - name: Install Prerequisites
+  #       run: |
+  #         set -eo pipefail
+  #         dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+  #                        gmp-devel numactl-devel make git wget subscription-manager
 
-          bash .github/actions/install-cmake-linux.sh
+  #         bash .github/actions/install-cmake-linux.sh
 
-      - name: Build Bladebit
-        run: |
-          source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
+  #     - name: Build Bladebit
+  #       run: |
+  #         source /opt/rh/gcc-toolset-9/enable
+  #         .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
 
-      - name: Install CUDA Prerequisites
-        run: |
-          distro=rhel8
-          arch=x86_64
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-          # subscription-manager repos --enable=rhel-8-for-x86_64-appstream-rpms
-          # subscription-manager repos --enable=rhel-8-for-x86_64-baseos-rpms
-          # subscription-manager repos --enable=codeready-builder-for-rhel-8-x86_64-rpms
-          # rpm --erase gpg-pubkey-7fa2af80*
-          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
-          dnf clean expire-cache
-          dnf module install -y nvidia-driver:latest-dkms
-          dnf install -y cuda
-          ls -la /usr/local/
-          ls -la /usr/local/cuda/
-          # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
-          # sh cuda_12.0.1_525.85.12_linux.run
+  #     - name: Install CUDA Prerequisites
+  #       run: |
+  #         distro=rhel8
+  #         arch=x86_64
+  #         dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+  #         # subscription-manager repos --enable=rhel-8-for-x86_64-appstream-rpms
+  #         # subscription-manager repos --enable=rhel-8-for-x86_64-baseos-rpms
+  #         # subscription-manager repos --enable=codeready-builder-for-rhel-8-x86_64-rpms
+  #         # rpm --erase gpg-pubkey-7fa2af80*
+  #         dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+  #         dnf clean expire-cache
+  #         dnf module install -y nvidia-driver:latest-dkms
+  #         dnf install -y cuda
+  #         ls -la /usr/local/
+  #         ls -la /usr/local/cuda/
+  #         # wget -nv https://developer.download.nvidia.com/compute/cuda/12.0.1/local_installers/cuda_12.0.1_525.85.12_linux.run
+  #         # sh cuda_12.0.1_525.85.12_linux.run
 
-      - name: Build Bladebit CUDA
-        run: |
-          source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
+  #     - name: Build Bladebit CUDA
+  #       run: |
+  #         source /opt/rh/gcc-toolset-9/enable
+  #         .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
 
-      - name: Build Harvester
-        run: |
-          source /opt/rh/gcc-toolset-9/enable
+  #     # - name: Build Harvester
+  #     #   run: |
+  #     #     source /opt/rh/gcc-toolset-9/enable
 
-          artifact_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
-          echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
+  #     #     artifact_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
+  #     #     echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
-          # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester-linux.sh "${artifact_name}"
+  #     #     # emits env.harvester_artifact_path
+  #     #     bash .github/actions/build-harvester-linux.sh "${artifact_name}"
 
-      - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Bladebit Artifact
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ env.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
-      - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
+  #     - name: Upload Bladebit CUDA Artifact
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+  #         if-no-files-found: error
 
-      - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.harvester_artifact_name }}
-          path: ${{ env.harvester_artifact_path }}
-          if-no-files-found: error
+  #     # - name: Upload Harvester Artifact
+  #     #   uses: actions/upload-artifact@v3
+  #     #   with:
+  #     #     name: ${{ env.harvester_artifact_name }}
+  #     #     path: ${{ env.harvester_artifact_path }}
+  #     #     if-no-files-found: error
 
   # build-ubuntu-arm64:
   #   runs-on: [ARM64, Linux]

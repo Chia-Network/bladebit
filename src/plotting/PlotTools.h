@@ -35,9 +35,6 @@ struct PlotTools
         PuzzleHash*     contractPuzzleHash
     );
 
-    static FSE_CTable* GenFSECompressionTable( double rValue, size_t* outTableSize = nullptr );
-    static FSE_DTable* GenFSEDecompressionTable( double rValue, size_t* outTableSize = nullptr );
-
     // static void PlotIdToStringTmp( const byte* plotId, const byte plotIdString[BB_PLOT_FILE_LEN_TMP] );
 
     // //-----------------------------------------------------------

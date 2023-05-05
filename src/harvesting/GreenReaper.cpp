@@ -4,7 +4,6 @@
 #include "threading/ThreadPool.h"
 #include "threading/GenJob.h"
 #include "plotting/Tables.h"
-#include "plotting/PlotTools.h"
 #include "tools/PlotReader.h"
 #include "plotmem/LPGen.h"
 #include "ChiaConsts.h"

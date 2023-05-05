@@ -2,16 +2,16 @@ add_library(bladebit_harvester SHARED
 
     src/pch.cpp
 
+    # src/util/KeyTools.cpp
+    # src/plotting/PlotTools.cpp
     src/util/Log.cpp
     src/util/Util.cpp
-    src/io/HybridStream.cpp
-    src/util/KeyTools.cpp
     src/PlotContext.cpp
+    src/io/HybridStream.cpp
     src/threading/AutoResetSignal.cpp
     src/threading/Fence.cpp
     src/threading/Semaphore.cpp
     src/threading/ThreadPool.cpp
-    src/plotting/PlotTools.cpp
     src/plotting/FSETableGenerator.cpp
     src/plotting/PlotWriter.cpp
     src/plotting/Compression.cpp
@@ -95,7 +95,7 @@ target_compile_options(bladebit_harvester PRIVATE
 target_link_libraries(bladebit_harvester PRIVATE 
     bladebit_config 
     Threads::Threads
-    bls
+    # bls
 
     $<${have_cuda}:
         CUDA::cudart_static

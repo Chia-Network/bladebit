@@ -1,5 +1,6 @@
 #include "Compression.h"
-#include "plotting/PlotTools.h"
+#include "plotting/FSETableGenerator.h"
+#include "util/Util.h"
 #include <mutex>
 
 // Caches for C and D tables
@@ -21,7 +22,7 @@ void* CreateCompressionCTableForCLevel( size_t* outTableSize, const uint32 compr
             if( !cTable )
             {
                 // Cache it
-                cTable = PlotTools::GenFSECompressionTable( rValue, outTableSize );
+                cTable = FSETableGenerator::GenCompressionTable( rValue, outTableSize );
                 _cTableCache[compressionLevel].store( cTable, std::memory_order_release );
             }
             _cCacheLock.unlock();
@@ -39,7 +40,7 @@ void* CreateCompressionCTableForCLevel( size_t* outTableSize, const uint32 compr
             if( !dTable )
             {
                 // Cache it
-                dTable = PlotTools::GenFSEDecompressionTable( rValue, outTableSize );
+                dTable = FSETableGenerator::GenDecompressionTable( rValue, outTableSize );
                 _dTableCache[compressionLevel].store( dTable, std::memory_order_release );
             }
             _dCacheLock.unlock();

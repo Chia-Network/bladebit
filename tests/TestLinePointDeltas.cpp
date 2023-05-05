@@ -3,6 +3,7 @@
 #include "plotdisk/jobs/IOJob.h"
 #include "plotdisk/DiskPlotConfig.h"
 #include "plotting/PlotTools.h"
+#include "plotting/FSETableGenerator.h"
 #include "plotmem/ParkWriter.h"
 
 struct LpData
@@ -119,7 +120,7 @@ TEST_CASE( "line-point-deltas", "[sandbox]" )
         {
             rValue += 0.1;
 
-            FSE_CTable* cTable = PlotTools::GenFSECompressionTable( rValue );
+            FSE_CTable* cTable = FSETableGenerator::GenFSECompressionTable( rValue );
             ASSERT( cTable );
 
             Log::Line( "  [R value: %.2lf]", rValue );

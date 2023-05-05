@@ -5,7 +5,7 @@
 #include <cmath>
 #include <queue>
 #include "ChiaConsts.h"
-#include "plotting/PlotTools.h"
+#include "FSETableGenerator.h"
 
 static std::vector<short> CreateNormalizedCount(double R);
 
@@ -49,13 +49,13 @@ void* GenFSETable( const double rValue, size_t* outTableSize, const bool compres
 }
 
 //-----------------------------------------------------------
-FSE_CTable* PlotTools::GenFSECompressionTable( const double rValue, size_t* outTableSize )
+FSE_CTable* FSETableGenerator::GenCompressionTable( const double rValue, size_t* outTableSize )
 {
     return (FSE_CTable*)GenFSETable( rValue, outTableSize, true );
 }
 
 //-----------------------------------------------------------
-FSE_DTable* PlotTools::GenFSEDecompressionTable( double rValue, size_t* outTableSize )
+FSE_DTable* FSETableGenerator::GenDecompressionTable( double rValue, size_t* outTableSize )
 {
     return (FSE_CTable*)GenFSETable( rValue, outTableSize, false );
 }
