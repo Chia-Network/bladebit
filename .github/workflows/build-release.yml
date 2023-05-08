@@ -23,7 +23,9 @@ jobs:
       - name: Install Prerequisites
         run: |
             set -eo pipefail
-            yum install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ make git wget subscription-manager
+            # yum install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ make git wget subscription-manager
+            yum group install -y "Development Tools"
+            yum install -y make git wget subscription-manager
             bash .github/actions/install-cmake-linux.sh
 
       - name: Install CUDA Prerequisites
