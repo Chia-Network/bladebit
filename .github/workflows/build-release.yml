@@ -23,19 +23,19 @@ jobs:
       - name: Install Prerequisites
         run: |
             set -eo pipefail
-            dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ make git wget subscription-manager
+            yum install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ make git wget subscription-manager
             bash .github/actions/install-cmake-linux.sh
 
       - name: Install CUDA Prerequisites
         run: |
           distro=rhel8
           arch=x86_64
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+          yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 
-          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
-          dnf clean expire-cache
-          dnf module install -y nvidia-driver:latest-dkms
-          dnf install -y cuda
+          yum config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+          yum clean expire-cache
+          yum module install -y nvidia-driver:latest-dkms
+          yum install -y cuda
           ls -la /usr/local/
           ls -la /usr/local/cuda/
 
@@ -43,7 +43,7 @@ jobs:
         run: |
           source /opt/rh/gcc-toolset-9/enable
 
-          artifact_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
+          artifact_name=green_reaper-v${{ env.BB_VERSION }}-x86-64
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
           # emits env.harvester_artifact_path
