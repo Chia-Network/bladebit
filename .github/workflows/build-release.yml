@@ -32,7 +32,7 @@ jobs:
         run: |
           distro=rhel8
           arch=x86_64
-          yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+          # yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 
           yum config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
           yum clean expire-cache
@@ -43,6 +43,8 @@ jobs:
 
       - name: Build Harvester
         run: |
+          # source /opt/rh/gcc-toolset-9/enable
+
           artifact_name=green_reaper-v${{ env.BB_VERSION }}-x86-64
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
