@@ -29,8 +29,10 @@ jobs:
           # CMake
           bash .github/actions/install-cmake-linux.sh
 
-          # CUDA
-          distro=rhel7s
+      - name: Install CUDA Prerequisites
+        run: |
+          set -eo pipefail
+          distro=rhel7
           arch=x86_64
 
           yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
