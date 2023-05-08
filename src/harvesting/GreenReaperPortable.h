@@ -18,9 +18,6 @@ extern "C" {
 
 inline void* grLoadModule( const char* path )
 {
-    if( path == NULL || *path == '\0' )
-        return NULL;
-
     void* module = NULL;
 
     #ifdef _WIN32
