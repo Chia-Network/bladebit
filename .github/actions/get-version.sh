@@ -9,12 +9,12 @@ arch=$2
 shift $#
 
 # version_cmp=($(./extract-version.sh))
-. ./extract-version.sh
+# . ./extract-version.sh
 
-ver_maj=$bb_ver_maj
-ver_min=$bb_ver_min
-ver_rev=$bb_ver_rev
-ver_suffix=$bb_version_suffix
+ver_maj=3 #$bb_ver_maj
+ver_min=0 #$bb_ver_min
+ver_rev=0 #$bb_ver_rev
+ver_suffix=alpha #$bb_version_suffix
 
 version="${ver_maj}.${ver_min}.${ver_rev}${ver_suffix}"
 
