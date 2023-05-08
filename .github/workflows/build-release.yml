@@ -8,8 +8,10 @@ env:
   CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
 
 jobs:
-  build-ubuntu-x86-64:
+  build-harvester-x86-64:
     runs-on: ubuntu-20.04
+    container:
+      image: quay.io/pypa/manylinux2014_x86_64
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -23,9 +25,6 @@ jobs:
             sudo apt install -y libgmp-dev libnuma-dev
             sudo bash .github/actions/install-cmake-linux.sh
 
-      - name: Build Bladebit
-        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
-
       - name: Install CUDA Prerequisites
         run: |
             distro=ubuntu2004
@@ -35,9 +34,6 @@ jobs:
             sudo dpkg -i cuda-keyring_1.0-1_all.deb
             sudo apt-get update
             sudo apt-get install cuda
-
-      # - name: Build Bladebit CUDA
-      #   run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
       - name: Build Harvester
         run: |
@@ -54,19 +50,72 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
-      # - name: Upload Bladebit CUDA Artifact
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-      #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-      #     if-no-files-found: error
-
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
+
+  # build-ubuntu-x86-64:
+  #   runs-on: ubuntu-20.04
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
+
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh ubuntu x86-64
+
+  #     - name: Install Prerequisites
+  #       run: |
+  #           sudo apt install -y libgmp-dev libnuma-dev
+  #           sudo bash .github/actions/install-cmake-linux.sh
+
+      # - name: Build Bladebit
+      #   run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
+
+      # - name: Install CUDA Prerequisites
+      #   run: |
+      #       distro=ubuntu2004
+      #       arch=x86_64
+      #       sudo apt-key del 7fa2af80
+      #       wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
+      #       sudo dpkg -i cuda-keyring_1.0-1_all.deb
+      #       sudo apt-get update
+      #       sudo apt-get install cuda
+
+      # # - name: Build Bladebit CUDA
+      # #   run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
+
+      # - name: Build Harvester
+      #   run: |
+      #     artifact_name=green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz
+      #     echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
+          
+      #     # emits env.harvester_artifact_path
+      #     bash .github/actions/build-harvester-linux.sh --artifact "${artifact_name}"
+
+      # - name: Upload Bladebit Artifact
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: ${{ env.BB_ARTIFACT_NAME }}
+      #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+      #     if-no-files-found: error
+
+      # # - name: Upload Bladebit CUDA Artifact
+      # #   uses: actions/upload-artifact@v3
+      # #   with:
+      # #     name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+      # #     path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+      # #     if-no-files-found: error
+
+      # - name: Upload Harvester Artifact
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: ${{ env.harvester_artifact_name }}
+      #     path: ${{ env.harvester_artifact_path }}
+      #     if-no-files-found: error
 
   # build-centos-x86-64:
   #   runs-on: ubuntu-20.04
