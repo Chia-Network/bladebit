@@ -22,33 +22,32 @@ jobs:
 
       - name: Install Prerequisites
         run: |
-            apt install -y libgmp-dev libnuma-dev
+            set -eo pipefail
+            dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ make git wget subscription-manager
             bash .github/actions/install-cmake-linux.sh
 
       - name: Install CUDA Prerequisites
         run: |
-            distro=ubuntu2004
-            arch=x86_64
-            apt-key del 7fa2af80
-            wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
-            dpkg -i cuda-keyring_1.0-1_all.deb
-            apt-get update
-            apt-get install cuda
+          distro=rhel8
+          arch=x86_64
+          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+
+          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+          dnf clean expire-cache
+          dnf module install -y nvidia-driver:latest-dkms
+          dnf install -y cuda
+          ls -la /usr/local/
+          ls -la /usr/local/cuda/
 
       - name: Build Harvester
         run: |
-          artifact_name=green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz
+          source /opt/rh/gcc-toolset-9/enable
+
+          artifact_name=green_reaper-v${{ env.BB_VERSION }}-centos-x86-64
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester-linux.sh --artifact "${artifact_name}"
-
-      - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+          bash .github/actions/build-harvester-linux.sh "${artifact_name}"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
