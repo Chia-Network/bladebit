@@ -43,8 +43,6 @@ jobs:
 
       - name: Build Harvester
         run: |
-          source /opt/rh/gcc-toolset-9/enable
-
           artifact_name=green_reaper-v${{ env.BB_VERSION }}-x86-64
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
           
