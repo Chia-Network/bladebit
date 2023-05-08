@@ -79,6 +79,7 @@ target_include_directories(bladebit_harvester PRIVATE
 target_compile_features(bladebit_harvester PRIVATE cxx_std_17)
 
 target_compile_definitions(bladebit_harvester PRIVATE
+    BB_IS_HARVESTER=1
     BB_CUDA_ENABLED=1
     THRUST_IGNORE_CUB_VERSION_CHECK=1
     GR_EXPORT=1

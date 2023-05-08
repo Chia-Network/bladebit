@@ -1,14 +1,17 @@
 #include "SysHost.h"
 #include "Platform.h"
 #include "util/Util.h"
-#include </usr/include/linux/random.h>
-// #include <sys/random.h>
+
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
 #include <errno.h>
 #include <stdio.h>
 #include <mutex>
+
+#if !defined(BB_IS_HARVESTER)
+    #include <sys/random.h>
+#endif
 
 #if BB_NUMA_ENABLED
     #include <numa.h>
@@ -262,6 +265,9 @@ void SysHost::DumpStackTrace()
 //-----------------------------------------------------------
 void SysHost::Random( byte* buffer, size_t size )
 {
+    #if defined(BB_IS_HARVESTER)
+        Panic( "getrandom not supported on bladebit_harvester target.");
+    #else
     // See: https://man7.org/linux/man-pages/man2/getrandom.2.html
 
     ssize_t sizeRead;
@@ -285,6 +291,7 @@ void SysHost::Random( byte* buffer, size_t size )
 
         writer += (size_t)sizeRead;
     }
+    #endif
 }
 
 // #NOTE: This is not thread-safe
