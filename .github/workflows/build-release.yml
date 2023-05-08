@@ -41,9 +41,8 @@ jobs:
           # yum module install -y nvidia-driver:latest-dkms
 
           yum clean all
-          yum install -y epel-release
+          yum install -y epel-release cuda
           # yum install -y dkms
-          yum install -y cuda
           # yum install -y nvidia-driver-latest-dkms
 
           # yum install -y cuda

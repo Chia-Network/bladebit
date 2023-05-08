@@ -1,8 +1,8 @@
 #include "SysHost.h"
 #include "Platform.h"
 #include "util/Util.h"
-
-#include <sys/random.h>
+#include </usr/include/linux/random.h>
+// #include <sys/random.h>
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
