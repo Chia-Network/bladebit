@@ -14,7 +14,7 @@ shift $#
 ver_maj=$bb_ver_maj
 ver_min=$bb_ver_min
 ver_rev=$bb_ver_rev
-ver_suffix=bb_version_suffix
+ver_suffix=$bb_version_suffix
 
 version="${ver_maj}.${ver_min}.${ver_rev}${ver_suffix}"
 
