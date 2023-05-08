@@ -22,18 +22,18 @@ jobs:
 
       - name: Install Prerequisites
         run: |
-            sudo apt install -y libgmp-dev libnuma-dev
-            sudo bash .github/actions/install-cmake-linux.sh
+            apt install -y libgmp-dev libnuma-dev
+            bash .github/actions/install-cmake-linux.sh
 
       - name: Install CUDA Prerequisites
         run: |
             distro=ubuntu2004
             arch=x86_64
-            sudo apt-key del 7fa2af80
+            apt-key del 7fa2af80
             wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
-            sudo dpkg -i cuda-keyring_1.0-1_all.deb
-            sudo apt-get update
-            sudo apt-get install cuda
+            dpkg -i cuda-keyring_1.0-1_all.deb
+            apt-get update
+            apt-get install cuda
 
       - name: Build Harvester
         run: |
