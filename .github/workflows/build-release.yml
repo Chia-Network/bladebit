@@ -30,7 +30,8 @@ jobs:
 
       - name: Install CUDA Prerequisites
         run: |
-          distro=rhel8
+          # distro=rhel8
+          distro=rhel7
           arch=x86_64
           set -eo pipefail
           # yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
