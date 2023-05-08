@@ -22,42 +22,32 @@ jobs:
 
       - name: Install Prerequisites
         run: |
-            set -eo pipefail
-            # yum install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ make git wget subscription-manager
-            yum group install -y "Development Tools"
-            yum install -y make git wget subscription-manager
-            bash .github/actions/install-cmake-linux.sh
-
-      - name: Install CUDA Prerequisites
-        run: |
-          # distro=rhel8
-          distro=rhel7
-          arch=x86_64
           set -eo pipefail
-          # yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+          yum group install -y "Development Tools"
+          yum install -y make git wget subscription-manager
+
+          # CMake
+          bash .github/actions/install-cmake-linux.sh
+
+          # CUDA
+          distro=rhel7s
+          arch=x86_64
 
           yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
           yum clean expire-cache
-          # yum module install -y nvidia-driver:latest-dkms
 
           yum clean all
           yum install -y epel-release cuda
-          # yum install -y dkms
-          # yum install -y nvidia-driver-latest-dkms
-
-          # yum install -y cuda
           ls -la /usr/local/
           ls -la /usr/local/cuda/
 
       - name: Build Harvester
         run: |
-          # source /opt/rh/gcc-toolset-9/enable
-
           artifact_name=green_reaper-v${{ env.BB_VERSION }}-x86-64
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
 
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester-linux.sh "${artifact_name}"
+          bash .github/actions/build-harvester-linux.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
