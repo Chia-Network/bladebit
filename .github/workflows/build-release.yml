@@ -45,7 +45,7 @@ jobs:
 
       - name: Build Harvester
         run: |
-          artifact_name=green_reaper-v${{ env.BB_VERSION }}-x86-64.tar.gz
+          artifact_name=green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz
           echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
 
           # emits env.harvester_artifact_path
