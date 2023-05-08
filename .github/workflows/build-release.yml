@@ -32,12 +32,20 @@ jobs:
         run: |
           distro=rhel8
           arch=x86_64
+          set -eo pipefail
           # yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 
           yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
           yum clean expire-cache
-          yum module install -y nvidia-driver:latest-dkms
+          # yum module install -y nvidia-driver:latest-dkms
+          
+          yum clean all
+          yum install -y epel-release
+          yum install -y dkms
           yum install -y cuda
+          yum install -y nvidia-driver-latest-dkms
+
+          # yum install -y cuda
           ls -la /usr/local/
           ls -la /usr/local/cuda/
 
