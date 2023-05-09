@@ -124,12 +124,11 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         cfg.parallelCount = (uint32)cfg.fetchCount;
     }
 
-    // #TODO: Make sure there's a cuda device present
     // With cuda, only support a single context and thread
-    if( !cfg.noCuda )
+    if( !cfg.noCuda && cfg.parallelCount > 1 )
     {
-        cfg.gCfg->threadCount = 1;
         cfg.parallelCount = 1;
+        Log::Line( "Warning: Limiting the number of parallel contexts to 1 for CUDA harvester simulation." );
     }
 
 
@@ -295,17 +294,19 @@ void SimulatorJob::Run()
 
     {
         GreenReaperConfig grCfg = {};
+        grCfg.apiVersion         = GR_API_VERSION;
         grCfg.threadCount        = decompressorThreadCount;
         grCfg.cpuOffset          = decompressorThreadCount * JobId();
         grCfg.disableCpuAffinity = cfg->gCfg->disableCpuAffinity;
         grCfg.gpuRequest         = cfg->noCuda ? GRGpuRequestKind_None : GRGpuRequestKind_FirstAvailable;
         grCfg.gpuDeviceIndex     = cfg->cudaDevice;
 
-        auto* grContext = grCreateContext( &grCfg );
-        FatalIf( !grContext, "Failed to create decompression context." );
+        GreenReaperContext* grContext = nullptr;
+        const auto result = grCreateContext( &grContext, &grCfg, sizeof( GreenReaperConfig ) );
+        FatalIf( !grContext, "Failed to create decompression context with error %d.", (int)result );
 
-        if( grCfg.gpuRequest != GRGpuRequestKind_None && !(bool)grHasGpuDecompresser( grContext ) )
-            Log::Line( "Warning: No GPU device decompresser selected. Falling back to CPU-based simulation." );
+        if( grCfg.gpuRequest != GRGpuRequestKind_None && !(bool)grHasGpuDecompressor( grContext ) )
+            Log::Line( "Warning: No GPU device decompressor selected. Falling back to CPU-based simulation." );
 
         reader.AssignDecompressionContext( grContext );
     }

@@ -1,5 +1,6 @@
 #pragma once
-#include "plotting/PlotTools.h"
+// #include "plotting/PlotTools.h"
+#include "plotting/FSETableGenerator.h"
 #include "plotting/PlotTypes.h"
 #include "plotting/PlotHeader.h"
 #include "io/FileStream.h"

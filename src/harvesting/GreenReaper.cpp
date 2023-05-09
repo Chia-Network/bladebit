@@ -4,7 +4,6 @@
 #include "threading/ThreadPool.h"
 #include "threading/GenJob.h"
 #include "plotting/Tables.h"
-#include "plotting/PlotTools.h"
 #include "tools/PlotReader.h"
 #include "plotmem/LPGen.h"
 #include "ChiaConsts.h"
@@ -219,14 +218,48 @@ static void BacktraceProof( GreenReaperContext& cx, const TableId tableStart, ui
 /// Public API
 ///
 //-----------------------------------------------------------
-GreenReaperContext* grCreateContext( GreenReaperConfig* config )
+GRResult grPopulateApi( GRApi* api, const size_t apiStructSize, const int apiVersion )
 {
+    if( api == nullptr )
+        return GRResult_Failed;
+
+    if( apiVersion != GR_API_VERSION )
+        return GRResult_WrongVersion;
+
+    if( apiStructSize != sizeof( GRApi ) )
+        return GRResult_WrongVersion;
+
+    api->CreateContext                  = &grCreateContext;
+    api->DestroyContext                 = &grDestroyContext;
+    api->PreallocateForCompressionLevel = &grPreallocateForCompressionLevel;
+    api->FetchProofForChallenge         = &grFetchProofForChallenge;
+    api->GetFetchQualitiesXPair         = &grGetFetchQualitiesXPair;
+    api->GetMemoryUsage                 = &grGetMemoryUsage;
+    api->HasGpuDecompressor             = &grHasGpuDecompressor;
+    api->GetCompressionInfo             = &grGetCompressionInfo;
+
+    return GRResult_OK;
+}
+
+//-----------------------------------------------------------
+GRResult grCreateContext( GreenReaperContext** outContext, 
+                          GreenReaperConfig* config,
+                          const size_t configStructSize )
+{
+    if( outContext == nullptr )
+        return GRResult_Failed;
+
     auto* context = new GreenReaperContext{};
     if( context == nullptr )
-        return nullptr;
+        return GRResult_OutOfMemory;
 
     if( config )
+    {
+        if( configStructSize != sizeof( GreenReaperConfig ) || config->apiVersion != GR_API_VERSION )
+            return GRResult_WrongVersion;
+
         context->config = *config;
+    }
     else
     {
         context->config.threadCount = std::min( 2u, SysHost::GetLogicalCPUCount() );
@@ -238,7 +271,7 @@ GreenReaperContext* grCreateContext( GreenReaperConfig* config )
     if( !context->pool )
     {
         grDestroyContext( context );
-        return nullptr;
+        return GRResult_OutOfMemory;
     }
 
     if( config->gpuRequest != GRGpuRequestKind_None )
@@ -247,11 +280,12 @@ GreenReaperContext* grCreateContext( GreenReaperConfig* config )
         if( context->cudaThresher == nullptr && config->gpuRequest == GRGpuRequestKind_ExactDevice )
         {
             grDestroyContext( context );
-            return nullptr;
+            return GRResult_InvalidGPU;
         }
     }
 
-    return context;
+    *outContext = context;
+    return GRResult_OK;
 }
 
 //-----------------------------------------------------------
@@ -294,9 +328,33 @@ size_t grGetMemoryUsage( GreenReaperContext* context )
 }
 
 //-----------------------------------------------------------
-grBool grHasGpuDecompresser( GreenReaperContext* context )
+GRBool grHasGpuDecompressor( GreenReaperContext* context )
 {
-    return (grBool)(context != nullptr && context->cudaThresher != nullptr );
+    return (context != nullptr && context->cudaThresher != nullptr ) ? GR_TRUE : GR_FALSE;
+}
+
+//-----------------------------------------------------------
+GRResult grGetCompressionInfo( GRCompressionInfo* outInfo, const size_t infoStructSize, 
+                               const uint32_t k, const uint32_t compressionLevel )
+{
+    if( infoStructSize != sizeof( GRCompressionInfo ) )
+        return GRResult_WrongVersion;
+
+    if( outInfo == nullptr 
+        || k != 32
+        || compressionLevel < 1
+        || compressionLevel > 9 )
+    {
+        return GRResult_InvalidArg;
+    }
+
+    auto c = GetCompressionInfoForLevel( compressionLevel );
+    outInfo->entrySizeBits = c.entrySizeBits;
+    outInfo->subtSizeBits  = c.subtSizeBits;
+    outInfo->tableParkSize = c.tableParkSize;
+    outInfo->ansRValue     = c.ansRValue;
+
+    return GRResult_OK;
 }
 
 //-----------------------------------------------------------
@@ -583,6 +641,9 @@ GRResult grGetFetchQualitiesXPair( GreenReaperContext* cx, GRCompressedQualities
         Pair  pairs[2][4] = {};
         Pair* pairsIn  = pairs[0];
         Pair* pairsOut = pairs[1];
+
+        if( cx->cudaThresher )
+            bbmemcpy_t( cx->tables[(int)matchTable]._pairs, cx->pairs.Ptr(), cx->tables[(int)matchTable]._length );
 
         bbmemcpy_t( pairs[0], cx->tables[(int)matchTable]._pairs, cx->tables[(int)matchTable]._length );
 

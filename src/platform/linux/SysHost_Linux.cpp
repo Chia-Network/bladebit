@@ -2,15 +2,21 @@
 #include "Platform.h"
 #include "util/Util.h"
 
-#include <sys/random.h>
 #include <execinfo.h>
 #include <signal.h>
 #include <atomic>
 #include <errno.h>
-#include <numa.h>
-#include <numaif.h>
 #include <stdio.h>
 #include <mutex>
+
+#if !defined(BB_IS_HARVESTER)
+    #include <sys/random.h>
+#endif
+
+#if BB_NUMA_ENABLED
+    #include <numa.h>
+    #include <numaif.h>
+#endif
 
 // #if _DEBUG
     #include "util/Log.h"
@@ -259,6 +265,9 @@ void SysHost::DumpStackTrace()
 //-----------------------------------------------------------
 void SysHost::Random( byte* buffer, size_t size )
 {
+    #if defined(BB_IS_HARVESTER)
+        Panic( "getrandom not supported on bladebit_harvester target.");
+    #else
     // See: https://man7.org/linux/man-pages/man2/getrandom.2.html
 
     ssize_t sizeRead;
@@ -282,12 +291,16 @@ void SysHost::Random( byte* buffer, size_t size )
 
         writer += (size_t)sizeRead;
     }
+    #endif
 }
 
 // #NOTE: This is not thread-safe
 //-----------------------------------------------------------
 const NumaInfo* SysHost::GetNUMAInfo()
 {
+#if !BB_NUMA_ENABLED
+    return nullptr;
+#else
     if( numa_available() == -1 )
         return nullptr;
 
@@ -358,12 +371,15 @@ const NumaInfo* SysHost::GetNUMAInfo()
     }
 
     return info;
+#endif // BB_NUMA_ENABLED
 }
 
 //-----------------------------------------------------------
 void SysHost::NumaAssignPages( void* ptr, size_t size, uint node )
 {
+#if BB_NUMA_ENABLED
     numa_tonode_memory( ptr, size, (int)node );
+#endif
 }
 
 //-----------------------------------------------------------
@@ -373,6 +389,7 @@ bool SysHost::NumaSetThreadInterleavedMode()
     if( !numa )
         return false;
     
+#if BB_NUMA_ENABLED
     const size_t MASK_SIZE = 128;
     unsigned long mask[MASK_SIZE];
     memset( mask, 0xFF, sizeof( mask ) );
@@ -391,6 +408,7 @@ bool SysHost::NumaSetThreadInterleavedMode()
     #endif
 
     return r == 0;
+#endif // BB_NUMA_ENABLED
 }
 
 //-----------------------------------------------------------
@@ -400,6 +418,7 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
     if( !numa )
         return false;
 
+#if BB_NUMA_ENABLED
     const size_t MASK_SIZE = 128;
     unsigned long mask[MASK_SIZE];
     memset( mask, 0xFF, sizeof( mask ) );
@@ -418,6 +437,7 @@ bool SysHost::NumaSetMemoryInterleavedMode( void* ptr, size_t size )
     #endif
 
     return r == 0;
+#endif // BB_NUMA_ENABLED
 }
 
 //-----------------------------------------------------------
@@ -427,6 +447,7 @@ int SysHost::NumaGetNodeFromPage( void* ptr )
     if( !numa )
         return -1;
 
+#if BB_NUMA_ENABLED
     int node = -1;
     int r = numa_move_pages( 0, 1, &ptr, nullptr, &node, 0 );
 
@@ -442,4 +463,5 @@ int SysHost::NumaGetNodeFromPage( void* ptr )
     }
 
     return node;
+#endif // BB_NUMA_ENABLED
 }

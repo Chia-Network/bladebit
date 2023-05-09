@@ -62,6 +62,31 @@
 
 		{
 			"type"   : "shell",
+			"label"  : "build_harvester",
+			"detail" : "Build Bladebit Harvester",
+			"command": "cmake",
+
+			"args": [
+				"--build", ".",
+				"--target", "lib_bladebit_harvester",
+				"--config", "Debug",
+				"-j", "24"
+			],
+			
+			"problemMatcher": [ "$nvcc" ],
+
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			}
+		},
+
+		{
+			"type"   : "shell",
 			"label"  : "rebuild_debug",
 			"detail" : "Rebuild Debug Bladebit",
 			"command": "cmake",

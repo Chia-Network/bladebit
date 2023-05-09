@@ -5,7 +5,7 @@
 #include <cmath>
 #include <queue>
 #include "ChiaConsts.h"
-#include "plotting/PlotTools.h"
+#include "FSETableGenerator.h"
 
 static std::vector<short> CreateNormalizedCount(double R);
 
@@ -20,7 +20,7 @@ void* GenFSETable( const double rValue, size_t* outTableSize, const bool compres
     
     size_t      err = 0;
     FSE_CTable* ct  = nullptr;
-    FSE_CTable* dt  = nullptr;
+    FSE_DTable* dt  = nullptr;
 
     if( compress )
     {
@@ -29,8 +29,8 @@ void* GenFSETable( const double rValue, size_t* outTableSize, const bool compres
     }
     else
     {
-        ct  = FSE_createDTable( tableLog );
-        err = FSE_buildDTable( ct, nCount.data(), maxSymbolValue, tableLog );
+        dt  = FSE_createDTable( tableLog );
+        err = FSE_buildDTable( dt, nCount.data(), maxSymbolValue, tableLog );
     }
     
     FatalIf( FSE_isError( err ), "Failed to generate FSE compression table with error: %s", FSE_getErrorName( err ) );
@@ -45,17 +45,17 @@ void* GenFSETable( const double rValue, size_t* outTableSize, const bool compres
             *outTableSize = FSE_DTABLE_SIZE( tableLog );
     }
 
-    return ct;
+    return compress ? ct : dt;
 }
 
 //-----------------------------------------------------------
-FSE_CTable* PlotTools::GenFSECompressionTable( const double rValue, size_t* outTableSize )
+FSE_CTable* FSETableGenerator::GenCompressionTable( const double rValue, size_t* outTableSize )
 {
     return (FSE_CTable*)GenFSETable( rValue, outTableSize, true );
 }
 
 //-----------------------------------------------------------
-FSE_DTable* PlotTools::GenFSEDecompressionTable( double rValue, size_t* outTableSize )
+FSE_DTable* FSETableGenerator::GenDecompressionTable( double rValue, size_t* outTableSize )
 {
     return (FSE_CTable*)GenFSETable( rValue, outTableSize, false );
 }

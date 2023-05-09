@@ -6,7 +6,6 @@
 #include "io/FileStream.h"
 
 #include "DiskFp.h"
-#include "DiskPlotPhase1.h"
 #include "DiskPlotPhase2.h"
 #include "DiskPlotPhase3.h"
 #include "SysHost.h"
@@ -51,7 +50,7 @@ void DiskPlotter::Init()
     _cx.p2ThreadCount = cfg.p2ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p2ThreadCount, sysLogicalCoreCount );
     _cx.p3ThreadCount = cfg.p3ThreadCount == 0 ? gCfg.threadCount : std::min( cfg.p3ThreadCount, sysLogicalCoreCount );
 
-    const size_t heapSize = GetRequiredSizeForBuckets( cfg.bounded, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize, _cx.fpThreadCount );
+    const size_t heapSize = GetRequiredSizeForBuckets( true, cfg.numBuckets, _cx.tmp1BlockSize, _cx.tmp2BlockSize, _cx.fpThreadCount );
     ASSERT( heapSize );
 
     _cfg                    = cfg;
@@ -153,8 +152,6 @@ void DiskPlotter::Run( const PlotRequest& req )
     _cx.cTableWaitTime  = Duration::zero();
     _cx.p7WaitTime      = Duration::zero();
 
-    const bool bounded = _cx.cfg->bounded;
-
     _cx.plotRequest = req;
     
 
@@ -173,16 +170,8 @@ void DiskPlotter::Run( const PlotRequest& req )
         Log::Line( "Running Phase 1" );
         const auto timer = TimerBegin();
 
-        if( bounded )
         {
             K32BoundedPhase1 phase1( _cx );
-            #if !( _DEBUG && BB_DP_DBG_SKIP_PHASE_1 )
-                phase1.Run();
-            #endif
-        }
-        else
-        {
-            DiskPlotPhase1 phase1( _cx );
             #if !( _DEBUG && BB_DP_DBG_SKIP_PHASE_1 )
                 phase1.Run();
             #endif
@@ -200,11 +189,6 @@ void DiskPlotter::Run( const PlotRequest& req )
         Log::Line( "Running Phase 2" );
         const auto timer = TimerBegin();
 
-        // if( bounded )
-        // {
-        //     Fatal( "Phase 2 bounded not implemented." );
-        // }
-        // else
         {
             DiskPlotPhase2 phase2( _cx );
             phase2.Run();
@@ -218,11 +202,6 @@ void DiskPlotter::Run( const PlotRequest& req )
         Log::Line( "Running Phase 3" );
         const auto timer = TimerBegin();
 
-        // if( bounded )
-        // {
-        //     Fatal( "Phase 3 bounded not implemented." );
-        // }
-        // else
         {
             DiskPlotPhase3 phase3( _cx );
             phase3.Run();
@@ -399,23 +378,7 @@ size_t DiskPlotter::GetRequiredSizeForBuckets( const bool bounded, const uint32 
         return std::max( p1HeapSize, p3HeapSize );
     }
 
-    switch( numBuckets )
-    {
-        case 128 : return DiskFp<TableId::Table4, 128 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
-        case 256 : return DiskFp<TableId::Table4, 256 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
-        case 512 : return DiskFp<TableId::Table4, 512 >::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
-        case 1024:
-            Fatal( "1024 buckets are currently unsupported." );
-            return 0;
-            // We need to add a bit more here (at least 1GiB) to have enough space for P2, which keeps
-            // 2 marking table bitfields in-memory: k^32 / 8 = 0.5GiB
-//            return 1032ull MB + DiskFp<TableId::Table4, 1024>::GetRequiredHeapSize( fxBlockSize, pairsBlockSize );
-
-    default:
-        break;
-    }
-
-    Fatal( "Invalid bucket size: %u.", numBuckets );
+    Fatal( "Only bounded k32 plots currently supported: %u.", numBuckets );
     return 0;
 }
 
@@ -480,9 +443,6 @@ Creates plots by making use of a disk to temporarily store and read values.
  -b, --buckets <n>  : The number of buckets to use. The default is 256.
                       You may specify one of: 128, 256, 512, 1024 and 64 for if --k32-bounded is enabled.
                       1024 is not available for plots of k < 33.
-
- --unbounded        : Create an unbounded k32 plot. That is a plot that does not cut-off entries that 
-                      overflow 2^32;
  
  -a, --alternate    : Halves the temp2 cache size requirements by alternating bucket writing methods
                       between tables.

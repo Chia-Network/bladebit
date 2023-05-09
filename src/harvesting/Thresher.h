@@ -5,7 +5,7 @@
 struct GreenReaperContext;
 struct Pair;
 
-/// A decompresser interface
+/// Plot decompression interface
 class IThresher
 {
 public:
@@ -49,6 +49,6 @@ public:
 class CudaThresherFactory
 {
 public:
-    static IThresher* Create( struct GreenReaperConfig& config );
+    static IThresher* Create( const struct GreenReaperConfig& config );
 };
 

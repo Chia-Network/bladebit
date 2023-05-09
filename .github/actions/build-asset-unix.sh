@@ -37,16 +37,17 @@ gcc --version
 
 exe_name=bladebit
 target=bladebit
-if [[ compile_cuda ]]; then
+if [[ compile_cuda -eq 1 ]]; then
   target=bladebit_cuda
   exe_name=bladebit_cuda
 fi
 
-mkdir build && cd build
-cmake ..
+set -x
+mkdir build-${target} && cd build-${target}
+cmake .. -DCMAKE_BUILD_TYPE=Release
 bash -eo pipefail ../embed-version.sh
-cmake --build . --target bladebit --config Release --target $target -j $thread_count
-chmod +x ./bladebit
+cmake --build . --config Release --target $target -j $thread_count
+chmod +x ./${exe_name}
 
 if [[ $OSTYPE == 'msys'* ]] || [[ $OSTYPE == 'cygwin'* ]]; then
   ls -la Release
@@ -64,7 +65,7 @@ fi
 
 tar --version
 tar -czvf $artifact_name $exe_name
-mkdir ../bin
+mkdir -p ../bin
 mv $artifact_name ../bin/
 ls -la ../bin
 
