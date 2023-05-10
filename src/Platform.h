@@ -2,7 +2,9 @@
 
 #ifdef _WIN32
     
-    #define NOMINMAX 1
+    #ifndef NOMINMAX
+        #define NOMINMAX 1
+    #endif
     #define WIN32_LEAN_AND_MEAN 1
     // #NOTE: Not including globally anymore as we're getting some naming conflicts
     //#include <Windows.h>

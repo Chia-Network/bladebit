@@ -128,6 +128,7 @@ set(is_cuda_release $<AND:${is_cuda},${is_release}>)
 set(is_cuda_debug $<AND:${is_cuda},${is_debug}>)
 set(is_x86 $<OR:$<STREQUAL:${CMAKE_HOST_SYSTEM_PROCESSOR},AMD64>,$<STREQUAL:${CMAKE_HOST_SYSTEM_PROCESSOR},x86_64>>)
 set(is_arm $<OR:$<STREQUAL:${CMAKE_HOST_SYSTEM_PROCESSOR},arm64>,$<STREQUAL:${CMAKE_HOST_SYSTEM_PROCESSOR},aarch64>>)
+set(is_msvc_c_cpp $<AND:${is_c_cpp},$<CXX_COMPILER_ID:MSVC>>)
 
 if(CUDAToolkit_FOUND AND NOT ${NO_CUDA_HARVESTER})
     set(have_cuda $<BOOL:1>)

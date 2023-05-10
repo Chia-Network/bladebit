@@ -51,7 +51,7 @@ target_compile_options(bladebit_config INTERFACE
     >
 
     # MSVC
-    $<$<CXX_COMPILER_ID:MSVC>:
+    $<${is_msvc_c_cpp}:
         /Zc:__cplusplus
         /MP
         /Zi
@@ -59,7 +59,6 @@ target_compile_options(bladebit_config INTERFACE
         # /Wall
         /W3
         /WX
-        #/FIpch.h 
         /wd4068
         /wd4464
         /wd4668
@@ -93,7 +92,7 @@ target_link_options(bladebit_config INTERFACE
     >
 
     # MSVC
-    $<$<CXX_COMPILER_ID:MSVC>:
+    $<${is_msvc_c_cpp}:
 
         /SUBSYSTEM:CONSOLE
         /STACK:33554432,1048576
@@ -120,8 +119,8 @@ set(preinclude_pch
     $<${is_cuda}:--pre-include pch.h>
     $<${is_c_cpp}:
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:--include=pch.h>
-        $<$<CXX_COMPILER_ID:MSVC>:/FIpch.h>
     >
+    $<${is_msvc_c_cpp}:/FIpch.h>
 )
 
 set(cuda_archs

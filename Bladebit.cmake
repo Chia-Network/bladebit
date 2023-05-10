@@ -66,11 +66,13 @@ set(src_blake3
     src/b3/blake3_portable.c
     
     $<${is_x86}:
-        # src/b3/blake3_sse41.c
-        # src/b3/blake3_avx2.c
-        # src/b3/blake3_avx512.c
 
-        $<$<PLATFORM_ID:Linux>:
+        $<$<PLATFORM_ID:Windows>:
+            src/b3/blake3_sse41.c
+            src/b3/blake3_avx2.c
+            src/b3/blake3_avx512.c
+        >
+        $<$<NOT:$<PLATFORM_ID:Windows>>:
             src/b3/blake3_avx2_x86-64_unix.S
             src/b3/blake3_avx512_x86-64_unix.S
             src/b3/blake3_sse41_x86-64_unix.S
@@ -86,7 +88,10 @@ set(src_bech32
 set(src_bladebit
 
     # third party
-    $<$<CXX_COMPILER_ID:MSVC>:${src_uint128}>
+    $<$<CXX_COMPILER_ID:MSVC>:
+        ${src_uint128}
+    >
+
     ${src_chacha8}
     ${src_fse}
     ${src_blake3}

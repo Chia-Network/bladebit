@@ -1,9 +1,7 @@
-add_library(bladebit_harvester SHARED
+add_library(bladebit_harvester #SHARED
 
     src/pch.cpp
 
-    # src/util/KeyTools.cpp
-    # src/plotting/PlotTools.cpp
     src/util/Log.cpp
     src/util/Util.cpp
     src/PlotContext.cpp
@@ -41,8 +39,8 @@ add_library(bladebit_harvester SHARED
 
     $<$<PLATFORM_ID:Windows>:
         src/platform/win32/SysHost_Win32.cpp
-        src/platform/unix/FileStream_Win32.cpp
-        src/platform/unix/Thread_Win32.cpp
+        src/platform/win32/FileStream_Win32.cpp
+        src/platform/win32/Thread_Win32.cpp
     >
 
     $<$<PLATFORM_ID:Linux>:
@@ -57,6 +55,10 @@ add_library(bladebit_harvester SHARED
         src/platform/unix/FileStream_Unix.cpp
         src/platform/unix/Thread_Unix.cpp
     >
+
+    $<$<CXX_COMPILER_ID:MSVC>:
+        src/uint128_t/uint128_t.cpp
+    >
 )
 
 set_property(TARGET bladebit_harvester PROPERTY PUBLIC_HEADER 
@@ -68,13 +70,7 @@ install(TARGETS bladebit_harvester
     PUBLIC_HEADER DESTINATION green_reaper/include
 )
 
-target_include_directories(bladebit_harvester PRIVATE
-    src
-    $<${have_cuda}:
-        cuda
-        SYSTEM cuda
-    >
-)
+target_include_directories(bladebit_harvester PUBLIC src PRIVATE SYSTEM cuda)
 
 target_compile_features(bladebit_harvester PRIVATE cxx_std_17)
 
@@ -88,18 +84,14 @@ target_compile_definitions(bladebit_harvester PRIVATE
 target_compile_options(bladebit_harvester PRIVATE 
     ${preinclude_pch}
 
-    $<${have_cuda}:
-        ${cuda_archs}
-    >
+    # $<${have_cuda}:${cuda_archs}>
 )
 
 target_link_libraries(bladebit_harvester PRIVATE 
     bladebit_config 
     Threads::Threads
 
-    $<${have_cuda}:
-        CUDA::cudart_static
-    >
+    $<${have_cuda}: CUDA::cudart_static>
 
     INTERFACE
         $<$<PLATFORM_ID:Linux>:
@@ -115,6 +107,9 @@ if(CUDAToolkit_FOUND)
         CUDA_RUNTIME_LIBRARY Static
         CUDA_SEPARABLE_COMPILATION ON
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
-        CUDA_ARCHITECTURES OFF
+        # CUDA_ARCHITECTURES OFF
     )
 endif()
+
+
+# target_compile_definitions(bladebit_harvester PRIVATE)

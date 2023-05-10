@@ -15,7 +15,7 @@
 #include "util/VirtualAllocator.h"
 #include "plotting/matching/GroupScan.h"
 #include <mutex>
-
+#include <algorithm>
 
 
 static std::mutex _lTargetLock;
