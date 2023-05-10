@@ -1,6 +1,10 @@
-add_library(bladebit_harvester #SHARED
+add_library(bladebit_harvester SHARED
 
     src/pch.cpp
+
+    ${src_fse}
+    ${src_chacha8}
+    ${src_blake3}
 
     src/util/Log.cpp
     src/util/Util.cpp
