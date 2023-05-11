@@ -34,7 +34,7 @@ cmake --build . --config Release --target bladebit_harvester -j"$(nproc --all)"
 cmake --install . --prefix harvester_dist
 
 pushd harvester_dist/green_reaper
-mkdir lib
+mkdir -p lib
 cp -vn ../*/*_harvester* lib/
 
 artifact_files=()
