@@ -68,11 +68,11 @@ target_compile_options(bladebit_config INTERFACE
         /wd5027
 
         $<${is_release}:
-            /Od
-        >
-
-        $<${is_debug}:
             /Oi /O2 /Gy /GL
+        >
+        
+        $<${is_debug}:
+            /Od
         >
     >
 
@@ -104,9 +104,9 @@ target_link_options(bladebit_config INTERFACE
         >
 
         $<${is_debug}:
-            /DEBUG:FASTLINK
-            /OPT:NOREF,NOICF,NOLBR
-            /INCREMENTAL
+            # /DEBUG:FASTLINK
+            # /OPT:NOREF,NOICF,NOLBR
+            # /INCREMENTAL
         >
     >
 )
@@ -135,5 +135,6 @@ set(cuda_archs
 
     $<${is_cuda_debug}:
         -arch=native
+        # -gencode=arch=compute_52,code=sm_52 # Maxwell
     >
 )

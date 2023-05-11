@@ -629,12 +629,18 @@ uint64 PlotReader::GetP7IndicesForF7( const uint64 f7, uint64& outStartT6Index )
         _c3Buffer.length = kCheckpoint1Interval * 2;
     }
 
-    uint64 c3Count = (uint64)ReadC3Park( c3Park, _c3Buffer.Ptr() );
+    int64 c3Count = ReadC3Park( c3Park, _c3Buffer.Ptr() );
+    if( c3Count < 0)
+        return {};
 
     if( parkCount > 1 )
     {
         ASSERT( parkCount == 2 );
-        c3Count += (uint64)ReadC3Park( c3Park+1, _c3Buffer.Ptr() + c3Count );
+        const int64 secondParkC3Count = ReadC3Park( c3Park+1, _c3Buffer.Ptr() + c3Count );
+        if( secondParkC3Count < 0 )
+            return {};
+
+        c3Count += secondParkC3Count;
     }
 
     // Grab as many matches as we can
@@ -648,7 +654,7 @@ uint64 PlotReader::GetP7IndicesForF7( const uint64 f7, uint64& outStartT6Index )
             uint64 matchCount = 1;
 
             outStartT6Index = c3StartIndex + i;
-            while( ++i < c3Count && c3Entries[i] == f7 )
+            while( ++i < (uint64)c3Count && c3Entries[i] == f7 )
                 matchCount++;
 
             return matchCount;

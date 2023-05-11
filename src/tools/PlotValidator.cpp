@@ -228,7 +228,7 @@ void PlotValidatorMain( GlobalPlotConfig& gCfg, CliParser& cli )
         // Create a default challenge string. The f7 will be embedded into it
         challenge = new char[65];
         const char challengeSrc[] = "00000000ff04b8ee9355068689bd558eafe07cc7af47ad1574b074fc34d6913a";
-        memcpy( (void*)challenge, challengeSrc, sizeof( challengeSrc ) - 1 );
+        memcpy( (void*)challenge, challengeSrc, sizeof( challengeSrc ) );
     }
 
     const uint32 maxThreads = SysHost::GetLogicalCPUCount();
@@ -738,7 +738,7 @@ void GetProofForChallenge( const ValidatePlotOptions& opts, const char* challeng
         uint64 f7 = (uint64)opts.f7;
 
         const size_t f7Size = CDiv( k, 8 );
-        
+
         for( size_t i = 0; i < f7Size; i++ )
             challengeBytes[i] = (uint8_t)(f7 >> ((f7Size - i - 1) * 8));
     }

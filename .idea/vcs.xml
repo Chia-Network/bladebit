@@ -3,12 +3,10 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build-release/_deps/bls-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/build-release/_deps/catch2-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build-release/_deps/relic-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build-release/_deps/sodium-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build-release/_deps/sodium-src/libsodium" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build/_deps/bls-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/build/_deps/catch2-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build/_deps/relic-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build/_deps/sodium-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build/_deps/sodium-src/libsodium" vcs="Git" />

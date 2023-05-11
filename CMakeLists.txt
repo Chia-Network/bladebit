@@ -84,7 +84,7 @@ endif()
 # NOTE: These are mostly sandbox test environment, not proper tests
 option(BB_ENABLE_TESTS "Enable tests." OFF)
 option(NO_CUDA_HARVESTER "Explicitly disable CUDA in the bladebit_harvester target." OFF)
-option(NO_EMBED_VERSION "Disable embedding the version when building locall (non-CI)." OFF)
+option(BB_NO_EMBED_VERSION "Disable embedding the version when building locally (non-CI)." ON)
 option(BB_HARVESTER_ONLY "Enable only the harvester target." OFF)
 
 
@@ -143,7 +143,7 @@ endif()
 include(Config.cmake)
 
 if(NOT ${BB_HARVESTER_ONLY})
-    if(NOT BB_IS_DEPENDENCY)
+    if(NOT BB_IS_DEPENDENCY AND (NOT BB_NO_EMBED_VERSION))
         include(cmake_modules/EmbedVersion.cmake)
     endif()
 
