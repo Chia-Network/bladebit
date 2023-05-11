@@ -9,7 +9,7 @@ env:
 
 jobs:
   build-harvester-linux-x86-64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     container:
       image: quay.io/pypa/manylinux2014_x86_64
     steps:
@@ -46,18 +46,18 @@ jobs:
         run: |
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-          # emits env.harvester_artifact_path_linux
+          # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.harvester_artifact_name }}
-          path: ${{ env.harvester_artifact_path_linux }}
+          path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
   build-harvester-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -92,18 +92,18 @@ jobs:
         run: |
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-          # emits env.harvester_artifact_path_windows
+          # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.harvester_artifact_name }}
-          path: ${{ env.harvester_artifact_path_windows }}
+          path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
   build-ubuntu-x86-64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -148,7 +148,7 @@ jobs:
           if-no-files-found: error
 
   build-centos-x86-64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     container:
       image: quay.io/centos/centos:stream8
     steps:
@@ -208,7 +208,7 @@ jobs:
   # build-ubuntu-arm64:
   #   runs-on: [ARM64, Linux]
   #   container:
-  #     image: chianetwork/ubuntu-latest-builder:latest
+  #     image: chianetwork/ubuntu-20.04-builder:latest
   #   defaults:
   #     run:
   #       shell: bash
