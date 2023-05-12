@@ -2,9 +2,43 @@ add_library(bladebit_harvester SHARED
 
     src/pch.cpp
 
-    ${src_fse}
-    ${src_chacha8}
-    ${src_blake3}
+    src/pos/chacha8.cpp
+    src/pos/chacha8.h
+
+    src/fse/bitstream.h
+    src/fse/compiler.h
+    src/fse/debug.c
+    src/fse/debug.h
+    src/fse/entropy_common.c
+    src/fse/error_private.h
+    src/fse/error_public.h
+    src/fse/fse_compress.c
+    src/fse/fse_decompress.c
+    src/fse/fse.h
+    src/fse/hist.c
+    src/fse/hist.h
+    src/fse/huf.h
+    src/fse/mem.h
+    
+    src/b3/blake3.c
+    src/b3/blake3_dispatch.c
+    src/b3/blake3.h
+    src/b3/blake3_impl.h
+    src/b3/blake3_portable.c
+
+    $<${is_x86}:
+        $<$<PLATFORM_ID:Windows>:
+            src/b3/blake3_sse41.c
+            src/b3/blake3_avx2.c
+            src/b3/blake3_avx512.c
+        >
+        $<$<NOT:$<PLATFORM_ID:Windows>>:
+            src/b3/blake3_avx2_x86-64_unix.S
+            src/b3/blake3_avx512_x86-64_unix.S
+            src/b3/blake3_sse41_x86-64_unix.S
+        >
+    >
+    
 
     src/util/Log.cpp
     src/util/Util.cpp
@@ -115,5 +149,15 @@ if(CUDAToolkit_FOUND)
     )
 endif()
 
+ # Disable blake3 conversion loss of data warnings
+ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "MSVC")
+    set_source_files_properties( 
+        src/b3/blake3_avx2.c
+        src/b3/blake3_avx512.c
+        src/b3/blake3_sse41.c
+        PROPERTIES COMPILE_FLAGS
+        /wd4244
+    )
+ endif()
 
 # target_compile_definitions(bladebit_harvester PRIVATE)

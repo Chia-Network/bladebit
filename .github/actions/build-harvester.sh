@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 set -eo pipefail
-
 if [[ $RUNNER_DEBUG = 1 ]]; then
   set -x
 fi
 
-if [[ "$RUNNER_OS" == "Windows" ]]; then
+host_os=$(uname -a)
+case "${host_os}" in
+  Linux*)  host_os="linux";;
+  Darwin*) host_os="macos";;
+  CYGWIN*) host_os="windows";;
+  MINGW*)  host_os="windows";;
+  *Msys)   host_os="windows";;
+esac
+
+if [[ "$host_os" == "windows" ]]; then
   ext="zip"
 else
   ext="tar.gz"
@@ -30,29 +38,25 @@ mkdir -p build-harvester
 pushd build-harvester
 cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 
-cmake --build . --config Release --target bladebit_harvester -j"$(nproc --all)"
+cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
 cmake --install . --prefix harvester_dist
 
 pushd harvester_dist/green_reaper
 
-if [[ "$RUNNER_OS" == "Windows" ]]; then
+if [[ "$host_os" == "windows" ]]; then
   mkdir -p lib
   cp -vn ../../*/*.dll lib/
   cp -vn ../../*/*.lib lib/
 fi
 
-artifact_files=()
-
-while read -r; do
-  artifact_files+=("$REPLY")
-done < <(find . -type f -name '*.*' | cut -c3-)
+artifact_files=($(find . -type f -name '*.*' | cut -c3-))
 
 # shellcheck disable=SC2068
-sha256sum ${artifact_files[@]} >sha256checksum
+sha256sum ${artifact_files[@]} > sha256checksum
 
 artifact_files+=("sha256checksum")
 
-if [[ "$RUNNER_OS" == "Windows" ]]; then
+if [[ "$host_os" == "windows" ]]; then
   7z.exe a -tzip "${artifact_name}" "${artifact_files[@]}"
 else
   # shellcheck disable=SC2068
@@ -60,19 +64,18 @@ else
 fi
 
 popd
-mv harvester_dist/green_reaper/"${artifact_name}" ./
-sha256sum "${artifact_name}" >"${artifact_name}".sha256.txt
+mv "harvester_dist/green_reaper/${artifact_name}" ./
+sha256sum "${artifact_name}" > "${artifact_name}.sha256.txt"
 ls -la
-cat "${artifact_name}".sha256.txt
+cat "${artifact_name}.sha256.txt"
 
-if [[ "$RUNNER_OS" == "Windows" ]]; then
-  windows_path=$(echo "$(pwd)/${artifact_name}*" | sed 's/\//\\/g' | sed 's/^\\d/D:/')
-  export windows_path
-  echo "harvester_artifact_path=$windows_path" >>"$GITHUB_ENV"
-else
-  linux_path=$(echo "$(pwd)/${artifact_name}*")
-  export linux_path
-  echo "harvester_artifact_path=$linux_path" >>"$GITHUB_ENV"
+if [[ "$CI" == "1" ]]; then
+  if [[ "$host_os" == "windows" ]]; then
+    harvester_artifact_path="$(cygpath -m "$(pwd)/${artifact_name}")*"
+  else
+    harvester_artifact_path="$(pwd)/${artifact_name}*"
+  fi
+  echo "harvester_artifact_path=$harvester_artifact_path" >> "$GITHUB_ENV"
 fi
 
 popd
