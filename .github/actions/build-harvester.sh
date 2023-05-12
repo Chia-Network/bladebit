@@ -34,8 +34,11 @@ cmake --build . --config Release --target bladebit_harvester -j"$(nproc --all)"
 cmake --install . --prefix harvester_dist
 
 pushd harvester_dist/green_reaper
-mkdir -p lib
-cp -vn ../*/*_harvester* lib/
+
+if [[ "$RUNNER_OS" == "Windows" ]]; then
+  mkdir -p lib
+  cp -vn ../../*/*_harvester* lib/
+fi
 
 artifact_files=()
 
@@ -49,7 +52,7 @@ sha256sum ${artifact_files[@]} >sha256checksum
 artifact_files+=("sha256checksum")
 
 if [[ "$RUNNER_OS" == "Windows" ]]; then
-  zip -r "${artifact_name}" ${artifact_files[@]}
+  7z.exe a -tzip "${artifact_name}" "${artifact_files[@]}"
 else
   # shellcheck disable=SC2068
   tar -czvf "${artifact_name}" ${artifact_files[@]}
