@@ -69,14 +69,16 @@ sha256sum "${artifact_name}" > "${artifact_name}.sha256.txt"
 ls -la
 cat "${artifact_name}.sha256.txt"
 
-if [[ "$CI" == "1" ]]; then
+set -x
+# if [[ "$CI" == "1" ]]; then
   if [[ "$host_os" == "windows" ]]; then
     harvester_artifact_path="$(cygpath -m "$(pwd)/${artifact_name}")*"
   else
     harvester_artifact_path="$(pwd)/${artifact_name}*"
   fi
+  echo "harvester_artifact_path=$harvester_artifact_path"
   echo "harvester_artifact_path=$harvester_artifact_path" >> "$GITHUB_ENV"
-fi
+# fi
 
 popd
 ls -la
