@@ -37,7 +37,8 @@ pushd harvester_dist/green_reaper
 
 if [[ "$RUNNER_OS" == "Windows" ]]; then
   mkdir -p lib
-  cp -vn ../../bin/bladebit_harvester.dll ../../lib/bladebit_harvester.lib lib/
+  cp -vn ../../*/*.dll lib/
+  cp -vn ../../*/*.lib lib/
 fi
 
 artifact_files=()
