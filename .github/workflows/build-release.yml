@@ -8,7 +8,7 @@ env:
   CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
 
 jobs:
-  build-harvester-x86-64:
+  build-harvester-linux-x86-64:
     runs-on: ubuntu-20.04
     container:
       image: quay.io/pypa/manylinux2014_x86_64
@@ -18,38 +18,82 @@ jobs:
 
       - name: Get Version Number
         id: version_number
-        run: .github/actions/get-version.sh ubuntu x86-64
+        shell: bash
+        run: ./.github/actions/get-version.sh ubuntu x86-64
 
       - name: Install Prerequisites
+        shell: bash
         run: |
           set -eo pipefail
           yum group install -y "Development Tools"
-          yum install -y make git wget subscription-manager
+          yum install -y sudo make git wget subscription-manager
 
-          # CMake
-          bash .github/actions/install-cmake-linux.sh
+      - name: Setup CUDA
+        uses: Jimver/cuda-toolkit@v0.2.10
+        id: cuda-toolkit
+        with:
+          cuda: '12.1.0'
 
-      - name: Install CUDA Prerequisites
+      - name: Verify CUDA
+        shell: bash
         run: |
-          set -eo pipefail
-          distro=rhel7
-          arch=x86_64
-
-          yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
-          yum clean expire-cache
-
-          yum clean all
-          yum install -y epel-release cuda
-          ls -la /usr/local/
-          ls -la /usr/local/cuda/
+          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          nvcc -V
 
       - name: Build Harvester
+        shell: bash
         run: |
-          artifact_name=green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz
-          echo "harvester_artifact_name=${artifact_name}" >> $GITHUB_ENV
-
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64"
+          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester-linux.sh --artifact "${artifact_name}"
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+
+      - name: Upload Harvester Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.harvester_artifact_name }}
+          path: ${{ env.harvester_artifact_path }}
+          if-no-files-found: error
+
+  build-harvester-windows-x86-64:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Get Version Number
+        id: version_number
+        shell: bash
+        run: ./.github/actions/get-version.sh windows x86-64
+
+      - name: Install Prerequisites
+        shell: powershell
+        run: |
+          choco install -y make
+          choco install -y wget
+          choco install -y sed
+
+      - name: Setup CUDA
+        uses: Jimver/cuda-toolkit@v0.2.10
+        id: cuda-toolkit
+        with:
+          cuda: '12.1.0'
+
+      - name: Verify CUDA
+        shell: bash
+        run: |
+          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          nvcc -V
+
+      - name: Build Harvester
+        shell: bash
+        run: |
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64"
+          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+          # emits env.harvester_artifact_path
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
