@@ -44,7 +44,7 @@ jobs:
       - name: Build Harvester
         shell: bash
         run: |
-          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
@@ -56,7 +56,7 @@ jobs:
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
-  build-harvester-windows:
+  build-harvester-windows-x86-64:
     runs-on: windows-2022
     steps:
       - name: Checkout Repo
@@ -90,7 +90,7 @@ jobs:
       - name: Build Harvester
         shell: bash
         run: |
-          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.zip"
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
