@@ -99,9 +99,7 @@ jobs:
       - name: Setup CUDA
         run: |
           set -eo pipefail
-          distro=rhel7
-          arch=arm64
-          yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+          yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/aarch64/cuda-rhel9.repo
           yum clean expire-cache
           yum clean all
           yum install -y epel-release cuda
@@ -327,7 +325,7 @@ jobs:
           dpkg -i cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
           cp /var/cuda-repo-ubuntu2004-12-1-local/cuda-*-keyring.gpg /usr/share/keyrings/
           apt-get update
-          apt-get -y install cuda
+          DEBIAN_FRONTEND=noninteractive apt-get -y install cuda
 
       - name: Build Harvester
         shell: bash
