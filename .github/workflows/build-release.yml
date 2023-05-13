@@ -26,13 +26,13 @@ jobs:
         run: |
           set -eo pipefail
           yum group install -y "Development Tools"
-          yum install -y gmp-dev libgmp libnuma-dev sudo make git wget subscription-manager
+          yum install -y gmp-devel numactl-devel sudo make git wget subscription-manager
 
       - name: Setup CUDA
         uses: Jimver/cuda-toolkit@v0.2.10
         id: cuda-toolkit
         with:
-          cuda: '12.1.0'
+          cuda: '12.1.1'
 
       - name: Verify CUDA
         shell: bash
@@ -44,8 +44,22 @@ jobs:
       - name: Build Bladebit
         run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
+      - name: Upload Bladebit Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
       - name: Build Bladebit CUDA
         run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
+
+      - name: Upload Bladebit CUDA Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+          if-no-files-found: error
 
       - name: Build Harvester
         shell: bash
@@ -54,20 +68,6 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-
-      - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
-
-      - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -94,7 +94,7 @@ jobs:
         run: |
           set -eo pipefail
           yum group install -y "Development Tools"
-          yum install -y sudo make git wget subscription-manager
+          yum install -y gmp-devel numactl-devel sudo make git wget subscription-manager
 
       - name: Setup CUDA
         uses: Jimver/cuda-toolkit@v0.2.10
@@ -369,6 +369,21 @@ jobs:
           echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
           nvcc -V
 
+      - name: Build Harvester
+        shell: bash
+        run: |
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-ARM64"
+          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+          # emits env.harvester_artifact_path
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+
+      - name: Upload Harvester Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.harvester_artifact_name }}
+          path: ${{ env.harvester_artifact_path }}
+          if-no-files-found: error
+
       - name: Build Bladebit
         run: |
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
@@ -389,21 +404,6 @@ jobs:
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
-
-      - name: Build Harvester
-        shell: bash
-        run: |
-          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-ARM64"
-          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-          # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-
-      - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.harvester_artifact_name }}
-          path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
   build-ubuntu-arm64:
@@ -428,17 +428,9 @@ jobs:
           apt install -y build-essential git libgmp-dev libnuma-dev sudo
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.10
-        id: cuda-toolkit
-        with:
-          cuda: '12.1.0'
-
-      - name: Verify CUDA
-        shell: bash
         run: |
-          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
-          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
-          nvcc -V
+          wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux_sbsa.run
+          sudo sh cuda_12.1.1_530.30.02_linux_sbsa.run
 
       - name: Build Harvester
         shell: bash
@@ -490,15 +482,14 @@ jobs:
 
       - name: Install Prerequisites
         run: |
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git
+          dnf install -y gcc gcc-c++ openssl-devel bzip2-devel libffi-devel zlib-devel make \
+                         gmp-devel numactl-devel make git wget subscription-manager sudo cmake
 
       - name: Build
         env:
           BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
           BB_VERSION: ${{env.BB_VERSION}}
         run: |
-          source /opt/rh/gcc-toolset-9/enable
           .github/actions/build-asset-unix.sh
 
       - name: Upload Artifact CentOS ARM64
