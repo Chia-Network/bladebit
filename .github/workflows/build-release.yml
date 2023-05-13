@@ -26,7 +26,7 @@ jobs:
         run: |
           set -eo pipefail
           yum group install -y "Development Tools"
-          yum install -y libgmp-dev libnuma-dev sudo make git wget subscription-manager
+          yum install -y gmp-dev libgmp libnuma-dev sudo make git wget subscription-manager
 
       - name: Setup CUDA
         uses: Jimver/cuda-toolkit@v0.2.10
@@ -125,7 +125,7 @@ jobs:
           if-no-files-found: error
 
   build-harvester-macos-x86-64:
-    runs-on: macOS-13
+    runs-on: macOS-11
     steps:
       - name: Cleanup Environment
         uses: Chia-Network/actions/clean-workspace@main
