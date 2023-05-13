@@ -32,7 +32,7 @@ jobs:
         uses: Jimver/cuda-toolkit@v0.2.10
         id: cuda-toolkit
         with:
-          cuda: '12.1.1'
+          cuda: '12.1.0'
 
       - name: Verify CUDA
         shell: bash
@@ -98,8 +98,15 @@ jobs:
 
       - name: Setup CUDA
         run: |
-          wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux_sbsa.run
-          sh cuda_12.1.1_530.30.02_linux_sbsa.run
+          set -eo pipefail
+          distro=rhel7
+          arch=arm64
+          yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+          yum clean expire-cache
+          yum clean all
+          yum install -y epel-release cuda
+          ls -la /usr/local/
+          ls -la /usr/local/cuda/
 
       - name: Build Harvester
         shell: bash
@@ -250,19 +257,9 @@ jobs:
           dnf install -y gcc gcc-c++ openssl-devel bzip2-devel libffi-devel zlib-devel make \
                          gmp-devel numactl-devel make git wget subscription-manager sudo
           dnf install -y cmake
-
-      - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.10
-        id: cuda-toolkit
-        with:
-          cuda: '12.1.0'
-
-      - name: Verify CUDA
-        shell: bash
-        run: |
-          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
-          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
-          nvcc -V
+          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/$(uname -i)/cuda-rhel9.repo
+          dnf makecache
+          dnf install -y cuda
 
       - name: Build Harvester
         shell: bash
@@ -324,8 +321,13 @@ jobs:
 
       - name: Setup CUDA
         run: |
-          wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux_sbsa.run
-          sh cuda_12.1.1_530.30.02_linux_sbsa.run
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/cuda-ubuntu2004.pin
+          mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600
+          wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
+          dpkg -i cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
+          cp /var/cuda-repo-ubuntu2004-12-1-local/cuda-*-keyring.gpg /usr/share/keyrings/
+          apt-get update
+          apt-get -y install cuda
 
       - name: Build Harvester
         shell: bash
@@ -363,36 +365,36 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
-  build-centos-arm64:
-    runs-on: [ARM64, Linux]
-    container:
-      image: quay.io/centos/centos:stream9
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+  # build-centos-arm64:
+  #   runs-on: [ARM64, Linux]
+  #   container:
+  #     image: quay.io/centos/centos:stream9
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v3
 
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh centos arm64
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: .github/actions/get-version.sh centos arm64
 
-      - name: Install Prerequisites
-        run: |
-          dnf install -y gcc gcc-c++ openssl-devel bzip2-devel libffi-devel zlib-devel make \
-                         gmp-devel numactl-devel make git wget subscription-manager sudo cmake
+  #     - name: Install Prerequisites
+  #       run: |
+  #         dnf install -y gcc gcc-c++ openssl-devel bzip2-devel libffi-devel zlib-devel make \
+  #                        gmp-devel numactl-devel make git wget subscription-manager sudo cmake
 
-      - name: Build
-        env:
-          BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{env.BB_VERSION}}
-        run: |
-          .github/actions/build-asset-unix.sh
+  #     - name: Build
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{env.BB_VERSION}}
+  #       run: |
+  #         .github/actions/build-asset-unix.sh
 
-      - name: Upload Artifact CentOS ARM64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Artifact CentOS ARM64
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ env.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
   # build-macos-arm64:
   #   runs-on: [macOS, ARM64]
