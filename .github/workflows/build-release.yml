@@ -106,6 +106,7 @@ jobs:
 
   build-harvester-macos-x86-64:
     runs-on: macOS-13
+    steps:
       - name: Cleanup Environment
         uses: Chia-Network/actions/clean-workspace@main
 
