@@ -129,7 +129,7 @@ target_link_libraries(bladebit_harvester PRIVATE
     bladebit_config 
     Threads::Threads
 
-    $<${have_cuda}: CUDA::cudart_static>
+    $<${have_cuda}:CUDA::cudart_static>
 
     INTERFACE
         $<$<PLATFORM_ID:Linux>:
