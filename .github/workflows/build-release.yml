@@ -84,6 +84,14 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
+      - name: Cache DNF packages
+        uses: actions/cache@v3
+        with:
+          path: /var/cache/dnf
+          key: ${{ runner.os }}-dnf-${{ hashFiles('**/your-build-file') }}
+          restore-keys: |
+            ${{ runner.os }}-dnf-
+
       - name: Get Version Number
         id: version_number
         shell: bash
@@ -107,7 +115,7 @@ jobs:
           dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/cuda-rhel9.repo
           dnf makecache
           dnf install -y cuda.aarch64
-          dnf install cuda-toolkit
+          dnf install -y cuda-toolkit
           ls -la /usr/local/
           ls -la /usr/local/cuda*
           export PATH=/usr/local/cuda-12.1/bin${PATH:+:${PATH}}
