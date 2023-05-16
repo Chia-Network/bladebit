@@ -26,7 +26,7 @@ jobs:
         run: |
           set -eo pipefail
           yum group install -y "Development Tools"
-          yum install -y gmp-devel numactl-devel sudo make git wget subscription-manager
+          yum install -y gmp-devel numactl-devel sudo make git sed wget subscription-manager
 
       - name: Setup CUDA
         uses: Jimver/cuda-toolkit@v0.2.10
@@ -79,7 +79,7 @@ jobs:
   build-harvester-linux-arm64:
     runs-on: [ARM64, Linux]
     container:
-      image: quay.io/pypa/manylinux2014_aarch64
+      image: quay.io/centos/arm64v8:stream9
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -93,18 +93,25 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
-          yum group install -y "Development Tools"
-          yum install -y gmp-devel numactl-devel make git wget subscription-manager
+          dnf install -y dnf-plugins-core
+          dnf install -y epel-release epel-next-release
+          dnf makecache
+          dnf install -y kernel-headers-aarch64 kernel-devel-aarch64 tar bzip2 make automake gcc gcc-c++ pciutils elfutils-libelf-devel libglvnd-opengl libglvnd-glx libglvnd-devel acpid pkgconfig dkms
+          dnf group install -y "Development Tools"
+          dnf install -y gmp-devel numactl-devel make git wget sed
 
       - name: Setup CUDA
         run: |
           set -eo pipefail
-          yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/aarch64/cuda-rhel9.repo
-          yum clean expire-cache
-          yum clean all
-          yum install -y epel-release cuda
+          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/$(uname -i)/cuda-rhel9.repo
+          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/cuda-rhel9.repo
+          dnf makecache
+          dnf install -y cuda.aarch64
+          dnf install cuda-toolkit
           ls -la /usr/local/
-          ls -la /usr/local/cuda/
+          ls -la /usr/local/cuda*
+          export PATH=/usr/local/cuda-12.1/bin${PATH:+:${PATH}}
+          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 
       - name: Build Harvester
         shell: bash
