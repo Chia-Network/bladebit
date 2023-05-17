@@ -1,6 +1,9 @@
 #! /usr/bin/env bash
 set -eo pipefail
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+if [[ $RUNNER_DEBUG = 1 ]]; then
+  set -x
+fi
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # version=($(./extract-version.sh))
 . ./extract-version.sh
@@ -25,4 +28,3 @@ sed -i ${sed_inline} -E -r "s/([[:space:]]*#define[[:space:]]+BLADEBIT_VERSION_M
 sed -i ${sed_inline} -E -r "s/([[:space:]]*#define[[:space:]]+BLADEBIT_VERSION_REV[[:space:]]+)([0-9]+)/\1$ver_rev/g" $version_header
 sed -i ${sed_inline} -E -r "s/([[:space:]]*#define[[:space:]]+BLADEBIT_VERSION_SUFFIX[[:space:]]+)(\".*\")/\1\"$ver_suffix\"/g" $version_header
 sed -i ${sed_inline} -E -r "s/([[:space:]]*#define[[:space:]]+BLADEBIT_GIT_COMMIT[[:space:]]+)(\".*\")/\1\"$git_commit\"/g" $version_header
-

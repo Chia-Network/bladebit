@@ -105,6 +105,7 @@ jobs:
           dnf install -y epel-release epel-next-release
           dnf makecache
           dnf install -y kernel-headers.aarch64 kernel-devel.aarch64 tar bzip2 make automake gcc gcc-c++ pciutils elfutils-libelf-devel libglvnd-opengl libglvnd-glx libglvnd-devel acpid pkgconfig dkms
+          dnf install -y cmake
           dnf group install -y "Development Tools"
           dnf install -y gmp-devel numactl-devel make git wget sed
 

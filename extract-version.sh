@@ -1,11 +1,14 @@
 #! /usr/bin/env bash
 set -eo pipefail
-_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)"
+if [[ $RUNNER_DEBUG = 1 ]]; then
+  set -x
+fi
+_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 cd $_dir
 
 # Arguments
-ver_component=$1  # The user specified a specified component from the full verison.
-                  # See the case switch below.
+ver_component=$1 # The user specified a specified component from the full verison.
+# See the case switch below.
 
 # Grab version specified in the file
 _IFS=IFS
@@ -16,7 +19,7 @@ version_header='src/Version.h'
 IFS=$_IFS
 
 if [[ "$version_str" == "$bb_version_suffix" ]]; then
-    bb_version_suffix=
+  bb_version_suffix=
 fi
 
 # prepend a '-' to the suffix, if necessarry
@@ -30,13 +33,13 @@ bb_ver_rev=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' |
 
 bb_git_commit=$GITHUB_SHA
 if [[ -z $bb_git_commit ]]; then
-    set +e
-    bb_git_commit=$(git rev-parse HEAD)
-    set -e
+  set +e
+  bb_git_commit=$(git rev-parse HEAD)
+  set -e
 fi
-    
+
 if [[ -z $bb_git_commit ]]; then
-    bb_git_commit="unknown"
+  bb_git_commit="unknown"
 fi
 
 # Check if the user wants a specific component
@@ -44,30 +47,30 @@ if [[ -n $ver_component ]]; then
 
   case "$ver_component" in
 
-    "major")
-      echo -n $bb_ver_maj
-      ;;
+  "major")
+    echo -n $bb_ver_maj
+    ;;
 
-    "minor")
-      echo -n $bb_ver_min
-      ;;
+  "minor")
+    echo -n $bb_ver_min
+    ;;
 
-    "revision")
-      echo -n $bb_ver_rev
-      ;;
+  "revision")
+    echo -n $bb_ver_rev
+    ;;
 
-    "suffix")
-      echo -n $bb_version_suffix
-      ;;
+  "suffix")
+    echo -n $bb_version_suffix
+    ;;
 
-    "commit")
-      echo -n $bb_git_commit
-      ;;
+  "commit")
+    echo -n $bb_git_commit
+    ;;
 
-    *)
-      >&2 echo "Invalid version component '${ver_component}'"
-      exit 1
-      ;;
+  *)
+    echo >&2 "Invalid version component '${ver_component}'"
+    exit 1
+    ;;
   esac
   exit 0
 fi
@@ -78,4 +81,3 @@ fi
 # echo "REV: $bb_ver_rev"
 # echo "SUF: $bb_version_suffix"
 # echo "COM: $bb_git_commit"
-
