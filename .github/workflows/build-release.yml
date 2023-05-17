@@ -26,7 +26,7 @@ jobs:
         run: |
           set -eo pipefail
           yum group install -y "Development Tools"
-          yum install -y gmp-devel numactl-devel sudo make git sed wget subscription-manager
+          yum install -y gmp-devel numactl-devel glibc-devel sudo make git sed wget subscription-manager
 
       - name: Setup CUDA
         uses: Jimver/cuda-toolkit@v0.2.10
