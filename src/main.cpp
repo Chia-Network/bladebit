@@ -139,6 +139,12 @@ int main( int argc, const char* argv[] )
         req.IsFinalPlot  = i == plotCount-1;
 
         plotter->Run( req );
+
+        if( cfg.sleepSeconds )
+        {
+            Log::Line( "Sleeping for %u seconds", cfg.sleepSeconds );
+            sleep(cfg.sleepSeconds);
+        }
     }
 }
 
@@ -159,6 +165,8 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
         if( cli.ReadU32( cfg.threadCount, "-t", "--threads" ) )
             continue;
         else if( cli.ReadU32( cfg.plotCount, "-n", "--count" ) )
+            continue;
+        else if( cli.ReadU32( cfg.sleepSeconds, "-s", "--sleep" ) )
             continue;
         else if( cli.ReadStr( farmerPublicKey, "-f", "--farmer-key" ) )
             continue;
@@ -459,6 +467,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
         Log::Line( " Will create %u plots.", cfg.plotCount );
 
     Log::Line( " Thread count          : %d", cfg.threadCount );
+    Log::Line( " Sleep seconds per plot: %d", cfg.sleepSeconds );
     Log::Line( " Warm start enabled    : %s", cfg.warmStart ? "true" : "false" );
     Log::Line( " NUMA disabled         : %s", cfg.disableNuma ? "true" : "false" );
     Log::Line( " CPU affinity disabled : %s", cfg.disableCpuAffinity ? "true" : "false" );
@@ -583,6 +592,8 @@ R"(
                         instances of Bladebit as you can manually
                         assign thread affinity yourself when launching Bladebit.
  
+ -s, --sleep          : Number of seconds to sleep after each plot is generated
+
  --memory             : Display system memory available, in bytes, and the 
                         required memory to run Bladebit, in bytes.
  

@@ -12,6 +12,7 @@ struct GlobalPlotConfig
 {
     uint32 threadCount   = 0;
     uint32 plotCount     = 1;
+    uint32 sleepSeconds     = 0;
 
     const char* plotIdStr    = nullptr;
     const char* plotMemoStr  = nullptr;
