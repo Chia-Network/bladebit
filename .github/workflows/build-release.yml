@@ -51,7 +51,7 @@ jobs:
           dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/cuda-rhel9.repo
           dnf makecache
           dnf install -y cuda.aarch64
-          dnf install -y cuda-toolkit
+          #dnf install -y cuda-toolkit
           ls -la /usr/local/
           ls -la /usr/local/cuda*
           export PATH=/usr/local/cuda-12.1/bin${PATH:+:${PATH}}
