@@ -33,8 +33,9 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
+          uname -a
           yum install -y dnf
-          yum install -y epel-release epel-next-release
+          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
           dnf install -y dnf-plugins-core
           dnf makecache
           dnf install -y kernel-headers.aarch64 kernel-devel.aarch64 tar bzip2 make automake gcc gcc-c++ pciutils elfutils-libelf-devel libglvnd-opengl libglvnd-glx libglvnd-devel acpid pkgconfig dkms
