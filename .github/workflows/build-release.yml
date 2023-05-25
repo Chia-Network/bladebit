@@ -77,35 +77,52 @@ jobs:
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
-  # build-centos-arm64:
-  #   runs-on: [ARM64, Linux]
-  #   container:
-  #     image: quay.io/centos/centos:stream9
-  #   steps:
-  #     - name: Checkout Repo
-  #       uses: actions/checkout@v3
+  build-bladebit-cuda-linux-arm64:
+    runs-on: [ARM64, Linux]
+    container:
+      image: chianetwork/ubuntu-20.04-builder:latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
 
-  #     - name: Get Version Number
-  #       id: version_number
-  #       run: .github/actions/get-version.sh centos arm64
+      - name: Get Version Number
+        id: version_number
+        run: .github/actions/get-version.sh ubuntu arm64
 
-  #     - name: Install Prerequisites
-  #       run: |
-  #         dnf install -y gcc gcc-c++ openssl-devel bzip2-devel libffi-devel zlib-devel make \
-  #                        gmp-devel numactl-devel make git wget subscription-manager sudo cmake
+      - name: Install Prerequisites
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt update
+          apt install -y build-essential git libgmp-dev libnuma-dev
+      - name: Setup CUDA
+        run: |
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/cuda-ubuntu2004.pin
+          mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600
+          wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
+          dpkg -i cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
+          cp /var/cuda-repo-ubuntu2004-12-1-local/cuda-*-keyring.gpg /usr/share/keyrings/
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get -y install cuda
 
-  #     - name: Build
-  #       env:
-  #         BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
-  #         BB_VERSION: ${{env.BB_VERSION}}
-  #       run: |
-  #         .github/actions/build-asset-unix.sh
+      - name: Build
+        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
-  #     - name: Upload Artifact CentOS ARM64
-  #       uses: actions/upload-artifact@v3
-  #       with:
-  #         name: ${{ env.BB_ARTIFACT_NAME }}
-  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-  #         if-no-files-found: error
+      - name: Upload Artifact Ubuntu ARM64
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
 
-### Consolidated
+      - name: Build Bladebit CUDA
+        run: |
+          .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
+      - name: Upload Bladebit CUDA Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+          if-no-files-found: error
