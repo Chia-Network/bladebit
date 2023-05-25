@@ -33,10 +33,11 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
+          module_platform_id=platform:el9
           uname -a
           cat /etc/os-release
           yum install -y dnf
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
           dnf install -y dnf-plugins-core
           dnf makecache
           dnf install -y kernel-headers.aarch64 kernel-devel.aarch64 tar bzip2 make automake gcc gcc-c++ pciutils elfutils-libelf-devel libglvnd-opengl libglvnd-glx libglvnd-devel acpid pkgconfig dkms
@@ -47,6 +48,7 @@ jobs:
       - name: Setup CUDA
         run: |
           set -eo pipefail
+          module_platform_id=platform:el9
           dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/$(uname -i)/cuda-rhel9.repo
           dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/cuda-rhel9.repo
           dnf makecache
