@@ -46,9 +46,11 @@ target_compile_options(bladebit_cuda PRIVATE
     >
  )
 
+target_link_options(bladebit_cuda PRIVATE $<DEVICE_LINK: ${cuda_archs}>)
+
 target_link_libraries(bladebit_cuda PRIVATE bladebit_core CUDA::cudart_static)# CUDA::cuda_driver)
 
-set_target_properties(bladebit_cuda PROPERTIES 
+set_target_properties(bladebit_cuda PROPERTIES
     MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
     CUDA_RUNTIME_LIBRARY Static
     CUDA_SEPARABLE_COMPILATION ON

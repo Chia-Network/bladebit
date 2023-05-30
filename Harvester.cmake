@@ -125,6 +125,8 @@ target_compile_options(bladebit_harvester PRIVATE
     # $<${have_cuda}:${cuda_archs}>
 )
 
+target_link_options(bladebit_harvester PRIVATE $<DEVICE_LINK: ${cuda_archs}>)
+
 target_link_libraries(bladebit_harvester PRIVATE 
     bladebit_config 
     Threads::Threads

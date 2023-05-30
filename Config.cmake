@@ -123,6 +123,9 @@ set(preinclude_pch
     $<${is_msvc_c_cpp}:/FIpch.h>
 )
 
+# See: https://gitlab.kitware.com/cmake/cmake/-/issues/18265
+cmake_policy(SET CMP0105 NEW)
+
 set(cuda_archs
 
     $<${is_cuda_release}:
