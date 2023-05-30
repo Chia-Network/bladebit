@@ -125,6 +125,7 @@ set(preinclude_pch
 
 # See: https://gitlab.kitware.com/cmake/cmake/-/issues/18265
 cmake_policy(SET CMP0105 NEW)
+
 set(cuda_archs
 
     $<${is_cuda_release}:
