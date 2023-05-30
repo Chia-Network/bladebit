@@ -19,7 +19,7 @@ add_library(bladebit_harvester SHARED
     src/fse/hist.h
     src/fse/huf.h
     src/fse/mem.h
-    
+
     src/b3/blake3.c
     src/b3/blake3_dispatch.c
     src/b3/blake3.h
@@ -38,7 +38,7 @@ add_library(bladebit_harvester SHARED
             src/b3/blake3_sse41_x86-64_unix.S
         >
     >
-    
+
 
     src/util/Log.cpp
     src/util/Util.cpp
@@ -99,8 +99,8 @@ add_library(bladebit_harvester SHARED
     >
 )
 
-set_property(TARGET bladebit_harvester PROPERTY PUBLIC_HEADER 
-    src/harvesting/GreenReaper.h 
+set_property(TARGET bladebit_harvester PROPERTY PUBLIC_HEADER
+    src/harvesting/GreenReaper.h
     src/harvesting/GreenReaperPortable.h)
 
 install(TARGETS bladebit_harvester
@@ -119,14 +119,16 @@ target_compile_definitions(bladebit_harvester PRIVATE
     GR_EXPORT=1
 )
 
-target_compile_options(bladebit_harvester PRIVATE 
+target_compile_options(bladebit_harvester PRIVATE
     ${preinclude_pch}
 
     # $<${have_cuda}:${cuda_archs}>
 )
 
-target_link_libraries(bladebit_harvester PRIVATE 
-    bladebit_config 
+target_link_options(bladebit_harvester PRIVATE $<DEVICE_LINK: ${cuda_archs}>)
+
+target_link_libraries(bladebit_harvester PRIVATE
+    bladebit_config
     Threads::Threads
 
     $<${have_cuda}:CUDA::cudart_static>
@@ -139,7 +141,7 @@ target_link_libraries(bladebit_harvester PRIVATE
 )
 
 if(CUDAToolkit_FOUND)
-    set_target_properties(bladebit_harvester PROPERTIES 
+    set_target_properties(bladebit_harvester PROPERTIES
         EXCLUDE_FROM_ALL ON
         MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
         CUDA_RUNTIME_LIBRARY Static
@@ -151,7 +153,7 @@ endif()
 
  # Disable blake3 conversion loss of data warnings
  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "MSVC")
-    set_source_files_properties( 
+    set_source_files_properties(
         src/b3/blake3_avx2.c
         src/b3/blake3_avx512.c
         src/b3/blake3_sse41.c
