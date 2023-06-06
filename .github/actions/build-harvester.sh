@@ -19,6 +19,12 @@ else
   ext="tar.gz"
 fi
 
+if [[ "$host_os" == "macos" ]]; then
+  procs=$(sysctl -n hw.logicalcpu)
+else
+  procs=$(nproc --all)
+fi
+
 artifact_name=green_reaper.$ext
 
 while true; do
@@ -38,7 +44,7 @@ mkdir -p build-harvester
 pushd build-harvester
 cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 
-cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
+cmake --build . --config Release --target bladebit_harvester -j$procs
 cmake --install . --prefix harvester_dist
 
 pushd harvester_dist/green_reaper

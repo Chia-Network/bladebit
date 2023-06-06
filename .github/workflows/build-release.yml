@@ -8,43 +8,189 @@ env:
   CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
 
 jobs:
-  build-harvester-linux-x86-64:
-    runs-on: ubuntu-20.04
-    container:
-      image: quay.io/pypa/manylinux2014_x86_64
+#  build-harvester-linux-x86-64:
+#    runs-on: ubuntu-20.04
+#    container:
+#      image: quay.io/pypa/manylinux2014_x86_64
+#    steps:
+#      - name: Checkout Repo
+#        uses: actions/checkout@v3
+#
+#      - name: Get Version Number
+#        id: version_number
+#        shell: bash
+#        run: ./.github/actions/get-version.sh ubuntu x86-64
+#
+#      - name: Install Prerequisites
+#        shell: bash
+#        run: |
+#          set -eo pipefail
+#          yum group install -y "Development Tools"
+#          yum install -y sudo make git wget subscription-manager
+#
+#      - name: Setup CUDA
+#        uses: Jimver/cuda-toolkit@v0.2.10
+#        id: cuda-toolkit
+#        with:
+#          cuda: '12.1.0'
+#
+#      - name: Verify CUDA
+#        shell: bash
+#        run: |
+#          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+#          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+#          nvcc -V
+#
+#      - name: Build Harvester
+#        shell: bash
+#        run: |
+#          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
+#          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+#          # emits env.harvester_artifact_path
+#          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+#
+#      - name: Upload Harvester Artifact
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.harvester_artifact_name }}.zip
+#          path: ${{ env.harvester_artifact_path }}
+#          if-no-files-found: error
+#
+#  build-harvester-windows-x86-64:
+#    runs-on: windows-2022
+#    steps:
+#      - name: Checkout Repo
+#        uses: actions/checkout@v3
+#
+#      - name: Get Version Number
+#        id: version_number
+#        shell: bash
+#        run: ./.github/actions/get-version.sh windows x86-64
+#
+#      - name: Install Prerequisites
+#        shell: powershell
+#        run: |
+#          choco install -y make
+#          choco install -y wget
+#          choco install -y sed
+#
+#      - name: Setup CUDA
+#        uses: Jimver/cuda-toolkit@v0.2.10
+#        id: cuda-toolkit
+#        with:
+#          cuda: '12.1.0'
+#
+#      - name: Verify CUDA
+#        shell: bash
+#        run: |
+#          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+#          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+#          nvcc -V
+#
+#      - name: Build Harvester
+#        shell: bash
+#        run: |
+#          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.zip"
+#          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+#          # emits env.harvester_artifact_path
+#          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+#
+#      - name: Upload Harvester Artifact
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.harvester_artifact_name }}.zip
+#          path: ${{ env.harvester_artifact_path }}
+#          if-no-files-found: error
+#
+#  build-harvester-linux-arm64:
+#    runs-on: [ARM64, Linux]
+#    container:
+#      image: quay.io/pypa/manylinux2014_aarch64
+#    steps:
+#      - name: Checkout Repo
+#        uses: actions/checkout@v3
+#
+#      - name: Cache DNF packages
+#        uses: actions/cache@v3
+#        with:
+#          path: /var/cache/dnf
+#          key: ${{ runner.os }}-dnf-${{ hashFiles('**/your-build-file') }}
+#          restore-keys: |
+#            ${{ runner.os }}-dnf-
+#
+#      - name: Get Version Number
+#        id: version_number
+#        shell: bash
+#        run: ./.github/actions/get-version.sh centos arm64
+#
+#      - name: Install Prerequisites
+#        shell: bash
+#        run: |
+#          set -eo pipefail
+#          export module_platform_id=platform:el9
+#          export MODULE_PLATFORM_ID=platform:el9
+#          export PLATFORM_ID=platform:el9
+#          uname -a
+#          cat /etc/os-release
+#          yum install -y dnf
+#          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+#          dnf install -y dnf-plugins-core
+#          dnf makecache
+#          dnf install -y kernel-headers.aarch64 kernel-devel.aarch64 tar bzip2 make automake gcc gcc-c++ pciutils elfutils-libelf-devel libglvnd-opengl libglvnd-glx libglvnd-devel acpid pkgconfig dkms
+#          dnf install -y cmake
+#          dnf group install -y "Development Tools"
+#          dnf install -y gmp-devel numactl-devel make git wget sed
+#
+#      - name: Setup CUDA
+#        run: |
+#          set -eo pipefail
+#          module_platform_id=platform:el9
+#          export MODULE_PLATFORM_ID=platform:el9
+#          export PLATFORM_ID=platform:el9
+#          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/$(uname -i)/cuda-rhel9.repo
+#          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/cuda-rhel9.repo
+#          dnf makecache
+#          #dnf install -y cuda.aarch64
+#          dnf install -y cuda-toolkit
+#          ls -la /usr/local/
+#          ls -la /usr/local/cuda*
+#          export PATH=/usr/local/cuda-12.1/bin${PATH:+:${PATH}}
+#          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+#      - name: Build Harvester
+#        shell: bash
+#        run: |
+#          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-ARM64.tar.gz"
+#          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+#          # emits env.harvester_artifact_path
+#          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+#
+#      - name: Upload Harvester Artifact
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.harvester_artifact_name }}.zip
+#          path: ${{ env.harvester_artifact_path }}
+#          if-no-files-found: error
+
+  build-harvester-macos-x86-64:
+    runs-on: [macos, arm64]
     steps:
+      - name: Cleanup Environment
+        uses: Chia-Network/actions/clean-workspace@main
+
       - name: Checkout Repo
         uses: actions/checkout@v3
 
       - name: Get Version Number
         id: version_number
-        shell: bash
-        run: ./.github/actions/get-version.sh ubuntu x86-64
+        run: bash -e .github/actions/get-version.sh macos arm64
 
       - name: Install Prerequisites
-        shell: bash
-        run: |
-          set -eo pipefail
-          yum group install -y "Development Tools"
-          yum install -y sudo make git wget subscription-manager
-
-      - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.10
-        id: cuda-toolkit
-        with:
-          cuda: '12.1.0'
-
-      - name: Verify CUDA
-        shell: bash
-        run: |
-          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
-          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
-          nvcc -V
+        run: brew install cmake
 
       - name: Build Harvester
         shell: bash
         run: |
-          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-m1.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
@@ -56,377 +202,262 @@ jobs:
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
-  build-harvester-windows-x86-64:
-    runs-on: windows-2022
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: Get Version Number
-        id: version_number
-        shell: bash
-        run: ./.github/actions/get-version.sh windows x86-64
-
-      - name: Install Prerequisites
-        shell: powershell
-        run: |
-          choco install -y make
-          choco install -y wget
-          choco install -y sed
-
-      - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.10
-        id: cuda-toolkit
-        with:
-          cuda: '12.1.0'
-
-      - name: Verify CUDA
-        shell: bash
-        run: |
-          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
-          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
-          nvcc -V
-
-      - name: Build Harvester
-        shell: bash
-        run: |
-          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.zip"
-          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-          # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-
-      - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.harvester_artifact_name }}.zip
-          path: ${{ env.harvester_artifact_path }}
-          if-no-files-found: error
-
-  build-harvester-linux-arm64:
-    runs-on: [ARM64, Linux]
-    container:
-      image: quay.io/pypa/manylinux2014_aarch64
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: Cache DNF packages
-        uses: actions/cache@v3
-        with:
-          path: /var/cache/dnf
-          key: ${{ runner.os }}-dnf-${{ hashFiles('**/your-build-file') }}
-          restore-keys: |
-            ${{ runner.os }}-dnf-
-
-      - name: Get Version Number
-        id: version_number
-        shell: bash
-        run: ./.github/actions/get-version.sh centos arm64
-
-      - name: Install Prerequisites
-        shell: bash
-        run: |
-          set -eo pipefail
-          export module_platform_id=platform:el9
-          export MODULE_PLATFORM_ID=platform:el9
-          export PLATFORM_ID=platform:el9
-          uname -a
-          cat /etc/os-release
-          yum install -y dnf
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-          dnf install -y dnf-plugins-core
-          dnf makecache
-          dnf install -y kernel-headers.aarch64 kernel-devel.aarch64 tar bzip2 make automake gcc gcc-c++ pciutils elfutils-libelf-devel libglvnd-opengl libglvnd-glx libglvnd-devel acpid pkgconfig dkms
-          dnf install -y cmake
-          dnf group install -y "Development Tools"
-          dnf install -y gmp-devel numactl-devel make git wget sed
-
-      - name: Setup CUDA
-        run: |
-          set -eo pipefail
-          module_platform_id=platform:el9
-          export MODULE_PLATFORM_ID=platform:el9
-          export PLATFORM_ID=platform:el9
-          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/$(uname -i)/cuda-rhel9.repo
-          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/cuda-rhel9.repo
-          dnf makecache
-          #dnf install -y cuda.aarch64
-          dnf install -y cuda-toolkit
-          ls -la /usr/local/
-          ls -la /usr/local/cuda*
-          export PATH=/usr/local/cuda-12.1/bin${PATH:+:${PATH}}
-          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
-      - name: Build Harvester
-        shell: bash
-        run: |
-          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-ARM64.tar.gz"
-          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-          # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-
-      - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.harvester_artifact_name }}.zip
-          path: ${{ env.harvester_artifact_path }}
-          if-no-files-found: error
-
-  build-bladebit-ubuntu-x86-64:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh ubuntu x86-64
-
-      - name: Install Prerequisites
-        run: |
-            sudo apt install -y libgmp-dev libnuma-dev
-            sudo bash .github/actions/install-cmake-linux.sh
-
-      - name: Build Bladebit
-        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
-
-      - name: Install CUDA Prerequisites
-        run: |
-            distro=ubuntu2004
-            arch=x86_64
-            sudo apt-key del 7fa2af80
-            wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
-            sudo dpkg -i cuda-keyring_1.0-1_all.deb
-            sudo apt-get update
-            sudo apt-get install cuda
-
-      - name: Build Bladebit CUDA
-        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
-
-      - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
-
-      - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
-
-  build-bladebit-centos-x86-64:
-    runs-on: ubuntu-20.04
-    container:
-      image: quay.io/centos/centos:stream8
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh centos x86-64
-
-      - name: Install Prerequisites
-        run: |
-          set -eo pipefail
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         gmp-devel numactl-devel make git wget subscription-manager
-
-          bash .github/actions/install-cmake-linux.sh
-
-      - name: Build Bladebit
-        run: |
-          source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
-
-      - name: Install CUDA Prerequisites
-        run: |
-          distro=rhel8
-          arch=x86_64
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-
-          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
-          dnf clean expire-cache
-          dnf module install -y nvidia-driver:latest-dkms
-          dnf install -y cuda
-          ls -la /usr/local/
-          ls -la /usr/local/cuda/
-
-      - name: Build Bladebit CUDA
-        run: |
-          source /opt/rh/gcc-toolset-9/enable
-          .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
-
-      - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
-
-      - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
-
-  build-bladebit-cuda-linux-arm64:
-    runs-on: [ARM64, Linux]
-    container:
-      image: chianetwork/ubuntu-20.04-builder:latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: Get Version Number
-        id: version_number
-        run: .github/actions/get-version.sh ubuntu arm64
-
-      - name: Install Prerequisites
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          apt update
-          apt install -y build-essential git libgmp-dev libnuma-dev
-      - name: Setup CUDA
-        run: |
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/cuda-ubuntu2004.pin
-          mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600
-          wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
-          dpkg -i cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
-          cp /var/cuda-repo-ubuntu2004-12-1-local/cuda-*-keyring.gpg /usr/share/keyrings/
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get -y install cuda
-
-      - name: Build
-        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
-
-      - name: Upload Artifact Ubuntu ARM64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
-
-      - name: Build Bladebit CUDA
-        run: |
-          .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
-      - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
-
-  build-bladebit-windows-x86-64:
-    runs-on: windows-2019
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: Get Version Number
-        shell: bash
-        id: version_number
-        run: .github/actions/get-version.sh windows x86-64
-
-      - name: Build Bladebit
-        shell: bash
-        env:
-          BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{env.BB_VERSION}}
-        run: |
-          mkdir build && cd build
-          cmake ..
-          bash -eo pipefail ../embed-version.sh
-          cat ../src/Version.h
-          cmake --build . --target bladebit --config Release
-
-          # Ensure bladebit version matches expected version
-          bb_version="$(./Release/bladebit.exe --version | xargs)"
-
-          if [[ "$bb_version" != "$BB_VERSION" ]]; then
-              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
-              exit 1
-          fi
-
-          mkdir ../bin
-          cd Release
-          ls -la
-          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
-          ls -la ../../bin
-
-      - name: Upload Bladebit Artifact Windows x86-64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
-
-  build-bladebit-cuda-windows-x86-64:
-    runs-on: windows-2019
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: Get Version Number
-        shell: bash
-        id: version_number
-        run: .github/actions/get-version.sh windows x86-64
-
-      - name: Install Prerequisites
-        shell: powershell
-        run: |
-          choco install -y make
-          choco install -y wget
-          choco install -y sed
-
-      - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.10
-        id: cuda-toolkit
-        with:
-          cuda: '12.1.0'
-
-      - name: Verify CUDA
-        shell: bash
-        run: |
-          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
-          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
-          nvcc -V
-
-      - name: Build Bladebit CUDA
-        shell: bash
-        env:
-          BB_ARTIFACT_NAME_CUDA: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-          BB_VERSION: ${{env.BB_VERSION}}
-        run: |
-          mkdir build_cuda && cd build_cuda
-          cmake ..
-          bash -eo pipefail ../embed-version.sh
-          cat ../src/Version.h
-          cmake --build . --target bladebit_cuda --config Release
-
-          # Ensure bladebit version matches expected version
-          bb_version="$(./Release/bladebit_cuda.exe --version | xargs)"
-
-          if [[ "$bb_version" != "$BB_VERSION" ]]; then
-              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
-              exit 1
-          fi
-
-          mkdir ../bin
-          cd Release
-          ls -la
-          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME_CUDA} bladebit_cuda.exe
-          ls -la ../../bin
-
-      - name: Upload Bladebit CUDA Artifact Windows x86-64
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
+#  build-bladebit-ubuntu-x86-64:
+#    runs-on: ubuntu-20.04
+#    steps:
+#      - name: Checkout Repo
+#        uses: actions/checkout@v3
+#
+#      - name: Get Version Number
+#        id: version_number
+#        run: .github/actions/get-version.sh ubuntu x86-64
+#
+#      - name: Install Prerequisites
+#        run: |
+#            sudo apt install -y libgmp-dev libnuma-dev
+#            sudo bash .github/actions/install-cmake-linux.sh
+#
+#      - name: Build Bladebit
+#        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
+#
+#      - name: Install CUDA Prerequisites
+#        run: |
+#            distro=ubuntu2004
+#            arch=x86_64
+#            sudo apt-key del 7fa2af80
+#            wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
+#            sudo dpkg -i cuda-keyring_1.0-1_all.deb
+#            sudo apt-get update
+#            sudo apt-get install cuda
+#
+#      - name: Build Bladebit CUDA
+#        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
+#
+#      - name: Upload Bladebit Artifact
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+#          if-no-files-found: error
+#
+#      - name: Upload Bladebit CUDA Artifact
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+#          if-no-files-found: error
+#
+#  build-bladebit-centos-x86-64:
+#    runs-on: ubuntu-20.04
+#    container:
+#      image: quay.io/centos/centos:stream8
+#    steps:
+#      - name: Checkout Repo
+#        uses: actions/checkout@v3
+#
+#      - name: Get Version Number
+#        id: version_number
+#        run: .github/actions/get-version.sh centos x86-64
+#
+#      - name: Install Prerequisites
+#        run: |
+#          set -eo pipefail
+#          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+#                         gmp-devel numactl-devel make git wget subscription-manager
+#
+#          bash .github/actions/install-cmake-linux.sh
+#
+#      - name: Build Bladebit
+#        run: |
+#          source /opt/rh/gcc-toolset-9/enable
+#          .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
+#
+#      - name: Install CUDA Prerequisites
+#        run: |
+#          distro=rhel8
+#          arch=x86_64
+#          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+#
+#          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+#          dnf clean expire-cache
+#          dnf module install -y nvidia-driver:latest-dkms
+#          dnf install -y cuda
+#          ls -la /usr/local/
+#          ls -la /usr/local/cuda/
+#
+#      - name: Build Bladebit CUDA
+#        run: |
+#          source /opt/rh/gcc-toolset-9/enable
+#          .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
+#
+#      - name: Upload Bladebit Artifact
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+#          if-no-files-found: error
+#
+#      - name: Upload Bladebit CUDA Artifact
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+#          if-no-files-found: error
+#
+#  build-bladebit-cuda-linux-arm64:
+#    runs-on: [ARM64, Linux]
+#    container:
+#      image: chianetwork/ubuntu-20.04-builder:latest
+#    defaults:
+#      run:
+#        shell: bash
+#    steps:
+#      - name: Checkout Repo
+#        uses: actions/checkout@v3
+#
+#      - name: Get Version Number
+#        id: version_number
+#        run: .github/actions/get-version.sh ubuntu arm64
+#
+#      - name: Install Prerequisites
+#        run: |
+#          export DEBIAN_FRONTEND=noninteractive
+#          apt update
+#          apt install -y build-essential git libgmp-dev libnuma-dev
+#      - name: Setup CUDA
+#        run: |
+#          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/cuda-ubuntu2004.pin
+#          mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600
+#          wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
+#          dpkg -i cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
+#          cp /var/cuda-repo-ubuntu2004-12-1-local/cuda-*-keyring.gpg /usr/share/keyrings/
+#          apt-get update
+#          DEBIAN_FRONTEND=noninteractive apt-get -y install cuda
+#
+#      - name: Build
+#        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
+#
+#      - name: Upload Artifact Ubuntu ARM64
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+#          if-no-files-found: error
+#
+#      - name: Build Bladebit CUDA
+#        run: |
+#          .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
+#      - name: Upload Bladebit CUDA Artifact
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+#          if-no-files-found: error
+#
+#  build-bladebit-windows-x86-64:
+#    runs-on: windows-2019
+#    steps:
+#      - name: Checkout Repo
+#        uses: actions/checkout@v3
+#
+#      - name: Get Version Number
+#        shell: bash
+#        id: version_number
+#        run: .github/actions/get-version.sh windows x86-64
+#
+#      - name: Build Bladebit
+#        shell: bash
+#        env:
+#          BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
+#          BB_VERSION: ${{env.BB_VERSION}}
+#        run: |
+#          mkdir build && cd build
+#          cmake ..
+#          bash -eo pipefail ../embed-version.sh
+#          cat ../src/Version.h
+#          cmake --build . --target bladebit --config Release
+#
+#          # Ensure bladebit version matches expected version
+#          bb_version="$(./Release/bladebit.exe --version | xargs)"
+#
+#          if [[ "$bb_version" != "$BB_VERSION" ]]; then
+#              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
+#              exit 1
+#          fi
+#
+#          mkdir ../bin
+#          cd Release
+#          ls -la
+#          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
+#          ls -la ../../bin
+#
+#      - name: Upload Bladebit Artifact Windows x86-64
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+#          if-no-files-found: error
+#
+#  build-bladebit-cuda-windows-x86-64:
+#    runs-on: windows-2019
+#    steps:
+#      - name: Checkout Repo
+#        uses: actions/checkout@v3
+#
+#      - name: Get Version Number
+#        shell: bash
+#        id: version_number
+#        run: .github/actions/get-version.sh windows x86-64
+#
+#      - name: Install Prerequisites
+#        shell: powershell
+#        run: |
+#          choco install -y make
+#          choco install -y wget
+#          choco install -y sed
+#
+#      - name: Setup CUDA
+#        uses: Jimver/cuda-toolkit@v0.2.10
+#        id: cuda-toolkit
+#        with:
+#          cuda: '12.1.0'
+#
+#      - name: Verify CUDA
+#        shell: bash
+#        run: |
+#          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+#          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+#          nvcc -V
+#
+#      - name: Build Bladebit CUDA
+#        shell: bash
+#        env:
+#          BB_ARTIFACT_NAME_CUDA: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+#          BB_VERSION: ${{env.BB_VERSION}}
+#        run: |
+#          mkdir build_cuda && cd build_cuda
+#          cmake ..
+#          bash -eo pipefail ../embed-version.sh
+#          cat ../src/Version.h
+#          cmake --build . --target bladebit_cuda --config Release
+#
+#          # Ensure bladebit version matches expected version
+#          bb_version="$(./Release/bladebit_cuda.exe --version | xargs)"
+#
+#          if [[ "$bb_version" != "$BB_VERSION" ]]; then
+#              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
+#              exit 1
+#          fi
+#
+#          mkdir ../bin
+#          cd Release
+#          ls -la
+#          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME_CUDA} bladebit_cuda.exe
+#          ls -la ../../bin
+#
+#      - name: Upload Bladebit CUDA Artifact Windows x86-64
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+#          if-no-files-found: error
