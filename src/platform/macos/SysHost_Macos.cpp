@@ -6,7 +6,10 @@
 #include <mach/mach.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include <sodium.h>
+
+#if !defined(BB_IS_HARVESTER)
+    #include <sodium.h>
+#endif
 
 //-----------------------------------------------------------
 size_t SysHost::GetPageSize()
@@ -229,7 +232,11 @@ void SysHost::DumpStackTrace()
 //-----------------------------------------------------------
 void SysHost::Random( byte* buffer, size_t size )
 {
+    #if defined(BB_IS_HARVESTER)
+        Panic( "getrandom not supported on bladebit_harvester target.");
+    #else
     randombytes_buf( buffer, size );
+    #endif
 }
 
 
