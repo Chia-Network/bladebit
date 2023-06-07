@@ -67,6 +67,9 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cp", f"{str(extdir)}/bladebit/include/GreenReaper.h", f"{str(extdir)}/bladebit/"])
         subprocess.check_call(["cp", f"{str(extdir)}/bladebit/include/GreenReaperPortable.h", f"{str(extdir)}/bladebit/"])
 
+        if platform.system() == "Windows":
+            subprocess.check_call(["mv", f"{str(extdir)}/lib", f"{str(extdir)}/bladebit/"])
+            subprocess.check_call(["mv", f"{str(extdir)}/bin/bladebit_harvester.dll", f"{str(extdir)}/bladebit/lib/"])
 
 ext_modules = [
     Extension(
