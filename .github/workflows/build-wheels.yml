@@ -1,0 +1,160 @@
+name: build - check - upload
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  pull_request:
+    branches:
+      - '**'
+
+concurrency:
+  # SHA is added to the end if on `main` to let all main workflows run
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/long_lived/')) && github.sha || '' }}
+  cancel-in-progress: true
+
+jobs:
+  build-wheels:
+    name: Wheel - ${{ matrix.os.name }} ${{ matrix.python.major-dot-minor }} ${{ matrix.arch.name }}
+    runs-on: ${{ matrix.os.runs-on[matrix.arch.matrix] }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - name: macOS
+            matrix: macos
+            runs-on:
+              arm: [macOS, ARM64]
+              intel: [macos-latest]
+            cibw-archs-macos:
+              arm: arm64
+              intel: x86_64
+          - name: Ubuntu
+            matrix: ubuntu
+            runs-on:
+              arm: [Linux, ARM64]
+              intel: [ubuntu-latest]
+          - name: Windows
+            matrix: windows
+            runs-on:
+              intel: [windows-latest]
+        python:
+          - major-dot-minor: '3.7'
+            cibw-build: 'cp37-*'
+            manylinux:
+              arch: manylinux2014
+              intel: manylinux2014
+            matrix: '3.7'
+          - major-dot-minor: '3.8'
+            cibw-build: 'cp38-*'
+            manylinux:
+              arch: manylinux2014
+              intel: manylinux2014
+            matrix: '3.8'
+          - major-dot-minor: '3.9'
+            cibw-build: 'cp39-*'
+            manylinux:
+              arch: manylinux2014
+              intel: manylinux2014
+            matrix: '3.9'
+          - major-dot-minor: '3.10'
+            cibw-build: 'cp310-*'
+            manylinux:
+              arch: manylinux2014
+              intel: manylinux2014
+            matrix: '3.10'
+          - major-dot-minor: '3.11'
+            cibw-build: 'cp311-*'
+            manylinux:
+              arch: manylinux2014
+              intel: manylinux2014
+            matrix: '3.11'
+        arch:
+          - name: ARM
+            matrix: arm
+          - name: Intel
+            matrix: intel
+        exclude:
+          # Only partial entries are required here by GitHub Actions so generally I
+          # only specify the `matrix:` entry.  The super linter complains so for now
+          # all entries are included to avoid that.  Reported at
+          # https://github.com/github/super-linter/issues/3016
+          - os:
+              name: Windows
+              matrix: windows
+              runs-on:
+                intel: [windows-latest]
+            arch:
+              name: ARM
+              matrix: arm
+          - os:
+              name: macOS
+              matrix: macos
+              runs-on:
+                arm: [macOS, ARM64]
+                intel: [macos-latest]
+            python:
+              major-dot-minor: '3.7'
+              cibw-build: 'cp37-*'
+              matrix: '3.7'
+            arch:
+              name: ARM
+              matrix: arm
+
+    steps:
+      - name: Clean workspace
+        uses: Chia-Network/actions/clean-workspace@main
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: Chia-Network/actions/setup-python@main
+        with:
+          python-version: ${{ matrix.python.major-dot-minor }}
+
+      - name: Install pipx
+        run: |
+          pip install pipx
+
+      - name: Build and test
+        env:
+          CIBW_PRERELEASE_PYTHONS: True
+          CIBW_BUILD_VERBOSITY_MACOS: 0
+          CIBW_BUILD_VERBOSITY_LINUX: 0
+          CIBW_BUILD_VERBOSITY_WINDOWS: 0
+          CIBW_BUILD: ${{ matrix.python.cibw-build }}
+          CIBW_SKIP: '*-manylinux_i686 *-win32 *-musllinux_*'
+          CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux['arm'] }}
+          CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.python.manylinux['intel'] }}
+          CIBW_ENVIRONMENT_WINDOWS: ""
+          CIBW_ENVIRONMENT_LINUX: PATH="/project/cmake-3.17.3-Linux-`uname -m`/bin:$PATH"
+          CIBW_BEFORE_ALL_LINUX: |
+            curl -L https://github.com/Kitware/CMake/releases/download/v3.17.3/cmake-3.17.3-Linux-`uname -m`.sh > cmake.sh\
+            && yes | sh cmake.sh | cat\
+            && rm -f /usr/bin/cmake\
+            && which cmake\
+            && cmake --version\
+            && uname -a
+          CIBW_BEFORE_BUILD_LINUX: >
+            python -m pip install --upgrade pip
+          CIBW_ARCHS_MACOS: ${{ matrix.os.cibw-archs-macos[matrix.arch.matrix] }}
+          CIBW_BEFORE_ALL_MACOS: >
+            brew install cmake
+          CIBW_BEFORE_BUILD_MACOS: >
+            python -m pip install --upgrade pip
+          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.14"
+          CIBW_TEST_REQUIRES: ""
+          CIBW_TEST_COMMAND: ""
+        run:
+          pipx run --spec='cibuildwheel==2.9.0' cibuildwheel --output-dir dist 2>&1
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: packages
+          path: ./dist
