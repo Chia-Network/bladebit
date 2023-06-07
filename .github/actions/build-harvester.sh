@@ -21,10 +21,10 @@ fi
 
 if [[ "$host_os" == "macos" ]]; then
   procs=$(sysctl -n hw.logicalcpu)
-  sha_sum=$(shasum -a 256)
+  sha_sum="shasum -a 256"
 else
   procs=$(nproc --all)
-  sha_sum=$(sha256sum)
+  sha_sum="sha256sum"
 fi
 
 artifact_name=green_reaper.$ext
