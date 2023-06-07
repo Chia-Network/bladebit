@@ -197,8 +197,8 @@ jobs:
         run: |
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-arm64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-          # export CPATH=/opt/homebrew/include
-          # export LIBRARY_PATH=/opt/homebrew/lib
+          export CPATH=/usr/local/include
+          export LIBRARY_PATH=/usr/local/lib
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
