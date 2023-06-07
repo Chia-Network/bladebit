@@ -63,6 +63,9 @@ class CMakeBuild(build_ext):
         subprocess.check_call(
             ["cmake", "--install", "."] + install_args, cwd=self.build_temp
         )
+        subprocess.check_call(["mv", f"{str(extdir)}/green_reaper", f"{str(extdir)}/bladebit"])
+        subprocess.check_call(["cp", f"{str(extdir)}/bladebit/include/GreenReaper.h", f"{str(extdir)}/bladebit/"])
+        subprocess.check_call(["cp", f"{str(extdir)}/bladebit/include/GreenReaperPortable.h", f"{str(extdir)}/bladebit/"])
 
 
 ext_modules = [
