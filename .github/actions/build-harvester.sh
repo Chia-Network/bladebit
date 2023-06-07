@@ -19,6 +19,14 @@ else
   ext="tar.gz"
 fi
 
+if [[ "$host_os" == "macos" ]]; then
+  procs=$(sysctl -n hw.logicalcpu)
+  sha_sum="shasum -a 256"
+else
+  procs=$(nproc --all)
+  sha_sum="sha256sum"
+fi
+
 artifact_name=green_reaper.$ext
 
 while true; do
@@ -38,7 +46,7 @@ mkdir -p build-harvester
 pushd build-harvester
 cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 
-cmake --build . --config Release --target bladebit_harvester -j$(nproc --all)
+cmake --build . --config Release --target bladebit_harvester -j$procs
 cmake --install . --prefix harvester_dist
 
 pushd harvester_dist/green_reaper
@@ -52,7 +60,7 @@ fi
 artifact_files=($(find . -type f -name '*.*' | cut -c3-))
 
 # shellcheck disable=SC2068
-sha256sum ${artifact_files[@]} > sha256checksum
+$sha_sum ${artifact_files[@]} > sha256checksum
 
 artifact_files+=("sha256checksum")
 
@@ -65,7 +73,7 @@ fi
 
 popd
 mv "harvester_dist/green_reaper/${artifact_name}" ./
-sha256sum "${artifact_name}" > "${artifact_name}.sha256.txt"
+$sha_sum "${artifact_name}" > "${artifact_name}.sha256.txt"
 ls -la
 cat "${artifact_name}.sha256.txt"
 
