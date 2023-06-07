@@ -19,3 +19,5 @@ park*_hash.txt
 lib/*
 build*/
 cmake-build*/
+/venv/
+*.egg-info/
