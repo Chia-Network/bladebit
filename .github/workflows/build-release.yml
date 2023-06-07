@@ -188,7 +188,7 @@ jobs:
         run: |
           git clone https://github.com/jedisct1/libsodium --branch stable
           cd libsodium
-          ./configure
+          ./configure --host=arm64-apple-darwin
           make && make check
           sudo make install
 
