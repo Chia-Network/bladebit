@@ -131,15 +131,6 @@ jobs:
           CIBW_SKIP: '*-manylinux_i686 *-win32 *-musllinux_*'
           CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux['arm'] }}
           CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.python.manylinux['intel'] }}
-          CIBW_ENVIRONMENT_WINDOWS: ""
-          CIBW_ENVIRONMENT_LINUX: PATH="/project/cmake-3.17.3-Linux-`uname -m`/bin:$PATH"
-          CIBW_BEFORE_ALL_LINUX: |
-            curl -L https://github.com/Kitware/CMake/releases/download/v3.26.4/cmake-3.26.4-Linux-`uname -m`.sh > cmake.sh\
-            && yes | sh cmake.sh | cat\
-            && rm -f /usr/bin/cmake\
-            && which cmake\
-            && cmake --version\
-            && uname -a
           CIBW_BEFORE_BUILD_LINUX: >
             python -m pip install --upgrade pip
           CIBW_ARCHS_MACOS: ${{ matrix.os.cibw-archs-macos[matrix.arch.matrix] }}
