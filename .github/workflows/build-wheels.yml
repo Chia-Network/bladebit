@@ -45,31 +45,31 @@ jobs:
           - major-dot-minor: '3.7'
             cibw-build: 'cp37-*'
             manylinux:
-              arch: cmmarslender/manylinux2014_cuda_aarch64
+              arm: cmmarslender/manylinux2014_cuda_aarch64
               intel: cmmarslender/manylinux2014_cuda_x86_64
             matrix: '3.7'
           - major-dot-minor: '3.8'
             cibw-build: 'cp38-*'
             manylinux:
-              arch: cmmarslender/manylinux2014_cuda_aarch64
+              arm: cmmarslender/manylinux2014_cuda_aarch64
               intel: cmmarslender/manylinux2014_cuda_x86_64
             matrix: '3.8'
           - major-dot-minor: '3.9'
             cibw-build: 'cp39-*'
             manylinux:
-              arch: cmmarslender/manylinux2014_cuda_aarch64
+              arm: cmmarslender/manylinux2014_cuda_aarch64
               intel: cmmarslender/manylinux2014_cuda_x86_64
             matrix: '3.9'
           - major-dot-minor: '3.10'
             cibw-build: 'cp310-*'
             manylinux:
-              arch: cmmarslender/manylinux2014_cuda_aarch64
+              arm: cmmarslender/manylinux2014_cuda_aarch64
               intel: cmmarslender/manylinux2014_cuda_x86_64
             matrix: '3.10'
           - major-dot-minor: '3.11'
             cibw-build: 'cp311-*'
             manylinux:
-              arch: cmmarslender/manylinux2014_cuda_aarch64
+              arm: cmmarslender/manylinux2014_cuda_aarch64
               intel: cmmarslender/manylinux2014_cuda_x86_64
             matrix: '3.11'
         arch:
