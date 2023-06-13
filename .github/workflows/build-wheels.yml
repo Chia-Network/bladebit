@@ -24,57 +24,57 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - name: macOS
-            matrix: macos
-            runs-on:
-              arm: [macOS, ARM64]
-              intel: [macos-latest]
-            cibw-archs-macos:
-              arm: arm64
-              intel: x86_64
+#          - name: macOS
+#            matrix: macos
+#            runs-on:
+#              arm: [macOS, ARM64]
+#              intel: [macos-latest]
+#            cibw-archs-macos:
+#              arm: arm64
+#              intel: x86_64
           - name: Ubuntu
             matrix: ubuntu
             runs-on:
               arm: [Linux, ARM64]
               intel: [ubuntu-latest]
-          - name: Windows
-            matrix: windows
-            runs-on:
-              intel: [windows-latest]
+#          - name: Windows
+#            matrix: windows
+#            runs-on:
+#              intel: [windows-latest]
         python:
           - major-dot-minor: '3.7'
             cibw-build: 'cp37-*'
             manylinux:
               arch: manylinux2014
-              intel: manylinux2014
+              intel: cmmarslender/manylinux2014_cuda
             matrix: '3.7'
           - major-dot-minor: '3.8'
             cibw-build: 'cp38-*'
             manylinux:
               arch: manylinux2014
-              intel: manylinux2014
+              intel: cmmarslender/manylinux2014_cuda
             matrix: '3.8'
           - major-dot-minor: '3.9'
             cibw-build: 'cp39-*'
             manylinux:
               arch: manylinux2014
-              intel: manylinux2014
+              intel: cmmarslender/manylinux2014_cuda
             matrix: '3.9'
           - major-dot-minor: '3.10'
             cibw-build: 'cp310-*'
             manylinux:
               arch: manylinux2014
-              intel: manylinux2014
+              intel: cmmarslender/manylinux2014_cuda
             matrix: '3.10'
           - major-dot-minor: '3.11'
             cibw-build: 'cp311-*'
             manylinux:
               arch: manylinux2014
-              intel: manylinux2014
+              intel: cmmarslender/manylinux2014_cuda
             matrix: '3.11'
         arch:
-          - name: ARM
-            matrix: arm
+#          - name: ARM
+#            matrix: arm
           - name: Intel
             matrix: intel
         exclude:
