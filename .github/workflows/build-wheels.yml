@@ -121,6 +121,22 @@ jobs:
         run: |
           pip install pipx
 
+      # For linux, CUDA is in the container used by CIBW
+      - name: Setup CUDA
+        uses: Jimver/cuda-toolkit@v0.2.10
+        id: cuda-toolkit
+        if: runner.os == 'Windows'
+        with:
+          cuda: '12.1.0'
+
+      - name: Verify CUDA
+        shell: bash
+        if: runner.os == 'Windows'
+        run: |
+          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          nvcc -V
+
       - name: Build and test
         env:
           CIBW_PRERELEASE_PYTHONS: True
