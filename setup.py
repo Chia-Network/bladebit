@@ -95,6 +95,4 @@ setup(
     cmdclass=dict(build_ext=CMakeBuild),
     package_data={"": ["*.h"]},
     zip_safe=False,
-    use_scm_version=True,
-    setup_requires=['setuptools_scm'],
 )
