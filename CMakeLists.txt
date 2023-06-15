@@ -100,7 +100,7 @@ if(NOT ${BB_HARVESTER_ONLY})
     FetchContent_Declare(
     bls
     GIT_REPOSITORY https://github.com/Chia-Network/bls-signatures.git
-    GIT_TAG        1.0.10
+    GIT_TAG        2.0.0b3
     EXCLUDE_FROM_ALL ${BB_IS_DEPENDENCY}
     )
 
