@@ -1,5 +1,10 @@
-add_library(bladebit_harvester $<$<BOOL:${BB_HARVESTER_STATIC}>:SHARED>
+if(${BB_HARVESTER_STATIC})
+    add_library(bladebit_harvester STATIC)
+else()
+    add_library(bladebit_harvester SHARED)
+endif()
 
+target_sources(bladebit_harvester
     src/pch.cpp
 
     src/pos/chacha8.cpp
