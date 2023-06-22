@@ -1,6 +1,4 @@
-add_library(bladebit_harvester 
-    $<$<BOOL:${BB_HARVESTER_STATIC}>:SHARED>
-
+add_library(bladebit_harvester $<$<BOOL:${BB_HARVESTER_STATIC}>:SHARED>
 
     src/pch.cpp
 
