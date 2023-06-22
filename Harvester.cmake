@@ -4,7 +4,7 @@ else()
     add_library(bladebit_harvester SHARED)
 endif()
 
-target_sources(bladebit_harvester
+target_sources(bladebit_harvester PUBLIC
     src/pch.cpp
 
     src/pos/chacha8.cpp
