@@ -198,7 +198,6 @@ public:
         CudaSafeFreeHost( _hostMatchCount );
 
         CudaSafeFree( _devSortTmpBuffer );
-        
         CudaSafeFree( _devChaChaInput );
 
         CudaSafeFree( _devYBufferF1  );
@@ -478,14 +477,14 @@ public:
 
         cudaError_t cErr = cudaSuccess;
 
+        const size_t inMetaMultiplier = GetTableMetaMultiplier( table - 1 );
+        const size_t inMetaByteSize   = CDiv( _info.k * inMetaMultiplier, 8 );
+        uint32 matchCount = 0;
+
         // Ensure we're in a good state
         cErr = cudaStreamSynchronize( _uploadStream ); if( cErr != cudaSuccess ) goto FAIL;
         cErr = cudaStreamSynchronize( _computeStream ); if( cErr != cudaSuccess ) goto FAIL;
         cErr = cudaStreamSynchronize( _downloadStream ); if( cErr != cudaSuccess ) goto FAIL;
-
-        const size_t inMetaMultiplier = GetTableMetaMultiplier( table - 1 );
-        const size_t inMetaByteSize   = CDiv( _info.k * inMetaMultiplier, 8 );
-        uint32 matchCount = 0;
 
         /// Upload input data
     #if BB_CUDA_HARVEST_USE_TIMINGS
