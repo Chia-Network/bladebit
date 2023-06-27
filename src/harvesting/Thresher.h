@@ -21,8 +21,8 @@ public:
         uint64*    outY,
         void*      outMeta,
         uint32&    outMatchCount,
-        uint64 x0, uint64 x1
-    ) = 0;
+        uint64 x0, uint64 x1,
+        uint32*    outErrorCode ) = 0;
 
     virtual bool DecompressTableGroup(
         GreenReaperContext& cx,
@@ -37,7 +37,8 @@ public:
         Pair*           outLPairs,  // Where to store sorted input pairs from previous table
         const Pair*     inLPairs,
         const uint64*   inY,
-        const void*     inMeta ) = 0;
+        const void*     inMeta,
+        uint32*         outErrorCode ) = 0;
 
     // For testing
     virtual void DumpTimings() {}

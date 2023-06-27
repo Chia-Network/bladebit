@@ -235,7 +235,8 @@ public:
         uint64*      outY,
         void*        outMeta,
         uint32&      outMatchCount,
-        const uint64 x0, const uint64 x1 ) override
+        const uint64 x0, const uint64 x1,
+        uint32*      outErrorCode ) override
     {
         // Only k32 for now
         ASSERT( x0 <= 0xFFFFFFFF );
@@ -243,12 +244,12 @@ public:
 
         ASSERT( entryCountPerX*2 < _bufferCapacity );
 
-        // Ensure our state is good
-        if( cudaStreamSynchronize( _computeStream ) != cudaSuccess ) return false;
-        if( cudaStreamSynchronize( _downloadStream ) != cudaSuccess ) return false;
-
         uint64    table1EntryCount = 0;
         cudaError cErr             = cudaSuccess;
+
+        // Ensure we're in a good state
+        cErr = cudaStreamSynchronize( _computeStream ); if( cErr != cudaSuccess ) goto FAIL;
+        cErr = cudaStreamSynchronize( _downloadStream ); if( cErr  != cudaSuccess ) goto FAIL;
 
 
         {
@@ -337,8 +338,8 @@ public:
 
                 cErr = cub::DeviceRadixSort::SortPairs<uint64, uint32>(
                     _devSortTmpBuffer, _sortBufferSize,
-                    _devYBufferF1,  _devYBufferIn, 
-                    _devXBufferTmp, _devXBuffer, 
+                    _devYBufferF1,  _devYBufferIn,
+                    _devXBufferTmp, _devXBuffer,
                     f1EntryCount, 0, _info.k+kExtraBits,
                     _computeStream );
                 if( cErr != cudaSuccess ) goto FAIL;
@@ -448,8 +449,10 @@ public:
     FAIL:
 // Log::Line( "DecompressInitialTable() Failed with CUDA error '%s': %s", cudaGetErrorName( cErr ), cudaGetErrorString( cErr ) );
         ASSERT( cErr == cudaSuccess );              // Force debugger break
-        cudaStreamSynchronize( _computeStream );
-        cudaStreamSynchronize( _downloadStream );
+        
+        if( outErrorCode )
+            *outErrorCode = (uint32)cErr;
+
         return false;
     }
 
@@ -466,13 +469,19 @@ public:
         Pair*           outLPairs,
         const Pair*     inLPairs,
         const uint64*   inY,
-        const void*     inMeta ) override
+        const void*     inMeta,
+        uint32*         outErrorCode ) override
     {
         ASSERT( maxPairs );
 
         outMatchCount = 0;
 
         cudaError_t cErr = cudaSuccess;
+
+        // Ensure we're in a good state
+        cErr = cudaStreamSynchronize( _uploadStream ); if( cErr != cudaSuccess ) goto FAIL;
+        cErr = cudaStreamSynchronize( _computeStream ); if( cErr != cudaSuccess ) goto FAIL;
+        cErr = cudaStreamSynchronize( _downloadStream ); if( cErr != cudaSuccess ) goto FAIL;
 
         const size_t inMetaMultiplier = GetTableMetaMultiplier( table - 1 );
         const size_t inMetaByteSize   = CDiv( _info.k * inMetaMultiplier, 8 );
@@ -622,10 +631,11 @@ public:
     FAIL:
 // Log::Line( "DecompressTableGroup() Failed with CUDA error '%s': %s", cudaGetErrorName( cErr ), cudaGetErrorString( cErr ) );
 
-        ASSERT( cErr == cudaSuccess );
-        cudaStreamSynchronize( _uploadStream );
-        cudaStreamSynchronize( _computeStream );
-        cudaStreamSynchronize( _downloadStream );
+        ASSERT( cErr == cudaSuccess );  // Force debugger break
+
+        if( outErrorCode )
+            *outErrorCode = (uint32)cErr;
+
         return false;
     }
 

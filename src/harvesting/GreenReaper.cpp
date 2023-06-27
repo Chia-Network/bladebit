@@ -149,6 +149,8 @@ struct GreenReaperContext
     LPIndex        lpTables       [6][32] = {};
 
     IThresher*     cudaThresher = nullptr;
+    bool           cudaRecreateThresher = false;    // In case a CUDA error occurred or the device was lost,
+                                                    // we need to re-create it.
 };
 
 enum class ForwardPropResult
@@ -475,14 +477,14 @@ GRResult grGetFetchQualitiesXPair( GreenReaperContext* cx, GRCompressedQualities
     if( !req || !req->plotId )
         return GRResult_Failed;
 
-    if( cx->cudaThresher ) cx->cudaThresher->ClearTimings();
-
     const uint32 k = 32;
     {
         auto r = RequestSetup( cx, k, req->compressionLevel );
         if( r != GRResult_OK )
             return r;
     }
+
+    if( cx->cudaThresher ) cx->cudaThresher->ClearTimings();
 
     const uint64 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, req->compressionLevel );
     ASSERT( entriesPerBucket <= 0xFFFFFFFF );
@@ -703,6 +705,42 @@ GRResult grGetFetchQualitiesXPair( GreenReaperContext* cx, GRCompressedQualities
 /// Private Funcs
 ///
 //-----------------------------------------------------------
+GRResult RequestSetup( GreenReaperContext* cx, const uint32 k, const uint32 compressionLevel )
+{
+    if( compressionLevel < 1 || compressionLevel > 9 )
+        return GRResult_Failed;
+
+    const GRResult r = grPreallocateForCompressionLevel( cx, k, compressionLevel );
+    if( r != GRResult_OK )    
+        return r;
+
+    // Always make sure this has been done
+    {
+        // #TODO: Make The function itself thread-safe, don't do it out here
+        _lTargetLock.lock();
+        LoadLTargets();
+        _lTargetLock.unlock();
+    }
+
+    // Make sure we have our CUDA decompressor working in case it was deleted after a failure
+    {
+        // if( cx->config.gpuRequest != GRGpuRequestKind_None )
+        if( cx->cudaRecreateThresher )
+        {
+            ASSERT( !cx->cudaThresher );
+            cx->cudaThresher = CudaThresherFactory::Create( cx->config );
+
+            if( !cx->cudaThresher )
+                return GRResult_Failed;
+
+            cx->cudaRecreateThresher = false;
+        }
+    }
+
+    return r;
+}
+
+//-----------------------------------------------------------
 GRResult ProcessTable1Bucket( Table1BucketContext& tcx, const uint64 x1, const uint64 x2, const uint32 groupIndex )
 {
     GreenReaperContext& cx = *tcx.cx;
@@ -718,6 +756,7 @@ GRResult ProcessTable1Bucket( Table1BucketContext& tcx, const uint64 x1, const u
 // #endif
         uint32 matchCount = 0;
 
+        uint32 cudaErr = 0;
         const bool r = cx.cudaThresher->DecompressInitialTable(
                         cx,
                         tcx.plotId,
@@ -726,7 +765,16 @@ GRResult ProcessTable1Bucket( Table1BucketContext& tcx, const uint64 x1, const u
                         tcx.outY.Ptr(),
                         tcx.outMeta.Ptr(),
                         matchCount,
-                        x1, x2 );
+                        x1, x2, &cudaErr );
+        if( !r )
+        {
+            (void)cudaErr;  // Perhaps find a way to log this or pass it back.
+            delete cx.cudaThresher;
+            cx.cudaThresher         = nullptr;
+            cx.cudaRecreateThresher = true;
+
+            return GRResult_Failed;
+        }
 
     // #if _DEBUG
         // Log::Line( "[%u] Match Count: %u", groupIndex, matchCount );
@@ -894,27 +942,6 @@ void BacktraceProof( GreenReaperContext& cx, const TableId tableStart, uint64 pr
 //     for( uint32 i = 0; i < GR_POST_PROOF_X_COUNT; i++ )
 //         Log::WriteLine( "[%2u]: %-10u ( 0x%08x )", i, (uint32)proof[i], (uint32)proof[i] );
 // #endif
-}
-
-//-----------------------------------------------------------
-GRResult RequestSetup( GreenReaperContext* cx, const uint32 k, const uint32 compressionLevel )
-{
-    if( compressionLevel < 1 || compressionLevel > 9 )
-        return GRResult_Failed;
-
-    const GRResult r = grPreallocateForCompressionLevel( cx, k, compressionLevel );
-    if( r != GRResult_OK )    
-        return r;
-
-    // Always make sure this has been done
-    {
-        // #TODO: Make The function itself thread-safe, don't do it out here
-        _lTargetLock.lock();
-        LoadLTargets();
-        _lTargetLock.unlock();
-    }
-
-    return r;
 }
 
 //-----------------------------------------------------------
@@ -1260,6 +1287,7 @@ inline uint64 ForwardPropTableGroup( GreenReaperContext& cx, const uint32 lGroup
         const uint32 matchOffset = lTable._groups[lGroup].offset;
               uint32 matchCount  = 0;
 
+        uint32 cudaErr = 0;
         const bool r = cx.cudaThresher->DecompressTableGroup(
             cx,
             rTableId,
@@ -1273,7 +1301,18 @@ inline uint64 ForwardPropTableGroup( GreenReaperContext& cx, const uint32 lGroup
             outLeftPairs.Ptr(),
             inLeftPairs.Ptr(),            // Input (pairs are in/out as they get sorted here)
             yLeft.Ptr(),
-            metaLeft.Ptr() );
+            metaLeft.Ptr(),
+            &cudaErr );
+
+        if( !r )
+        {
+            (void)cudaErr;  // Perhaps find a way to log this or pass it back.
+            delete cx.cudaThresher;
+            cx.cudaThresher         = nullptr;
+            cx.cudaRecreateThresher = true;
+
+            return 0;
+        }
 
         if( !r || matchCount < 1 )
             return 0;
