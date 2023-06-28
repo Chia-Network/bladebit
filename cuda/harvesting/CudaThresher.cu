@@ -361,7 +361,7 @@ public:
             cErr = CudaHarvestMatchK32(
                     _devMatchesOut,
                     _devMatchCount,
-                    _bufferCapacity,
+                    (uint32)_bufferCapacity,
                     _devYBufferIn,
                     (uint32)table1EntryCount,
                     0,

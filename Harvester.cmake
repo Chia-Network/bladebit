@@ -1,30 +1,21 @@
-add_library(bladebit_harvester_base INTERFACE)
-
-add_library(bladebit_harvester STATIC)
-target_link_libraries(bladebit_harvester PRIVATE bladebit_harvester_base)
-
-add_library(bladebit_harvester_dynamic SHARED)
-target_link_libraries(bladebit_harvester_dynamic PRIVATE bladebit_harvester_base)
-
-if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-    set_target_properties(bladebit_harvester_dynamic PROPERTIES OUTPUT_NAME "bladebit_harvester")
+if(NOT ${BB_HARVESTER_STATIC})
+    add_library(bladebit_harvester SHARED)
+else()
+    add_library(bladebit_harvester STATIC)
 endif()
 
-target_compile_definitions(bladebit_harvester PRIVATE GR_EXPORT=1 )
-target_compile_definitions(bladebit_harvester_dynamic PRIVATE GR_EXPORT=1 )
 
-
-set_property(TARGET bladebit_harvester bladebit_harvester_dynamic PROPERTY PUBLIC_HEADER 
+set_property(TARGET bladebit_harvester PROPERTY PUBLIC_HEADER 
     src/harvesting/GreenReaper.h 
     src/harvesting/GreenReaperPortable.h)
 
-install(TARGETS bladebit_harvester bladebit_harvester_dynamic
+install(TARGETS bladebit_harvester
     LIBRARY DESTINATION green_reaper/lib
     ARCHIVE DESTINATION green_reaper/lib
     PUBLIC_HEADER DESTINATION green_reaper/include
 )
 
-target_sources(bladebit_harvester_base INTERFACE
+target_sources(bladebit_harvester PRIVATE
     src/pch.cpp
 
     src/pos/chacha8.cpp
@@ -124,40 +115,45 @@ target_sources(bladebit_harvester_base INTERFACE
     >
 )
 
-target_include_directories(bladebit_harvester_base INTERFACE src SYSTEM cuda)
+target_include_directories(bladebit_harvester PRIVATE src SYSTEM cuda)
 
-target_compile_features(bladebit_harvester_base INTERFACE cxx_std_17)
+target_compile_features(bladebit_harvester PUBLIC cxx_std_17)
 
-target_compile_definitions(bladebit_harvester_base INTERFACE
-    BB_IS_HARVESTER=1
-    THRUST_IGNORE_CUB_VERSION_CHECK=1
+target_compile_definitions(bladebit_harvester
+    PRIVATE
+        THRUST_IGNORE_CUB_VERSION_CHECK=1
+        GR_EXPORT=1
+
     $<${have_cuda}:
         BB_CUDA_ENABLED=1
     >
+
+    PUBLIC
+        BB_IS_HARVESTER=1
+    INTERFACE
+        $<$<BOOL:${BB_HARVESTER_STATIC}>:GR_NO_IMPORT=1>
 )
 
-target_compile_options(bladebit_harvester_base INTERFACE 
+
+target_compile_options(bladebit_harvester PRIVATE 
     ${preinclude_pch}
     # $<${have_cuda}:${cuda_archs}>
 )
 
-target_link_options(bladebit_harvester_base INTERFACE $<DEVICE_LINK: ${cuda_archs}>)
+if(${have_cuda})
+    target_link_options(bladebit_harvester PUBLIC $<DEVICE_LINK: ${cuda_archs}>)
+endif()
 
-target_link_libraries(bladebit_harvester_base INTERFACE 
-    bladebit_config 
-    Threads::Threads
-
-    $<${have_cuda}:CUDA::cudart_static>
-
-    INTERFACE
-        $<$<PLATFORM_ID:Linux>:
-            # ${NUMA_LIBRARY}
-            # dl
-        >
+target_link_libraries(bladebit_harvester
+    PRIVATE
+        bladebit_config
+    PUBLIC 
+        Threads::Threads
+        $<${have_cuda}:CUDA::cudart_static>
 )
 
 if(CUDAToolkit_FOUND)
-    set_target_properties(bladebit_harvester_base PROPERTIES 
+    set_target_properties(bladebit_harvester PROPERTIES 
         EXCLUDE_FROM_ALL ON
         MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
         CUDA_RUNTIME_LIBRARY Static
