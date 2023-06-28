@@ -115,7 +115,7 @@ target_sources(bladebit_harvester PRIVATE
     >
 )
 
-target_include_directories(bladebit_harvester PRIVATE src SYSTEM cuda)
+target_include_directories(bladebit_harvester PRIVATE src SYSTEM cuda INTERFACE src/harvesting)
 
 target_compile_features(bladebit_harvester PUBLIC cxx_std_17)
 
