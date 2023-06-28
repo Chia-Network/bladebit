@@ -10,6 +10,9 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows")
     set_target_properties(bladebit_harvester_dynamic PROPERTIES OUTPUT_NAME "bladebit_harvester")
 endif()
 
+target_compile_definitions(bladebit_harvester PRIVATE GR_EXPORT=1 )
+target_compile_definitions(bladebit_harvester_dynamic PRIVATE GR_EXPORT=1 )
+
 
 set_property(TARGET bladebit_harvester bladebit_harvester_dynamic PROPERTY PUBLIC_HEADER 
     src/harvesting/GreenReaper.h 
@@ -128,7 +131,6 @@ target_compile_features(bladebit_harvester_base INTERFACE cxx_std_17)
 target_compile_definitions(bladebit_harvester_base INTERFACE
     BB_IS_HARVESTER=1
     THRUST_IGNORE_CUB_VERSION_CHECK=1
-    GR_EXPORT=1
     $<${have_cuda}:
         BB_CUDA_ENABLED=1
     >
