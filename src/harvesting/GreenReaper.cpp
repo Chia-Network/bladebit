@@ -125,6 +125,7 @@ struct GreenReaperContext
     size_t         allocationSize = 0;
 
     uint64         maxEntriesPerBucket;
+    uint32         maxCompressionLevelReserved = 0; // Compression level for which we have reserved memory
 
     Span<uint64>   yBufferF1;   // F1 tmp
     Span<uint64>   yBuffer;     // F1/In/Out
@@ -148,7 +149,7 @@ struct GreenReaperContext
     Pair           backTraceTables[6][32] = {};
     LPIndex        lpTables       [6][32] = {};
 
-    IThresher*     cudaThresher = nullptr;
+    IThresher*     cudaThresher         = nullptr;
     bool           cudaRecreateThresher = false;    // In case a CUDA error occurred or the device was lost,
                                                     // we need to re-create it.
 };
@@ -705,42 +706,6 @@ GRResult grGetFetchQualitiesXPair( GreenReaperContext* cx, GRCompressedQualities
 /// Private Funcs
 ///
 //-----------------------------------------------------------
-GRResult RequestSetup( GreenReaperContext* cx, const uint32 k, const uint32 compressionLevel )
-{
-    if( compressionLevel < 1 || compressionLevel > 9 )
-        return GRResult_Failed;
-
-    const GRResult r = grPreallocateForCompressionLevel( cx, k, compressionLevel );
-    if( r != GRResult_OK )    
-        return r;
-
-    // Always make sure this has been done
-    {
-        // #TODO: Make The function itself thread-safe, don't do it out here
-        _lTargetLock.lock();
-        LoadLTargets();
-        _lTargetLock.unlock();
-    }
-
-    // Make sure we have our CUDA decompressor working in case it was deleted after a failure
-    {
-        // if( cx->config.gpuRequest != GRGpuRequestKind_None )
-        if( cx->cudaRecreateThresher )
-        {
-            ASSERT( !cx->cudaThresher );
-            cx->cudaThresher = CudaThresherFactory::Create( cx->config );
-
-            if( !cx->cudaThresher )
-                return GRResult_Failed;
-
-            cx->cudaRecreateThresher = false;
-        }
-    }
-
-    return r;
-}
-
-//-----------------------------------------------------------
 GRResult ProcessTable1Bucket( Table1BucketContext& tcx, const uint64 x1, const uint64 x2, const uint32 groupIndex )
 {
     GreenReaperContext& cx = *tcx.cx;
@@ -756,8 +721,7 @@ GRResult ProcessTable1Bucket( Table1BucketContext& tcx, const uint64 x1, const u
 // #endif
         uint32 matchCount = 0;
 
-        uint32 cudaErr = 0;
-        const bool r = cx.cudaThresher->DecompressInitialTable(
+        const auto r = cx.cudaThresher->DecompressInitialTable(
                         cx,
                         tcx.plotId,
                         (uint32)tcx.entriesPerBucket,
@@ -765,35 +729,18 @@ GRResult ProcessTable1Bucket( Table1BucketContext& tcx, const uint64 x1, const u
                         tcx.outY.Ptr(),
                         tcx.outMeta.Ptr(),
                         matchCount,
-                        x1, x2, &cudaErr );
-        if( !r )
+                        x1, x2 );
+
+        if( r.kind == ThresherResultKind::Error )
         {
-            (void)cudaErr;  // Perhaps find a way to log this or pass it back.
+            // #NOTE: Perhaps find a way to log this or pass it back to the caller.
             delete cx.cudaThresher;
             cx.cudaThresher         = nullptr;
             cx.cudaRecreateThresher = true;
 
             return GRResult_Failed;
         }
-
-    // #if _DEBUG
-        // Log::Line( "[%u] Match Count: %u", groupIndex, matchCount );
-    //     auto yCPU = cx.yBufferTmp.SliceSize( matchCount );
-    //     auto yGPU = cx.yBufferTmp.Slice( matchCount ).SliceSize( matchCount );
-
-    //     uint64* ytmp = new uint64[matchCount];
-    //     RadixSort256::Sort<BB_MAX_JOBS>( *cx.pool, yCPU.Ptr(), ytmp, matchCount );
-    //     RadixSort256::Sort<BB_MAX_JOBS>( *cx.pool, yGPU.Ptr(), ytmp, matchCount );
-
-    //     for( uint32 i = 0; i < matchCount; i++ )
-    //     {
-    //         const uint64 yc = yCPU[i];
-    //         const uint64 yg = yGPU[i];
-    //         ASSERT( yc == yg );
-    //     }
-    // #endif
-
-        if( r )
+        else if( r.kind == ThresherResultKind::Success )
         {
             auto& table = cx.tables[1];
             table.AddGroupPairs( groupIndex, matchCount );
@@ -945,15 +892,51 @@ void BacktraceProof( GreenReaperContext& cx, const TableId tableStart, uint64 pr
 }
 
 //-----------------------------------------------------------
+GRResult RequestSetup( GreenReaperContext* cx, const uint32 k, const uint32 compressionLevel )
+{
+    if( compressionLevel < 1 || compressionLevel > 9 )
+        return GRResult_Failed;
+
+    // Make sure we have our CUDA decompressor working in case it was deleted after a failure
+    {
+        // if( cx->config.gpuRequest != GRGpuRequestKind_None )
+        if( cx->cudaRecreateThresher )
+        {
+            ASSERT( !cx->cudaThresher );
+            cx->cudaThresher = CudaThresherFactory::Create( cx->config );
+            if( !cx->cudaThresher )
+                return GRResult_Failed;
+
+            cx->cudaRecreateThresher = false;
+        }
+    }
+
+    const GRResult r = grPreallocateForCompressionLevel( cx, k, compressionLevel );
+    if( r != GRResult_OK )    
+        return r;
+
+    // Always make sure this has been done
+    {
+        // #TODO: Make The function itself thread-safe, don't do it out here
+        _lTargetLock.lock();
+        LoadLTargets();
+        _lTargetLock.unlock();
+    }
+
+    return r;
+}
+
+//-----------------------------------------------------------
 bool ReserveBucketBuffers( GreenReaperContext& cx, const uint32 k, const uint32 compressionLevel )
 {
     // #TODO: Support other K values
     ASSERT( k == 32 );
 
-    const uint64 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, compressionLevel );
-
-    if( cx.maxEntriesPerBucket < entriesPerBucket )
+    if( compressionLevel > cx.maxCompressionLevelReserved )
     {
+        const uint64 entriesPerBucket = GetEntriesPerBucketForCompressionLevel( k, compressionLevel );
+        ASSERT( entriesPerBucket > cx.maxEntriesPerBucket );
+
         cx.maxEntriesPerBucket = 0;
         FreeBucketBuffers( cx );
 
@@ -1001,7 +984,20 @@ bool ReserveBucketBuffers( GreenReaperContext& cx, const uint32 k, const uint32 
             return false;
         }
 
-        cx.maxEntriesPerBucket = entriesPerBucket;
+        cx.maxEntriesPerBucket         = entriesPerBucket;
+        cx.maxCompressionLevelReserved = compressionLevel;
+    }
+
+    if( cx.cudaThresher != nullptr )
+    {
+        if( !cx.cudaThresher->AllocateBuffers( k, compressionLevel ) )
+        {
+            FreeBucketBuffers( cx );
+            delete cx.cudaThresher;
+            cx.cudaThresher         = nullptr;
+            cx.cudaRecreateThresher = true;
+            return false;
+        }
     }
 
     return true;
@@ -1011,6 +1007,7 @@ bool ReserveBucketBuffers( GreenReaperContext& cx, const uint32 k, const uint32 
 void FreeBucketBuffers( GreenReaperContext& cx )
 {
     cx.allocationSize = 0;
+    cx.maxCompressionLevelReserved = 0;
 
     bbvirtfreebounded_span( cx.yBufferF1 );
     bbvirtfreebounded_span( cx.yBuffer );
@@ -1287,8 +1284,7 @@ inline uint64 ForwardPropTableGroup( GreenReaperContext& cx, const uint32 lGroup
         const uint32 matchOffset = lTable._groups[lGroup].offset;
               uint32 matchCount  = 0;
 
-        uint32 cudaErr = 0;
-        const bool r = cx.cudaThresher->DecompressTableGroup(
+        const auto r = cx.cudaThresher->DecompressTableGroup(
             cx,
             rTableId,
             (uint32)yLeft.Length(),
@@ -1301,20 +1297,17 @@ inline uint64 ForwardPropTableGroup( GreenReaperContext& cx, const uint32 lGroup
             outLeftPairs.Ptr(),
             inLeftPairs.Ptr(),            // Input (pairs are in/out as they get sorted here)
             yLeft.Ptr(),
-            metaLeft.Ptr(),
-            &cudaErr );
+            metaLeft.Ptr() );
 
-        if( !r )
+        if( r.kind == ThresherResultKind::Error )
         {
-            (void)cudaErr;  // Perhaps find a way to log this or pass it back.
+            // Perhaps find a way to log this or pass the error back to the caller.
             delete cx.cudaThresher;
             cx.cudaThresher         = nullptr;
             cx.cudaRecreateThresher = true;
-
-            return 0;
         }
 
-        if( !r || matchCount < 1 )
+         if( r.kind != ThresherResultKind::Success || matchCount < 1 )
             return 0;
 
         ASSERT( matchCount <= inLeftPairs.Length() );
