@@ -46,7 +46,7 @@ mkdir -p build-harvester
 pushd build-harvester
 cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 
-cmake --build . --config Release --target bladebit_harvester --target bladebit_harvester_dynamic -j$procs
+cmake --build . --config Release --target bladebit_harvester
 cmake --install . --prefix harvester_dist
 
 pushd harvester_dist/green_reaper

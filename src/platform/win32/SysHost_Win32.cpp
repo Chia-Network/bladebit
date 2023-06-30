@@ -180,8 +180,35 @@ void SysHost::VirtualFree( void* ptr )
 bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
 {
     ASSERT( ptr );
+    if( !ptr )
+        return false;
 
-    // #TODO: Implement me
+    DWORD winFlags;
+    
+    if( flags == VProtect::NoAccess )
+    {
+        winFlags = PAGE_NOACCESS;
+    }
+    else
+    {
+        if( IsFlagSet( flags, VProtect::Write ) )
+        {
+            winFlags = PAGE_READWRITE;
+        }
+        else
+        {
+            ASSERT( IsFlagSet( flags, VProtect::Read ) );
+            winFlags = PAGE_READONLY;
+        }
+    }
+
+    DWORD oldProtect = 0;
+    if( ::VirtualProtect( ptr, (SIZE_T)size, winFlags, &oldProtect ) == FALSE )
+    {
+        Log::Error( "::VirtualProtect() failed with error: %d", (int)::GetLastError() );
+        return false;
+    }
+
     return true;
 }
 

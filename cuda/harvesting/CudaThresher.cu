@@ -35,6 +35,8 @@ class CudaThresher : public IThresher
     bool      _isDecompressing = false;             // Are we currently decompressing a proof?
     TableId   _currentTable    = TableId::Table1;   // Current table being decompressed
     
+    uint32    _maxCompressionLevel = 0; // Max compression level for which we have allocated buffers
+
     size_t    _bufferCapacity = 0;
     size_t    _matchCapacity  = 0;
     size_t    _sortBufferSize = 0;
@@ -97,8 +99,14 @@ public:
         ReleaseBuffers();
     }
 
-    bool AllocateBuffers( const uint k, const uint maxCompressionLevel ) override
+    bool AllocateBuffers( const uint k, uint maxCompressionLevel ) override
     {
+        // #NOTE: For now we always preallocate for the maximum compression level
+        maxCompressionLevel = 9;
+
+        if( _maxCompressionLevel >= maxCompressionLevel )
+            return true;
+    
         _info.k              = 32;
         _info.bucketCount    = 64;                          // #TODO: Make this configurable
         _info.yBits          = _info.k + kExtraBits;
@@ -185,6 +193,7 @@ public:
         }
 
         //cErr = cudaMalloc( &cuda.devYBufferF1, sizeof( uint32 ) * allocEntryCount );
+        _maxCompressionLevel = maxCompressionLevel;
         return true;
 
     FAIL:
@@ -194,11 +203,13 @@ public:
 
     void ReleaseBuffers() override
     {
+        _bufferCapacity      = 0;
+        _maxCompressionLevel = 0;
+
         // Release all buffers
         CudaSafeFreeHost( _hostMatchCount );
 
         CudaSafeFree( _devSortTmpBuffer );
-        
         CudaSafeFree( _devChaChaInput );
 
         CudaSafeFree( _devYBufferF1  );
@@ -227,7 +238,7 @@ public:
         if( _downloadEvent ) cudaEventDestroy( _downloadEvent ); _downloadEvent = nullptr;
     }
 
-    bool DecompressInitialTable( 
+    ThresherResult DecompressInitialTable( 
         GreenReaperContext& cx,
         const byte   plotId[32],
         const uint32 entryCountPerX,
@@ -240,15 +251,24 @@ public:
         // Only k32 for now
         ASSERT( x0 <= 0xFFFFFFFF );
         ASSERT( x1 <= 0xFFFFFFFF );
-
         ASSERT( entryCountPerX*2 < _bufferCapacity );
 
-        // Ensure our state is good
-        if( cudaStreamSynchronize( _computeStream ) != cudaSuccess ) return false;
-        if( cudaStreamSynchronize( _downloadStream ) != cudaSuccess ) return false;
+        ThresherResult result{};
+        result.kind = ThresherResultKind::Success; 
+
+        if( entryCountPerX*2 > _bufferCapacity )
+        {
+            result.kind  = ThresherResultKind::Error;
+            result.error = ThresherError::UnexpectedError;
+            return result;
+        }
 
         uint64    table1EntryCount = 0;
         cudaError cErr             = cudaSuccess;
+
+        // Ensure we're in a good state
+        cErr = cudaStreamSynchronize( _computeStream ); if( cErr != cudaSuccess ) goto FAIL;
+        cErr = cudaStreamSynchronize( _downloadStream ); if( cErr  != cudaSuccess ) goto FAIL;
 
 
         {
@@ -292,11 +312,11 @@ public:
                     const auto timer = TimerBegin();
                 #endif
 
-                cErr = cudaMemcpyAsync( _devChaChaInput, chacha.input, 64, cudaMemcpyHostToDevice, _computeStream );
-                if( cErr != cudaSuccess ) return false;
-
                 uint64* f1Y = _devYBufferF1;
                 uint32* f1X = _devXBufferTmp;
+
+                cErr = cudaMemcpyAsync( _devChaChaInput, chacha.input, 64, cudaMemcpyHostToDevice, _computeStream );
+                if( cErr != cudaSuccess ) goto FAIL;
 
                 for( uint32 i = 0; i < f1Iterations; i++ )
                 {
@@ -337,8 +357,8 @@ public:
 
                 cErr = cub::DeviceRadixSort::SortPairs<uint64, uint32>(
                     _devSortTmpBuffer, _sortBufferSize,
-                    _devYBufferF1,  _devYBufferIn, 
-                    _devXBufferTmp, _devXBuffer, 
+                    _devYBufferF1,  _devYBufferIn,
+                    _devXBufferTmp, _devXBuffer,
                     f1EntryCount, 0, _info.k+kExtraBits,
                     _computeStream );
                 if( cErr != cudaSuccess ) goto FAIL;
@@ -361,7 +381,7 @@ public:
             cErr = CudaHarvestMatchK32(
                     _devMatchesOut,
                     _devMatchCount,
-                    _bufferCapacity,
+                    (uint32)_bufferCapacity,
                     _devYBufferIn,
                     (uint32)table1EntryCount,
                     0,
@@ -381,6 +401,12 @@ public:
                 _timings.match += TimerEndTicks( timer );
                 timer = TimerBegin();
             #endif
+
+            if( matchCount < 1 )
+            {
+                result.kind = ThresherResultKind::NoMatches;
+                return result;
+            }
 
             // Compute table 2 Fx
             CudaFxHarvestK32( 
@@ -441,19 +467,28 @@ public:
             #if BB_CUDA_HARVEST_USE_TIMINGS
                 _timings.download += TimerEndTicks( timer );
             #endif
+
+            if( matchCount < 1 )
+            {
+                result.kind = ThresherResultKind::NoMatches;
+                return result;
+            }
         }
 
-        return true;
+        return result;
 
     FAIL:
 // Log::Line( "DecompressInitialTable() Failed with CUDA error '%s': %s", cudaGetErrorName( cErr ), cudaGetErrorString( cErr ) );
         ASSERT( cErr == cudaSuccess );              // Force debugger break
-        cudaStreamSynchronize( _computeStream );
-        cudaStreamSynchronize( _downloadStream );
-        return false;
+
+        result.kind          = ThresherResultKind::Error;
+        result.error         = ThresherError::CudaError;
+        result.internalError = (i32)cErr;
+
+        return result;
     }
 
-    bool DecompressTableGroup(
+    ThresherResult DecompressTableGroup(
         GreenReaperContext& cx,
         const TableId   table,
         uint32          entryCount,
@@ -472,11 +507,19 @@ public:
 
         outMatchCount = 0;
 
+        ThresherResult result{};
+        result.kind = ThresherResultKind::Success; 
+
         cudaError_t cErr = cudaSuccess;
 
         const size_t inMetaMultiplier = GetTableMetaMultiplier( table - 1 );
         const size_t inMetaByteSize   = CDiv( _info.k * inMetaMultiplier, 8 );
         uint32 matchCount = 0;
+
+        // Ensure we're in a good state
+        cErr = cudaStreamSynchronize( _uploadStream ); if( cErr != cudaSuccess ) goto FAIL;
+        cErr = cudaStreamSynchronize( _computeStream ); if( cErr != cudaSuccess ) goto FAIL;
+        cErr = cudaStreamSynchronize( _downloadStream ); if( cErr != cudaSuccess ) goto FAIL;
 
         /// Upload input data
     #if BB_CUDA_HARVEST_USE_TIMINGS
@@ -558,6 +601,7 @@ public:
         if( matchCount < 1 )
         {
 // Log::Line( "CUDA: No matches!" );
+            result.kind = ThresherResultKind::NoMatches;
             goto FAIL;
         }
 
@@ -617,16 +661,21 @@ public:
         #endif
 
         outMatchCount = matchCount;
-        return true;
+        return result;
 
     FAIL:
 // Log::Line( "DecompressTableGroup() Failed with CUDA error '%s': %s", cudaGetErrorName( cErr ), cudaGetErrorString( cErr ) );
 
-        ASSERT( cErr == cudaSuccess );
-        cudaStreamSynchronize( _uploadStream );
-        cudaStreamSynchronize( _computeStream );
-        cudaStreamSynchronize( _downloadStream );
-        return false;
+        ASSERT( cErr == cudaSuccess );  // Force debugger break
+
+        if( result.kind == ThresherResultKind::Success )
+        {
+            result.kind          = ThresherResultKind::Error;
+            result.error         = ThresherError::CudaError;
+            result.internalError = (i32)cErr;
+        }
+
+        return result;
     }
 
     cudaError_t SortEntriesOnY( 

@@ -288,6 +288,8 @@ inline void* bb_try_virt_alloc( size_t size )
 
 // Allocate virtual memory with protected boundary pages
 // #NOTE: Only free with bbvirtfreebounded
+void bbvirtfreebounded( void* ptr );
+
 //-----------------------------------------------------------
 inline void* bb_try_virt_alloc_bounded( size_t size )
 {
@@ -295,9 +297,15 @@ inline void* bb_try_virt_alloc_bounded( size_t size )
     size = RoundUpToNextBoundaryT<size_t>( size, pageSize ) + pageSize * 2;
 
     auto* ptr = (byte*)bb_try_virt_alloc( size );
+    if( !ptr )
+        return nullptr;
 
-    SysHost::VirtualProtect( ptr, pageSize, VProtect::NoAccess );
-    SysHost::VirtualProtect( ptr + size - pageSize, pageSize, VProtect::NoAccess );
+    if( !SysHost::VirtualProtect( ptr, pageSize, VProtect::NoAccess ) ||
+        !SysHost::VirtualProtect( ptr + size - pageSize, pageSize, VProtect::NoAccess ) )
+    {
+        bbvirtfreebounded( ptr );
+        return nullptr;
+    }
 
     return ptr + pageSize;
 }
@@ -384,8 +392,8 @@ inline Span<T> bbcvirtallocboundednuma_span( size_t count )
 //-----------------------------------------------------------
 inline void bbvirtfreebounded( void* ptr )
 {
-    ASSERT( ptr );
-    SysHost::VirtualFree( ((byte*)ptr) - SysHost::GetPageSize() );
+    if( ptr )
+        SysHost::VirtualFree( ((byte*)ptr) - SysHost::GetPageSize() );
 }
 
 //-----------------------------------------------------------
