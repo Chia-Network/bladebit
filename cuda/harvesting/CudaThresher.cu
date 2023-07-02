@@ -101,8 +101,12 @@ public:
 
     bool AllocateBuffers( const uint k, uint maxCompressionLevel ) override
     {
+        // Only support C7 max for now
+        if( maxCompressionLevel > 7 )
+            return false;
+
         // #NOTE: For now we always preallocate for the maximum compression level
-        maxCompressionLevel = 9;
+        maxCompressionLevel = 7;
 
         if( _maxCompressionLevel >= maxCompressionLevel )
             return true;
