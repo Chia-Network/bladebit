@@ -429,7 +429,7 @@ INLINE void round_fn4(__m128i v[16], __m128i m[16], size_t r) {
 }
 
 INLINE void transpose_vecs_128(__m128i vecs[4]) {
-  // Interleave 32-bit lates. The low unpack is lanes 00/11 and the high is
+  // Interleave 32-bit lanes. The low unpack is lanes 00/11 and the high is
   // 22/33. Note that this doesn't split the vector into two lanes, as the
   // AVX2 counterparts do.
   __m128i ab_01 = _mm_unpacklo_epi32(vecs[0], vecs[1]);
@@ -468,7 +468,7 @@ INLINE void transpose_msg_vecs4(const uint8_t *const *inputs,
   out[14] = loadu_128(&inputs[2][block_offset + 3 * sizeof(__m128i)]);
   out[15] = loadu_128(&inputs[3][block_offset + 3 * sizeof(__m128i)]);
   for (size_t i = 0; i < 4; ++i) {
-    _mm_prefetch(&inputs[i][block_offset + 256], _MM_HINT_T0);
+    _mm_prefetch((const void *)&inputs[i][block_offset + 256], _MM_HINT_T0);
   }
   transpose_vecs_128(&out[0]);
   transpose_vecs_128(&out[4]);
@@ -488,6 +488,7 @@ INLINE void load_counters4(uint64_t counter, bool increment_counter,
   *out_hi = _mm256_cvtepi64_epi32(_mm256_srli_epi64(counters, 32));
 }
 
+static
 void blake3_hash4_avx512(const uint8_t *const *inputs, size_t blocks,
                          const uint32_t key[8], uint64_t counter,
                          bool increment_counter, uint8_t flags,
@@ -683,7 +684,7 @@ INLINE void transpose_vecs_256(__m256i vecs[8]) {
   __m256i gh_0145 = _mm256_unpacklo_epi32(vecs[6], vecs[7]);
   __m256i gh_2367 = _mm256_unpackhi_epi32(vecs[6], vecs[7]);
 
-  // Interleave 64-bit lates. The low unpack is lanes 00/22 and the high is
+  // Interleave 64-bit lanes. The low unpack is lanes 00/22 and the high is
   // 11/33.
   __m256i abcd_04 = _mm256_unpacklo_epi64(ab_0145, cd_0145);
   __m256i abcd_15 = _mm256_unpackhi_epi64(ab_0145, cd_0145);
@@ -724,7 +725,7 @@ INLINE void transpose_msg_vecs8(const uint8_t *const *inputs,
   out[14] = loadu_256(&inputs[6][block_offset + 1 * sizeof(__m256i)]);
   out[15] = loadu_256(&inputs[7][block_offset + 1 * sizeof(__m256i)]);
   for (size_t i = 0; i < 8; ++i) {
-    _mm_prefetch(&inputs[i][block_offset + 256], _MM_HINT_T0);
+    _mm_prefetch((const void *)&inputs[i][block_offset + 256], _MM_HINT_T0);
   }
   transpose_vecs_256(&out[0]);
   transpose_vecs_256(&out[8]);
@@ -742,6 +743,7 @@ INLINE void load_counters8(uint64_t counter, bool increment_counter,
   *out_hi = _mm512_cvtepi64_epi32(_mm512_srli_epi64(counters, 32));
 }
 
+static
 void blake3_hash8_avx512(const uint8_t *const *inputs, size_t blocks,
                          const uint32_t key[8], uint64_t counter,
                          bool increment_counter, uint8_t flags,
@@ -957,7 +959,7 @@ INLINE void transpose_vecs_512(__m512i vecs[16]) {
   __m512i op_0 = _mm512_unpacklo_epi32(vecs[14], vecs[15]);
   __m512i op_2 = _mm512_unpackhi_epi32(vecs[14], vecs[15]);
 
-  // Interleave 64-bit lates. The _0 unpack is lanes
+  // Interleave 64-bit lanes. The _0 unpack is lanes
   // 0/0/0/0/4/4/4/4/8/8/8/8/12/12/12/12, the _1 unpack is lanes
   // 1/1/1/1/5/5/5/5/9/9/9/9/13/13/13/13, the _2 unpack is lanes
   // 2/2/2/2/6/6/6/6/10/10/10/10/14/14/14/14, and the _3 unpack is lanes
@@ -1037,7 +1039,7 @@ INLINE void transpose_msg_vecs16(const uint8_t *const *inputs,
   out[14] = loadu_512(&inputs[14][block_offset]);
   out[15] = loadu_512(&inputs[15][block_offset]);
   for (size_t i = 0; i < 16; ++i) {
-    _mm_prefetch(&inputs[i][block_offset + 256], _MM_HINT_T0);
+    _mm_prefetch((const void *)&inputs[i][block_offset + 256], _MM_HINT_T0);
   }
   transpose_vecs_512(out);
 }
@@ -1045,15 +1047,29 @@ INLINE void transpose_msg_vecs16(const uint8_t *const *inputs,
 INLINE void load_counters16(uint64_t counter, bool increment_counter,
                             __m512i *out_lo, __m512i *out_hi) {
   const __m512i mask = _mm512_set1_epi32(-(int32_t)increment_counter);
-  const __m512i add0 = _mm512_set_epi32(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
-  const __m512i add1 = _mm512_and_si512(mask, add0);
-  __m512i l = _mm512_add_epi32(_mm512_set1_epi32(counter), add1);
-  __mmask16 carry = _mm512_cmp_epu32_mask(l, add1, _MM_CMPINT_LT);
-  __m512i h = _mm512_mask_add_epi32(_mm512_set1_epi32(counter >> 32), carry, _mm512_set1_epi32(counter >> 32), _mm512_set1_epi32(1));
-  *out_lo = l;
-  *out_hi = h;
+  const __m512i deltas = _mm512_set_epi32(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+  const __m512i masked_deltas = _mm512_and_si512(deltas, mask);
+  const __m512i low_words = _mm512_add_epi32(
+    _mm512_set1_epi32((int32_t)counter),
+    masked_deltas);
+  // The carry bit is 1 if the high bit of the word was 1 before addition and is
+  // 0 after.
+  // NOTE: It would be a bit more natural to use _mm512_cmp_epu32_mask to
+  // compute the carry bits here, and originally we did, but that intrinsic is
+  // broken under GCC 5.4. See https://github.com/BLAKE3-team/BLAKE3/issues/271.
+  const __m512i carries = _mm512_srli_epi32(
+    _mm512_andnot_si512(
+        low_words, // 0 after (gets inverted by andnot)
+        _mm512_set1_epi32((int32_t)counter)), // and 1 before
+    31);
+  const __m512i high_words = _mm512_add_epi32(
+    _mm512_set1_epi32((int32_t)(counter >> 32)),
+    carries);
+  *out_lo = low_words;
+  *out_hi = high_words;
 }
 
+static
 void blake3_hash16_avx512(const uint8_t *const *inputs, size_t blocks,
                           const uint32_t key[8], uint64_t counter,
                           bool increment_counter, uint8_t flags,
