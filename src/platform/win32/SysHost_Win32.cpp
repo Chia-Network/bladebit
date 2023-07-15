@@ -177,6 +177,8 @@ void SysHost::VirtualFree( void* ptr )
     {
         const DWORD err = GetLastError();
         Log::Error( "VirtualFree() failed with error: %d", err );
+
+        DumpStackTrace();
     }
 }
 
