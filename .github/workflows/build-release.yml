@@ -26,14 +26,14 @@ jobs:
         run: |
           set -eo pipefail
           yum group install -y "Development Tools"
-          yum install -y sudo make git wget subscription-manager redhat-lsb-core
+          yum install -y sudo make git wget subscription-manager
 
       - name: Setup CUDA
         uses: Jimver/cuda-toolkit@v0.2.11
         id: cuda-toolkit
         with:
           cuda: '12.1.0'
-          method: network
+          linux-local-args: '["--toolkit"]'
 
       - name: Verify CUDA
         shell: bash
