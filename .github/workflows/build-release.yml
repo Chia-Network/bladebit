@@ -9,7 +9,7 @@ env:
 
 jobs:
   build-harvester-linux-x86-64:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     container:
       image: quay.io/pypa/manylinux2014_x86_64
     steps:
@@ -26,7 +26,7 @@ jobs:
         run: |
           set -eo pipefail
           yum group install -y "Development Tools"
-          yum install -y sudo make git wget subscription-manager
+          yum install -y sudo make git wget subscription-manager redhat-lsb-core
 
       - name: Setup CUDA
         uses: Jimver/cuda-toolkit@v0.2.11
