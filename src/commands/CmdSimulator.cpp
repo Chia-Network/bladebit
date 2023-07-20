@@ -435,8 +435,9 @@ void SimulatorJob::RunFarm( PlotReader& reader, const uint64 challengeCount, con
                 const auto errR = rQ != ProofFetchResult::OK ? rQ : rP;
                 if( errR != ProofFetchResult::OK )
                 {
-                    FatalIf( errR == ProofFetchResult::Error, "Error while fetching proof for F7 %llu.", (llu)f7 );
-                    FatalIf( errR == ProofFetchResult::CompressionError, "Decompression error while fetching proof for F7 %llu.", (llu)f7 );
+                    Log::Error( "Error %d while fetching proof for F7 %llu.", (int)errR, (llu)f7 );
+                    // FatalIf( errR == ProofFetchResult::Error, "Error while fetching proof for F7 %llu.", (llu)f7 );
+                    // FatalIf( errR == ProofFetchResult::CompressionError, "Decompression error while fetching proof for F7 %llu.", (llu)f7 );
                 }
             }
 

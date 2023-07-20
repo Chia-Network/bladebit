@@ -30,17 +30,13 @@ PlotReader::~PlotReader()
     free( _parkBuffer );    _parkBuffer = nullptr;
     free( _deltasBuffer );  _deltasBuffer = nullptr;
 
-    if( _c1Buffer )
-        bbvirtfreebounded( _c1Buffer );
-    _c1Buffer = nullptr;
+    bbvirtfreebounded( _c1Buffer );
 
     if( _c2Entries.Ptr() )
         delete[] _c2Entries.values;
     _c2Entries = {};
 
-    if( _c3Buffer.Ptr() )
-        bbvirtfreebounded( _c3Buffer.Ptr() );
-    _c3Buffer = {};
+    bbvirtfreebounded_span( _c3Buffer );
 
     if( _grContext )
         grDestroyContext( _grContext );

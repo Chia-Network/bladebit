@@ -1022,10 +1022,7 @@ void FreeBucketBuffers( GreenReaperContext& cx )
     bbvirtfreebounded_span( cx.groupsBoundaries );
 
     for( uint32 i = 0; i < 7; i++ )
-    {
-        if( cx.tables[i]._pairs )
-            bbvirtfreebounded( cx.tables[i]._pairs );
-    }
+        bbvirtfreebounded( cx.tables[i]._pairs );
 
     if( cx.cudaThresher != nullptr )
         cx.cudaThresher->ReleaseBuffers();
