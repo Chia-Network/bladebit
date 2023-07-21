@@ -390,7 +390,7 @@ jobs:
       - name: Upload Bladebit Artifact Windows x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
@@ -455,6 +455,6 @@ jobs:
       - name: Upload Bladebit CUDA Artifact Windows x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
