@@ -39,7 +39,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -86,7 +86,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -140,7 +140,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -168,7 +168,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -196,7 +196,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -233,14 +233,14 @@ jobs:
       - name: Upload Bladebit Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
       - name: Upload Bladebit CUDA Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
@@ -289,14 +289,14 @@ jobs:
       - name: Upload Bladebit Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
       - name: Upload Bladebit CUDA Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
@@ -336,7 +336,7 @@ jobs:
       - name: Upload Artifact Ubuntu ARM64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
@@ -346,7 +346,7 @@ jobs:
       - name: Upload Bladebit CUDA Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
