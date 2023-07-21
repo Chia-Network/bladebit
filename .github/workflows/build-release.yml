@@ -11,7 +11,7 @@ jobs:
   build-harvester-linux-x86-64:
     runs-on: ubuntu-20.04
     container:
-      image: quay.io/pypa/manylinux2014_x86_64
+      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -28,19 +28,6 @@ jobs:
           yum group install -y "Development Tools"
           yum install -y sudo make git wget subscription-manager
 
-      - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.10
-        id: cuda-toolkit
-        with:
-          cuda: '12.1.0'
-
-      - name: Verify CUDA
-        shell: bash
-        run: |
-          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
-          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
-          nvcc -V
-
       - name: Build Harvester
         shell: bash
         run: |
@@ -52,7 +39,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -75,10 +62,11 @@ jobs:
           choco install -y sed
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.10
+        uses: Jimver/cuda-toolkit@v0.2.11
         id: cuda-toolkit
         with:
           cuda: '12.1.0'
+          method: network
 
       - name: Verify CUDA
         shell: bash
@@ -98,14 +86,14 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
   build-harvester-linux-arm64:
     runs-on: [ARM64, Linux]
     container:
-      image: quay.io/pypa/manylinux2014_aarch64
+      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_aarch64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -141,21 +129,6 @@ jobs:
           dnf group install -y "Development Tools"
           dnf install -y gmp-devel numactl-devel make git wget sed
 
-      - name: Setup CUDA
-        run: |
-          set -eo pipefail
-          module_platform_id=platform:el9
-          export MODULE_PLATFORM_ID=platform:el9
-          export PLATFORM_ID=platform:el9
-          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/$(uname -i)/cuda-rhel9.repo
-          dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/cuda-rhel9.repo
-          dnf makecache
-          #dnf install -y cuda.aarch64
-          dnf install -y cuda-toolkit
-          ls -la /usr/local/
-          ls -la /usr/local/cuda*
-          export PATH=/usr/local/cuda-12.1/bin${PATH:+:${PATH}}
-          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
       - name: Build Harvester
         shell: bash
         run: |
@@ -167,7 +140,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -195,7 +168,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -223,7 +196,7 @@ jobs:
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.harvester_artifact_name }}.zip
+          name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
@@ -246,15 +219,13 @@ jobs:
       - name: Build Bladebit
         run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
-      - name: Install CUDA Prerequisites
-        run: |
-            distro=ubuntu2004
-            arch=x86_64
-            sudo apt-key del 7fa2af80
-            wget https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-keyring_1.0-1_all.deb
-            sudo dpkg -i cuda-keyring_1.0-1_all.deb
-            sudo apt-get update
-            sudo apt-get install cuda
+      - name: Setup CUDA
+        uses: Jimver/cuda-toolkit@v0.2.11
+        id: cuda-toolkit
+        with:
+          cuda: '12.1.0'
+          method: network
+          linux-local-args: '["--toolkit"]'
 
       - name: Build Bladebit CUDA
         run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
@@ -262,14 +233,14 @@ jobs:
       - name: Upload Bladebit Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
       - name: Upload Bladebit CUDA Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
@@ -289,7 +260,7 @@ jobs:
         run: |
           set -eo pipefail
           dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         gmp-devel numactl-devel make git wget subscription-manager
+              gmp-devel numactl-devel make git wget subscription-manager
 
           bash .github/actions/install-cmake-linux.sh
 
@@ -303,7 +274,6 @@ jobs:
           distro=rhel8
           arch=x86_64
           dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-
           dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
           dnf clean expire-cache
           dnf module install -y nvidia-driver:latest-dkms
@@ -319,14 +289,14 @@ jobs:
       - name: Upload Bladebit Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
       - name: Upload Bladebit CUDA Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
@@ -366,7 +336,7 @@ jobs:
       - name: Upload Artifact Ubuntu ARM64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
@@ -376,7 +346,7 @@ jobs:
       - name: Upload Bladebit CUDA Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
@@ -420,7 +390,7 @@ jobs:
       - name: Upload Bladebit Artifact Windows x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
@@ -443,10 +413,11 @@ jobs:
           choco install -y sed
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.10
+        uses: Jimver/cuda-toolkit@v0.2.11
         id: cuda-toolkit
         with:
           cuda: '12.1.0'
+          method: network
 
       - name: Verify CUDA
         shell: bash
@@ -484,6 +455,6 @@ jobs:
       - name: Upload Bladebit CUDA Artifact Windows x86-64
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}.zip
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
