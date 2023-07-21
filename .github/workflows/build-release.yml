@@ -225,6 +225,7 @@ jobs:
         with:
           cuda: '12.1.0'
           method: network
+          linux-local-args: '["--toolkit"]'
 
       - name: Build Bladebit CUDA
         run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
@@ -259,7 +260,7 @@ jobs:
         run: |
           set -eo pipefail
           dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         gmp-devel numactl-devel make git wget subscription-manager
+              gmp-devel numactl-devel make git wget subscription-manager
 
           bash .github/actions/install-cmake-linux.sh
 
@@ -268,12 +269,17 @@ jobs:
           source /opt/rh/gcc-toolset-9/enable
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
 
-      - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.11
-        id: cuda-toolkit
-        with:
-          cuda: '12.1.0'
-          method: network
+      - name: Install CUDA Prerequisites
+        run: |
+          distro=rhel8
+          arch=x86_64
+          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
+          dnf clean expire-cache
+          dnf module install -y nvidia-driver:latest-dkms
+          dnf install -y cuda
+          ls -la /usr/local/
+          ls -la /usr/local/cuda/
 
       - name: Build Bladebit CUDA
         run: |
