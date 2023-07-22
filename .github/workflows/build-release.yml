@@ -299,6 +299,38 @@ jobs:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
+          
+  build-bladebit-centos-arm64:
+    runs-on: [ARM64, Linux]
+    container:
+      image: quay.io/centos/centos:stream8
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Get Version Number
+        id: version_number
+        run: .github/actions/get-version.sh centos arm64
+
+      - name: Install Prerequisites
+        run: |
+          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+                         cmake gmp-devel numactl-devel make git
+
+      - name: Build
+        env:
+          BB_ARTIFACT_NAME: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          BB_VERSION: ${{steps.version_number.outputs.BB_VERSION}}
+        run: |
+          source /opt/rh/gcc-toolset-9/enable
+          .github/actions/build-asset-unix.sh
+
+      - name: Upload Artifact CentOS ARM64
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ steps.version_number.outputs.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
 
   build-bladebit-cuda-linux-arm64:
     runs-on: [ARM64, Linux]
