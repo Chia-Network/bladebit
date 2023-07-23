@@ -1,5 +1,6 @@
 #pragma once
 #include "util/Util.h"
+#include <cstddef>
 
 // Chiapos-compatible bitreader
 class CPBitReader
@@ -154,12 +155,12 @@ private:
             else
             {
                 // No guarantee that the last field is complete, so copy only the bytes we know we have
-                const size_t totalBytes     = CDiv( sizeBits, 8 );
-                const int32  remainderBytes = (int32)( totalBytes - fieldIndex * 8 );
+                const size_t totalBytes = CDiv( sizeBits, 8 );
+                const ptrdiff_t remainderBytes = std::min<ptrdiff_t>(sizeof(field), (fields + totalBytes) - pField);
 
                 field = 0;
                 byte* fieldBytes = (byte*)&field;
-                for( int32 i = 0; i < remainderBytes; i++ )
+                for( ptrdiff_t i = 0; i < remainderBytes; i++ )
                     fieldBytes[i] = pField[i];
             }
 
@@ -184,11 +185,11 @@ private:
                 else
                 {
                     const size_t totalBytes     = CDiv( sizeBits, 8 );
-                    const int32  remainderBytes = (int32)( totalBytes - fieldIndex * 8 );
+                    const ptrdiff_t remainderBytes = std::min<ptrdiff_t>(sizeof(field), (fields + totalBytes) - pField);
 
                     field = 0;
                     byte* fieldBytes = (byte*)&field;
-                    for( int32 i = 0; i < remainderBytes; i++ )
+                    for( ptrdiff_t i = 0; i < remainderBytes; i++ )
                         fieldBytes[i] = pField[i];
                 }
 
