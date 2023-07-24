@@ -4,9 +4,20 @@ else()
     add_library(bladebit_harvester STATIC)
 endif()
 
+string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} SYSTEM_PROCESSOR_LC)
+if(SYSTEM_PROCESSOR_LC MATCHES "arm" OR SYSTEM_PROCESSOR_LC MATCHES "aarch64" OR SYSTEM_PROCESSOR_LC MATCHES "arm64")
+    set(is_arm ON)
+else()
+    set(is_arm OFF)
+endif()
+if(${is_arm})
+    add_compile_options(-mfpu=neon)
+endif()
 
-set_property(TARGET bladebit_harvester PROPERTY PUBLIC_HEADER 
-    src/harvesting/GreenReaper.h 
+
+
+set_property(TARGET bladebit_harvester PROPERTY PUBLIC_HEADER
+    src/harvesting/GreenReaper.h
     src/harvesting/GreenReaperPortable.h)
 
 install(TARGETS bladebit_harvester
@@ -41,12 +52,18 @@ target_sources(bladebit_harvester PRIVATE
     src/b3/blake3.h
     src/b3/blake3_impl.h
     src/b3/blake3_portable.c
-
-    $<${is_x86}:
+    $<$<BOOL:${is_x86}>:
         $<$<PLATFORM_ID:Windows>:
-            src/b3/blake3_sse41.c
-            src/b3/blake3_avx2.c
-            src/b3/blake3_avx512.c
+            $<$<CXX_COMPILER_ID:MSVC>:
+                src/b3/blake3_avx2_x86-64_windows_msvc.asm
+                src/b3/blake3_avx512_x86-64_windows_msvc.asm
+                src/b3/blake3_sse41_x86-64_windows_msvc.asm
+            >
+            $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:
+                src/b3/blake3_avx2_x86-64_windows_gnu.S
+                src/b3/blake3_avx512_x86-64_windows_gnu.S
+                src/b3/blake3_sse41_x86-64_windows_gnu.S
+            >
         >
         $<$<NOT:$<PLATFORM_ID:Windows>>:
             src/b3/blake3_avx2_x86-64_unix.S
@@ -54,7 +71,9 @@ target_sources(bladebit_harvester PRIVATE
             src/b3/blake3_sse41_x86-64_unix.S
         >
     >
-    
+    $<$<BOOL:${is_arm}>:
+        src/b3/blake3_neon.c
+    >
 
     src/util/Log.cpp
     src/util/Util.cpp
@@ -135,7 +154,7 @@ target_compile_definitions(bladebit_harvester
 )
 
 
-target_compile_options(bladebit_harvester PRIVATE 
+target_compile_options(bladebit_harvester PRIVATE
     ${preinclude_pch}
     # $<${have_cuda}:${cuda_archs}>
 )
@@ -147,13 +166,13 @@ endif()
 target_link_libraries(bladebit_harvester
     PRIVATE
         bladebit_config
-    PUBLIC 
+    PUBLIC
         Threads::Threads
         $<${have_cuda}:CUDA::cudart_static>
 )
 
 if(CUDAToolkit_FOUND)
-    set_target_properties(bladebit_harvester PROPERTIES 
+    set_target_properties(bladebit_harvester PROPERTIES
         EXCLUDE_FROM_ALL ON
         MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>
         CUDA_RUNTIME_LIBRARY Static
@@ -165,7 +184,7 @@ endif()
 
  # Disable blake3 conversion loss of data warnings
  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "MSVC")
-    set_source_files_properties( 
+    set_source_files_properties(
         src/b3/blake3_avx2.c
         src/b3/blake3_avx512.c
         src/b3/blake3_sse41.c
