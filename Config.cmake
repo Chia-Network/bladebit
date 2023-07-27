@@ -131,8 +131,9 @@ set(cuda_archs
     $<${is_cuda_release}:
         -gencode=arch=compute_52,code=sm_52 # Maxwell
         -gencode=arch=compute_61,code=sm_61 # Pascal
-        -gencode=arch=compute_70,code=sm_70 # Volta 
+        -gencode=arch=compute_70,code=sm_70 # Volta
         -gencode=arch=compute_86,code=sm_86 # Ampere
+        -gencode=arch=compute_87,code=sm_87 # Orin
         -gencode=arch=compute_89,code=sm_89 # Ada
     >
 
