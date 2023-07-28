@@ -1,6 +1,5 @@
 #pragma once
 #include "util/Util.h"
-#include <cstddef>
 
 // Chiapos-compatible bitreader
 class CPBitReader
@@ -128,39 +127,36 @@ private:
     template<bool CheckAlignment>
     static inline uint64 _Read64( const uint32 bitCount, const byte* fields, const uint64 position, const size_t sizeBits )
     {
-        const uint64 fieldIndex    = position >> 6;                          // position / 64
-        const uint32 fieldBitIdx   = (uint32)( position - fieldIndex * 64 ); // Value start bit position from the left (MSb) in the field itself
+        const uint64 fieldIndex = position >> 6;                          // position / 64
+        const uint32 fieldBitIdx = (uint32)( position - fieldIndex * 64 ); // Value start bit position from the left (MSb) in the field itself
         const uint32 bitsAvailable = 64 - fieldBitIdx;
 
         uint32 shift = 64 - std::min( fieldBitIdx + bitCount, 64u );
 
+        const size_t totalBytes = CDiv( sizeBits, 8 );
         const byte* pField = fields + fieldIndex * 8;
         
+        const byte* pEnd;
         uint64 field;
         uint64 value;
 
         // Check for aligned pointer
         bool isPtrAligned;
-        bool isLastField;
 
         if constexpr ( CheckAlignment )
         {
-            isPtrAligned = ((uintptr_t)pField & 7) == 0; // % 8
-            isLastField  = fieldIndex == ( sizeBits >> 6 ) - 1;
-            
-            if( isPtrAligned && !isLastField )
+            pEnd = fields + totalBytes;
+            isPtrAligned = ((uintptr_t)pField & 7) == 0;
+            const size_t remainderBytes = pEnd - pField;
+
+            if ( remainderBytes >= 8 )
                 field = *((uint64*)pField);
-            else if( !isLastField )
-                memcpy( &field, pField, sizeof( uint64 ) );
             else
             {
                 // No guarantee that the last field is complete, so copy only the bytes we know we have
-                const size_t totalBytes = CDiv( sizeBits, 8 );
-                const ptrdiff_t remainderBytes = std::min<ptrdiff_t>(sizeof(field), (fields + totalBytes) - pField);
-
                 field = 0;
                 byte* fieldBytes = (byte*)&field;
-                for( ptrdiff_t i = 0; i < remainderBytes; i++ )
+                for( int32 i = 0; i < remainderBytes; i++ )
                     fieldBytes[i] = pField[i];
             }
 
@@ -177,19 +173,16 @@ private:
             if constexpr ( CheckAlignment )
             {
                 pField += 8;
-                    
-                if( isPtrAligned && !isLastField )    
+                ASSERT(pField < pEnd);
+                const size_t remainderBytes = pEnd - pField;
+                
+                if( remainderBytes >= 8 )    
                     field = *((uint64*)pField);
-                else if( !isLastField )
-                    memcpy( &field, pField, sizeof( uint64 ) );
                 else
                 {
-                    const size_t totalBytes     = CDiv( sizeBits, 8 );
-                    const ptrdiff_t remainderBytes = std::min<ptrdiff_t>(sizeof(field), (fields + totalBytes) - pField);
-
                     field = 0;
                     byte* fieldBytes = (byte*)&field;
-                    for( ptrdiff_t i = 0; i < remainderBytes; i++ )
+                    for( int32 i = 0; i < remainderBytes; i++ )
                         fieldBytes[i] = pField[i];
                 }
 
