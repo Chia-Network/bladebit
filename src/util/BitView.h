@@ -127,15 +127,15 @@ private:
     template<bool CheckAlignment>
     static inline uint64 _Read64( const uint32 bitCount, const byte* fields, const uint64 position, const size_t sizeBits )
     {
-        const uint64 fieldIndex = position >> 6;                          // position / 64
-        const uint32 fieldBitIdx = (uint32)( position - fieldIndex * 64 ); // Value start bit position from the left (MSb) in the field itself
+        const uint64 fieldIndex    = position >> 6;                          // position / 64
+        const uint32 fieldBitIdx   = (uint32)( position - fieldIndex * 64 ); // Value start bit position from the left (MSb) in the field itself
         const uint32 bitsAvailable = 64 - fieldBitIdx;
 
-        uint32 shift = 64 - std::min( fieldBitIdx + bitCount, 64u );
-
-        const size_t totalBytes = CDiv( sizeBits, 8 );
-        const byte* pField = fields + fieldIndex * 8;
+        const size_t totalBytes    = CDiv( sizeBits, 8 );
+        const byte*  pField        = fields + fieldIndex * 8;
         
+        uint32 shift               = 64 - std::min( fieldBitIdx + bitCount, 64u );
+
         const byte* pEnd;
         uint64 field;
         uint64 value;
@@ -146,6 +146,8 @@ private:
         if constexpr ( CheckAlignment )
         {
             pEnd = fields + totalBytes;
+            ASSERT(pField < pEnd);
+
             isPtrAligned = ((uintptr_t)pField & 7) == 0;
             const size_t remainderBytes = pEnd - pField;
 
@@ -175,7 +177,7 @@ private:
                 pField += 8;
                 ASSERT(pField < pEnd);
                 const size_t remainderBytes = pEnd - pField;
-                
+
                 if( remainderBytes >= 8 )    
                     field = *((uint64*)pField);
                 else
