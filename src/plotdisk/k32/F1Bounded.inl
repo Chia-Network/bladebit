@@ -346,13 +346,12 @@ void DbgValidateF1( DiskPlotContext& context )
 
     // Cleanup
     context.fencePool->RestoreAllFences();
-    bbvirtfreebounded( yReference.Ptr() );
-    bbvirtfreebounded( xReference.Ptr() );
-    bbvirtfreebounded( yBuffer.Ptr() );
-    bbvirtfreebounded( xBuffer.Ptr() );
-    bbvirtfreebounded( tmpBuffer.Ptr() );
-    bbvirtfreebounded( tmpBuffer2.Ptr() );
+    bbvirtfreebounded_span( yReference );
+    bbvirtfreebounded_span( xReference );
+    bbvirtfreebounded_span( yBuffer    );
+    bbvirtfreebounded_span( xBuffer    );
+    bbvirtfreebounded_span( tmpBuffer  );
+    bbvirtfreebounded_span( tmpBuffer2 );
 }
 
 #endif
-

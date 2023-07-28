@@ -1322,8 +1322,8 @@ private:
         }
 
         Log::Line( " Indices are valid" );
-        bbvirtfreebounded( indices.Ptr() );
-        bbvirtfreebounded( tmpIndices.Ptr() );
+        bbvirtfreebounded_span( indices );
+        bbvirtfreebounded_span( tmpIndices );
     }
     #endif
 
