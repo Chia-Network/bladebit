@@ -1,3 +1,8 @@
+foreach(ARCH IN LISTS BB_CUDA_GENCODE_ARCHS)
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode arch=compute_${ARCH},code=sm_${ARCH}")
+endforeach()
+
+
 if(NOT ${BB_HARVESTER_STATIC})
     add_library(bladebit_harvester SHARED)
 else()
