@@ -51,13 +51,16 @@ cmake --install . --prefix harvester_dist
 
 env | sort | grep 'CUDA'
 
-set -x
 if [[ "$host_os" == "windows" ]]; then
-  'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin\cuobjdump' bladebit_harvester.dll
+  set -x
+  '$CUDA_PATH\bin\cuobjdump' bladebit_harvester.dll
+  set +x
 elif [[ "$host_os" == "linux" ]]; then
+  set -x
   /usr/local/cuda/bin/cuobjdump libbladebit_harvester.so
+  set +x
 fi
-set +x
+
 
 pushd harvester_dist/green_reaper
 

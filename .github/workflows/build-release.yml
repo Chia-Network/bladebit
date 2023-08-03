@@ -16,6 +16,11 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Get Version Number
         id: version_number
         shell: bash
@@ -34,7 +39,8 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
+          gh run annotate "$GITHUB_RUN_ID" --message "$BUILD_OUTPUT"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -48,6 +54,11 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Version Number
         id: version_number
@@ -81,7 +92,8 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.zip"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
+          gh run annotate "$GITHUB_RUN_ID" --message "$BUILD_OUTPUT"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -97,6 +109,11 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache DNF packages
         uses: actions/cache@v3
@@ -135,7 +152,8 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-ARM64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
+          gh run annotate "$GITHUB_RUN_ID" --message "$BUILD_OUTPUT"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -153,6 +171,11 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Get Version Number
         id: version_number
         run: bash -e .github/actions/get-version.sh macos arm64
@@ -163,7 +186,8 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-arm64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          BUILD_HARVESTER=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
+          gh run annotate "$GITHUB_RUN_ID" --message "$BUILD_OUTPUT"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -181,6 +205,11 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Get Version Number
         id: version_number
         run: bash -e .github/actions/get-version.sh macos x86-64
@@ -191,7 +220,8 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-x86-64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
+          gh run annotate "$GITHUB_RUN_ID" --message "$BUILD_OUTPUT"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -206,6 +236,11 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Version Number
         id: version_number
@@ -251,6 +286,11 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Version Number
         id: version_number
@@ -299,7 +339,7 @@ jobs:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
-          
+
   build-bladebit-centos-arm64:
     runs-on: [ARM64, Linux]
     container:
@@ -307,6 +347,11 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Version Number
         id: version_number
@@ -339,6 +384,11 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Version Number
         id: version_number
@@ -385,6 +435,11 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Get Version Number
         shell: bash
         id: version_number
@@ -428,6 +483,11 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Version Number
         shell: bash
