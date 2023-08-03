@@ -53,12 +53,10 @@ env | sort | grep 'CUDA'
 
 set -x
 if [[ "$host_os" == "windows" ]]; then
-  echo "$CUDA_HOME"
-  PATH="$PATH":"$CUDA_HOME"/bin
-  cuobjdump bladebit_harvester.dll
+  'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin\cuobjdump' bladebit_harvester.dll
 elif [[ "$host_os" == "linux" ]]; then
-  echo "$CUDA_HOME"
-  PATH="$PATH":"$CUDA_HOME"/bin
+  which nvcc
+  PATH="$PATH":/usr/local/cuda/bin
   cuobjdump libbladebit_harvester.so
 fi
 set +x
