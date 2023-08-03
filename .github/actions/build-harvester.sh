@@ -49,6 +49,12 @@ cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 cmake --build . --config Release --target bladebit_harvester
 cmake --install . --prefix harvester_dist
 
+if [[ "$host_os" == "windows" ]]; then
+  cuobjdump bladebit_harvester.dll
+else
+  cuobjdump libbladebit_harvester.so
+fi
+
 pushd harvester_dist/green_reaper
 
 if [[ "$host_os" == "windows" ]]; then
