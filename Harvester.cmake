@@ -1,5 +1,3 @@
-set(CMAKE_CUDA_ARCHITECTURES "50;52;53;60;61;62;70;72;75;80;86;87;89")
-
 if(NOT ${BB_HARVESTER_STATIC})
     add_library(bladebit_harvester SHARED)
 else()
@@ -139,10 +137,10 @@ target_compile_definitions(bladebit_harvester
 
 target_compile_options(bladebit_harvester PRIVATE 
     ${preinclude_pch}
-    # $<${have_cuda}:${cuda_archs}>
+    ${cuda_archs}
 )
 
-if(${have_cuda})
+if(have_cuda)
     target_link_options(bladebit_harvester PUBLIC $<DEVICE_LINK: ${cuda_archs}>)
 endif()
 

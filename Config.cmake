@@ -127,6 +127,7 @@ set(preinclude_pch
 cmake_policy(SET CMP0105 NEW)
 
 set(cuda_archs
+
     $<${is_cuda_release}:
 ## Maxwell
     ## Tesla/Quadro M series
@@ -150,15 +151,17 @@ set(cuda_archs
     ## Turing
         -gencode=arch=compute_75,code=sm_75
 ## Ampere
-    ## NVIDIA DGX-A100
-       -gencode=arch=compute_80,code=sm_80
-    ## GeForce RTX 3000 series
+    ## NVIDIA A100, DGX-A100
+        -gencode=arch=compute_80,code=sm_80
+    ## GeForce RTX 3000 series, NVIDIA A100
         -gencode=arch=compute_86,code=sm_86
     ## Jetson Orin
         -gencode=arch=compute_87,code=sm_87
 ## Lovelace
     ## NVIDIA GeForce RTX 4090, RTX 4080, RTX 6000, Tesla L40
         -gencode=arch=compute_89,code=sm_89
+    ## Future proofing
+        -gencode=arch=compute_89,code=compute_89
 ## Hopper
     ## NVIDIA H100 (GH100)
         # -gencode=arch=compute_90,code=sm_90
@@ -167,6 +170,6 @@ set(cuda_archs
 
     $<${is_cuda_debug}:
         -arch=native
-        # -gencode=arch=compute_52,code=sm_50 # Maxwell
+        # -gencode=arch=compute_52,code=sm_52 # Maxwell
     >
 )
