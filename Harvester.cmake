@@ -137,10 +137,10 @@ target_compile_definitions(bladebit_harvester
 
 target_compile_options(bladebit_harvester PRIVATE 
     ${preinclude_pch}
-    # $<${have_cuda}:${cuda_archs}>
+    ${cuda_archs}
 )
 
-if(${have_cuda})
+if(have_cuda)
     target_link_options(bladebit_harvester PUBLIC $<DEVICE_LINK: ${cuda_archs}>)
 endif()
 
