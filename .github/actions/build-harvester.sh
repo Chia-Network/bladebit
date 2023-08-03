@@ -51,14 +51,17 @@ cmake --install . --prefix harvester_dist
 
 env | sort | grep 'CUDA'
 
-echo "$CUDA_HOME"
-PATH="$PATH":"$CUDA_HOME"/bin
-/usr/local/cuda/bin
+set -x
 if [[ "$host_os" == "windows" ]]; then
+  echo "$CUDA_HOME"
+  PATH="$PATH":"$CUDA_HOME"/bin
   cuobjdump bladebit_harvester.dll
 elif [[ "$host_os" == "linux" ]]; then
+  echo "$CUDA_HOME"
+  PATH="$PATH":"$CUDA_HOME"/bin
   cuobjdump libbladebit_harvester.so
 fi
+set +x
 
 pushd harvester_dist/green_reaper
 
