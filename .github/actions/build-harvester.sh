@@ -49,9 +49,14 @@ cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 cmake --build . --config Release --target bladebit_harvester
 cmake --install . --prefix harvester_dist
 
+env | sort | grep 'CUDA'
+
+echo "$CUDA_HOME"
+PATH="$PATH":"$CUDA_HOME"/bin
+/usr/local/cuda/bin
 if [[ "$host_os" == "windows" ]]; then
   cuobjdump bladebit_harvester.dll
-else
+elif [[ "$host_os" == "linux" ]]; then
   cuobjdump libbladebit_harvester.so
 fi
 
