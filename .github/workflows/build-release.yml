@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -56,7 +56,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -111,7 +111,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -172,7 +172,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -206,7 +206,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -238,7 +238,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -288,7 +288,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -349,7 +349,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -386,7 +386,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -436,7 +436,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -485,7 +485,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
+        uses: Chia-Network/actions/setjobenv@wallentx-patch-1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
