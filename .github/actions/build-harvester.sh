@@ -5,6 +5,7 @@ if [[ $RUNNER_DEBUG = 1 ]]; then
 fi
 
 host_os=$(uname -a)
+case "${host_os}" in
   Linux*)  host_os="linux";;
   Darwin*) host_os="macos";;
   CYGWIN*) host_os="windows";;
