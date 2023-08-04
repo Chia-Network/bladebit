@@ -40,7 +40,6 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY" || echo "No Summary"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -93,7 +92,6 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY" || echo "No Summary"
         env:
           CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
 
@@ -155,7 +153,6 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY" || echo "No Summary"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -188,8 +185,7 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-arm64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          BUILD_HARVESTER=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
-          echo "$BUILD_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -223,7 +219,6 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY" || echo "No Summary"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -303,7 +298,6 @@ jobs:
           set -eo pipefail
           dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
               gmp-devel numactl-devel make git wget subscription-manager
-
           bash .github/actions/install-cmake-linux.sh
 
       - name: Build Bladebit
