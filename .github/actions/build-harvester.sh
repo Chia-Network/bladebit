@@ -52,13 +52,9 @@ cmake --install . --prefix harvester_dist
 env | sort | grep 'CUDA'
 
 if [[ "$host_os" == "windows" ]]; then
-  set -x
   OBJDUMP=$("${CUDA_PATH}"\\bin\\cuobjdump bladebit_harvester.dll)
-  set +x
 elif [[ "$host_os" == "linux" ]]; then
-  set -x
   OBJDUMP=$(/usr/local/cuda/bin/cuobjdump libbladebit_harvester.so)
-  set +x
 fi
 
 pushd harvester_dist/green_reaper

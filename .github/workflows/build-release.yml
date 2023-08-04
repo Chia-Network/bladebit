@@ -40,7 +40,7 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY" || echo "No Summary"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -93,7 +93,7 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY" || echo "No Summary"
         env:
           CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
 
@@ -155,7 +155,7 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY" || echo "No Summary"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -223,7 +223,7 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          [[ -f "summary.md" ]] && cat summary.md >> "$GITHUB_STEP_SUMMARY" || echo "No Summary"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
