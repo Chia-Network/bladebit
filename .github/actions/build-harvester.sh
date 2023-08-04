@@ -5,12 +5,11 @@ if [[ $RUNNER_DEBUG = 1 ]]; then
 fi
 
 host_os=$(uname -a)
-case "${host_os}" in
-Linux*) host_os="linux" ;;
-Darwin*) host_os="macos" ;;
-CYGWIN*) host_os="windows" ;;
-MINGW*) host_os="windows" ;;
-*Msys) host_os="windows" ;;
+  Linux*)  host_os="linux";;
+  Darwin*) host_os="macos";;
+  CYGWIN*) host_os="windows";;
+  MINGW*)  host_os="windows";;
+  *Msys)   host_os="windows";;
 esac
 
 if [[ "$host_os" == "windows" ]]; then
@@ -66,7 +65,7 @@ fi
 artifact_files=($(find . -type f -name '*.*' | cut -c3-))
 
 # shellcheck disable=SC2068
-$sha_sum ${artifact_files[@]} >sha256checksum
+$sha_sum ${artifact_files[@]} > sha256checksum
 
 artifact_files+=("sha256checksum")
 
@@ -79,7 +78,7 @@ fi
 
 popd
 mv "harvester_dist/green_reaper/${artifact_name}" ./
-$sha_sum "${artifact_name}" >"${artifact_name}.sha256.txt"
+$sha_sum "${artifact_name}" > "${artifact_name}.sha256.txt"
 ls -la
 cat "${artifact_name}.sha256.txt"
 
@@ -106,7 +105,7 @@ if [[ "$CI" == "true" ]]; then
     harvester_artifact_path="$(pwd)/${artifact_name}*"
   fi
   echo "harvester_artifact_path=$harvester_artifact_path"
-  echo "harvester_artifact_path=$harvester_artifact_path" >>"$GITHUB_ENV"
+  echo "harvester_artifact_path=$harvester_artifact_path" >> "$GITHUB_ENV"
 fi
 
 popd
