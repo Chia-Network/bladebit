@@ -47,8 +47,14 @@ pushd build-harvester
 cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 
 cmake --build . --config Release --target bladebit_harvester
-cmake --install . --prefix harvester_dist
 
+if [[ "$host_os" == "windows" ]]; then
+  OBJDUMP=$("${CUDA_PATH}"\\bin\\cuobjdump Release\\bladebit_harvester.dll)
+elif [[ "$host_os" == "linux" ]]; then
+  OBJDUMP=$(/usr/local/cuda/bin/cuobjdump libbladebit_harvester.so)
+fi
+
+cmake --install . --prefix harvester_dist
 pushd harvester_dist/green_reaper
 
 if [[ "$host_os" == "windows" ]]; then
@@ -78,6 +84,22 @@ ls -la
 cat "${artifact_name}.sha256.txt"
 
 if [[ "$CI" == "true" ]]; then
+  if [[ "$host_os" == "windows" ]] || [[ "$host_os" == "linux" ]]; then
+    while IFS= read -r line; do
+      echo -e "$(echo ${line#* } | tr -d '*')\n###### <sup>${line%% *}</sup>\n"
+    done <"${artifact_name}.sha256.txt" >> "$GITHUB_STEP_SUMMARY"
+    echo "| Arch | Code Version | Host | Compile Size |" >> "$GITHUB_STEP_SUMMARY"
+    echo "| --- | --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+    echo "$OBJDUMP" | awk -v RS= -v FS='\n' -v OFS=' | ' '{
+    for (i=1; i<=NF; i++) {
+        if (index($i, "=")) {
+            gsub(/.* = /, "", $i);
+            }
+        }
+        print $3, $4, $5, $6;
+    }' | sed 's/^/| /; s/$/ |/; s/ |  | / | /g' >> "$GITHUB_STEP_SUMMARY"
+  fi
+
   if [[ "$host_os" == "windows" ]]; then
     harvester_artifact_path="$(cygpath -m "$(pwd)/${artifact_name}")*"
   else
