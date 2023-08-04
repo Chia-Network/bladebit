@@ -139,32 +139,31 @@ private:
         const uint32 fieldBitIdx   = (uint32)( position - fieldIndex * 64 ); // Value start bit position from the left (MSb) in the field itself
         const uint32 bitsAvailable = 64 - fieldBitIdx;
 
-        uint32 shift = 64 - std::min( fieldBitIdx + bitCount, 64u );
-
-        const byte* pField = fields + fieldIndex * 8;
+        const size_t totalBytes    = CDiv( sizeBits, 8 );
+        const byte*  pField        = fields + fieldIndex * 8;
         
+        uint32 shift               = 64 - std::min( fieldBitIdx + bitCount, 64u );
+
+        const byte* pEnd;
         uint64 field;
         uint64 value;
 
         // Check for aligned pointer
         bool isPtrAligned;
-        bool isLastField;
 
         if constexpr ( CheckAlignment )
         {
-            isPtrAligned = ((uintptr_t)pField & 7) == 0; // % 8
-            isLastField  = fieldIndex == ( sizeBits >> 6 ) - 1;
-            
-            if( isPtrAligned && !isLastField )
+            pEnd = fields + totalBytes;
+            ASSERT(pField < pEnd);
+
+            isPtrAligned = ((uintptr_t)pField & 7) == 0;
+            const size_t remainderBytes = pEnd - pField;
+
+            if ( remainderBytes >= 8 )
                 field = *((uint64*)pField);
-            else if( !isLastField )
-                memcpy( &field, pField, sizeof( uint64 ) );
             else
             {
                 // No guarantee that the last field is complete, so copy only the bytes we know we have
-                const size_t totalBytes     = CDiv( sizeBits, 8 );
-                const int32  remainderBytes = (int32)( totalBytes - fieldIndex * 8 );
-
                 field = 0;
                 byte* fieldBytes = (byte*)&field;
                 for( int32 i = 0; i < remainderBytes; i++ )
@@ -184,16 +183,13 @@ private:
             if constexpr ( CheckAlignment )
             {
                 pField += 8;
-                    
-                if( isPtrAligned && !isLastField )    
+                ASSERT(pField < pEnd);
+                const size_t remainderBytes = pEnd - pField;
+
+                if( remainderBytes >= 8 )    
                     field = *((uint64*)pField);
-                else if( !isLastField )
-                    memcpy( &field, pField, sizeof( uint64 ) );
                 else
                 {
-                    const size_t totalBytes     = CDiv( sizeBits, 8 );
-                    const int32  remainderBytes = (int32)( totalBytes - fieldIndex * 8 );
-
                     field = 0;
                     byte* fieldBytes = (byte*)&field;
                     for( int32 i = 0; i < remainderBytes; i++ )
