@@ -9,16 +9,21 @@
 #include "MemPhase3.h"
 #include "MemPhase4.h"
 
+//----------------------------------------------------------
+void MemPlotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
+{
+    _context.cfg.gCfg = &gCfg;
+}
 
 //----------------------------------------------------------
-MemPlotter::MemPlotter( const MemPlotConfig& cfg )
+void MemPlotter::Init()
 {
-    ZeroMem( &_context );
+    auto& cfg = *_context.cfg.gCfg;
 
     const bool warmStart = cfg.warmStart;
 
     const NumaInfo* numa = nullptr;
-    if( !cfg.noNUMA )
+    if( !cfg.disableNuma )
         numa = SysHost::GetNUMAInfo();
     
     if( numa && numa->nodeCount < 2 )
@@ -33,7 +38,7 @@ MemPlotter::MemPlotter( const MemPlotConfig& cfg )
     _context.threadCount = cfg.threadCount;
     
     // Create a thread pool
-    _context.threadPool = new ThreadPool( cfg.threadCount, ThreadPool::Mode::Fixed, cfg.noCPUAffinity );
+    _context.threadPool = new ThreadPool( cfg.threadCount, ThreadPool::Mode::Fixed, cfg.disableCpuAffinity );
 
     // Allocate buffers
     {
@@ -112,11 +117,7 @@ MemPlotter::MemPlotter( const MemPlotConfig& cfg )
 }
 
 //----------------------------------------------------------
-MemPlotter::~MemPlotter()
-{}
-
-//----------------------------------------------------------
-bool MemPlotter::Run( const PlotRequest& request )
+void MemPlotter::Run( const PlotRequest& request )
 {
     auto& cx = _context;
 
@@ -124,28 +125,10 @@ bool MemPlotter::Run( const PlotRequest& request )
     cx.plotId       = request.plotId;
     cx.plotMemo     = request.memo;
     cx.plotMemoSize = request.memoSize;
-    
-    // Open the plot file for writing before we actually start plotting
-    const int PLOT_FILE_RETRIES = 16;
-    FileStream* plotfile = new FileStream();
-    ASSERT( plotfile );
 
-    for( int i = 0; i < PLOT_FILE_RETRIES; i++ )
-    {
-        if( !plotfile->Open( request.outPath, FileMode::Create, FileAccess::Write, FileFlags::NoBuffering | FileFlags::LargeFile ) )
-        {
-            if( i+1 >= PLOT_FILE_RETRIES )
-            {
-                Log::Error( "Error: Failed to open plot output file at %s for writing after %d tries.", request.outPath, PLOT_FILE_RETRIES );
-                delete plotfile;
-                return false;
-            }
-
-            continue;
-        }
-
-        break;
-    }
+    // Start the first plot immediately, to exit early in case of error    
+    if( request.isFirstPlot )
+        BeginPlotFile( request );
     
     // Start plotting
     auto plotTimer = TimerBegin();
@@ -175,11 +158,9 @@ bool MemPlotter::Run( const PlotRequest& request )
         Log::Line( "Finished Phase 2 in %.2lf seconds.", elapsed );
     }
 
-    // Start writing the plot file
-    if( !_context.plotWriter )
-        _context.plotWriter = new DiskPlotWriter();
-    
-    cx.plotWriter->BeginPlot( request.outPath, *plotfile, request.plotId, request.memo, request.memoSize );
+    // Start the new plot file
+    if( !request.isFirstPlot )
+        BeginPlotFile( request );
 
     {
         auto timeStart = TimerBegin();
@@ -204,6 +185,8 @@ bool MemPlotter::Run( const PlotRequest& request )
     }
 
     // Wait flush writer, if this is the final plot
+    _context.plotWriter->EndPlot( true );
+
     if( request.IsFinalPlot )
     {
         auto timeStart = TimerBegin();
@@ -220,60 +203,32 @@ bool MemPlotter::Run( const PlotRequest& request )
     Log::Line( "Finished plotting in %.2lf seconds (%.2lf minutes).", 
         plotElapsed, plotElapsed / 60.0 );
 
-    cx.plotCount ++;
-    return true;
+    cx.plotCount++;
+}
+
+//-----------------------------------------------------------
+void MemPlotter::BeginPlotFile( const PlotRequest& request )
+{
+    // Re-create the serializer for now to workaround multiple-run serializer bug 
+    if( _context.plotWriter )
+    {
+        delete _context.plotWriter;
+        _context.plotWriter = nullptr;
+    }
+
+    if( !_context.plotWriter )
+        _context.plotWriter = new PlotWriter();
+    
+    FatalIf( !_context.plotWriter->BeginPlot( PlotVersion::v2_0, request.outDir, request.plotFileName, 
+              request.plotId, request.memo, request.memoSize, _context.cfg.gCfg->compressionLevel ),
+            "Failed to open plot file with error: %d", _context.plotWriter->GetError() );
 }
 
 //-----------------------------------------------------------
 void MemPlotter::WaitPlotWriter()
 {
-    // if( !_context.plotWriter )
-    //     _context.plotWriter = new DiskPlotWriter();
-    // else
-    // {
-        // Wait until the current plot has finished writing
-        if( !_context.plotWriter->WaitUntilFinishedWriting() )
-            Fatal( "Failed to write plot file %s with error: %d", 
-                _context.plotWriter->FilePath().c_str(),
-                _context.plotWriter->GetError() );
-
-        // Rename plot file to final plot file name (remove .tmp suffix)
-        const char*  tmpName       = _context.plotWriter->FilePath().c_str();
-        const size_t tmpNameLength = strlen( tmpName );
-
-        char* plotName = new char[tmpNameLength - 3];  ASSERT( plotName );
-
-        memcpy( plotName, tmpName, tmpNameLength - 4 );
-        plotName[tmpNameLength-4] = 0;
-
-        int r = rename( tmpName, plotName );
-        
-        if( r )
-        {
-            Log::Error( "Error: Failed to rename plot file %s.", tmpName );
-            Log::Error( " Please rename it manually." );
-        }
-
-        Log::Line( "" );
-        Log::Line( "Plot %s finished writing to disk:", r ? tmpName : plotName );
-
-        delete[] plotName;
-
-        // Print final pointer offsets
-        const uint64* tablePointers = _context.plotWriter->GetTablePointers();
-        for( uint i = 0; i < 7; i++ )
-        {
-            const uint64 ptr = Swap64( tablePointers[i] );
-            Log::Line( "  Table %u pointer  : %16lu ( 0x%016lx )", i+1, ptr, ptr );
-        }
-
-        for( uint i = 7; i < 10; i++ )
-        {
-            const uint64 ptr = Swap64( tablePointers[i] );
-            Log::Line( "  C%u table pointer : %16lu ( 0x%016lx )", i+1-7, ptr, ptr );
-        }
-        Log::Line( "" );
-    // }
+    _context.plotWriter->WaitForPlotToComplete();
+    _context.plotWriter->DumpTables();
 }
 
 ///

@@ -1,27 +1,43 @@
 #pragma once
-#include "plotting/PlotTools.h"
+// #include "plotting/PlotTools.h"
+#include "plotting/FSETableGenerator.h"
 #include "plotting/PlotTypes.h"
+#include "plotting/PlotHeader.h"
 #include "io/FileStream.h"
 #include "util/Util.h"
 #include <vector>
 
 class CPBitReader;
 
-struct PlotHeader
+enum class ProofFetchResult
 {
-    byte   id  [BB_PLOT_ID_LEN]        = { 0 };
-    byte   memo[BB_PLOT_MEMO_MAX_SIZE] = { 0 };
-    uint   memoLength                  = 0;
-    uint32 k                           = 0;
-    uint64 tablePtrs[10]               = { 0 };
+    OK = 0,
+    NoProof,
+    Error,
+    CompressionError
 };
 
 // Base Abstract class for read-only plot files
 class IPlotFile
 {
 public:
-
     inline uint K() const { return _header.k; }
+
+    inline PlotFlags Flags() const 
+    {
+        if( _version < PlotVersion::v2_0 )
+            return PlotFlags::None;
+
+         return _header.flags;
+    }
+
+    inline uint CompressionLevel() const
+    {
+        if( _version < PlotVersion::v2_0 )
+            return 0;
+
+        return _header.compressionLevel;
+    }
 
     inline const byte* PlotId() const { return _header.id; }
 
@@ -96,7 +112,8 @@ protected:
     bool ReadHeader( int& error );
 
 protected:
-    PlotHeader _header;
+    PlotFileHeaderV2 _header;
+    PlotVersion      _version;
 };
 
 class MemoryPlot : public IPlotFile
@@ -153,6 +170,9 @@ public:
     PlotReader( IPlotFile& plot );
     ~PlotReader();
 
+    // Start reading a different plot
+    void SetPlot( IPlotFile& plot );
+
     uint64 GetC3ParkCount() const;
 
     // Get the maximum potential F7 count.
@@ -179,11 +199,13 @@ public:
     // If the return value is negative, there was an error reading the park.
     int64 ReadC3Park( uint64 parkIndex, uint64* f7Buffer );
 
-    bool ReadP7Entries( uint64 parkIndex, uint64* p7Indices );
+    bool ReadP7Entries( uint64 parkIndex, uint64 p7ParkEntries[kEntriesPerPark] );
+
+    bool ReadP7Entry( uint64 p7Index, uint64& outP7Entry );
 
     uint64 GetFullProofForF7Index( uint64 f7Index, byte* fullProof );
 
-    bool FetchProof( uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] );
+    ProofFetchResult FetchProof( uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] );
 
     // void   FindF7ParkIndices( uintt64 f7, std::vector<uint64> indices );
     bool ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints[kEntriesPerPark], uint64& outEntryCount );
@@ -194,25 +216,54 @@ public:
 
     inline IPlotFile& PlotFile() const { return _plot; }
 
-    Span<uint64> GetP7IndicesForF7( const uint64 f7, Span<uint64> indices );
-    
+    // Returns the number of f7s found and the starting index as outStartT6Index.
+    uint64 GetP7IndicesForF7( const uint64 f7, uint64& outStartT6Index );
+
+    ProofFetchResult FetchQualityXsForP7Entry( uint64 t6Index,const byte challenge[BB_CHIA_CHALLENGE_SIZE], uint64& outX1, uint64& outX2 );
+    ProofFetchResult FetchQualityForP7Entry( uint64 t6Index, const byte challenge[BB_CHIA_CHALLENGE_SIZE], byte outQuality[BB_CHIA_QUALITY_SIZE] );
+
+    TableId           GetLowestStoredTable() const;
+    bool              IsCompressedXTable( TableId table ) const;
+    size_t            GetParkSizeForTable( TableId table ) const;
+    uint32            GetLPStubBitSize( TableId table ) const;
+    uint32            GetLPStubByteSize( TableId table ) const;
+    size_t            GetParkDeltasSectionMaxSize( TableId table ) const;
+    const FSE_DTable* GetDTableForTable( TableId table ) const;
+
+    // Takes ownership of a decompression context
+    void AssignDecompressionContext( struct GreenReaperContext* context );
+
+    void ConfigDecompressor( uint32 threadCount, bool disableCPUAffinity, uint32 cpuOffset = 0 );
+    inline struct GreenReaperContext* GetDecompressorContext() const { return _grContext; }
+
 private:
+    ProofFetchResult DecompressProof( const uint64 compressedProof[BB_PLOT_PROOF_X_COUNT], uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] );
 
     bool ReadLPParkComponents( TableId table, uint64 parkIndex, 
                                CPBitReader& outStubs, byte*& outDeltas, 
                                uint128& outBaseLinePoint, uint64& outDeltaCounts );
 
+    bool LoadP7Park( uint64 parkIndex );
+
     bool LoadC2Entries();
+
+    struct GreenReaperContext* GetGRContext();
+
 private:
     IPlotFile& _plot;
     uint32     _version;
 
     // size_t  _parkBufferSize;
-    uint64*      _parkBuffer    ;        // Buffer for loading compressed park data.
-    byte*        _deltasBuffer  ;        // Buffer for decompressing deltas in parks that have delta. 
+    uint64*      _parkBuffer;           // Buffer for loading compressed park data.
+    byte*        _deltasBuffer;         // Buffer for decompressing deltas in parks that have delta. 
 
-    Span<uint64> _c2Entries;
     byte*        _c1Buffer = nullptr;
+    Span<uint64> _c2Entries;
     Span<uint64> _c3Buffer;
+
+    struct GreenReaperContext* _grContext = nullptr;    // Used for decompressing
+    
+    int64  _park7Index = -1;
+    uint64 _park7Entries[kEntriesPerPark];
 };
 

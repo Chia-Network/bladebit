@@ -55,6 +55,9 @@ public:
     template<uint32 ThreadCount>
     static void SortYWithKey( ThreadPool& pool, uint64* input, uint64* tmp, uint32* keyInput, uint32* keyTmp, uint64 length );
 
+    template<uint32 ThreadCount>
+    static void SortYWithKey( ThreadPool& pool, const uint32 threadCount, uint64* input, uint64* tmp, uint32* keyInput, uint32* keyTmp, uint64 length );
+
 private:
 
     template<uint32 ThreadCount, SortMode Mode, typename T1, typename TK, int MaxIter = sizeof( T1 )>
@@ -105,6 +108,13 @@ template<uint32 ThreadCount>
 inline void RadixSort256::SortYWithKey( ThreadPool& pool, uint64* input, uint64* tmp, uint32* keyInput, uint32* keyTmp, uint64 length )
 {
     DoSort<ThreadCount, SortAndGenKey, uint64, uint32, 5>( pool, 0, input, tmp, keyInput, keyTmp, length );
+}
+
+//-----------------------------------------------------------
+template<uint32 ThreadCount>
+inline void RadixSort256::SortYWithKey( ThreadPool& pool, const uint32 threadCount, uint64* input, uint64* tmp, uint32* keyInput, uint32* keyTmp, uint64 length )
+{
+    DoSort<ThreadCount, SortAndGenKey, uint64, uint32, 5>( pool, threadCount, input, tmp, keyInput, keyTmp, length );
 }
 
 //-----------------------------------------------------------

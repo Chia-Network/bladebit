@@ -49,8 +49,8 @@
 #define BB_DP_DBG_TEST_DIR      "/home/harold/plot/dbg/"
 #define BB_DP_DBG_REF_DIR       "/home/harold/plot/ref/"
 
-// #define BB_DP_DBG_SKIP_PHASE_1  1
-// #define BB_DP_DBG_SKIP_PHASE_2  1
+#define BB_DP_DBG_SKIP_PHASE_1  1
+#define BB_DP_DBG_SKIP_PHASE_2  1
 
 // Skip all of Phase 1 except the C tables writing.
 // #NOTE: BB_DP_DBG_SKIP_PHASE_1 Must be defined
@@ -102,6 +102,9 @@
     #else
         #define BB_DBG_ValidateBoundedPairs( numBuckets, table, context )
     #endif
+
+    // Dump sorted line points to a file
+    #define BB_DBG_DumpLinePoints_T2 1 
 
     #define BB_DP_DBG_WriteTableCounts( context ) Debug::WriteTableCounts( context )
     #define BB_DP_DBG_ReadTableCounts( context )  Debug::ReadTableCounts( context )

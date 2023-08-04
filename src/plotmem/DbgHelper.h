@@ -3,6 +3,7 @@
 #include "PlotContext.h"
 #include "util/Log.h"
 #include "io/FileStream.h"
+#include "plotdisk/jobs/IOJob.h"
 
 #define DBG_TABLES_PATH ".sandbox/"
 
@@ -243,187 +244,194 @@ inline bool DbgReadTableFromFile( ThreadPool& pool, const char* path, uint64& ou
 template<typename T>
 inline void DbgWriteTableToFile( ThreadPool& pool, const char* path, uint64 entryCount, const T* entries, bool unBuffered )
 {
-    if( entryCount < 1 )
-        return;
+    // if( entryCount < 1 )
+    //     return;
 
-    const FileFlags flags = unBuffered ? FileFlags::None : FileFlags::NoBuffering; 
+    // const FileFlags flags = unBuffered ? FileFlags::None : FileFlags::NoBuffering; 
 
     Log::Line( "Started writing table file @ %s", path );
     auto timer = TimerBegin();
 
-    FileStream file;
-    if( !file.Open( path, FileMode::Create, FileAccess::Write ,flags ) )
+    int err = 0;
+    if( !IOJob::WriteToFile( path, entries, entryCount * sizeof( T), err ) )
     {
-        Log::Line( "Error: Failed to open table file '%s'.", path );
+        Log::Error( "Failed to write table with error %d", err );
         return;
     }
 
-    // Reserve the total size
-    const size_t size        = sizeof( T ) * entryCount;
+    // FileStream file;
+    // if( !file.Open( path, FileMode::Create, FileAccess::Write ,flags ) )
+    // {
+    //     Log::Line( "Error: Failed to open table file '%s'.", path );
+    //     return;
+    // }
 
-    const size_t blockSize   = file.BlockSize();
-    const size_t totalBlocks = size / blockSize;
+    // // Reserve the total size
+    // const size_t size        = sizeof( T ) * entryCount;
 
-    ASSERT( size > blockSize );
+    // const size_t blockSize   = file.BlockSize();
+    // const size_t totalBlocks = size / blockSize;
 
-    if( !file.Reserve( blockSize + CDiv( size, (int)blockSize ) ) )
-    {
-        Log::Line( "Failed to reserve size with error %d for table '%s'.", file.GetError(), path );
-    }
+    // ASSERT( size > blockSize );
 
-    /// Write the entry count as a whole block
-    static void* block = nullptr;
-    if( !block )
-    {
-        #if PLATFORM_IS_UNIX
-            int r = posix_memalign( &block, blockSize, blockSize );
-            if( r != 0 )
-            {
-                Log::Line( "Failed to get aligned block with error %d.", r );
-                return;
-            }
-        #else
-            block = _aligned_malloc( blockSize, blockSize );
+    // if( !file.Reserve( blockSize + CDiv( size, (int)blockSize ) ) )
+    // {
+    //     Log::Line( "Failed to reserve size with error %d for table '%s'.", file.GetError(), path );
+    // }
+
+    // /// Write the entry count as a whole block
+    // static void* block = nullptr;
+    // if( !block )
+    // {
+    //     #if PLATFORM_IS_UNIX
+    //         int r = posix_memalign( &block, blockSize, blockSize );
+    //         if( r != 0 )
+    //         {
+    //             Log::Line( "Failed to get aligned block with error %d.", r );
+    //             return;
+    //         }
+    //     #else
+    //         block = _aligned_malloc( blockSize, blockSize );
             
-            if( !block )
-            {
-                Log::Line( "Failed to allocate aligned block." );
-                return;
-            }
-        #endif
-    }
-    ASSERT( block );
+    //         if( !block )
+    //         {
+    //             Log::Line( "Failed to allocate aligned block." );
+    //             return;
+    //         }
+    //     #endif
+    // }
+    // ASSERT( block );
     
-    memset( block, 0, blockSize );
-    *((uint64*)block) = entryCount;
+    // memset( block, 0, blockSize );
+    // *((uint64*)block) = entryCount;
 
-    if( file.Write( block, blockSize ) != (ssize_t)blockSize )
-    {
-        Log::Line( "Error: Failed to write count on table file '%s'.", path );
-        return;
-    }
-    file.Close();
+    // if( file.Write( block, blockSize ) != (ssize_t)blockSize )
+    // {
+    //     Log::Line( "Error: Failed to write count on table file '%s'.", path );
+    //     return;
+    // }
+    // file.Close();
 
-    ///
-    /// Multi-threaded writing
-    ///
-    struct WriteJob
-    {
-        FileStream file     ;
-        byte*      buffer   ;
-        size_t     writeSize;
-        size_t     blockSize;
-    };
+    // ///
+    // /// Multi-threaded writing
+    // ///
+    // struct WriteJob
+    // {
+    //     FileStream file     ;
+    //     byte*      buffer   ;
+    //     size_t     writeSize;
+    //     size_t     blockSize;
+    // };
     
-    #if __GNUC__ > 7
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wclass-memaccess"
-    #endif
+    // #if __GNUC__ > 7
+    // #pragma GCC diagnostic push
+    // #pragma GCC diagnostic ignored "-Wclass-memaccess"
+    // #endif
 
-    WriteJob jobs[MAX_THREADS];
-    memset( jobs, 0, sizeof( jobs ) );
+    // WriteJob jobs[MAX_THREADS];
+    // memset( jobs, 0, sizeof( jobs ) );
 
-    #if __GNUC__ > 7
-    #pragma GCC diagnostic pop
-    #endif
+    // #if __GNUC__ > 7
+    // #pragma GCC diagnostic pop
+    // #endif
 
-    const uint threadCount = pool.ThreadCount();
-    ASSERT( threadCount <= MAX_THREADS );
+    // const uint threadCount = pool.ThreadCount();
+    // ASSERT( threadCount <= MAX_THREADS );
    
-    const size_t blocksPerThread = totalBlocks / threadCount;
-    const size_t threadWriteSize = blocksPerThread * blockSize;
+    // const size_t blocksPerThread = totalBlocks / threadCount;
+    // const size_t threadWriteSize = blocksPerThread * blockSize;
 
-    for( uint i = 0; i < threadCount; i++ )
-    {
-        auto& job = jobs[i];
+    // for( uint i = 0; i < threadCount; i++ )
+    // {
+    //     auto& job = jobs[i];
 
-        const size_t offset = threadWriteSize * i;
+    //     const size_t offset = threadWriteSize * i;
 
-        // Open a new handle to the file and seek it to the correct position
-        job.file = FileStream();
-        if( !job.file.Open( path, FileMode::Open, FileAccess::Write, flags ) )
-        {
-            Log::Line( "Error: Failed to open table file '%s'.", path );
-            return;
-        }
+    //     // Open a new handle to the file and seek it to the correct position
+    //     job.file = FileStream();
+    //     if( !job.file.Open( path, FileMode::Open, FileAccess::Write, flags ) )
+    //     {
+    //         Log::Line( "Error: Failed to open table file '%s'.", path );
+    //         return;
+    //     }
 
-        if( !job.file.Seek( (int64)(blockSize + offset), SeekOrigin::Begin ) )
-        {
-            Log::Line( "Error: Failed to seek table file '%s'.", path );
-            return;
-        }
+    //     if( !job.file.Seek( (int64)(blockSize + offset), SeekOrigin::Begin ) )
+    //     {
+    //         Log::Line( "Error: Failed to seek table file '%s'.", path );
+    //         return;
+    //     }
 
-        job.buffer    = ((byte*)entries) + offset;
-        job.writeSize = threadWriteSize;
-        job.blockSize = blockSize;
-    }
+    //     job.buffer    = ((byte*)entries) + offset;
+    //     job.writeSize = threadWriteSize;
+    //     job.blockSize = blockSize;
+    // }
 
-    pool.RunJob( (JobFunc)[]( void* pdata ) {
+    // pool.RunJob( (JobFunc)[]( void* pdata ) {
 
-        WriteJob& job = *(WriteJob*)pdata;
+    //     WriteJob& job = *(WriteJob*)pdata;
 
-        size_t size = job.writeSize;
+    //     size_t size = job.writeSize;
 
-        // Write blocks until we run out
-        while( size > 0 )
-        {
-            ssize_t written = job.file.Write( job.buffer, size );
-            if( written < 0 )
-            {
-                Log::Line( "Error: Write failure." );
-                return;
-            }
+    //     // Write blocks until we run out
+    //     while( size > 0 )
+    //     {
+    //         ssize_t written = job.file.Write( job.buffer, size );
+    //         if( written < 0 )
+    //         {
+    //             Log::Line( "Error: Write failure." );
+    //             return;
+    //         }
             
-            ASSERT( size >= (size_t)written );
+    //         ASSERT( size >= (size_t)written );
 
-            size       -= (size_t)written;
-            job.buffer += written;
-        }
+    //         size       -= (size_t)written;
+    //         job.buffer += written;
+    //     }
 
-        job.file.Close();
+    //     job.file.Close();
 
-    }, jobs, threadCount, sizeof( WriteJob ) );
+    // }, jobs, threadCount, sizeof( WriteJob ) );
     
-    // Write any remainder
-    const size_t totalThreadWrite = threadWriteSize * threadCount;
-    size_t       remainder        = size - totalThreadWrite;
+    // // Write any remainder
+    // const size_t totalThreadWrite = threadWriteSize * threadCount;
+    // size_t       remainder        = size - totalThreadWrite;
 
-    // Re-open without block-aligned writes
-    if( remainder > 0 )
-    {
-        if( !file.Open( path, FileMode::Open, FileAccess::Write ) )
-        {
-            Log::Line( "Error: Failed to open table file '%s'.", path );
-            return;
-        }
+    // // Re-open without block-aligned writes
+    // if( remainder > 0 )
+    // {
+    //     if( !file.Open( path, FileMode::Open, FileAccess::Write ) )
+    //     {
+    //         Log::Line( "Error: Failed to open table file '%s'.", path );
+    //         return;
+    //     }
 
-        const size_t seek = blockSize + totalThreadWrite;
+    //     const size_t seek = blockSize + totalThreadWrite;
 
-        if( !file.Seek( (int64)seek, SeekOrigin::Begin ) )
-        {
-            Log::Line( "Error: Failed to seek table file." );
-            return;
-        }
+    //     if( !file.Seek( (int64)seek, SeekOrigin::Begin ) )
+    //     {
+    //         Log::Line( "Error: Failed to seek table file." );
+    //         return;
+    //     }
 
-        byte* buffer = ((byte*)entries) + totalThreadWrite;
+    //     byte* buffer = ((byte*)entries) + totalThreadWrite;
 
-        do {
+    //     do {
 
-            ssize_t written = file.Write( buffer, remainder );
-            if( written <= 0 )
-            {
-                Log::Line( "Error: Failed to write final data to table file." );
-                file.Close();
-                return;
-            }
+    //         ssize_t written = file.Write( buffer, remainder );
+    //         if( written <= 0 )
+    //         {
+    //             Log::Line( "Error: Failed to write final data to table file." );
+    //             file.Close();
+    //             return;
+    //         }
 
-            ASSERT( written <= (ssize_t)remainder );
-            remainder -= (size_t)written;
+    //         ASSERT( written <= (ssize_t)remainder );
+    //         remainder -= (size_t)written;
 
-        } while( remainder > 0 );
+    //     } while( remainder > 0 );
         
-        file.Close();
-    }
+    //     file.Close();
+    // }
 
 
     const double elapsed = TimerEnd( timer );

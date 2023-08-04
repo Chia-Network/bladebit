@@ -40,7 +40,17 @@ public:
     }
 };
 
-class DummyAllocator : public IAllocator
+class IStackAllocator : public IAllocator
+{
+public:
+
+    virtual size_t Size() const = 0;
+    virtual void Pop( const size_t size ) = 0;
+    virtual void PopToMarker( const size_t sizeMarker ) = 0;
+};
+
+
+class DummyAllocator : public IStackAllocator
 {
 public:
     //-----------------------------------------------------------
@@ -52,15 +62,28 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline size_t Size() const { return _size; }
+    inline size_t Size() const override { return _size; }
+
+     //-----------------------------------------------------------
+    inline void Pop( const size_t size ) override
+    {
+        ASSERT( size >= _size );
+        _size -= size;
+    }
+
+    //-----------------------------------------------------------
+    inline void PopToMarker( const size_t sizeMarker ) override
+    {
+        ASSERT( sizeMarker <= _size );
+        _size = sizeMarker;
+    }
 
 private:
     size_t _size = 0;
 };
 
-
 // Fixed-capacity stack allocator
-class StackAllocator : public IAllocator
+class StackAllocator : public IStackAllocator
 {
 public:
 
@@ -100,7 +123,7 @@ public:
     }
 
     //-----------------------------------------------------------
-    inline size_t Size() const
+    inline size_t Size() const override
     {
         return _size;
     }
@@ -112,20 +135,26 @@ public:
     }
 
     //-----------------------------------------------------------
+    inline byte* Ptr() const
+    {
+        return _buffer;
+    }
+
+    //-----------------------------------------------------------
     inline byte* Top() const
     {
         return _buffer + _size;
     }
 
     //-----------------------------------------------------------
-    inline void Pop( const size_t size )
+    inline void Pop( const size_t size ) override
     {
         ASSERT( size >= _size );
         _size -= size;
     }
 
     //-----------------------------------------------------------
-    inline void PopToMarker( const size_t sizeMarker )
+    inline void PopToMarker( const size_t sizeMarker ) override
     {
         ASSERT( sizeMarker <= _size );
         _size = sizeMarker;

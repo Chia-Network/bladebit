@@ -6,6 +6,7 @@
 #include "threading/MTJob.h"
 #include "plotting/WorkHeap.h"
 #include "plotting/Tables.h"
+#include "plotting/PlotWriter.h"
 #include "FileId.h"
 
 class Thread;
@@ -57,6 +58,8 @@ struct FileSet
 
 class DiskBufferQueue
 {
+    friend class PlotWriter;
+
     struct Command
     {
         enum CommandType
@@ -76,6 +79,9 @@ class DiskBufferQueue
             WaitForFence,
             TruncateBucket,
 
+            PlotWriterCommand,      // Wraps a PlotWriter command and dispatches it in our thread
+
+            // DEBUG
             DBG_WriteSliceSizes,    // Read/Write slice sizes to disk. Used for skipping tables
             DBG_ReadSliceSizes
         };
@@ -140,6 +146,12 @@ class DiskBufferQueue
                 FileId  fileId;
                 ssize_t position;
             } truncateBucket;
+
+            struct
+            {
+                PlotWriter* writer;
+                PlotWriter::Command cmd;
+            } plotWriterCmd;
 
             #if _DEBUG
                 struct
@@ -405,6 +417,8 @@ private:
     void DeleteFileNow( const FileId fileId, const uint32 bucket );
     void DeleteBucketNow( const FileId fileId );
 
+    void CmdPlotWriterCommand( const Command& cmd );
+    
     static const char* DbgGetCommandName( Command::CommandType type );
 
     #if _DEBUG

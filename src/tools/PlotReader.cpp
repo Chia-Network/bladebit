@@ -5,6 +5,9 @@
 #include "plotting/CTables.h"
 #include "plotting/DTables.h"
 #include "plotmem/LPGen.h"
+#include "plotting/Compression.h"
+#include "harvesting/GreenReaper.h"
+#include "BLS.h"
 
 ///
 /// Plot Reader
@@ -24,17 +27,20 @@ PlotReader::PlotReader( IPlotFile& plot )
 //-----------------------------------------------------------
 PlotReader::~PlotReader()
 {
-    free( _parkBuffer );
-    free( _deltasBuffer );
+    free( _parkBuffer );    _parkBuffer = nullptr;
+    free( _deltasBuffer );  _deltasBuffer = nullptr;
 
-    if( _c2Entries.values )
-        bbvirtfreebounded( _c2Entries.values );
+    bbvirtfreebounded( _c1Buffer );
 
-    if( _c1Buffer )
-        bbvirtfreebounded( _c1Buffer );
+    if( _c2Entries.Ptr() )
+        delete[] _c2Entries.values;
+    _c2Entries = {};
 
-    if( _c3Buffer.Ptr() )
-        bbvirtfreebounded( _c3Buffer.Ptr() );
+    bbvirtfreebounded_span( _c3Buffer );
+
+    if( _grContext )
+        grDestroyContext( _grContext );
+    _grContext = nullptr;
 }
 
 //-----------------------------------------------------------
@@ -82,7 +88,7 @@ size_t PlotReader::GetTableParkCount( const PlotTable table ) const
         case PlotTable::Table4:
         case PlotTable::Table5:
         case PlotTable::Table6:
-            return _plot.TableSize( table ) / CalculateParkSize( (TableId)table );
+            return _plot.TableSize( table ) / GetParkSizeForTable( (TableId)table );
 
         default:
             return 0;
@@ -223,8 +229,39 @@ int64 PlotReader::ReadC3Park( uint64 parkIndex, uint64* f7Buffer )
 }
 
 //-----------------------------------------------------------
-bool PlotReader::ReadP7Entries( uint64 parkIndex, uint64* p7Indices )
+bool PlotReader::ReadP7Entries( uint64 parkIndex, uint64 p7ParkEntries[kEntriesPerPark] )
 {
+    if( LoadP7Park( parkIndex ) )
+    {
+        bbmemcpy_t( p7ParkEntries, _park7Entries, kEntriesPerPark );
+        return true;
+    }
+
+    return false;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::ReadP7Entry( uint64 p7Index, uint64& outP7Entry )
+{
+    const uint64 parkIndex = p7Index / kEntriesPerPark;
+
+    if( LoadP7Park( parkIndex ) )
+    {
+        const uint64 parkLocalP7Index = p7Index - parkIndex * kEntriesPerPark;
+        outP7Entry = _park7Entries[parkLocalP7Index];
+        return true;
+    }
+
+    outP7Entry = 0;
+    return false;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::LoadP7Park( uint64 parkIndex )
+{
+    if( _park7Index != -1 && (uint64)_park7Index == parkIndex )
+        return true;
+
     const uint32 k              = _plot.K();
     const uint32 p7EntrySize    = k + 1;
     const uint64 p7TableAddress = _plot.TableAddress( PlotTable::Table7 );
@@ -248,8 +285,9 @@ bool PlotReader::ReadP7Entries( uint64 parkIndex, uint64* p7Indices )
     CPBitReader parkReader( (byte*)_parkBuffer, parkSizeBytes * 8 );
 
     for( uint32 i = 0; i < kEntriesPerPark; i++ )
-        p7Indices[i] = parkReader.Read64( p7EntrySize );
+        _park7Entries[i] = parkReader.Read64( p7EntrySize );
 
+    _park7Index = (int64)parkIndex;
     return true;
 }
 
@@ -264,11 +302,11 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     if( table >= TableId::Table7 )
         return false;
 
-    const uint32 k              = _plot.K();
-    const size_t lpSizeBytes    = LinePointSizeBytes( k );
-    const size_t tableMaxSize   = _plot.TableSize( (PlotTable)table );
-    const size_t tableAddress   = _plot.TableAddress( (PlotTable)table );
-    const size_t parkSize       = CalculateParkSize( table, k );
+    const uint32 k                = _plot.K();
+    const size_t lpSizeBytes      = LinePointSizeBytes( k );
+    const size_t tableMaxSize     = _plot.TableSize( (PlotTable)table );
+    const size_t tableAddress     = _plot.TableAddress( (PlotTable)table );
+    const size_t parkSize         = GetParkSizeForTable( table );
 
     const uint64 maxParks       = tableMaxSize / parkSize;
     if( parkIndex >= maxParks )
@@ -294,17 +332,17 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     }
 
     // Read stubs
-    const size_t stubsSizeBytes = CDiv( ( kEntriesPerPark - 1 ) * ( k - kStubMinusBits ), 8 );
+    const size_t stubsSizeBytes = GetLPStubByteSize( table );
     uint64* stubsBuffer = _parkBuffer;
 
     if( _plot.Read( stubsSizeBytes, stubsBuffer ) != (ssize_t)stubsSizeBytes )
         return false;
 
     // Read deltas
-    const size_t maxDeltasSizeBytes = CalculateMaxDeltasSize( (TableId)table );
+    const size_t maxDeltasSizeBytes = GetParkDeltasSectionMaxSize( (TableId)table );
     byte* compressedDeltaBuffer = ((byte*)_parkBuffer) + RoundUpToNextBoundary( stubsSizeBytes, sizeof( uint64 ) );
     byte* deltaBuffer           = _deltasBuffer;
-    
+
     uint16 compressedDeltasSize = 0;
     if( _plot.Read( 2, &compressedDeltasSize ) != 2 )
         return false;
@@ -329,10 +367,12 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
             return false;
 
         // Decompress deltas
+        const FSE_DTable* dTable = GetDTableForTable( table );
+
         deltaCount = FSE_decompress_usingDTable( 
                         deltaBuffer, kEntriesPerPark - 1, 
                         compressedDeltaBuffer, compressedDeltasSize, 
-                        DTables[(int)table] );
+                        dTable );
 
         if( FSE_isError( deltaCount ) )
             return false;
@@ -344,6 +384,15 @@ bool PlotReader::ReadLPParkComponents( TableId table, uint64 parkIndex,
     outDeltaCounts   = deltaCount;
 
     return true;
+}
+
+//-----------------------------------------------------------
+const FSE_DTable* PlotReader::GetDTableForTable( TableId table ) const
+{
+    if( !IsCompressedXTable( table ) )
+        return DTables[(int)table];
+
+    return CreateCompressionDTable( _plot.CompressionLevel() );
 }
 
 //-----------------------------------------------------------
@@ -363,7 +412,7 @@ bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints
     linePoints[0] = baseLinePoint;
     if( deltaCount > 0 )
     {
-        const uint32 stubBitSize = ( _plot.K() - kStubMinusBits );
+        const uint32 stubBitSize = GetLPStubBitSize( table );
         
         for( uint64 i = 1; i <= deltaCount; i++ )
         {
@@ -378,6 +427,70 @@ bool PlotReader::ReadLPPark( TableId table, uint64 parkIndex, uint128 linePoints
 
     outEntryCount = deltaCount + 1;
     return true;
+}
+
+//-----------------------------------------------------------
+TableId PlotReader::GetLowestStoredTable() const
+{
+    const uint32 compressionLevel = _plot.CompressionLevel();
+
+    const uint32 numDroppedTables = compressionLevel == 0 ? 0 :
+                                    compressionLevel >= 9 ? 2 : 1;
+
+    return TableId::Table1 + numDroppedTables;
+}
+
+//-----------------------------------------------------------
+bool PlotReader::IsCompressedXTable( const TableId table ) const
+{
+    return _plot.CompressionLevel() > 0 && table == GetLowestStoredTable();
+}
+
+//-----------------------------------------------------------
+size_t PlotReader::GetParkSizeForTable( TableId table ) const
+{
+    if( IsCompressedXTable( table ) )
+        return GetCompressionInfoForLevel( _plot.CompressionLevel() ).tableParkSize;
+
+    if( table < GetLowestStoredTable() )
+    {
+        ASSERT(0);
+        return 0;
+    }
+
+    return CalculateParkSize( table, _plot.K() );
+}
+
+//-----------------------------------------------------------
+uint32 PlotReader::GetLPStubBitSize( TableId table ) const
+{
+    FatalIf( table < GetLowestStoredTable(), "Getting stub bit size for invalid table." );
+
+    if( !IsCompressedXTable( table ) )
+        return _plot.K() - kStubMinusBits;
+
+    auto info = GetCompressionInfoForLevel( _plot.CompressionLevel() );
+    return info.subtSizeBits;
+}
+
+//-----------------------------------------------------------
+uint32 PlotReader::GetLPStubByteSize( const TableId table ) const
+{
+    return CDiv( ( kEntriesPerPark - 1 ) * GetLPStubBitSize( table ), 8 );
+}
+
+//-----------------------------------------------------------
+size_t PlotReader::GetParkDeltasSectionMaxSize( const TableId table ) const
+{
+    if( !IsCompressedXTable( table ) )
+        return CalculateMaxDeltasSize( table );
+
+    auto info = GetCompressionInfoForLevel( _plot.CompressionLevel() );
+
+    const uint32 lpSize       = CDiv( _K * 2u, 8 );
+    const uint32 stubByteSize = GetLPStubByteSize( table );
+    
+    return info.tableParkSize - ( lpSize + stubByteSize );
 }
 
 // #TODO: Add 64-bit outLinePoint (templatize)
@@ -404,7 +517,7 @@ bool PlotReader::ReadLP( TableId table, uint64 index, uint128& outLinePoint )
             return false;
 
         const uint64 maxIter     = std::min( lpLocalIdx, deltaCount );
-        const uint32 stubBitSize = ( _plot.K() - kStubMinusBits );
+        const uint32 stubBitSize = GetLPStubBitSize( table );
 
         for( uint64 i = 0; i < maxIter; i++ )
         {
@@ -430,13 +543,10 @@ bool PlotReader::FetchProofFromP7Entry( uint64 p7Entry, uint64 proof[32] )
 }
 
 //-----------------------------------------------------------
-Span<uint64> PlotReader::GetP7IndicesForF7( const uint64 f7, Span<uint64> indices )
+uint64 PlotReader::GetP7IndicesForF7( const uint64 f7, uint64& outStartT6Index )
 {
-    if( indices.Length() == 0 )
-        return {};
-
     if( !LoadC2Entries() )
-        return {};
+        return 0;
 
     uint64 c2Index = 0;
 
@@ -515,36 +625,43 @@ Span<uint64> PlotReader::GetP7IndicesForF7( const uint64 f7, Span<uint64> indice
         _c3Buffer.length = kCheckpoint1Interval * 2;
     }
 
-    uint64 c3Count = (uint64)ReadC3Park( c3Park, _c3Buffer.Ptr() );
+    int64 c3Count = ReadC3Park( c3Park, _c3Buffer.Ptr() );
+    if( c3Count < 0)
+        return {};
 
     if( parkCount > 1 )
     {
         ASSERT( parkCount == 2 );
-        c3Count += (uint64)ReadC3Park( c3Park+1, _c3Buffer.Ptr() + c3Count );
+        const int64 secondParkC3Count = ReadC3Park( c3Park+1, _c3Buffer.Ptr() + c3Count );
+        if( secondParkC3Count < 0 )
+            return {};
+
+        c3Count += secondParkC3Count;
     }
 
     // Grab as many matches as we can
     const Span<uint64> c3Entries    = _c3Buffer.SliceSize( (size_t)c3Count );
-    const uint64       c3StartIndex = c3Park * kCheckpoint1Interval;
-    uint64 matchCount = 0;
+          uint64       c3StartIndex = c3Park * kCheckpoint1Interval;
 
     for( uint64 i = 0; i < c3Entries.Length(); i++ )
     {
         if( c3Entries[i] == f7 )
         {
-            while( matchCount < indices.Length() && i < c3Count && c3Entries[i] == f7 )
-                indices[matchCount++] = c3StartIndex + i++;
+            uint64 matchCount = 1;
 
-            return indices.SliceSize( matchCount );
+            outStartT6Index = c3StartIndex + i;
+            while( ++i < (uint64)c3Count && c3Entries[i] == f7 )
+                matchCount++;
+
+            return matchCount;
         }
     }
 
-    return {};
+    return 0;
 }
 
-
 //-----------------------------------------------------------
-bool PlotReader::FetchProof( const uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] )
+ProofFetchResult PlotReader::FetchProof( const uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] )
 {
     uint64 lpIndices[2][BB_PLOT_PROOF_X_COUNT];
 
@@ -557,9 +674,14 @@ bool PlotReader::FetchProof( const uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_
     // from 6 to 1, grabbing all of the x's that make up a proof.
     uint32 lookupCount = 1;
 
-    for( TableId table = TableId::Table6; table >= TableId::Table1; table-- )
+    const bool    isCompressed = _plot.CompressionLevel() > 0;
+    const TableId endTable     = GetLowestStoredTable();
+
+    for( TableId table = TableId::Table6; table >= endTable; table-- )
     {
         ASSERT( lookupCount <= 32 );
+
+        const bool use64BitLP = table < TableId::Table6 && _plot.K() <= 32;
 
         for( uint32 i = 0, dst = 0; i < lookupCount; i++, dst += 2 )
         {
@@ -567,14 +689,11 @@ bool PlotReader::FetchProof( const uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_
 
             uint128 lp = 0;
             if( !ReadLP( table, idx, lp ) )
-                return false;
+                return ProofFetchResult::Error;
 
-            BackPtr ptr;
-            if( table < TableId::Table6 && _plot.K() <= 32 )
-                ptr = LinePointToSquare64( (uint64)lp );
-            else
-                ptr = LinePointToSquare( lp );
+            const BackPtr ptr = use64BitLP ? LinePointToSquare64( (uint64)lp ) : LinePointToSquare( lp );
 
+            ASSERT( ptr.x > ptr.y );
             lpIdxDst[dst+0] = ptr.y;
             lpIdxDst[dst+1] = ptr.x;
         }
@@ -585,9 +704,172 @@ bool PlotReader::FetchProof( const uint64 t6LPIndex, uint64 fullProofXs[BB_PLOT_
         // memset( lpIdxDst, 0, sizeof( uint64 ) * PROOF_X_COUNT );
     }
 
+    const uint32  finalIndex = ((uint32)(endTable - TableId::Table1)) % 2;
+    const uint64* xSource   = lpIndices[finalIndex];
+
+    if( isCompressed )
+        return DecompressProof( xSource, fullProofXs );
+
     // Full proof x's will be at the src ptr
     memcpy( fullProofXs, lpIdxSrc, sizeof( uint64 ) * BB_PLOT_PROOF_X_COUNT );
-    return true;
+    return ProofFetchResult::OK;
+}
+
+//-----------------------------------------------------------
+ProofFetchResult PlotReader::DecompressProof( const uint64 compressedProof[BB_PLOT_PROOF_X_COUNT], uint64 fullProofXs[BB_PLOT_PROOF_X_COUNT] )
+{
+    GreenReaperContext* gr = GetGRContext();
+    if( !gr )
+        return ProofFetchResult::Error;
+
+    const uint32 compressionLevel = _plot.CompressionLevel();
+
+    GRCompressedProofRequest req = {};
+    req.plotId           = _plot.PlotId();
+    req.compressionLevel = compressionLevel;
+
+    const uint32 compressedProofCount = compressionLevel < 9 ? PROOF_X_COUNT / 2 : PROOF_X_COUNT / 4;
+
+    for( uint32 i = 0; i < compressedProofCount; i++ )
+        req.compressedProof[i] = compressedProof[i];
+
+    const GRResult r = grFetchProofForChallenge( gr, &req );
+
+    if( r == GRResult_OK )
+    {
+        bbmemcpy_t( fullProofXs, req.fullProof, BB_PLOT_PROOF_X_COUNT );
+        return ProofFetchResult::OK;
+    }
+
+    return r == GRResult_NoProof ? ProofFetchResult::NoProof : ProofFetchResult::CompressionError;
+}
+
+//-----------------------------------------------------------
+ProofFetchResult PlotReader::FetchQualityXsForP7Entry( 
+    const uint64  t6Index, 
+    const byte    challenge[BB_CHIA_CHALLENGE_SIZE], 
+          uint64& outX1, uint64& outX2 )
+{
+    const bool    isCompressed = _plot.CompressionLevel() > 0;
+    const TableId endTable     = GetLowestStoredTable();
+
+    GreenReaperContext* gr = nullptr;
+    if( isCompressed )
+    {
+        gr = GetGRContext();
+        if( !gr )
+            return ProofFetchResult::Error;
+    }
+
+    const uint32 last5Bits = (uint32)challenge[31] & 0x1f;
+
+    uint64 lpIndex  = t6Index; 
+    uint64 altIndex = 0;
+
+    for( TableId table = TableId::Table6; table > endTable; table-- )
+    {
+        // Read line point
+        uint128 lp;
+        if( !ReadLP( table, lpIndex, lp ) )
+            return ProofFetchResult::Error;
+
+
+        const bool    use64BitLP = table < TableId::Table6 && _plot.K() <= 32;
+        const BackPtr ptr        = use64BitLP ? LinePointToSquare64( (uint64)lp ) : LinePointToSquare( lp );
+        ASSERT( ptr.x >= ptr.y );
+
+        const bool isTableBitSet = ((last5Bits >> ((uint32)table-1)) & 1) == 1;
+
+        if( !isTableBitSet )
+        {
+            lpIndex  = ptr.y;
+            altIndex = ptr.x;
+        }
+        else
+        {
+            lpIndex  = ptr.x;
+            altIndex = ptr.y;
+        }
+    }
+
+    if( isCompressed )
+    {
+        const bool needBothLeaves = _plot.CompressionLevel() >= 6;
+
+        // Read both back pointers, depending on compression level
+        uint128 xLP0, xLP1;
+        if( !ReadLP( endTable, lpIndex, xLP0 ) )
+            return ProofFetchResult::Error;
+
+        if( needBothLeaves )
+        {
+            if( !ReadLP( endTable, altIndex, xLP1 ) )
+                return ProofFetchResult::Error;
+        }
+
+        // Now decompress the X's
+        GRCompressedQualitiesRequest req = {};
+        req.plotId                = _plot.PlotId();
+        req.compressionLevel      = _plot.CompressionLevel();
+        req.challenge             = challenge;
+        req.xLinePoints[0].hi     = (uint64)(xLP0 >> 64);
+        req.xLinePoints[0].lo     = (uint64)xLP0;
+
+        if( needBothLeaves )
+        {
+            req.xLinePoints[1].hi = (uint64)(xLP1 >> 64);
+            req.xLinePoints[1].lo = (uint64)xLP1;
+        }
+
+        const auto r = grGetFetchQualitiesXPair( gr, &req );
+        if( r != GRResult_OK )
+            return r == GRResult_NoProof ? ProofFetchResult::NoProof : ProofFetchResult::CompressionError;
+
+        outX1 = req.x1;
+        outX2 = req.x2;
+    }
+    else
+    {
+        uint128 lp;
+        if( !ReadLP( endTable, lpIndex, lp ) )
+            return ProofFetchResult::Error;
+
+        const BackPtr ptr = _plot.K() <= 32 ? LinePointToSquare64( (uint64)lp ) : LinePointToSquare( lp );
+        outX1 = ptr.x;
+        outX2 = ptr.y;
+    }
+
+    return ProofFetchResult::OK;
+}
+
+//-----------------------------------------------------------
+ProofFetchResult PlotReader::FetchQualityForP7Entry( 
+    const uint64 t6Index, 
+    const byte challenge [BB_CHIA_CHALLENGE_SIZE], 
+          byte outQuality[BB_CHIA_QUALITY_SIZE] )
+{
+    uint64 x1, x2;
+
+    const ProofFetchResult r = FetchQualityXsForP7Entry( t6Index, challenge, x1, x2 );
+    if( r != ProofFetchResult::OK )
+        return r;
+
+    const size_t HASH_SIZE_MAX = BB_CHIA_QUALITY_SIZE + CDiv( 2*50, 8 );
+    byte hashInput[HASH_SIZE_MAX] = {};
+
+    const uint32 k        = _plot.K();
+    const size_t hashSize = BB_CHIA_QUALITY_SIZE + CDiv( 2*k, 8 );
+
+    memcpy( hashInput, challenge, BB_CHIA_QUALITY_SIZE );
+
+    Bits<HASH_SIZE_MAX-BB_CHIA_QUALITY_SIZE> hashBits;
+    hashBits.Write( x2, k );
+    hashBits.Write( x1, k );
+
+    hashBits.ToBytes( hashInput + BB_CHIA_QUALITY_SIZE );
+    bls::Util::Hash256( outQuality, hashInput, hashSize );
+
+    return r;
 }
 
 //-----------------------------------------------------------
@@ -618,7 +900,7 @@ bool PlotReader::LoadC2Entries()
         return false;
     }
 
-    _c2Entries = bbcalloc_span<uint64>( c2MaxEntries );
+    _c2Entries = Span<uint64>( new uint64[c2MaxEntries], c2MaxEntries );
 
     const size_t f7BitCount = f7ByteSize * 8;
     CPBitReader reader( buffer, c2Size * 8 );
@@ -643,103 +925,51 @@ bool PlotReader::LoadC2Entries()
     return true;
 }
 
-///
-/// Plot Files
-///
-// #TODO: Move to other source files
 //-----------------------------------------------------------
-bool IPlotFile::ReadHeader( int& error )
+void PlotReader::AssignDecompressionContext( struct GreenReaperContext* context )
 {
-    error = 0;
+    ASSERT( context );
+    if( !context)
+        return;
 
-    // Magic
-    {
-        char magic[sizeof( kPOSMagic )-1] = { 0 };
-        if( Read( sizeof( magic ), magic ) != sizeof( magic ) )
-            return false;
-        
-        if( !MemCmp( magic, kPOSMagic, sizeof( magic ) ) )
-        {
-            error = -1;       // #TODO: Set actual user error
-            return false;
-        }
-    }
+    if( _grContext )
+        grDestroyContext( _grContext );
     
-    // Plot Id
-    {
-        if( Read( sizeof( _header.id ), _header.id ) != sizeof( _header.id ) )
-            return false;
-
-        // char str[65] = { 0 };
-        // size_t numEncoded = 0;
-        // BytesToHexStr( _header.id, sizeof( _header.id ), str, sizeof( str ), numEncoded );
-        // ASSERT( numEncoded == sizeof( _header.id ) );
-        // _idString = str;
-    }
-
-    // K
-    {
-        byte k = 0;
-        if( Read( 1, &k ) != 1 )
-            return false;
-
-        _header.k = k;
-    }
-
-    // Format Descritption
-    {
-        const uint formatDescSize =  ReadUInt16();
-        FatalIf( formatDescSize != sizeof( kFormatDescription ) - 1, "Invalid format description size." );
-
-        char desc[sizeof( kFormatDescription )-1] = { 0 };
-        if( Read( sizeof( desc ), desc ) != sizeof( desc ) )
-            return false;
-        
-        if( !MemCmp( desc, kFormatDescription, sizeof( desc ) ) )
-        {
-            error = -1; // #TODO: Set proper user error
-            return false;
-        }
-    }
-    
-    // Memo
-    {
-        uint memoSize = ReadUInt16();
-        if( memoSize > sizeof( _header.memo ) )
-        {
-            error = -1; // #TODO: Set proper user error
-            return false;
-        } 
-
-        _header.memoLength = memoSize;
-
-        if( Read( memoSize, _header.memo ) != memoSize )
-        {
-            error = -1; // #TODO: Set proper user error
-            return false;
-        }
-
-        // char str[BB_PLOT_MEMO_MAX_SIZE*2+1] = { 0 };
-        // size_t numEncoded = 0;
-        // BytesToHexStr( _memo, memoSize, str, sizeof( str ), numEncoded );
-        
-        // _memoString = str;
-    }
-
-    // Table pointers
-    if( Read( sizeof( _header.tablePtrs ), _header.tablePtrs ) != sizeof( _header.tablePtrs ) )
-    {
-        error = -1; // #TODO: Set proper user error
-        return false;
-    }
-
-    for( int i = 0; i < 10; i++ )
-        _header.tablePtrs[i] = Swap64( _header.tablePtrs[i] );
-
-    // What follows is table data
-    return true;
+    _grContext = context;
 }
 
+//-----------------------------------------------------------
+void PlotReader::ConfigDecompressor( const uint32 threadCount, const bool disableCPUAffinity, const uint32 cpuOffset )
+{
+    if( _grContext )
+        grDestroyContext( _grContext );
+    _grContext = nullptr;
+
+    GreenReaperConfig cfg = {};
+    cfg.apiVersion         = GR_API_VERSION;
+    cfg.threadCount        = bbclamp( threadCount, 1u, SysHost::GetLogicalCPUCount() );
+    cfg.cpuOffset          = cpuOffset;
+    cfg.disableCpuAffinity = disableCPUAffinity ? GR_TRUE : GR_FALSE;
+
+    auto result = grCreateContext( &_grContext, &cfg, sizeof( GreenReaperConfig ) );
+    ASSERT( result == GRResult_OK );
+}
+
+//-----------------------------------------------------------
+GreenReaperContext* PlotReader::GetGRContext()
+{
+    if( _grContext == nullptr )
+    {
+        GreenReaperConfig cfg = {};
+        cfg.apiVersion  = GR_API_VERSION;
+        cfg.threadCount = std::min( 8u, SysHost::GetLogicalCPUCount() );
+
+        auto result = grCreateContext( &_grContext, &cfg, sizeof( GreenReaperConfig ) );
+        ASSERT( result == GRResult_OK );
+    }
+
+    return _grContext;
+}
 
 ///
 /// Memory Plot

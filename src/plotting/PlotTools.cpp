@@ -1,11 +1,11 @@
 #include "PlotTools.h"
 #include "util/Util.h"
+#include "BLS.h"
 
-
-#define PLOT_FILE_PREFIX_LEN (sizeof("plot-k32-2021-08-05-18-55-")-1)
+#define PLOT_FILE_DATE_LEN (sizeof("2021-08-05-18-55-")-1)
 
 //-----------------------------------------------------------
-void PlotTools::GenPlotFileName( const byte plotId[BB_PLOT_ID_LEN], char outPlotFileName[BB_PLOT_FILE_LEN] )
+void PlotTools::GenPlotFileName( const byte plotId[BB_PLOT_ID_LEN], char outPlotFileName[BB_COMPRESSED_PLOT_FILE_LEN_TMP], const uint32 compressionLevel )
 {
     ASSERT( plotId );
     ASSERT( outPlotFileName );
@@ -13,8 +13,30 @@ void PlotTools::GenPlotFileName( const byte plotId[BB_PLOT_ID_LEN], char outPlot
     time_t     now = time( nullptr );
     struct tm* t   = localtime( &now ); ASSERT( t );
     
-    const size_t r = strftime( outPlotFileName, BB_PLOT_FILE_LEN, "plot-k32-%Y-%m-%d-%H-%M-", t );
-    if( r != PLOT_FILE_PREFIX_LEN )
+    const bool isCompressed = compressionLevel > 0;
+
+    const char classicFormat[]    = "plot-k32-";
+    const char compressedFormat[] = "plot-k32-c%02u-";
+    const char dateFormat[]       = "%Y-%m-%d-%H-%M-";
+
+    size_t bufferLength = isCompressed ? BB_COMPRESSED_PLOT_FILE_LEN : BB_PLOT_FILE_LEN;
+    size_t prefixLength = sizeof( classicFormat ) - 1;
+
+    if( isCompressed )
+    {
+        int l = snprintf( outPlotFileName, bufferLength, compressedFormat, compressionLevel );
+        FatalIf( l <= 0, "Failed to prepare plot file name." );
+        prefixLength = (size_t)l;
+    }
+    else
+        memcpy( outPlotFileName, classicFormat, sizeof( classicFormat ) - 1 );
+    
+    outPlotFileName += prefixLength;
+    bufferLength    -= prefixLength;
+
+    size_t r = strftime( outPlotFileName, bufferLength, dateFormat, t );
+
+    if( r != PLOT_FILE_DATE_LEN )
         Fatal( "Failed to generate plot file." );
 
     PlotIdToString( plotId, outPlotFileName + r );
@@ -93,7 +115,7 @@ void PlotTools::GeneratePlotIdAndMemo(
     SysHost::Random( seed, sizeof( seed ) );
 
     bls::PrivateKey sk      = bls::AugSchemeMPL().KeyGen( bls::Bytes( seed, sizeof( seed ) ) );
-    bls::G1Element  localPk = std::move( KeyTools::MasterSkToLocalSK( sk ) ).GetG1Element();
+    bls::G1Element  localPk = KeyTools::MasterSkToLocalSK( sk ).GetG1Element();
 
     // #See: chia-blockchain create_plots.py
     //       The plot public key is the combination of the harvester and farmer keys

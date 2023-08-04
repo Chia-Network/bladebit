@@ -6,7 +6,10 @@
 #include <mach/mach.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include <sodium.h>
+
+#if !defined( BB_IS_HARVESTER )
+    #include <sodium.h>
+#endif
 
 //-----------------------------------------------------------
 size_t SysHost::GetPageSize()
@@ -84,18 +87,22 @@ void* SysHost::VirtualAlloc( size_t size, bool initialize )
     ASSERT( ptr );
 
     // #TODO: Use a hinting system for this.
-    // Hit the memory to be accessed sequentially
+    // Hint the memory to be accessed sequentially
     r = vm_behavior_set( task, ptr, allocSize, VM_BEHAVIOR_SEQUENTIAL );
     if( r != 0 )
     {
-        Log::Line( "Warning: vm_behavior_set() failed with error: %d .", (int32)r );
+        #if !defined( BB_IS_HARVESTER )
+            Log::Line( "Warning: vm_behavior_set() failed with error: %d .", (int32)r );
+        #endif
     }
 
     // Try wiring it
     r = vm_wire( mach_host_self(), task, ptr, allocSize, VM_PROT_READ | VM_PROT_WRITE );
     if( r != 0 )
     {
-        Log::Line( "Warning: vm_wire() failed with error: %d .", (int32)r );
+        #if !defined( BB_IS_HARVESTER )
+            Log::Line( "Warning: vm_wire() failed with error: %d .", (int32)r );
+        #endif
     }
 
     // Store page size
@@ -229,7 +236,11 @@ void SysHost::DumpStackTrace()
 //-----------------------------------------------------------
 void SysHost::Random( byte* buffer, size_t size )
 {
+    #if defined(BB_IS_HARVESTER)
+        Panic( "getrandom not supported on bladebit_harvester target.");
+    #else
     randombytes_buf( buffer, size );
+    #endif
 }
 
 

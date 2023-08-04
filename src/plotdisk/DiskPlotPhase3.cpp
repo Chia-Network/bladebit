@@ -6,6 +6,7 @@
 #include "algorithm/RadixSort.h"
 #include "plotting/TableWriter.h"
 #include "plotmem/ParkWriter.h"
+#include "plotting/Compression.h"
 
 #if _DEBUG
     #include "DiskPlotDebug.h"
@@ -19,6 +20,11 @@
     // #define BB_DP_DBG_P3_SKIP_TO_TABLE
     #define BB_DP_DBG_P3_START_TABLE TableId::Table7
 
+
+    #if BB_DBG_DumpLinePoints_T2
+        static FileStream _dbgLpTableFile = {};
+        static void DbgWriteSortedLinePoints( TableId table, uint32 bucket, uint32 numBuckets, const Span<uint64> linePoints );
+    #endif
 #endif
 
 // Extra L entries to load per bucket to ensure we
@@ -156,6 +162,9 @@ public:
     {
         _readFence .Reset();
         _writeFence.Reset();
+
+        _isCompressedTable        = context.cfg->globalCfg->compressionLevel > 0 && rTable-1 <= (TableId)context.cfg->globalCfg->numDroppedTables;
+        _lpBitsSavedByCompression = _isCompressedTable ? 63 - ( ( _context.cfg->globalCfg->compressedEntryBits * 2 - 1) * 2 - 1 ) : 0;
     }
 
     //-----------------------------------------------------------
@@ -178,6 +187,7 @@ public:
         const size_t  rMarksSize       =  RoundUpToNextBoundary( maxBucketEntries * _numBuckets  / 8, (int)tmp1BlockSize );
         //RoundUpToNextBoundary( _context.entryCounts[(int)rTable] / 8, (int)context.tmp1BlockSize );
 
+        const bool isCompressedTable2 = dryRun ? false : _isCompressedTable;
 
         rMarks       = allocator.Alloc( rMarksSize, tmp1BlockSize );
         rTableReader = dryRun ? PMReader( allocator, tmp1BlockSize )
@@ -186,10 +196,13 @@ public:
         lReader        = nullptr;
         lTableNEntries = nullptr;
         
-        if constexpr ( lTable == TableId::Table1 )
+        if( lTable == TableId::Table1 || isCompressedTable2 )
         {
+            const FileId  lReaderFileId = isCompressedTable2 ? FileId::T2 : FileId::T1;
+            const TableId lReaderTable  = isCompressedTable2 ? TableId::Table2 : TableId::Table1;
+
             lTable1Reader = dryRun ? L1Reader( allocator, tmp1BlockSize, maxBucketEntries )
-                                   : L1Reader( FileId::T1, _context.ioQueue, allocator, maxBucketEntries, tmp2BlockSize, _context.bucketCounts[(int)TableId::Table1] ); 
+                                   : L1Reader( lReaderFileId, _context.ioQueue, allocator, maxBucketEntries, tmp2BlockSize, _context.bucketCounts[(int)lReaderTable] ); 
             lReader       = &lTable1Reader;
         }
         else
@@ -273,7 +286,7 @@ public:
 
         auto LoadBucket = [&]( const uint32 bucket ) {
 
-            if( lTable == TableId::Table1 )
+            if( lTable == TableId::Table1 || _isCompressedTable )
                 lReader->LoadNextBucket();
                 // lTable1Reader.LoadNextBucket();
             else
@@ -302,7 +315,7 @@ public:
 
             uint32* lEntries;
 
-            if constexpr ( lTable == TableId::Table1 )
+            if( lTable == TableId::Table1 || _isCompressedTable )
                 // lEntries = lTable1Reader.ReadLoadedBucket();
                 lEntries = lReader->ReadLoadedBucket();
             else
@@ -321,10 +334,10 @@ public:
                                                           BitField( (uint64*)rMarks, context.entryCounts[(int)rTable] ), pairs, map );
             ASSERT( prunedEntryCount <= bucketLength );
 
-            WriteLinePointsToBuckets( bucket, (int64)prunedEntryCount, _rPrunedLinePoints, _rPrunedMap, (uint64*)pairs, map, outLPBucketCounts );
+            WriteLinePointsToBuckets( bucket, (int64)prunedEntryCount, _rPrunedLinePoints, _rPrunedMap, (uint64*)pairs, map, outLPBucketCounts, _lpBitsSavedByCompression );
 
             // #TODO: Remove this after making our T2+ table reader an IP3LMapReader? Or just remove the IP3LMapReader thing?
-            if constexpr ( lTable > TableId::Table1 )
+            if( lTable > TableId::Table1 && !_isCompressedTable )
             {
                 // ASSERT( 0 );
                 if( bucket < _numBuckets - 1 )
@@ -376,6 +389,11 @@ private:
     {
         int64 __prunedEntryCount[BB_DP_MAX_JOBS];
         int64* _prunedEntryCount = __prunedEntryCount;
+
+// #if _DEBUG
+//     std::atomic<uint64> _numSameLP = 0;
+//     std::atomic<uint64>* numSameLP = &_numSameLP;
+// #endif
 
         AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
 
@@ -465,7 +483,21 @@ private:
                     const uint64 x = lTable[p.left ];
                     const uint64 y = lTable[p.right];
 
-                    ASSERT( x || y );                    outLinePoints[i] = SquareToLinePoint( x, y );
+                    ASSERT( x || y );
+                    outLinePoints[i] = SquareToLinePoint( x, y );
+// #if _DEBUG
+//         if( x == y )
+//         {
+//             std::atomic<uint64>& sameLP = *const_cast<std::atomic<uint64>*>( numSameLP );
+//             sameLP++;
+//         }
+//         else
+//         {
+//             const BackPtr deconverted = LinePointToSquare64( outLinePoints[i] ) ;
+//             ASSERT( ( deconverted.x == x && deconverted.y == y ) || 
+//                     ( deconverted.y == x && deconverted.y == x ) );
+//         }
+// #endif
                 }
             }
         });
@@ -474,12 +506,17 @@ private:
         for( int32 i = 0; i < (int32)_threadCount; i++ )
             prunedEntryCount += _prunedEntryCount[i];
 
+// #if _DEBUG
+//         Log::Line( "Same LP: %llu / %llu : %.2lf", _numSameLP.load(), (uint64)prunedEntryCount,
+//              _numSameLP.load()/ (double)prunedEntryCount );
+// #endif
+
         return (uint64)prunedEntryCount;
     }
 
     //-----------------------------------------------------------
     void WriteLinePointsToBuckets( const uint32 bucket, const int64 entryCount, const uint64* linePoints, const uint64* indices,
-                                   uint64* tmpLPs, uint64* tmpIndices, uint64 outLPBucketCounts[_numBuckets+1] )
+                                   uint64* tmpLPs, uint64* tmpIndices, uint64 outLPBucketCounts[_numBuckets+1], const uint32 bitsSavedByCompression )
     {
         using LPJob = AnonPrefixSumJob<uint32>;
 
@@ -491,7 +528,7 @@ private:
             const uint32 threadCount   = self->JobCount();
 
             const uint32 entrySizeBits = _entrySizeBits;
-            const uint32 bucketShift   = _lpBits;
+            const uint32 bucketShift   = _lpBits - bitsSavedByCompression;
 
             const uint64* srcLinePoints = linePoints;
             const uint64* srcIndices    = indices;
@@ -639,7 +676,9 @@ private:
     BitBucketWriter<_numBuckets> _lpWriter;
     byte*            _lpWriteBuffer[2] = { nullptr };
 
-    uint64           _prunedEntryCount = 0;
+    uint64           _prunedEntryCount         = 0;
+    uint32           _lpBitsSavedByCompression = 0;
+    bool             _isCompressedTable        = false;
 };
 
 template<TableId rTable, uint32 _numBuckets>
@@ -683,6 +722,10 @@ public:
         _readFence   .Reset();
         _writeFence  .Reset();
         _lpWriteFence.Reset();
+
+
+        _isCompressedTable        = context.cfg->globalCfg->compressionLevel > 0 && rTable-1 <= (TableId)context.cfg->globalCfg->numDroppedTables;
+        _lpBitsSavedByCompression = _isCompressedTable ? 63 - ( ( _context.cfg->globalCfg->compressedEntryBits * 2 - 1) * 2 - 1 ) : 0;
     }
 
     //-----------------------------------------------------------
@@ -740,6 +783,8 @@ public:
     //-----------------------------------------------------------
     void Run( const uint64 inLPBucketCounts[_numBuckets+1], uint64 outLMapBucketCounts[_numBuckets+1] )
     {
+        _context.plotWriter->BeginTable( (PlotTable)rTable-1 );
+
         _ioQueue.SeekBucket( FileId::LP, 0, SeekOrigin::Begin );
         _ioQueue.CommitCommands();
 
@@ -817,9 +862,30 @@ public:
                 std::swap( sortedIndices, scratchIndices );
             }
 
-            #if _DEBUG
+#if _DEBUG
                 // ValidateLinePoints( lTable, _context, bucket, sortedLinePoints, (uint64)entryCount );
-            #endif
+                
+        // # TEST
+        // {
+        //     uint64 prevLp = sortedLinePoints[0];
+        //     for( int64 i = 0; i < entryCount; i++ )
+        //     {
+        //         const uint64 lp = sortedLinePoints[i];
+        //         ASSERT( lp <= 0x1FFFFFFFFFFFFFFFull );
+        //         ASSERT( lp >= prevLp );
+        //         const uint64 delta      = lp - prevLp;
+        //         const uint64 smallDelta = delta >> 29;
+
+        //         ASSERT( smallDelta < 256 );
+        //         prevLp = lp;
+        //     }
+        // }
+#if _DEBUG && BB_DBG_DumpLinePoints_T2
+        if( rTable == TableId::Table3 )
+            DbgWriteSortedLinePoints( rTable-1, bucket, _numBuckets, Span<uint64>( sortedLinePoints, (size_t)entryCount ) );
+#endif
+
+#endif
 
             // Write reverse map to disk
             mapWriter.Write( *_context.threadPool, _threadCount, bucket, entryCount, mapOffset, sortedIndices, scratchIndices, outLMapBucketCounts );
@@ -844,6 +910,8 @@ public:
         _ioQueue.SignalFence( _lpWriteFence, _numBuckets + 5 );
         _ioQueue.CommitCommands();
         _lpWriteFence.Wait( _numBuckets + 5 );
+
+        _context.plotWriter->EndTable();   
     }
 
 private:
@@ -851,6 +919,7 @@ private:
     //-----------------------------------------------------------
     void UnpackEntries( const uint32 bucket, const int64 entryCount, const byte* packedEntries, uint64* outLinePoints, uint64* outIndices )
     {
+        
         AnonMTJob::Run( *_context.threadPool, _threadCount, [=]( AnonMTJob* self ) {
 
             int64 count, offset, end;
@@ -862,7 +931,7 @@ private:
             uint64* indices    = outIndices;
             ASSERT( indices + entryCount )
 
-            const uint64 bucketMask = ((uint64)bucket) << _lpBits;
+            const uint64 bucketMask = ((uint64)bucket) << (_lpBits - _lpBitsSavedByCompression);
             for( int64 i = offset; i < end; i++ )
             {
                 const uint64 lp  = reader.ReadBits64( _lpBits  ) | bucketMask;
@@ -882,10 +951,33 @@ private:
         ASSERT( entryCount );
         ASSERT( inLinePoints );
 
+#if _DEBUG
+        // # TEST
+        // if( _lpBitsSavedByCompression > 0 )
+        // {
+        //     uint64 prevLp = inLinePoints[0];
+        //     for( uint64 i = 0; i < entryCount; i++ )
+        //     {
+        //         const uint64 lp = inLinePoints[i];
+        //         ASSERT( lp <= 0x1FFFFFFFFFFFFFFFull );
+        //         ASSERT( lp >= prevLp );
+        //         const uint64 delta      = lp - prevLp;
+        //         const uint64 smallDelta = delta >> 29;
+
+        //         ASSERT( smallDelta < 256 );
+        //         prevLp = lp;
+        //     }
+        // }
+#endif  
+
         DiskBufferQueue& ioQueue = *_context.ioQueue;
 
-        const TableId lTable     = rTable - 1;
-        const size_t  parkSize   = CalculateParkSize( lTable );
+        const TableId lTable = rTable - 1;
+
+        size_t            _parkSize    = 0;
+        uint32            _stubBitSize = 0;
+        const FSE_CTable* _cTable      = nullptr;
+        GetParkSerializationData( _parkSize, _stubBitSize, _cTable );
 
         /// Encode into parks
         byte* parkBuffer = GetLPWriteBuffer( bucket );
@@ -904,11 +996,12 @@ private:
 
         AnonMTJob::Run( *_context.threadPool, _context.p3ThreadCount, [=]( AnonMTJob* self ){
 
+            const auto  parkSize    = _parkSize;
+            const auto  stubBitSize = _stubBitSize;
+            const auto* cTable      = _cTable;
+
             uint64 count, offset, end;
             GetThreadOffsets( self, parkCount, count, offset, end );
-
-            const TableId lTable          = rTable - 1;
-            const size_t  parkSize        = CalculateParkSize( lTable );
 
             uint64* parkLinePoints  = inLinePoints + offset * kEntriesPerPark;
             byte*   parkWriteBuffer = parkBuffer   + offset * parkSize;
@@ -916,17 +1009,19 @@ private:
             for( uint64 i = 0; i < count; i++ )
             {
                 // #NOTE: This functions mutates inLinePoints
-                WritePark( parkSize, kEntriesPerPark, (uint64*)parkLinePoints, parkWriteBuffer, lTable );
+                WritePark( parkSize, kEntriesPerPark, (uint64*)parkLinePoints, parkWriteBuffer, stubBitSize, cTable );
                 parkLinePoints  += kEntriesPerPark;
                 parkWriteBuffer += parkSize;
             }
         });
 
-        const size_t sizeWritten = parkSize * parkCount;
+        const size_t sizeWritten = _parkSize * parkCount;
         _context.plotTableSizes[(int)lTable] += sizeWritten;
 
-        ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
-        ioQueue.SignalFence( _lpWriteFence, bucket );
+        // ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
+        // ioQueue.SignalFence( _lpWriteFence, bucket );
+        _context.plotWriter->WriteTableData( parkBuffer, sizeWritten );
+        _context.plotWriter->SignalFence( _lpWriteFence, bucket );
         ioQueue.CommitCommands();
 
 
@@ -937,13 +1032,16 @@ private:
             if( overflowEntries )
             {
                 // #NOTE: This functions mutates inLinePoints
-                WritePark( parkSize, overflowEntries, lpOverflowStart, _finalPark, lTable );
+                WritePark( _parkSize, overflowEntries, lpOverflowStart, _finalPark, _stubBitSize, _cTable );
 
-                _context.plotTableSizes[(int)lTable] += parkSize;
-                ioQueue.WriteFile( FileId::PLOT, 0, _finalPark, parkSize );
+                _context.plotTableSizes[(int)lTable] += _parkSize;
+                // ioQueue.WriteFile( FileId::PLOT, 0, _finalPark, _parkSize );
+                _context.plotWriter->WriteTableData( _finalPark, _parkSize );   // #TODO: Shouldn't we signal a fence here??
                 ioQueue.CommitCommands();
             }
 
+            _context.plotWriter->SignalFence( _lpWriteFence, 0x1FFFFFFF );
+            _lpWriteFence.Wait( 0x1FFFFFFF );
             return;
         }
     }
@@ -957,6 +1055,29 @@ private:
         return _parkBuffers[bucket & 1];
     }
 
+    //-----------------------------------------------------------
+    void GetParkSerializationData( size_t& outParkSize, uint32& outStubBitSize, const FSE_CTable*& outCtable ) const
+    {
+        // Calculate the park size dynamically based on table 1's park and delta size, but with modified stub sizes
+        if( _isCompressedTable )
+        {
+            ASSERT( _k == 32 );
+
+            auto info = GetCompressionInfoForLevel( _context.cfg->globalCfg->compressionLevel );
+            outParkSize    = info.tableParkSize;
+            outStubBitSize = info.subtSizeBits;
+            outCtable      = _context.cfg->globalCfg->ctable;
+        }
+        else
+        {
+            const TableId lTable = rTable - 1;
+
+            outStubBitSize = _k - kStubMinusBits;
+            outParkSize    = CalculateParkSize( lTable );
+            outCtable      = CTables[(int)lTable];
+        }
+    }
+
 private:
     DiskPlotContext& _context;
     DiskBufferQueue& _ioQueue;
@@ -967,11 +1088,13 @@ private:
     Duration         _ioWaitTime = Duration::zero();
     FileId           _readId;
     FileId           _writeId;
-    uint64*          _lpLeftOverBuffer = nullptr;
-    uint64           _lpParkLeftOvers  = 0;
-    uint64           _maxParkCount     = 0;
-    byte*            _parkBuffers[2]   = { nullptr };
-    byte*            _finalPark        = nullptr;
+    uint64*          _lpLeftOverBuffer         = nullptr;
+    uint64           _lpParkLeftOvers          = 0;
+    uint64           _maxParkCount             = 0;
+    byte*            _parkBuffers[2]           = { nullptr };
+    byte*            _finalPark                = nullptr;
+    bool             _isCompressedTable        = false;
+    uint32           _lpBitsSavedByCompression = 0;
 };
 
 
@@ -1055,7 +1178,7 @@ void DiskPlotPhase3::Run()
     }
 
     // Delete remaining temporary files
-    #if !BB_DP_P3_KEEP_FILES
+    #if !BB_DP_DBG_P3_KEEP_FILES
         ioQueue.DeleteBucket( FileId::LP );
         ioQueue.DeleteBucket( FileId::LP_MAP_0 );
         ioQueue.DeleteBucket( FileId::LP_MAP_1 );
@@ -1140,6 +1263,18 @@ template<uint32 _numBuckets>
 void DiskPlotPhase3::RunBuckets()
 {
     TableId startTable = TableId::Table2;
+
+    if( _context.cfg->globalCfg->compressionLevel > 0 )
+    {
+        startTable = TableId::Table3;
+        _context.plotTableSizes   [(int)TableId::Table1] = 0;
+        _context.plotTablePointers[(int)TableId::Table2] = _context.plotTablePointers[(int)TableId::Table1];
+
+        #if !BB_DP_DBG_P3_KEEP_FILES
+            _context.ioQueue->DeleteBucket( FileId::T1 );
+            _context.ioQueue->CommitCommands();
+        #endif
+    }
 
 #if _DEBUG && defined( BB_DP_DBG_P3_SKIP_TO_TABLE )
     startTable = BB_DP_DBG_P3_START_TABLE;
@@ -1236,7 +1371,7 @@ void DiskPlotPhase3::ProcessTable()
     _ioQueue.SignalFence( _stepFence );
 
     // OK to delete input files now
-    #if !BB_DP_P3_KEEP_FILES
+    #if !BB_DP_DBG_P3_KEEP_FILES
         if( rTable == TableId::Table2 )
             _ioQueue.DeleteFile( FileId::T1, 0 );
     
@@ -1298,7 +1433,10 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
     const uint64 maxParkCount     = maxBucketEntries / kEntriesPerPark;
     const size_t parkSize         = CalculatePark7Size( _K );
 
-    const size_t plotBlockSize    = ioQueue.BlockSize( FileId::PLOT );
+    // #TODO: We don't need these alignments anymore
+    // const size_t plotBlockSize    = ioQueue.BlockSize( FileId::PLOT );
+    const size_t plotBlockSize    = _context.plotWriter->BlockSize();
+    _context.plotWriter->BeginTable( PlotTable::Table7 );
 
     StackAllocator allocator( context.heapBuffer, context.heapSize );
 
@@ -1398,8 +1536,10 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
         const size_t sizeWritten = parkSize * parkCount;
         context.plotTableSizes[(int)TableId::Table7] += sizeWritten;
 
-        ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
-        ioQueue.SignalFence( _writeFence, bucket );
+        // ioQueue.WriteFile( FileId::PLOT, 0, parkBuffer, sizeWritten );
+        // ioQueue.SignalFence( _writeFence, bucket );
+        _context.plotWriter->WriteTableData(  parkBuffer, sizeWritten );
+        _context.plotWriter->SignalFence( _writeFence, bucket );
         ioQueue.CommitCommands();
 
 
@@ -1415,7 +1555,8 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
                 TableWriter::WriteP7Entries( overflowEntries, indexOverflowStart, finalPark, 0 );
 
                 context.plotTableSizes[(int)TableId::Table7] += parkSize;
-                ioQueue.WriteFile( FileId::PLOT, 0, finalPark, parkSize );
+                // ioQueue.WriteFile( FileId::PLOT, 0, finalPark, parkSize );
+                _context.plotWriter->WriteTableData(  finalPark, parkSize );
                 ioQueue.CommitCommands();
             }
 
@@ -1430,7 +1571,9 @@ void DiskPlotPhase3::WritePark7( const uint64 inMapBucketCounts[_numBuckets+1] )
     }
 
     // Wait for all writes to finish
-    ioQueue.SignalFence( _writeFence, _numBuckets + 2 );
+    // ioQueue.SignalFence( _writeFence, _numBuckets + 2 );
+    _context.plotWriter->EndTable();
+    _context.plotWriter->SignalFence( _writeFence, _numBuckets + 2 );
     ioQueue.CommitCommands();
     _writeFence.Wait( _numBuckets + 2 );
 
@@ -1600,6 +1743,31 @@ void UnpackPark7( const byte* srcBits, uint64* dstEntries )
     // }
 }
 
+
+#if BB_DBG_DumpLinePoints_T2
+//-----------------------------------------------------------
+void DbgWriteSortedLinePoints( const TableId table, const uint32 bucket, const uint32 numBuckets, const Span<uint64> linePoints )
+{
+    if( bucket == 0 )
+    {
+        char filePath[1024] = {};
+        sprintf( filePath, "%st%u.lp.ref", BB_DP_DBG_REF_DIR, (uint32)table+1 );
+
+        _dbgLpTableFile.Open( filePath, FileMode::Create, FileAccess::Write );
+    }
+
+    if( _dbgLpTableFile.IsOpen() )
+    {
+        _dbgLpTableFile.Write( linePoints.Ptr(), (size_t)linePoints.Length() * sizeof( uint64 ) );
+
+        if( bucket == numBuckets-1 )
+        {
+            _dbgLpTableFile.Close();
+            Exit(0);
+        }
+    }
+}
+#endif
 
 #endif
 

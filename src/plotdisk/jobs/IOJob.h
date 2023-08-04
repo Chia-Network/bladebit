@@ -32,8 +32,13 @@ struct IOJob : MTJob<IOJob>
 
     void Run() override;
 
+    static bool WriteToFile( const char* filePath, const void* writeBuffer, const size_t size, int& error );
+
     static bool WriteToFile( IStream& file, const void* writeBuffer, const size_t size,
                              void* fileBlockBuffer, const size_t blockSize, int& error );
+    
+    static bool WriteToFileUnaligned( const char* filePath, const void* writeBuffer, const size_t size, int& error );
+    static bool WriteToFileUnaligned( IStream& file, const void* writeBuffer, const size_t size, int& error );
 
     static bool ReadFromFile( IStream& file, void* buffer, const size_t size,
                               void* blockBuffer, const size_t blockSize, int& error );
@@ -41,9 +46,18 @@ struct IOJob : MTJob<IOJob>
     static bool ReadFromFile( const char* path, void* buffer, const size_t size,
                               void* blockBuffer, const size_t blockSize, int& error );
 
+    static bool ReadFromFile( const char* path, void* buffer, const size_t size, int& error );
+
+
+    static bool ReadFromFileUnaligned( const char* path, void* buffer, const size_t size, int& error );
+    static bool ReadFromFileUnaligned( IStream& file, void* buffer, const size_t size, int& error );
+
     static void* ReadAllBytesDirect( const char* path, int& error );
+    
+    static void* ReadAllBytesDirect( const char* path, int& error, size_t& byteCount );
 
 private:
+
     static bool RunIOJob( bool write, ThreadPool& pool, uint32 threadCount, 
         IStream** files, 
         byte* ioBuffer, const size_t size,

@@ -1,11 +1,27 @@
 #! /usr/bin/env bash
 # NOTE: This is meant to be run from the repo root dir
-#
-#  Expects env variables:
-#   - BB_ARTIFACT_NAME
-#   - BB_VERSION
-#
+
 set -eo pipefail
+
+compile_cuda=0
+artifact_name=bladebit
+version=v1.0
+
+while true; do
+  case $1 in
+    --cuda)
+      compile_cuda=1 || exit 1
+    ;;
+    --artifact)
+      shift && artifact_name=$1 || exit 1
+    ;;
+    --version)
+      shift && version=$1 || exit 1
+    ;;
+  esac
+  shift || break
+done
+
 
 thread_count=2
 
@@ -19,11 +35,19 @@ fi
 echo "System: $(uname -s)"
 gcc --version
 
-mkdir build && cd build
-cmake ..
+exe_name=bladebit
+target=bladebit
+if [[ compile_cuda -eq 1 ]]; then
+  target=bladebit_cuda
+  exe_name=bladebit_cuda
+fi
+
+set -x
+mkdir build-${target} && cd build-${target}
+cmake .. -DCMAKE_BUILD_TYPE=Release
 bash -eo pipefail ../embed-version.sh
-cmake --build . --target bladebit --config Release -j $thread_count
-chmod +x ./bladebit
+cmake --build . --config Release --target $target -j $thread_count
+chmod +x ./${exe_name}
 
 if [[ $OSTYPE == 'msys'* ]] || [[ $OSTYPE == 'cygwin'* ]]; then
   ls -la Release
@@ -32,16 +56,16 @@ else
 fi
 
 # Ensure bladebit version matches expected version
-bb_version="$(./bladebit --version | xargs)"
+bb_version="$(./${exe_name} --version | xargs)"
 
-if [[ "$bb_version" != "$BB_VERSION" ]]; then
-    >&2 echo "Incorrect bladebit version. Got '$bb_version' but expected '$BB_VERSION'."
+if [[ "$bb_version" != "$version" ]]; then
+    >&2 echo "Incorrect bladebit version. Got '$bb_version' but expected '$version'."
     exit 1
 fi
 
 tar --version
-tar -czvf $BB_ARTIFACT_NAME bladebit
-mkdir ../bin
-mv $BB_ARTIFACT_NAME ../bin/
+tar -czvf $artifact_name $exe_name
+mkdir -p ../bin
+mv $artifact_name ../bin/
 ls -la ../bin
 

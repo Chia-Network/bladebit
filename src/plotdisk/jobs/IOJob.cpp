@@ -49,7 +49,7 @@ bool IOJob::RunIOJob( bool write,
     threadCount = std::max( 1u, std::min( threadCount, pool.ThreadCount() ) );
 
     // For small writes use a single thread
-    const size_t minWrite = std::max( blockSize, (size_t)16 MB );
+    const size_t minWrite = std::max( blockSize, (size_t)(16 MiB) );
 
     if( size <= minWrite || threadCount == 1 )
     {
@@ -128,6 +128,23 @@ void IOJob::Run()
 }
 
 //-----------------------------------------------------------
+bool IOJob::WriteToFile( const char* filePath, const void* writeBuffer, const size_t size, int& error )
+{
+    FileStream file;
+    if( !file.Open( filePath, FileMode::Create, FileAccess::Write, FileFlags::NoBuffering ) )
+    {
+        error = file.GetError();
+        return false;
+    }
+
+    void* block = bbvirtalloc( file.BlockSize() );
+    const bool r = WriteToFile( file, writeBuffer, size, block, file.BlockSize(), error );
+    bbvirtfree( block );
+
+    return r;
+}
+
+//-----------------------------------------------------------
 bool IOJob::WriteToFile( IStream& file, const void* writeBuffer, const size_t size,
                          void* fileBlockBuffer, const size_t blockSize, int& error )                 
 {
@@ -153,7 +170,7 @@ bool IOJob::WriteToFile( IStream& file, const void* writeBuffer, const size_t si
         sizeToWrite -= (size_t)sizeWritten;
         buffer      += sizeWritten;
     }
-    
+
     if( remainder )
     {
         ASSERT( blockBuffer );
@@ -175,8 +192,56 @@ bool IOJob::WriteToFile( IStream& file, const void* writeBuffer, const size_t si
 }
 
 //-----------------------------------------------------------
+bool IOJob::WriteToFileUnaligned( const char* filePath, const void* writeBuffer, const size_t size, int& error )
+{
+    FileStream file;
+    if( !file.Open( filePath, FileMode::Create, FileAccess::Write, FileFlags::None ) )
+    {
+        error = file.GetError();
+        return false;
+    }
+
+    return WriteToFileUnaligned( file, writeBuffer, size, error );
+}
+
+//-----------------------------------------------------------
+bool IOJob::WriteToFileUnaligned( IStream& file, const void* writeBuffer, const size_t size, int& error )
+{
+    error = 0;
+
+    const byte* buffer      = (byte*)writeBuffer;
+    size_t      sizeToWrite = size;
+
+    while( sizeToWrite )
+    {
+        ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
+        if( sizeWritten < 1 )
+        {
+            error = file.GetError();
+            return false;
+        }
+
+        ASSERT( sizeWritten <= (ssize_t)sizeToWrite );
+
+        sizeToWrite -= (size_t)sizeWritten;
+        buffer      += sizeWritten;
+    }
+
+    return true;
+}
+
+//-----------------------------------------------------------
 void* IOJob::ReadAllBytesDirect( const char* path, int& error )
 {
+    size_t byteCount = 0;
+    return ReadAllBytesDirect( path, error, byteCount );
+}
+
+//-----------------------------------------------------------
+void* IOJob::ReadAllBytesDirect( const char* path, int& error, size_t& byteCount )
+{
+    byteCount = 0;
+
     FileStream file;
     if( !file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::NoBuffering ) )
         return nullptr;
@@ -197,8 +262,10 @@ void* IOJob::ReadAllBytesDirect( const char* path, int& error )
         return nullptr;
     }
 
+    byteCount = readSize;
     return buffer;
 }
+
 
 //-----------------------------------------------------------
 bool IOJob::ReadFromFile( const char* path, void* buffer, const size_t size,
@@ -206,9 +273,32 @@ bool IOJob::ReadFromFile( const char* path, void* buffer, const size_t size,
 {
     FileStream file;
     if( !file.Open( path, FileMode::Open, FileAccess::Read ) )
+    {
+        error = file.GetError();
         return false;
+    }
 
     return ReadFromFile( file, buffer, size, blockBuffer, blockSize, error );
+}
+
+//-----------------------------------------------------------
+bool IOJob::ReadFromFile( const char* path, void* buffer, const size_t size, int& error )
+{
+    ASSERT( path   );
+    ASSERT( buffer );
+
+    FileStream file;
+    if( !file.Open( path, FileMode::Open, FileAccess::Read, FileFlags::NoBuffering ) )
+        return false;
+
+    const size_t blockSize = file.BlockSize();
+
+    void* block  = bbvirtalloc( blockSize );
+    const bool r = ReadFromFile( file, buffer, size, block, blockSize, error );
+
+    bbvirtfree( block );
+
+    return r;
 }
 
 //-----------------------------------------------------------
@@ -255,3 +345,23 @@ bool IOJob::ReadFromFile( IStream& file, void* readBuffer, const size_t size,
 
     return true;
 }
+
+//-----------------------------------------------------------
+bool IOJob::ReadFromFileUnaligned( const char* path, void* buffer, const size_t size, int& error )
+{
+    FileStream file;
+    if( !file.Open( path, FileMode::Open, FileAccess::Read ) )
+    {
+        error = file.GetError();
+        return false;
+    }
+
+    return ReadFromFileUnaligned( file, buffer, size, error );
+}
+
+//-----------------------------------------------------------
+bool IOJob::ReadFromFileUnaligned( IStream& file, void* buffer, const size_t size, int& error )
+{
+    return ReadFromFile( file, buffer, size, nullptr, 1, error );
+}
+

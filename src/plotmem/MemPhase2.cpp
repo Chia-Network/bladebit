@@ -79,15 +79,17 @@ void MemPhase2::Run()
         cx.t7LRBuffer
     };
 
+    const bool isCompressed = cx.cfg.gCfg->compressionLevel > 0;
+    const uint endTable     = (uint)(isCompressed ? TableId::Table3 : TableId::Table2);
+
     // #NOTE: We don't need to prune table 1. 
     //        Since it doesn't refer back to other values,
     //        pruning up to table 2 is enough.
-    for( uint i = (int)TableId::Table7; i > 1; i-- )
+    for( uint i = (int)TableId::Table7; i > endTable; i-- )
     {
         const Pair*  rTable       = rTables[i];
         const uint64 rTableCount  = cx.entryCount[i];
         byte* lTableMarkingBuffer = (byte*)cx.usedEntries[i-1];
-
 
         Log::Line( "  Prunning table %d...", i );
         auto timer = TimerBegin();

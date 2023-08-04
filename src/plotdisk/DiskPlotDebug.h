@@ -608,8 +608,8 @@ void Debug::ValidateK32Pairs( const TableId table, DiskPlotContext& context )
 
     // Cleanup
     bbvirtfreebounded( heap );
-    bbvirtfreebounded( reference.Ptr() );
-    bbvirtfreebounded( bucketPairs.Ptr() );
+    bbvirtfreebounded_span( reference );
+    bbvirtfreebounded_span( bucketPairs );
 
     Log::Line( "[DEBUG] Completed" );
 }
@@ -725,10 +725,10 @@ void Debug::DumpPairs( const TableId table, DiskPlotContext& context )
 
     // Cleanup
     bbvirtfreebounded( block );
-    bbvirtfreebounded( pairTable.Ptr() );
+    bbvirtfreebounded_span( pairTable );
     bbvirtfreebounded( heap );
     if( hasMap ) 
-        bbvirtfreebounded( mapTable.Ptr() );
+        bbvirtfreebounded_span( mapTable );
 
     Log::Line( "[DEBUG] Completed." );
 }

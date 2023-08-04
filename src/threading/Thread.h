@@ -28,12 +28,16 @@ public:
     // Cause the current thread to sleep
     static void Sleep( long milliseconds );
 
+    // Not thread safe, should only ever be called by a single thread.
     bool WaitForExit( long milliseconds = -1 );
 
     bool HasExited() const;
 
     bool SetPriority( const ThreadPriority priority );
     
+    // Unsafe
+    inline ThreadId GetNativeHandle() const { return _threadId; }
+
 private:
     
     #if PLATFORM_IS_UNIX
@@ -52,15 +56,18 @@ private:
 #if PLATFORM_IS_UNIX
     // Used for launching the thread and 
     // suspending it until it actually runs.
-    pthread_mutex_t _launchMutex;
-    pthread_cond_t  _launchCond ;
+    pthread_mutex_t _launchMutex = {};
+    pthread_cond_t  _launchCond  = {};
+
+    pthread_mutex_t _exitMutex = {};
+    pthread_cond_t  _exitCond  = {};
 #endif
 
     enum class ThreadState : int
     {
         ReadyToRun = 0,
-        Running    = 1,
-        Exited     = 2
+        Running,
+        Exited,
     };
 
     std::atomic<ThreadState> _state;

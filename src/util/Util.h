@@ -19,15 +19,50 @@
     #error Byte swapping intrinsics not configured for this compiler.
 #endif
 
+#if defined(__GNUC__)
+    #define AlignAs(bytes) __attribute__( (aligned((bytes))) )
+#elif defined(_MSC_VER)
+    #define AlignAs(bytes) __declspec( align((bytes)) )
+#endif
+
 
 /// Byte size conversions
-#define KB *(1<<10)
-#define MB *(1<<20)
-#define GB *(1<<30)
+#define KB *(1llu<<10)
+#define MB *(1llu<<20)
+#define GB *(1llu<<30)
+#define TB *(1llu<<40)
+#define PB *(1llu<<50)
 
-#define BtoKB /(1<<10)
-#define BtoMB /(1<<20)
-#define BtoGB /(1<<30)
+#define KiB *(1llu<<10)
+#define MiB *(1llu<<20)
+#define GiB *(1llu<<30)
+#define TiB *(1llu<<40)
+#define PiB *(1llu<<50)
+
+#define BtoKB /(1llu<<10)
+#define BtoMB /(1llu<<20)
+#define BtoGB /(1llu<<30)
+
+
+/// SI Units
+#define KBSi *(1000llu)
+#define MBSi *(1000llu KBSi )
+#define GBSi *(1000llu MBSi )
+#define TBSi *(1000llu GBSi )
+#define PBSi *(1000llu TBSi )
+
+
+#define BtoKBSi( v ) ((v) / 1000llu)
+#define BtoMBSi( v ) (BtoKBSi(v) / 1000llu)
+#define BtoGBSi( v ) (BtoMBSi(v) / 1000llu)
+#define BtoTBSi( v ) (BtoGBSi(v) / 1000llu)
+#define BtoPBSi( v ) (BtoTBSi(v) / 1000llu)
+
+#define BtoKBSiF( v ) ((v) / 1000.0)
+#define BtoMBSiF( v ) (BtoKBSiF(v) / 1000.0)
+#define BtoGBSiF( v ) (BtoMBSiF(v) / 1000.0)
+#define BtoTBSiF( v ) (BtoGBSiF(v) / 1000.0)
+#define BtoPBSiF( v ) (BtoTBSiF(v) / 1000.0)
 
 
 ///
@@ -204,6 +239,16 @@ inline void bbvirtfree( void* ptr )
 }
 
 //-----------------------------------------------------------
+template<typename T>
+inline void bbvirtfree_span( Span<T>& span )
+{
+    if( span.values )
+        SysHost::VirtualFree( span.values );
+
+    span = {};
+}
+
+//-----------------------------------------------------------
 template<typename T = void>
 inline T* bbvirtalloc( size_t size )
 {
@@ -235,22 +280,72 @@ inline T* bbcvirtalloc( size_t count )
     return bbvirtalloc<T>( sizeof( T ) * count );
 }
 
+//-----------------------------------------------------------
+inline void* bb_try_virt_alloc( size_t size )
+{
+    return SysHost::VirtualAlloc( size, false );
+}
+
 // Allocate virtual memory with protected boundary pages
 // #NOTE: Only free with bbvirtfreebounded
-//-----------------------------------------------------------
 template<typename T = void>
-inline T* bbvirtallocbounded( size_t size )
+inline void bbvirtfreebounded( T*& ptr )
+{
+    if( ptr )
+    {
+        bbvirtfree( ((byte*)ptr) - SysHost::GetPageSize() );
+        ptr = nullptr;
+    }
+}
+
+//-----------------------------------------------------------
+inline void* bb_try_virt_alloc_bounded( size_t size )
 {
     const size_t pageSize = SysHost::GetPageSize();
     size = RoundUpToNextBoundaryT<size_t>( size, pageSize ) + pageSize * 2;
 
-    auto* ptr = (byte*)SysHost::VirtualAlloc( size, false );
+    auto* ptr = (byte*)bb_try_virt_alloc( size );
+    if( !ptr )
+        return nullptr;
+
+    if( !SysHost::VirtualProtect( ptr, pageSize, VProtect::NoAccess ) ||
+        !SysHost::VirtualProtect( ptr + size - pageSize, pageSize, VProtect::NoAccess ) )
+    {
+        bbvirtfreebounded( ptr );
+        return nullptr;
+    }
+
+    return ptr + pageSize;
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline T* bb_try_virt_calloc_bounded( const size_t count )
+{
+    return reinterpret_cast<T*>( bb_try_virt_alloc_bounded( count * sizeof( T ) ) );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline Span<T> bb_try_virt_calloc_bounded_span( const size_t count )
+{
+    auto span = Span<T>( bb_try_virt_calloc_bounded<T>( count ), count );
+    if( span.Ptr() == nullptr )
+        span.length = 0;
+
+    return span;
+}
+
+// Allocate virtual memory with protected boundary pages
+// #NOTE: Only free with bbvirtfreebounded
+//-----------------------------------------------------------
+template<typename T = void>
+inline T* bbvirtallocbounded( const size_t size )
+{
+    void* ptr = bb_try_virt_alloc_bounded( size );
     FatalIf( !ptr, "VirtualAlloc failed." );
 
-    SysHost::VirtualProtect( ptr, pageSize, VProtect::NoAccess );
-    SysHost::VirtualProtect( ptr + size - pageSize, pageSize, VProtect::NoAccess );
-
-    return reinterpret_cast<T*>( ptr + pageSize );
+    return reinterpret_cast<T*>( ptr );
 }
 
 //-----------------------------------------------------------
@@ -290,18 +385,25 @@ inline T* bbcvirtallocboundednuma( size_t count )
 
 //-----------------------------------------------------------
 template<typename T = void>
+inline bool bb_interleave_numa_memory( const size_t count, T* ptr )
+{
+    return SysHost::GetNUMAInfo() && SysHost::NumaSetMemoryInterleavedMode( ptr, count * sizeof( T ) );
+}
+
+//-----------------------------------------------------------
+template<typename T = void>
 inline Span<T> bbcvirtallocboundednuma_span( size_t count )
 {
     return Span<T>( bbcvirtallocboundednuma<T>( count ), count );
 }
 
 //-----------------------------------------------------------
-inline void bbvirtfreebounded( void* ptr )
+template<typename T>
+inline void bbvirtfreebounded_span( Span<T>& span )
 {
-    ASSERT( ptr );
-    SysHost::VirtualFree( ((byte*)ptr) - SysHost::GetPageSize() );
+    bbvirtfreebounded( span.values );
+    span = {};
 }
-
 
 
 const char HEX_TO_BIN[256] = {
@@ -440,6 +542,14 @@ const char HEX_TO_BIN[256] = {
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 };
 
+
+//-----------------------------------------------------------
+inline bool IsHexChar( const char c )
+{
+    if( c < '0' || c > 'f' ) return false;
+    return c <= '9' || c >= 'a' || ( c >= 'A' && c <= 'B' );
+}
+
 //-----------------------------------------------------------
 inline void HexStrToBytes( const char* str, const size_t strSize,
                            byte* dst, size_t dstSize )
@@ -573,7 +683,68 @@ inline std::vector<uint8_t> BytesConcat( std::vector<uint8_t> a, std::vector<uin
     return a;
 }
 
-std::string HexToString( const byte* bytes, size_t length );
+std::string BytesToHexStdString( const byte* bytes, size_t length );
 std::vector<uint8_t> HexStringToBytes( const char* hexStr );
 std::vector<uint8_t> HexStringToBytes( const std::string& hexStr );
+
+//-----------------------------------------------------------
+inline bool IsDigit( const char c )
+{
+    return c >= '0' && c <= '9';
+}
+
+//-----------------------------------------------------------
+inline bool IsNumber( const char* str )
+{
+    if( str == nullptr )
+        return false;
+
+    while( *str )
+    {
+        if( !IsDigit( *str++ ) )
+            return false;
+    }
+    
+    return true;
+}
+
+// Offsets a string pointer to the bytes from immediately
+// following the "0x", if the string starts with such a prefix.
+// #NOTE: Assumes a null-terminated string.
+//-----------------------------------------------------------
+inline const char* Offset0xPrefix( const char* str )
+{
+    ASSERT( str );
+    if( str && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') )
+        return str+2;
+
+    return str;
+}
+
+template<typename T>
+inline void PrintBits( const T value, const uint32 bitCount )
+{
+    const uint32 shift = bitCount - 1;
+    for( uint32 i = 0; i < bitCount; i++ )
+        (value >> (shift-i)) & T(1) ? Log::Write( "1" ) : Log::Write( "0" );
+}
+
+//-----------------------------------------------------------
+/// Convertes 8 bytes to uint64 and endian-swaps it.
+/// This takes any byte alignment, so that bytes does
+/// not have to be aligned to 64-bit boundary.
+/// This is for compatibility for how chiapos extracts
+/// bytes into integers.
+//-----------------------------------------------------------
+inline uint64 BytesToUInt64( const byte bytes[8] )
+{
+    uint64 tmp;
+
+    if( (((uintptr_t)&bytes[0]) & 7) == 0 ) // Is address 8-byte aligned?
+        tmp = *(uint64*)&bytes[0];
+    else
+        memcpy( &tmp, bytes, sizeof( uint64 ) );
+
+    return Swap64( tmp );
+}
 

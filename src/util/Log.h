@@ -25,6 +25,8 @@ public:
     static void Flush();
     static void FlushError();
 
+    static void NewLine();
+
 #if DBG_LOG_ENABLE
     static void Debug( const char* msg, ... );
     static void DebugV( const char* msg, va_list args );

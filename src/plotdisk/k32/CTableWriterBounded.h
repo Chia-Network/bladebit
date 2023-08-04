@@ -38,6 +38,8 @@ public:
     {
         auto& context = _context;
 
+        PlotWriter& plotWriter = *context.plotWriter;
+
         // #TODO: Make the whole thing parallel?
         uint32 c1NextCheckpoint = 0;  // How many C1 entries to skip until the next checkpoint. If there's any entries here, it means the last bucket wrote a
         uint32 c2NextCheckpoint = 0;  // checkpoint entry and still had entries which did not reach the next checkpoint.
@@ -79,13 +81,16 @@ public:
         ///
         /// Begin
         ///
-        
+
         // Prepare read bucket files
         _ioQueue.SeekBucket( FileId::FX0   , 0, SeekOrigin::Begin );
         _ioQueue.SeekBucket( FileId::INDEX0, 0, SeekOrigin::Begin );
 
         // Seek to the start of the C3 table instead of writing garbage data.
-        _ioQueue.SeekFile( FileId::PLOT, 0, (int64)(c1TableSizeBytes + c2TableSizeBytes), SeekOrigin::Current );
+        // _ioQueue.SeekFile( FileId::PLOT, 0, (int64)(c1TableSizeBytes + c2TableSizeBytes), SeekOrigin::Current );
+        plotWriter.ReserveTableSize( PlotTable::C1, c1TableSizeBytes );
+        plotWriter.ReserveTableSize( PlotTable::C2, c2TableSizeBytes );
+        plotWriter.BeginTable( PlotTable::C3 );
         _ioQueue.CommitCommands();
 
         // Load initial bucket
@@ -212,7 +217,8 @@ public:
                 c3TableSizeBytes += sizeWritten;
 
                 // Write the C3 table to the plot file directly
-                _ioQueue.WriteFile( FileId::PLOT, 0, c3Buffer, c3BufferSize );
+                // _ioQueue.WriteFile( FileId::PLOT, 0, c3Buffer, c3BufferSize );
+                plotWriter.WriteTableData( c3Buffer, c3BufferSize );
                 _ioQueue.SignalFence( _writeFence, bucket );
                 _ioQueue.CommitCommands();
             }
@@ -220,32 +226,35 @@ public:
 
         // Seek back to the begining of the C1 table and
         // write C1 and C2 buffers to file, then seek back to the end of the C3 table
-
         c1Buffer[c1TotalEntries-1] = 0;          // Chiapos adds a trailing 0
         c2Buffer[c2TotalEntries-1] = 0xFFFFFFFF; // C2 overflow protection      // #TODO: Remove?
 
         _readFence.Reset( 0 );
 
-        _ioQueue.SeekBucket( FileId::PLOT, -(int64)( c1TableSizeBytes + c2TableSizeBytes + c3TableSizeBytes ), SeekOrigin::Current );
-        _ioQueue.WriteFile( FileId::PLOT, 0, c1Buffer.Ptr(), c1TableSizeBytes );
-        _ioQueue.WriteFile( FileId::PLOT, 0, c2Buffer.Ptr(), c2TableSizeBytes );
-        _ioQueue.SeekBucket( FileId::PLOT, (int64)c3TableSizeBytes, SeekOrigin::Current );
+        plotWriter.EndTable();
+        plotWriter.WriteReservedTable( PlotTable::C1, c1Buffer.Ptr() );
+        plotWriter.WriteReservedTable( PlotTable::C2, c2Buffer.Ptr() );
+
+        // _ioQueue.SeekBucket( FileId::PLOT, -(int64)( c1TableSizeBytes + c2TableSizeBytes + c3TableSizeBytes ), SeekOrigin::Current );
+        // _ioQueue.WriteFile( FileId::PLOT, 0, c1Buffer.Ptr(), c1TableSizeBytes );
+        // _ioQueue.WriteFile( FileId::PLOT, 0, c2Buffer.Ptr(), c2TableSizeBytes );
+        // _ioQueue.SeekBucket( FileId::PLOT, (int64)c3TableSizeBytes, SeekOrigin::Current );
         _ioQueue.SignalFence( _readFence, 1 );
         _ioQueue.CommitCommands();
 
         // Save C table addresses into the plot context.
         // And set the starting address for the table 1 to be written
-        const size_t headerSize = _ioQueue.PlotHeaderSize();
+        // const size_t headerSize = _ioQueue.PlotHeaderSize();
 
-        _context.plotTablePointers[7] = headerSize;                                       // C1
-        _context.plotTablePointers[8] = _context.plotTablePointers[7] + c1TableSizeBytes; // C2
-        _context.plotTablePointers[9] = _context.plotTablePointers[8] + c2TableSizeBytes; // C3
-        _context.plotTablePointers[0] = _context.plotTablePointers[9] + c3TableSizeBytes; // T1
+        // _context.plotTablePointers[7] = headerSize;                                       // C1
+        // _context.plotTablePointers[8] = _context.plotTablePointers[7] + c1TableSizeBytes; // C2
+        // _context.plotTablePointers[9] = _context.plotTablePointers[8] + c2TableSizeBytes; // C3
+        // _context.plotTablePointers[0] = _context.plotTablePointers[9] + c3TableSizeBytes; // T1
 
-        // Save sizes
-        _context.plotTableSizes[7] = c1TableSizeBytes;
-        _context.plotTableSizes[8] = c2TableSizeBytes;
-        _context.plotTableSizes[9] = c3TableSizeBytes;
+        // // Save sizes
+        // _context.plotTableSizes[7] = c1TableSizeBytes;
+        // _context.plotTableSizes[8] = c2TableSizeBytes;
+        // _context.plotTableSizes[9] = c3TableSizeBytes;
 
         // Wait for all commands to finish
         _readFence.Wait( 1 );
