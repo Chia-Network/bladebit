@@ -85,11 +85,19 @@ cat "${artifact_name}.sha256.txt"
 
 if [[ "$CI" == "true" ]]; then
   if [[ "$host_os" == "windows" ]] || [[ "$host_os" == "linux" ]]; then
-    cat "${artifact_name}.sha256.txt" | while IFS= read -r line; do
-      echo -e "$(echo ${line#* } | tr -d '*')\n###### <sup>${line%%*}</sup>\n"
-    done > "$GITHUB_STEP_SUMMARY"
-
-    echo "$OBJDUMP" >> "$GITHUB_STEP_SUMMARY"
+    while IFS= read -r line; do
+      echo -e "$(echo ${line#* } | tr -d '*')\n###### <sup>${line%% *}</sup>\n"
+    done <"${artifact_name}.sha256.txt" >> "$GITHUB_STEP_SUMMARY"
+    echo "| Arch | Code Version | Host | Compile Size |" >> "$GITHUB_STEP_SUMMARY"
+    echo "| --- | --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+    echo "$OBJDUMP" | awk -v RS= -v FS='\n' -v OFS=' | ' '{
+    for (i=1; i<=NF; i++) {
+        if (index($i, "=")) {
+            gsub(/.* = /, "", $i);
+            }
+        }
+        print $3, $4, $5, $6;
+    }' | sed 's/^/| /; s/$/ |/; s/ |  | / | /g' >> "$GITHUB_STEP_SUMMARY"
   fi
 
   if [[ "$host_os" == "windows" ]]; then
