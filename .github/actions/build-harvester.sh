@@ -49,8 +49,6 @@ cmake .. -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 cmake --build . --config Release --target bladebit_harvester
 cmake --install . --prefix harvester_dist
 
-env | sort | grep 'CUDA'
-
 if [[ "$host_os" == "windows" ]]; then
   OBJDUMP=$("${CUDA_PATH}"\\bin\\cuobjdump bladebit_harvester.dll)
 elif [[ "$host_os" == "linux" ]]; then
@@ -89,9 +87,9 @@ if [[ "$CI" == "true" ]]; then
   if [[ "$host_os" == "windows" ]] || [[ "$host_os" == "linux" ]]; then
     cat "${artifact_name}.sha256.txt" | while IFS= read -r line; do
       echo -e "$(echo ${line#* } | tr -d '*')\n###### <sup>${line%%*}</sup>\n"
-    done >summary.md
+    done > "$GITHUB_STEP_SUMMARY"
 
-    echo "$OBJDUMP" >>summary.md
+    echo "$OBJDUMP" >> "$GITHUB_STEP_SUMMARY"
   fi
 
   if [[ "$host_os" == "windows" ]]; then
