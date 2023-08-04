@@ -90,11 +90,13 @@ ls -la
 cat "${artifact_name}.sha256.txt"
 
 if [[ "$CI" == "true" ]]; then
-  cat "${artifact_name}.sha256.txt" | while IFS= read -r line; do
-    echo -e "$(echo ${line#* } | tr -d '*')\n###### <sup>${line%%*}</sup>\n"
-  done >summary.md
+  if [[ "$host_os" == "windows" ]] || [[ "$host_os" == "linux" ]]; then
+    cat "${artifact_name}.sha256.txt" | while IFS= read -r line; do
+      echo -e "$(echo ${line#* } | tr -d '*')\n###### <sup>${line%%*}</sup>\n"
+    done >summary.md
 
-  echo "$OBJDUMP" >>summary.md
+    echo "$OBJDUMP" >>summary.md
+  fi
 
   if [[ "$host_os" == "windows" ]]; then
     harvester_artifact_path="$(cygpath -m "$(pwd)/${artifact_name}")*"
