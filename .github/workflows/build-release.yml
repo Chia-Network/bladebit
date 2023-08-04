@@ -39,8 +39,8 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
-          echo "$BUILD_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
@@ -92,8 +92,11 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.zip"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
-          echo "$BUILD_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+        env:
+          CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
+
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
@@ -151,8 +154,9 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-ARM64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
-          echo "$BUILD_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
@@ -218,9 +222,9 @@ jobs:
           export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-x86-64.tar.gz"
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
-          BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
-          echo "$BUILD_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
-          
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
         with:
@@ -358,7 +362,7 @@ jobs:
       - name: Install Prerequisites
         run: |
           dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-                         cmake gmp-devel numactl-devel make git
+            cmake gmp-devel numactl-devel make git
 
       - name: Build
         run: |
