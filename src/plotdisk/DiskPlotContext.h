@@ -5,13 +5,14 @@
 #include "threading/MTJob.h"
 #include "plotting/PlotTypes.h"
 #include "plotting/Tables.h"
+#include "plotting/GlobalPlotConfig.h"
 #include "ChiaConsts.h"
-
-struct GlobalPlotConfig;
+#include "plotting/PlotWriter.h"
+#include "PlotContext.h"
 
 struct DiskPlotConfig
 {
-    GlobalPlotConfig* globalCfg                = nullptr;
+    const GlobalPlotConfig* globalCfg          = nullptr;
     const char*       tmpPath                  = nullptr;
     const char*       tmpPath2                 = nullptr;
     size_t            expectedTmpDirBlockSize  = 0;
@@ -44,15 +45,18 @@ struct DiskPlotContext
 
     ThreadPool*      threadPool;
     DiskBufferQueue* ioQueue;
+    PlotWriter*      plotWriter;
+    PlotRequest      plotRequest;
     FencePool*       fencePool;
 
-    size_t       heapSize;          // Size in bytes of our working heap.
-    byte*        heapBuffer;        // Buffer allocated for in-memory work
+    size_t       heapSize;              // Size in bytes of our working heap.
+    byte*        heapBuffer;            // Buffer allocated for in-memory work
     
-    size_t       cacheSize;         // Size of memory cache to reserve for IO (region in file that never gets written to disk).
+    size_t       cacheSize;             // Size of memory cache to reserve for IO (region in file that never gets written to disk).
     byte*        cache;
 
-    uint32       numBuckets;        // Divide entries into this many buckets
+    uint32       numBuckets;            // Divide entries into this many buckets
+    
 
     uint32       ioThreadCount;     // How many threads to use for the disk buffer writer/reader
     uint32       f1ThreadCount;     // How many threads to use for f1 generation
@@ -60,10 +64,6 @@ struct DiskPlotContext
     uint32       cThreadCount;      // How many threads to use for C3 park writing and compression
     uint32       p2ThreadCount;     // How many threads to use for Phase 2
     uint32       p3ThreadCount;     // How many threads to use for Phase 3
-
-    const byte*  plotId;
-    const byte*  plotMemo;
-    uint16       plotMemoSize;
 
     uint32       bucketCounts[(uint)TableId::_Count][BB_DP_MAX_BUCKET_COUNT+1];
     uint64       entryCounts [(uint)TableId::_Count];

@@ -5,8 +5,8 @@
 
 
 //-----------------------------------------------------------
-ThreadPool::ThreadPool( uint threadCount, Mode mode, bool disableAffinity )
-    : _threadCount( threadCount )
+ThreadPool::ThreadPool( uint threadCount, Mode mode, bool disableAffinity, uint32 cpuOffset )
+    : _threadCount    ( threadCount )
     , _mode           ( mode )
     , _disableAffinity( disableAffinity )
     , _jobSignal      ( 0 )
@@ -20,10 +20,12 @@ ThreadPool::ThreadPool( uint threadCount, Mode mode, bool disableAffinity )
 
     auto threadRunner = mode == Mode::Fixed ? FixedThreadRunner : GreedyThreadRunner;
 
+    const uint32 maxCpus = SysHost::GetLogicalCPUCount();
+
     for( uint i = 0; i < threadCount; i++ )
     {
         _threadData[i].index = (int)i;
-        _threadData[i].cpuId = i;
+        _threadData[i].cpuId = (cpuOffset + i) % maxCpus;
         _threadData[i].pool  = this;
         
         Thread& t = _threads[i];
@@ -35,7 +37,7 @@ ThreadPool::ThreadPool( uint threadCount, Mode mode, bool disableAffinity )
 //-----------------------------------------------------------
 ThreadPool::~ThreadPool()
 {
-    // Signal
+    // Signal threads to exit
     _exitSignal.store( true, std::memory_order_release );
 
     if( _mode == Mode::Fixed )
@@ -49,10 +51,10 @@ ThreadPool::~ThreadPool()
             _jobSignal.Release();
     }
 
-    // #TODO: Wait for all threads to finish
-    
-    // #TODO: Signal thread for exit.
-    // #TODO: Wait for all threads to exit
+    // #TODO: Implement A Thread::Join(...) to wait for all at the same time
+    // Wait for all threads to exit
+    for( uint i = 0; i < _threadCount; i++ )
+        _threads[i].WaitForExit();
 
     delete[] _threads;
     delete[] _threadData;
@@ -115,7 +117,7 @@ void ThreadPool::DispatchGreedy( JobFunc func, byte* data, uint count, size_t da
 
     ASSERT( _poolSignal.GetCount() == 0 );
 
-    // Signal release the job semaphore <coun> amount of times.
+    // Signal release the job semaphore <count> amount of times.
     // The job threads will grab jobs from the pool as long as there is one.
     for( uint i = 0; i < count; i++ )
         _jobSignal.Release();
@@ -156,14 +158,14 @@ void ThreadPool::FixedThreadRunner( void* tParam )
     for( ;; )
     {
         if( exitSignal.load( std::memory_order::memory_order_acquire ) )
-            return;
+            break;
 
         // Wait until we are signalled to go
         jobSignal.Wait();
 
         // We may have been signalled to exit
         if( exitSignal.load( std::memory_order_acquire ) )
-            return;
+            break;
         
         // Run job
         pool._jobFunc( pool._jobData + pool._jobDataSize * index );
@@ -171,6 +173,8 @@ void ThreadPool::FixedThreadRunner( void* tParam )
         // Finished job
         poolSignal.Release();
     }
+
+    // Signal exited
 }
 
 //-----------------------------------------------------------

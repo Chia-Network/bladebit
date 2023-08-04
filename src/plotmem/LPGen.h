@@ -61,7 +61,7 @@ inline BackPtr LinePointToSquare64( uint64 index );
 //-----------------------------------------------------------
 FORCE_INLINE uint64 GetXEnc( uint64 x )
 {
-    ASSERT( x );
+    // ASSERT( x );
     uint64 a = x, b = x - 1;
 
     // if( a % 2 == 0 )
@@ -71,7 +71,7 @@ FORCE_INLINE uint64 GetXEnc( uint64 x )
         b >>= 1; // b /= 2;
 
     const uint64 r = a * b;
-    ASSERT( r >= a && r >= b );
+    // ASSERT( r >= a && r >= b );
 
     return r;
 }
@@ -89,7 +89,7 @@ FORCE_INLINE uint128 GetXEnc128( uint64 x )
         b >>= 1; // b /= 2;
 
     const uint128 r = (uint128)a * b;
-    ASSERT( r >= a && r >= b );
+    // ASSERT( r >= a && r >= b );
 
     return r;
 }
@@ -110,6 +110,17 @@ FORCE_INLINE uint64 SquareToLinePoint( uint64 x, uint64 y )
         return GetXEnc( y ) + x;
 
     return GetXEnc( x ) + y;
+}
+
+inline uint128 SquareToLinePoint128( const uint64 x, const uint64 y )
+{
+    // Always makes y < x, which maps the random x, y  points from a square into a
+    // triangle. This means less data is needed to represent y, since we know it's less
+    // than x.
+    if( y > x )
+        return GetXEnc128( y ) + x;
+
+    return GetXEnc128( x ) + y;
 }
 
 FORCE_INLINE BackPtr LinePointToSquare( uint128 index )

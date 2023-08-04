@@ -2,13 +2,19 @@
 #include "util/CliParser.h"
 #include "plotdisk/DiskPlotter.h"
 #include "plotmem/MemPlotter.h"
+#include "plotting/PlotTools.h"
+#include "commands/Commands.h"
 #include "Version.h"
 
 #if PLATFORM_IS_UNIX
     #include <sys/resource.h>
 #endif
 
-static void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] );
+#if BB_CUDA_ENABLED
+    #include "../cuda/CudaPlotter.h"
+#endif
+
+static void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, const char* argv[] );
 static void PrintUsage();
 
 // See IOTester.cpp
@@ -28,25 +34,6 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli );
 void PlotCompareMainPrintUsage();
 
 
-enum class PlotterType
-{
-    None = 0,
-    Ram,
-    Disk
-};
-
-struct Plotter 
-{
-    PlotterType type;
-    union {
-        void* _ptr;
-        DiskPlotter* disk;
-        MemPlotter*  mem;
-    };
-};
-    
-Plotter _plotter;
-
 //-----------------------------------------------------------
 int main( int argc, const char* argv[] )
 {
@@ -57,12 +44,10 @@ int main( int argc, const char* argv[] )
     Log::Line( "*** Warning: Debug mode is ENABLED ***" );
 #endif
 
-    _plotter = {};
+    IPlotter* plotter = nullptr;
 
-    GlobalPlotConfig cfg;
-    ParseCommandLine( cfg, --argc, ++argv );
-
-    FatalIf( !_plotter._ptr, "No plot command chosen." );
+    auto& cfg = *new GlobalPlotConfig{};
+    ParseCommandLine( cfg, plotter, --argc, ++argv );
 
 
     const int64 plotCount = cfg.plotCount > 0 ? (int64)cfg.plotCount : std::numeric_limits<int64>::max();
@@ -74,18 +59,17 @@ int main( int argc, const char* argv[] )
 
     char   plotIdStr[BB_PLOT_ID_LEN*2+1];
 
-
     // Prepare the output path
-    size_t outputFolderLen = strlen( cfg.outputFolder );
-    char*  plotOutPath     = new char[outputFolderLen + BB_PLOT_FILE_LEN_TMP + 2]; // + '/' + null terminator
-
-    if( outputFolderLen )
+    char*  plotOutPath      = nullptr;
+    uint32 plotOutPathIndex = 0;
     {
-        memcpy( plotOutPath, cfg.outputFolder, outputFolderLen );
+        // Get the largest buffer needed
+        size_t outFolderLengthMax = cfg.outputFolders[0].length();
 
-        // Add a trailing slash, if we need one.
-        if( plotOutPath[outputFolderLen-1] != '/' && plotOutPath[outputFolderLen-1] != '\\' )
-            plotOutPath[outputFolderLen++] = '/';
+        for( uint32 i = 1; i < cfg.outputFolderCount; i++ )
+            outFolderLengthMax = std::max( outFolderLengthMax, cfg.outputFolders[i].length() );
+
+        plotOutPath = new char[outFolderLengthMax + BB_COMPRESSED_PLOT_FILE_LEN_TMP + 2]; // + '/' + null terminator
     }
 
     // Start plotting
@@ -93,7 +77,7 @@ int main( int argc, const char* argv[] )
     {
         // Generate a plot id and memo
         PlotTools::GeneratePlotIdAndMemo( plotId, plotMemo, plotMemoSize,
-                                          cfg.farmerPublicKey, cfg.poolPublicKey, cfg.poolContractPuzzleHash );
+                                          *cfg.farmerPublicKey, cfg.poolPublicKey, cfg.poolContractPuzzleHash );
 
         // Apply debug plot id and/or memo
         if( cfg.plotIdStr )
@@ -108,15 +92,30 @@ int main( int argc, const char* argv[] )
         // Convert plot id to string
         PlotTools::PlotIdToString( plotId, plotIdStr );
 
-        // Set the plot file name
-        const char* plotFileName = plotOutPath + outputFolderLen;
-        PlotTools::GenPlotFileName( plotId, (char*)plotFileName );
+        // Set the plot file name & get the full path to it
+        const char* plotFileName  = nullptr;
+        const char* plotOutFolder = nullptr;
+        {
+            // Select the next output folder
+            const std::string& curOutputDir = cfg.outputFolders[plotOutPathIndex++];
+            plotOutPathIndex %= cfg.outputFolderCount;
+
+            plotOutFolder = curOutputDir.data();
+
+            memcpy( plotOutPath, curOutputDir.data(), curOutputDir.length() );
+
+            plotFileName = plotOutPath + curOutputDir.length();
+            PlotTools::GenPlotFileName( plotId, (char*)plotFileName, cfg.compressionLevel );
+        }
 
         // Begin plot
         if( cfg.plotCount == 0 )
             Log::Line( "Generating plot %lld: %s", i+1, plotIdStr );
         else
             Log::Line( "Generating plot %lld / %u: %s", i+1, cfg.plotCount, plotIdStr );
+
+        Log::Line( "Plot temporary file: %s", plotOutPath );
+
 
         if( cfg.showMemo )
         {
@@ -130,39 +129,21 @@ int main( int argc, const char* argv[] )
         }
         Log::Line( "" );
 
-        if( _plotter.type == PlotterType::Ram )
-        {
-            auto& plotter = *_plotter.mem;
+        PlotRequest req = {};
+        req.plotId       = plotId;
+        req.memo         = plotMemo;
+        req.memoSize     = plotMemoSize;
+        req.outDir       = plotOutFolder;
+        req.plotFileName = plotFileName;
+        req.isFirstPlot  = i == 0;
+        req.IsFinalPlot  = i == plotCount-1;
 
-            PlotRequest req = {};
-            req.plotId      = plotId;
-            req.memo        = plotMemo;
-            req.memoSize    = plotMemoSize;
-            req.outPath     = plotOutPath;
-            req.IsFinalPlot = i == plotCount-1;
-            
-            plotter.Run( req );
-        }
-        else if( _plotter.type == PlotterType::Disk )
-        {
-            auto& plotter = *_plotter.disk;
-            
-            DiskPlotter::PlotRequest req;
-            req.plotId       = plotId;
-            req.plotMemo     = plotMemo;
-            req.plotMemoSize = plotMemoSize;
-            req.plotFileName = plotFileName;
-            plotter.Plot( req );
-        }
-        else
-        {
-            Fatal( "Unknown plotter type." );
-        }
+        plotter->Run( req );
     }
 }
 
 //-----------------------------------------------------------
-void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
+void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, const char* argv[] )
 {
     CliParser cli( argc, argv );
 
@@ -170,8 +151,8 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
     const char* poolPublicKey       = nullptr;
     const char* poolContractAddress = nullptr;
 
-    DiskPlotter::Config diskCfg = {};
-    MemPlotConfig       ramCfg  = {};
+    outPlotter        = nullptr;
+    IPlotter* plotter = nullptr;
 
     while( cli.HasArgs() )
     {
@@ -189,6 +170,16 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             continue;
         else if( cli.ReadStr( cfg.plotIdStr, "-i", "--plot-id" ) )
             continue;
+        else if( cli.ArgConsume( "-z", "--compress" ) )
+        {
+            cfg.compressionLevel = 1;   // Default to lowest compression
+
+            // The next parameter is potentially the compression level
+             if( IsNumber( cli.Peek() ) )
+                cfg.compressionLevel = (uint32)cli.ReadU64();
+            
+            continue;
+        }
         else if( cli.ReadStr( cfg.plotMemoStr, "--memo" ) )
             continue;
         else if( cli.ReadSwitch( cfg.showMemo, "--show-memo" ) )
@@ -197,7 +188,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             continue;
         else if( cli.ReadSwitch( cfg.disableCpuAffinity, "--no-cpu-affinity" ) )
             continue;
-        else if( cli.ArgConsume( "-v", "--verbose" ) )
+        else if( cli.ReadSwitch( cfg.verbose, "-v", "--verbose" ) )
         {
             Log::SetVerbose( true );
         }
@@ -239,17 +230,25 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
         }
         else if( cli.ArgConsume( "--about" ) )
         {
-            Log::Line( "BladeBit Chia Plotter" );
+            Log::Line( "Bladebit Chia Plotter" );
             Log::Line( "Version      : %s", BLADEBIT_VERSION_STR   );
             Log::Line( "Git Commit   : %s", BLADEBIT_GIT_COMMIT    );
             Log::Line( "Compiled With: %s", BBGetCompilerVersion() );
             
             exit( 0 );
         }
+        else if( cli.ReadSwitch( cfg.benchmarkMode, "--benchmark", "--dry-run" ) )
+            continue;
+
 
         // Commands
         else if( cli.ArgConsume( "diskplot" ) )
         {
+            // #TODO: Remove when fixed
+            FatalIf( cfg.compressionLevel > 0, "diskplot is currently disabled for compressed plotting due to a bug." );
+
+            plotter = new DiskPlotter();
+            
             // Increase the file size limit on linux
             #if PLATFORM_IS_UNIX
                 struct rlimit limit;
@@ -267,44 +266,56 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
                     }
                 }
             #endif
-
-            // DiskPlotter::Config diskCfg;
-            diskCfg.globalCfg = &cfg;
-            DiskPlotter::ParseCommandLine( cli, diskCfg );
-
-            _plotter.type = PlotterType::Disk;
             break;
         }
         else if( cli.ArgConsume( "ramplot" ) )
         {
-            ramCfg.threadCount   = cfg.threadCount == 0 ? 
-                                    SysHost::GetLogicalCPUCount() : 
-                                    bbclamp( cfg.threadCount, 1u, SysHost::GetLogicalCPUCount() );
-            ramCfg.warmStart     = cfg.warmStart;
-            ramCfg.gCfg          = &cfg;
+            FatalIf( cfg.compressionLevel > 7, "ramplot currently does not support compression levels greater than 7" );
 
-            _plotter.type = PlotterType::Ram;
+            plotter = new MemPlotter();
             break;
         }
+    #if BB_CUDA_ENABLED
+        else if( cli.ArgConsume( "cudaplot" ) )
+        {
+            plotter = new CudaK32Plotter();
+            break;
+        }
+    #endif
         else if( cli.ArgConsume( "iotest" ) )
         {
             IOTestMain( cfg, cli );
-            exit( 0 );
+            Exit( 0 );
         }
         else if( cli.ArgConsume( "memtest" ) )
         {
             MemTestMain( cfg, cli );
-            exit( 0 );
+            Exit( 0 );
         }
         else if( cli.ArgConsume( "validate" ) )
         {
             PlotValidatorMain( cfg, cli );
-            exit( 0 );
+            Exit( 0 );
         }
         else if( cli.ArgConsume( "plotcmp" ) )
         {
             PlotCompareMain( cfg, cli );
-            exit( 0 );
+            Exit( 0 );
+        }
+        else if( cli.ArgConsume( "simulate" ) )
+        {
+            CmdSimulateMain( cfg, cli );
+            Exit( 0 );
+        }
+        else if( cli.ArgConsume( "check" ) )
+        {
+            CmdPlotsCheckMain( cfg, cli );
+            Exit( 0 );
+        }
+        else if( cli.ArgConsume( "cudacheck" ) )
+        {
+            CmdCheckCUDA( cfg, cli );
+            Exit( 1 );
         }
         else if( cli.ArgConsume( "help" ) )
         {
@@ -312,6 +323,10 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             {
                 if( cli.ArgMatch( "diskplot" ) )
                     DiskPlotter::PrintUsage();
+                else if( cli.ArgMatch( "ramplot" ) )
+                    Log::Line( "bladebit -f ... -p/c ... ramplot <out_dirs>" );
+                else if( cli.ArgMatch( "cudaplot" ) )
+                    Log::Line( "bladebit_cuda -f ... -p/c ... cudaplot [-d=device] <out_dirs>" );
                 else if( cli.ArgMatch( "iotest" ) )
                     IOTestPrintUsage();
                 else if( cli.ArgMatch( "memtest" ) )
@@ -320,10 +335,16 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
                     PlotValidatorPrintUsage();
                 else if( cli.ArgMatch( "plotcmp" ) )
                     PlotCompareMainPrintUsage();
+                else if( cli.ArgMatch( "simulate" ) )
+                    CmdSimulateHelp();
+                else if( cli.ArgMatch( "check" ) )
+                    CmdPlotsCheckHelp();
+                else if( cli.ArgMatch( "cudacheck" ) )
+                    CmdCheckCUDAHelp();
                 else
                     Fatal( "Unknown command '%s'.", cli.Arg() );
 
-                exit( 0 );
+                Exit( 0 );
             }
 
             Log::Line( "help [<command>]" );
@@ -332,26 +353,19 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             PrintUsage();
             exit( 0 );
         }
-        // else if( cli.ArgMatch( "memplot" ) )
-        // {
-
-        // }
         else
         {
             Fatal( "Unexpected argument '%s'", cli.Arg() );
         }
     }
 
-    // The remainder should be output folders
-    while( cli.HasArgs() )
-    {
-        cfg.outputFolder = cli.Arg();
-        cli.NextArg();
-    }
+    // The remainder should be output folders, which we parse after the plotter consumes it's config
 
-    // Validation
+    ///
+    /// Validate global conifg
+    ///
     FatalIf( farmerPublicKey == nullptr, "A farmer public key must be specified." );
-    FatalIf( !KeyTools::HexPKeyToG1Element( farmerPublicKey, cfg.farmerPublicKey ),
+    FatalIf( !KeyTools::HexPKeyToG1Element( farmerPublicKey, *(cfg.farmerPublicKey = new bls::G1Element()) ),
         "Invalid farmer public key '%s'", farmerPublicKey );
 
     if( poolContractAddress )
@@ -370,6 +384,25 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
         Fatal( "Error: Either a pool public key or a pool contract address must be specified." );
 
 
+    // FatalIf( cfg.compressionLevel > 7, "Invalid compression level. Please specify a compression level between 0 and 7 (inclusive)." );
+    FatalIf( cfg.compressionLevel > 9, "Invalid compression level. Please specify a compression level between 0 and 9 (inclusive)." );
+    // If making compressed plots, get thr compression CTable, etc.
+    if( cfg.compressionLevel > 0 )
+    {
+        // #TODO: Remove this when added
+        if( cfg.compressionLevel > 7 )
+            Log::Line( "[WARNING] Compression levels greater than 7 are only for testing purposes and are not configured to the final plot size." );
+
+        cfg.compressedEntryBits = 17 - cfg.compressionLevel;
+        cfg.ctable              = CreateCompressionCTable( cfg.compressionLevel, &cfg.cTableSize );
+        cfg.compressionInfo     = GetCompressionInfoForLevel( cfg.compressionLevel );
+        cfg.compressedEntryBits = cfg.compressionInfo.entrySizeBits;
+        cfg.numDroppedTables    = cfg.compressionLevel < 9 ? 1 : 2;
+
+        cfg.ctable          = CreateCompressionCTable( cfg.compressionLevel );
+        cfg.compressionInfo = GetCompressionInfoForLevel( cfg.compressionLevel );
+    }
+
     const uint maxThreads = SysHost::GetLogicalCPUCount();
     if( cfg.threadCount == 0 )
         cfg.threadCount = maxThreads;
@@ -380,8 +413,6 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
 
         cfg.threadCount = maxThreads;
     }
-
-    FatalIf( cfg.outputFolder == nullptr, "An output folder must be specified." );
 
 
     if( cfg.plotIdStr )
@@ -411,7 +442,9 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
             Fatal( "Invalid plot memo." );
     }
 
-    // Config Summary
+    ///
+    // Global Config Summary
+    ///
     Log::Line( "" );
     Log::Line( "Bladebit Chia Plotter" );
     Log::Line( "Version      : %s", BLADEBIT_VERSION_STR   );
@@ -431,33 +464,61 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
     Log::Line( " CPU affinity disabled : %s", cfg.disableCpuAffinity ? "true" : "false" );
 
     Log::Line( " Farmer public key     : %s", farmerPublicKey );
-    
 
     if( poolContractAddress )
         Log::Line( " Pool contract address : %s", poolContractAddress );
     else if( cfg.poolPublicKey )
         Log::Line( " Pool public key       : %s", poolPublicKey   );
 
-    Log::Line( " Output path           : %s", cfg.outputFolder );
+    // Log::Line( " Compression           : %s", cfg.compressionLevel > 0 ? "enabled" : "disabled" );
+    if( cfg.compressionLevel > 0 )
+        Log::Line( " Compression Level     : %u", cfg.compressionLevel );
 
-    Log::Line( "" );
+    Log::Line( " Benchmark mode        : %s", cfg.benchmarkMode ? "enabled" : "disabled" );
+    // Log::Line( " Output path           : %s", cfg.outputFolder );
+    // Log::Line( "" );
+    
 
-    // Create plotter
-    switch( _plotter.type )
+    FatalIf( plotter == nullptr, "No plotter type chosen." );
+
+    // #TODO: Remove when C8 compression values added.
+    FatalIf( cfg.compressionLevel == 8, "Compression level 8 is not currently supported." );
+
+    // Parse plotter-specific CLI
+    plotter->ParseCLI( cfg, cli );
+    
+    // Parse remaining args as output directories
+    cfg.outputFolderCount = (uint32)cli.RemainingArgCount();
+    FatalIf( cfg.outputFolderCount < 1, "At least one output folder must be specified." );
+
+    cfg.outputFolders = new std::string[cfg.outputFolderCount];
+
+    int32 folderIdx = 0;
+    std::string outPath; 
+    while( cli.HasArgs() )
     {
-        case PlotterType::Disk:
-            _plotter.disk = new DiskPlotter( diskCfg );
-            break;
+        outPath = cli.Arg();
 
-        case PlotterType::Ram:
-            _plotter.mem  = new MemPlotter( ramCfg );
-            break;
+        // Add trailing slash?
+        const char endChar = outPath.back();
+        if( endChar != '/' && endChar != '\\' )
+            outPath += '/';
         
-        default:
-            Fatal( "No plotter chosen." );
-            break;
+        cfg.outputFolders[folderIdx++] = outPath;
+        cli.NextArg();
     }
+
+    cfg.outputFolder = cfg.outputFolders[0].c_str();
+
     Log::Line( "" );
+    Log::Flush();
+
+    // Initialize plotter
+    plotter->Init();
+
+    Log::Line( "" );
+
+    outPlotter = plotter;
 }
 
 
@@ -465,11 +526,14 @@ void ParseCommandLine( GlobalPlotConfig& cfg, int argc, const char* argv[] )
 static const char* USAGE = "bladebit [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS]\n"
 R"(
 [COMMANDS]
+ cudaplot   : Create a plot by using the a CUDA-capable GPU.
  diskplot   : Create a plot by making use of a disk.
  ramplot    : Create a plot completely in-ram.
  iotest     : Perform a write and read test on a specified disk.
  memtest    : Perform a memory (RAM) copy test.
  validate   : Validates all entries in a plot to ensure they all evaluate to a valid proof.
+ simulate   : Simulation tool useful for compressed plot capacity.
+ check      : Check and validate random proofs in a plot.
  help       : Output this help message, or help for a specific command, if specified.
 
 [GLOBAL_OPTIONS]:
@@ -490,6 +554,15 @@ R"(
  -p, --pool-key       : Pool public key, specified in hexadecimal format.
                         Use this if you are creating OG plots.
                         Only used if a pool contract address is not specified.
+
+ -z,--compress [level]: Compress the plot. Optionally pass a compression level parameter.
+                        If no level parameter is passed, the default compression level of 1 is used.
+                        Current compression levels supported are from 0 to 7 (inclusive).
+                        Where 0 means no compression, and 7 is the highest compression.
+                        Higher compression means smaller plots, but more CPU usage during harvesting.
+ 
+ --benchmark          : Enables benchmark mode. This is meant to test plotting without
+                        actually writing a final plot to disk.
 
  -w, --warm-start     : Touch all pages of buffer allocations before starting to plot.
 

@@ -24,9 +24,9 @@ if [[ -n "$bb_version_suffix" ]] && [[ "${bb_version_suffix:0:1}" != "-" ]]; the
   bb_version_suffix="-${bb_version_suffix}"
 fi
 
-bb_ver_maj=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
-bb_ver_min=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
-bb_ver_rev=$(printf $version_str | sed -E -r 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
+bb_ver_maj=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\1/' | xargs)
+bb_ver_min=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\2/' | xargs)
+bb_ver_rev=$(printf $version_str | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)/\3/' | xargs)
 
 bb_git_commit=$GITHUB_SHA
 if [[ -z $bb_git_commit ]]; then
@@ -73,9 +73,9 @@ if [[ -n $ver_component ]]; then
 fi
 
 # Emit all version components
-# echo "$bb_ver_maj"
-# echo "$bb_ver_min"
-# echo "$bb_ver_rev"
-# echo "$bb_version_suffix"
-# echo "$bb_git_commit"
+# echo "MAJ: $bb_ver_maj"
+# echo "MIN: $bb_ver_min"
+# echo "REV: $bb_ver_rev"
+# echo "SUF: $bb_version_suffix"
+# echo "COM: $bb_git_commit"
 

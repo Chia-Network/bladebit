@@ -35,8 +35,15 @@ jobs:
             bladebit-v${BB_VERSION}-ubuntu-arm64.tar.gz
             bladebit-v${BB_VERSION}-centos-arm64.tar.gz
             bladebit-v${BB_VERSION}-windows-x86-64.zip
-            bladebit-v${BB_VERSION}-macos-arm64.tar.gz
-            bladebit-v${BB_VERSION}-macos-x86-64.tar.gz
+            bladebit-cuda-v${BB_VERSION}-ubuntu-x86-64.tar.gz
+            bladebit-cuda-v${BB_VERSION}-centos-x86-64.tar.gz
+            bladebit-cuda-v${BB_VERSION}-ubuntu-arm64.tar.gz
+            bladebit-cuda-v${BB_VERSION}-windows-x86-64.zip
+            green_reaper-v${BB_VERSION}-linux-x86-64.tar.gz
+            green_reaper-v${BB_VERSION}-linux-ARM64.tar.gz
+            green_reaper-v${BB_VERSION}-macos-x86-64.tar.gz
+            green_reaper-v${BB_VERSION}-macos-arm64.tar.gz
+            green_reaper-v${BB_VERSION}-windows-x86-64.zip
           )
 
           mkdir -p bin
@@ -59,4 +66,4 @@ jobs:
             echo "Uploading release asset '${artifact_name}'"
             node .github/actions/artifacts.mjs upload-release-asset $BB_VERSION $artifact_name bin/$artifact_name
           done
- 
+

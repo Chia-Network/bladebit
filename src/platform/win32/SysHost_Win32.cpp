@@ -7,6 +7,7 @@
 #include <processthreadsapi.h>
 #include <systemtopologyapi.h>
 #include <psapi.h>
+#include <dbghelp.h>
 
 
 static_assert( INVALID_HANDLE_VALUE == INVALID_WIN32_HANDLE );
@@ -20,6 +21,9 @@ static_assert( INVALID_HANDLE_VALUE == INVALID_WIN32_HANDLE );
 #define RtlGenRandom SystemFunction036
 extern "C" BOOLEAN NTAPI RtlGenRandom( PVOID RandomBuffer, ULONG RandomBufferLength );
 #pragma comment( lib, "advapi32.lib" )
+
+// For stack back trace
+#pragma comment( lib, "dbghelp.lib" )
 
 static bool EnableLockMemoryPrivilege();
 
@@ -173,6 +177,8 @@ void SysHost::VirtualFree( void* ptr )
     {
         const DWORD err = GetLastError();
         Log::Error( "VirtualFree() failed with error: %d", err );
+
+        DumpStackTrace();
     }
 }
 
@@ -180,8 +186,35 @@ void SysHost::VirtualFree( void* ptr )
 bool SysHost::VirtualProtect( void* ptr, size_t size, VProtect flags )
 {
     ASSERT( ptr );
+    if( !ptr )
+        return false;
 
-    // #TODO: Implement me
+    DWORD winFlags;
+    
+    if( flags == VProtect::NoAccess )
+    {
+        winFlags = PAGE_NOACCESS;
+    }
+    else
+    {
+        if( IsFlagSet( flags, VProtect::Write ) )
+        {
+            winFlags = PAGE_READWRITE;
+        }
+        else
+        {
+            ASSERT( IsFlagSet( flags, VProtect::Read ) );
+            winFlags = PAGE_READONLY;
+        }
+    }
+
+    DWORD oldProtect = 0;
+    if( ::VirtualProtect( ptr, (SIZE_T)size, winFlags, &oldProtect ) == FALSE )
+    {
+        Log::Error( "::VirtualProtect() failed with error: %d", (int)::GetLastError() );
+        return false;
+    }
+
     return true;
 }
 
@@ -273,7 +306,66 @@ void SysHost::InstallCrashHandler()
 //-----------------------------------------------------------
 void SysHost::DumpStackTrace()
 {
-    // #TODO: Implement me
+    /// See: https://learn.microsoft.com/en-us/windows/win32/debug/retrieving-symbol-information-by-address
+    constexpr uint32 MAX_FRAMES = 256;
+
+    void* frames[MAX_FRAMES] = {};
+
+    const uint32 frameCount = (uint32)::CaptureStackBackTrace( 0, MAX_FRAMES, frames, nullptr );
+
+    if( frameCount < 1 )
+        return;
+
+    const HANDLE curProcess = ::GetCurrentProcess();
+
+    ::SymSetOptions( SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES );
+    if( !::SymInitialize( curProcess, NULL, TRUE ) )
+    {
+        Log::Error( "Waring: SymInitialize returned error: %d", GetLastError() );
+        return;
+    }
+
+
+    byte* symBuffer = (byte*)malloc( sizeof( SYMBOL_INFO ) + sizeof(TCHAR) * (MAX_SYM_NAME+1) );
+    if( !symBuffer )
+    {
+        Log::Error( "Warning: Failed to dump stack trace." );
+        return;
+    }
+    
+    auto* symbol = reinterpret_cast<SYMBOL_INFO*>( symBuffer );
+    symbol->MaxNameLen   = MAX_SYM_NAME;
+    symbol->SizeOfStruct = sizeof( SYMBOL_INFO );
+
+    IMAGEHLP_LINE64 line = {};
+    line.SizeOfStruct = sizeof( IMAGEHLP_LINE64 );
+
+    for( uint32 i = 0; i < frameCount; i++ )
+    {
+              DWORD64 displacement = 0;
+        const DWORD64 address      = (DWORD64)frames[i];
+
+        if( ::SymFromAddr( curProcess, address, &displacement, symbol ) )
+        {
+            DWORD lineDisplacement = 0;
+            if( ::SymGetLineFromAddr64( curProcess, address, &lineDisplacement, &line ) )
+            {
+                Log::Line( "0x%016llX @ %s::%s() line: %llu", (llu)address, line.FileName, symbol->Name, (llu)line.LineNumber );
+            }
+            else
+            {
+                Log::Line( "0x%016llX @ <unknown>::%s()", (llu)address, symbol->Name );
+            }
+        }
+        else
+        {
+            Log::Line( "0x%016llX @ <unknown>::<unknown>", (llu)address );
+        }
+    }
+
+    Log::Flush();
+
+    free( symBuffer );
 }
 
 //-----------------------------------------------------------

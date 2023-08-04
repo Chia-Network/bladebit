@@ -55,9 +55,15 @@
 #define TimerEndTicks( startTime ) \
     (std::chrono::steady_clock::now() - (startTime))
 
+#define NanoSecondsToSeconds( nano ) ( (nano) * 1e-9 )
+
 #define TicksToSeconds( duration ) \
-    ( std::chrono::duration_cast<std::chrono::nanoseconds>( (duration) ).count() * 1e-9 )
+    NanoSecondsToSeconds( std::chrono::duration_cast<std::chrono::nanoseconds>( (duration) ).count() )
+
+#define TicksToNanoSeconds( duration ) \
+    ( std::chrono::duration_cast<std::chrono::nanoseconds>( (duration) ).count() )
     
+
 
 #define ImplementFlagOps( FlagType ) \
 inline FlagType operator | ( FlagType lhs, FlagType rhs )                                               \

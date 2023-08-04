@@ -77,6 +77,18 @@ struct MTJobSyncT
         return _jobs[index];
     };
 
+    inline const TJob& GetNextJob() const
+    {   
+        ASSERT( !IsLastThread() );
+        return _jobs[_jobId+1];
+    };
+
+    inline const TJob& GetPrevJob() const
+    {   
+        ASSERT( !IsControlThread() );
+        return _jobs[_jobId-1];
+    };
+
     inline const TJob& LastJob() const { return _jobs[_jobCount-1]; }
 
     // For debugging
@@ -112,6 +124,9 @@ struct MTJobRunner
 
     double Run();
     double Run( uint32 threadCount );
+
+    static void RunFromInstance( ThreadPool& pool, uint32 threadCount, const TJob& jobSrc );
+    static void RunFromInstanceDynamic( ThreadPool& pool, uint32 threadCount, const TJob& jobSrc );
 
     inline TJob& operator[]( uint64 index ) { return this->_jobs[index]; }
     inline TJob& operator[]( int64  index ) { return this->_jobs[index]; }
@@ -205,6 +220,37 @@ inline void MTJobRunner<TJob, MaxJobs>::RunJobWrapper( TJob* job )
 {
     //job->Run();
     static_cast<MTJob<TJob>*>( job )->Run();
+}
+
+template<typename TJob, uint MaxJobs>
+void MTJobRunner<TJob, MaxJobs>::RunFromInstance( ThreadPool& pool, const uint32 threadCount, const TJob& jobSrc )
+{
+    FatalIf( threadCount > MaxJobs, "Too many threads for job." );
+
+    MTJobRunner<TJob> jobs( pool );
+
+    for( uint32 i = 0; i < threadCount; i++ )
+    {
+        auto& job = jobs[i];
+        job = jobSrc;
+    }
+
+    jobs.Run( threadCount );
+}
+
+template<typename TJob, uint MaxJobs>
+void MTJobRunner<TJob, MaxJobs>::RunFromInstanceDynamic( ThreadPool& pool, const uint32 threadCount, const TJob& jobSrc )
+{
+    FatalIf( threadCount > MaxJobs, "Too many threads for job." );
+
+    auto  runner = new MTJobRunner<TJob>( pool );
+    TJob* jobs   = runner->Jobs();
+
+    for( uint32 i = 0; i < threadCount; i++ )
+        jobs[i] = jobSrc;
+
+    runner->Run( threadCount );
+    delete runner;
 }
 
 
@@ -564,5 +610,50 @@ template<typename TJob, typename T>
 inline void GetThreadOffsets( MTJob<TJob>* job, const T totalCount, T& count, T& offset, T& end )
 {
     GetThreadOffsets( job->JobId(), job->JobCount(), totalCount, count, offset, end );
+}
+
+//-----------------------------------------------------------
+template<typename TJob, typename T>
+inline Span<T> GetThreadOffsets( MTJob<TJob>* job, const Span<T> values )
+{
+    const uint32 id          = job->JobId();
+    const uint32 threadCount = job->JobCount();
+
+    size_t count, offset;
+    
+    const size_t totalCount     = values.Length();
+    const size_t countPerThread = totalCount / threadCount;
+    const size_t remainder      = totalCount - countPerThread * threadCount;
+
+    count  = countPerThread;
+    offset = id * countPerThread;
+
+    if( id == threadCount-1 )
+        count += remainder;
+
+    return values.Slice( offset, count );
+}
+
+//-----------------------------------------------------------
+template<typename T>
+inline void GetFairThreadOffsets( const uint32 id, const uint32 threadCount, const T totalCount, T& count, T& offset, T& end )
+{
+    const T countPerThread = totalCount / (T)threadCount;
+    const T remainder      = totalCount - countPerThread * (T)threadCount;
+
+    count  = countPerThread;
+    offset = (T)id * countPerThread;
+
+    if( id < remainder )
+        count++;
+    
+    end = offset + count;
+}
+
+//-----------------------------------------------------------
+template<typename TJob, typename T>
+inline void GetFairThreadOffsets( MTJob<TJob>* job, const T totalCount, T& count, T& offset, T& end )
+{
+    GetFairThreadOffsets( job->JobId(), job->JobCount(), totalCount, count, offset, end );
 }
 

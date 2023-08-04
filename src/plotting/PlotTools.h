@@ -1,20 +1,25 @@
 #pragma once
 #include "ChiaConsts.h"
 #include "util/KeyTools.h"
+#include "util/BitView.h"
 
-#define BB_PLOT_PROOF_X_COUNT 32
+#define PROOF_X_COUNT       64
+#define MAX_K_SIZE          50
+#define MAX_META_MULTIPLIER 4
+#define MAX_Y_BIT_SIZE      ( MAX_K_SIZE + kExtraBits )
+#define MAX_META_BIT_SIZE   ( MAX_K_SIZE * MAX_META_MULTIPLIER )
+#define MAX_FX_BIT_SIZE     ( MAX_Y_BIT_SIZE + MAX_META_BIT_SIZE + MAX_META_BIT_SIZE )
 
-#define BB_PLOT_ID_LEN 32
-#define BB_PLOT_ID_HEX_LEN (BB_PLOT_ID_LEN * 2)
+typedef Bits<MAX_Y_BIT_SIZE>    YBits;
+typedef Bits<MAX_META_BIT_SIZE> MetaBits;
+typedef Bits<MAX_FX_BIT_SIZE>   FxBits;
 
-#define BB_PLOT_MEMO_MAX_SIZE (48+48+32)
-
-#define BB_PLOT_FILE_LEN_TMP (sizeof( "plot-k32-2021-08-05-18-55-77a011fc20f0003c3adcc739b615041ae56351a22b690fd854ccb6726e5f43b7.plot.tmp" ) - 1)
-#define BB_PLOT_FILE_LEN (BB_PLOT_FILE_LEN_TMP - 4)
+typedef unsigned FSE_CTable;
+typedef unsigned FSE_DTable;
 
 struct PlotTools
 {
-    static void GenPlotFileName( const byte plotId[BB_PLOT_ID_LEN], char outPlotFileName[BB_PLOT_FILE_LEN] );
+    static void GenPlotFileName( const byte plotId[BB_PLOT_ID_LEN], char outPlotFileName[BB_COMPRESSED_PLOT_FILE_LEN_TMP], uint32 compressionLevel );
     static void PlotIdToString( const byte plotId[BB_PLOT_ID_LEN], char plotIdString[BB_PLOT_ID_HEX_LEN+1] );
 
     static bool PlotStringToId( const char plotIdString[BB_PLOT_ID_HEX_LEN+1], byte plotId[BB_PLOT_ID_LEN] );
@@ -29,6 +34,7 @@ struct PlotTools
         bls::G1Element* poolPK,
         PuzzleHash*     contractPuzzleHash
     );
+
     // static void PlotIdToStringTmp( const byte* plotId, const byte plotIdString[BB_PLOT_FILE_LEN_TMP] );
 
     // //-----------------------------------------------------------
@@ -53,6 +59,8 @@ struct PlotTools
     //     return CalculateLinePointSize(k) + CalculateStubsSize(k) +
     //            CalculateMaxDeltasSize(k, table_index);
     // }
+
+
     
 };
 

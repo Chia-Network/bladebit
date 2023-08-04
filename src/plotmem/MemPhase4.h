@@ -417,17 +417,18 @@ inline void WriteC3Park( const uint64 length, uint32* f7Entries, byte* parkBuffe
     {
         const uint32 f7    = f7Entries[i];
         const uint32 delta = f7 - prevF7;
-        prevF7 = f7;
 
         ASSERT( delta < 255 );
         *deltaWriter++ = (byte)delta;
+
+        prevF7 = f7;
     }
 
     ASSERT( (uint64)(deltaWriter - (byte*)f7Entries) == length );
 
     // Serialize them into the C3 park buffer
     const size_t compressedSize = FSE_compress_usingCTable(
-        parkBuffer+2, c3Size, (byte*)f7Entries, 
+        parkBuffer+2, (length*8), (byte*)f7Entries,     // Bogus dstCapacity, see ParkWriter.h note on FSE_compress_usingCTable for reason
         length, (const FSE_CTable*)CTable_C3
     );
     ASSERT( (compressedSize+2) < c3Size );

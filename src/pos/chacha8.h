@@ -18,6 +18,14 @@ void chacha8_get_keystream(
     uint32_t n_blocks,
     uint8_t *c);
 
+
+void chacha8_get_keystream_cuda(
+    const uint32_t* input,
+    uint64_t pos,
+    uint32_t n_blocks,
+    uint8_t* c );
+
+
 #ifdef __cplusplus
 }
 #endif

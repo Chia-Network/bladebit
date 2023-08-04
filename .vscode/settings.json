@@ -13,6 +13,7 @@
         "*.ac": "shellscript",
         "player": "json",
         "*.userprefs": "xml",
+        "*.make": "makefile",
         "memory": "cpp",
         "cstddef": "cpp",
         "string": "cpp",
@@ -101,11 +102,30 @@
         "locale": "cpp",
         "stack": "cpp",
         "*.include": "cpp",
-        "relic_core.h": "c"
+        "relic_core.h": "c",
+        "compare": "cpp",
+        "concepts": "cpp",
+        "numbers": "cpp",
+        "semaphore": "cpp",
+        "stop_token": "cpp",
+        "queue": "cpp",
+        "__memory": "cpp",
+        "filesystem": "cpp",
+        "__bits": "cpp",
+        "csignal": "cpp",
+        "cfenv": "cpp"
     },
     "cSpell.words": [
         "Ryzen"
     ],
     "C_Cpp.errorSquiggles": "Enabled",
-    "cmake.configureOnOpen": true
+    "cmake.configureOnOpen": true,
+    "cmake.configureOnEdit": false,
+    "cmake.preferredGenerators": [
+        "Unix Makefiles",
+        "Visual Studio 17 2022"
+    ]
+    // "cmake.generator": "Unix Makefiles"
+    // "cmake.generator": "Visual Studio 17 2022"
+
 }

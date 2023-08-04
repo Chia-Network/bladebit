@@ -68,3 +68,9 @@ void Fence::Wait( uint32 value, Duration& accumulator )
     }
 }
 
+//-----------------------------------------------------------
+void Fence::SpinWait( uint32 value )
+{
+    while( _value < value );
+}
+

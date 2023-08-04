@@ -195,3 +195,19 @@ template<> struct K32MetaType<TableId::Table7>{ using In = K32Meta2;  using Out 
 /// Helper for obtaining the correct fx (y) output type per table
 template<TableId rTable> struct K32TYOut { using Type = uint64; };
 template<>               struct K32TYOut<TableId::Table7> { using Type = uint32; };
+
+
+inline uint32 GetTableMetaMultiplier( const TableId table )
+{
+    switch( table )
+    {
+        case TableId::Table1: return (uint32)TableMetaOut<TableId::Table1>::Multiplier;
+        case TableId::Table2: return (uint32)TableMetaOut<TableId::Table2>::Multiplier;
+        case TableId::Table3: return (uint32)TableMetaOut<TableId::Table3>::Multiplier;
+        case TableId::Table4: return (uint32)TableMetaOut<TableId::Table4>::Multiplier;
+        case TableId::Table5: return (uint32)TableMetaOut<TableId::Table5>::Multiplier;
+        case TableId::Table6: return (uint32)TableMetaOut<TableId::Table6>::Multiplier;
+        case TableId::Table7: return (uint32)TableMetaOut<TableId::Table7>::Multiplier;
+        default: return 0;
+    }
+}

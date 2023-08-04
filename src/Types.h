@@ -66,3 +66,4 @@ typedef uint128_t uint128;
 
 typedef std::chrono::steady_clock::duration   Duration;
 typedef std::chrono::steady_clock::time_point TimePoint;
+typedef std::chrono::nanoseconds              NanoSeconds;

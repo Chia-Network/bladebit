@@ -40,7 +40,14 @@ void MemPhase3::Run()
     // Therefore after each iteration rTable will be a park buffer
     uint64* lpBuffer = cx.metaBuffer0;
 
-    for( uint i = (uint)TableId::Table1; i < (uint)TableId::Table7; i++ )
+    const bool    isCompressed = cx.cfg.gCfg->compressionLevel > 0;
+    const TableId startTable   = isCompressed ? TableId::Table2 : TableId::Table1;
+
+    // Write a dummy table for table 1
+    if( isCompressed )
+        cx.plotWriter->ReserveTableSize( PlotTable::Table1, 0 );
+
+    for( uint i = (uint)startTable; i < (uint)TableId::Table7; i++ )
     {
         Pair*        rTable       = rTables[i+1];
         const uint64 rTableCount  = cx.entryCount[i+1];
@@ -165,12 +172,28 @@ uint64 MemPhase3::ProcessTable( uint32* lEntries, uint64* lpBuffer, Pair* rTable
 
     // Write park for table (re-use rTable for it)
     // #NOTE: For table 6: rTable is meta0 here.
-    byte*  parkBuffer     = _context.plotWriter->AlignPointerToBlockSize<byte>( (void*)rTable );
-    size_t sizeTableParks = WriteParks<MAX_THREADS>( *cx.threadPool, newLength, lpBuffer, parkBuffer, tableId );
-    
-    // Send over the park for writing in the plot file in the background
-    if( !cx.plotWriter->WriteTable( parkBuffer, sizeTableParks ) )
-        Fatal( "Failed to write table %d to disk.", (int)tableId+1 );
+    // #TODO: Only aligned if the user asked for it
+
+
+    byte*  parkBuffer     = _context.plotWriter->BlockAlignPtr<byte>( rTable );
+    // size_t sizeTableParks = WriteParks<MAX_THREADS>( *cx.threadPool, newLength, lpBuffer, parkBuffer, tableId );
+
+    size_t            parkSize    = CalculateParkSize( tableId );
+    uint64            stubBitSize = (_K - kStubMinusBits);
+    const FSE_CTable* cTable      = CTables[(int)tableId];
+
+    if( tableId == TableId::Table2 && cx.cfg.gCfg->compressionLevel > 0 )
+    {
+        parkSize    = cx.cfg.gCfg->compressionInfo.tableParkSize;
+        stubBitSize = cx.cfg.gCfg->compressionInfo.subtSizeBits;
+        cTable      = cx.cfg.gCfg->ctable;
+    }
+
+    size_t sizeTableParks = WriteParks<MAX_THREADS>( *cx.threadPool, newLength, lpBuffer, parkBuffer, parkSize, stubBitSize, cTable );
+
+    cx.plotWriter->BeginTable( (PlotTable)tableId );
+    cx.plotWriter->WriteTableData( parkBuffer, sizeTableParks );
+    cx.plotWriter->EndTable();
 
     if constexpr ( IsTable6 )
     {

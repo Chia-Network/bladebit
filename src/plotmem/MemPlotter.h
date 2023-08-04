@@ -1,37 +1,33 @@
 #pragma once
 #include "PlotContext.h"
 #include "plotting/GlobalPlotConfig.h"
+#include "plotting/IPlotter.h"
 
 struct NumaInfo;
 
-struct MemPlotConfig
-{
-    GlobalPlotConfig* gCfg;
-    uint threadCount;
-    bool warmStart;
-    bool noNUMA;
-    bool noCPUAffinity;
-};
-
 // This plotter performs the whole plotting process in-memory.
-class MemPlotter
+class MemPlotter : public IPlotter
 {
 public:
 
-    MemPlotter( const MemPlotConfig& cfg );
-    ~MemPlotter();
+    inline MemPlotter() {}
+    inline ~MemPlotter() {}
 
-    bool Run( const PlotRequest& request );
+    void ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli ) override;
+    void Init() override;
+    void Run( const PlotRequest& req ) override;
 
 private:
 
     template<typename T>
     T* SafeAlloc( size_t size, bool warmStart, const NumaInfo* numa );
 
+    void BeginPlotFile( const PlotRequest& request );
+
     // Check if the background plot writer finished
     void WaitPlotWriter();
 
 private:
 
-    MemPlotContext _context;
+    MemPlotContext _context = {};
 };

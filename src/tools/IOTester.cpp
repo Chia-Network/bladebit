@@ -136,7 +136,7 @@ void IOTestMain( GlobalPlotConfig& gCfg, CliParser& cli )
         {
             auto* diskFile = new FileStream();
             FatalIf( !diskFile->Open( filePath, FileMode::Create, FileAccess::ReadWrite, flags ), 
-                "Failed to open temporary test file at path '%s'.", testDir );
+                "Failed to open temporary test file at path '%s' with error: %d.", testDir, diskFile->GetError() );
 
             files[0] = diskFile;
         }

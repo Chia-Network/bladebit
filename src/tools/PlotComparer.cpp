@@ -349,12 +349,13 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli )
     FatalIf( tgtPlot.K() != 32, "Plot B is k%u. Only k32 plots are currently supported.", tgtPlot.K() );
 
     FatalIf( !MemCmp( refPlot.PlotId(), tgtPlot.PlotId(), BB_PLOT_ID_LEN ), "Plot id mismatch." );
-    FatalIf( !MemCmp( refPlot.PlotMemo(), tgtPlot.PlotMemo(), std::min( refPlot.PlotMemoSize(), tgtPlot.PlotMemoSize() ) ), "Plot memo mismatch." );
+    // FatalIf( !MemCmp( refPlot.PlotMemo(), tgtPlot.PlotMemo(), std::min( refPlot.PlotMemoSize(), tgtPlot.PlotMemoSize() ) ), "Plot memo mismatch." );
     FatalIf( refPlot.K() != tgtPlot.K(), "K value mismatch." );
 
     // Test P7, dump it
     // DumpP7( refPlot, "/mnt/p5510a/reference/p7.tmp" );
 
+    // TestC3Table( refPlot, tgtPlot );
     // TestTable( refPlot, tgtPlot, TableId::Table7 );
     // TestTable( refPlot, tgtPlot, TableId::Table3 );
 
@@ -483,7 +484,10 @@ void TestC3Table( PlotInfo& ref, PlotInfo& tgt )
 
         for( int64 i = 0; i < parkCount; i++ )
         {
-            if( !MemCmp( refC3Reader, tgtC3Reader, c3ParkSize ) )
+            const uint16 refSize = Swap16( *(uint16*)refC3Reader );
+            const uint16 tgtSize = Swap16( *(uint16*)tgtC3Reader );
+
+            if( refSize != tgtSize || !MemCmp( refC3Reader, tgtC3Reader, tgtSize ) )
             {
                 Log::Line( " C3 park %lld failed.", i );
                 failures.push_back( i );
@@ -620,6 +624,9 @@ void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
     
     Log::Line( "Validating Table %u...", table+1 );
 
+    const uint64 stubBitSize      = (_K - kStubMinusBits);
+    const size_t stubSectionBytes = CDiv( (kEntriesPerPark - 1) * stubBitSize, 8 );
+
     uint64 failureCount = 0;
     if( table == TableId::Table7 )
     {
@@ -635,12 +642,26 @@ void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
     {
         for( int64 i = 0; i < parkCount; i++ )
         {
-            if( !MemCmp( parkRef, parkTgt, parkSize ) )
+            // Ignore buffer zone
+
+            const uint16 pRefCSize = *(uint16*)(parkRef + stubSectionBytes + sizeof( uint64 ) );
+            const uint16 pTgtCSize = *(uint16*)(parkTgt + stubSectionBytes + sizeof( uint64 ) );
+
+            bool failed = pRefCSize != pTgtCSize;
+
+            if( !failed )
             {
-                bool failed = true;
+                const size_t realParkSize = sizeof( uint64 ) + stubSectionBytes + pRefCSize;
+                failed =!MemCmp( parkRef, parkTgt, realParkSize );
+            }
+            // if( pRefCSize != pTgtCSize || !MemCmp( parkRef, parkTgt, parkSize ) )
+
+            {
+                // bool failed     = true;
 
                 if( failed )
                 {
+                    bool stubsEqual = MemCmp( parkRef, parkTgt, stubSectionBytes + sizeof( uint64 ) );
                     Log::Line( " T%u park %lld failed.", table+1, i );
                     failureCount++;
                 }

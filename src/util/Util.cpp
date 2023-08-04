@@ -76,7 +76,7 @@ bool AssertLog( int line, const char* file, const char* func )
 }
 
 //-----------------------------------------------------------
-std::string HexToString( const byte* bytes, size_t length )
+std::string BytesToHexStdString( const byte* bytes, size_t length )
 {
     ASSERT( length );
 
