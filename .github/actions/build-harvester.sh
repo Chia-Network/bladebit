@@ -38,6 +38,9 @@ while true; do
   shift || break
 done
 
+if [[ "$host_os" == "windows" ]]; then
+  "${CUDA_PATH}"\bin\cuobjdump --version
+fi
 echo "Harvester artifact: ${artifact_name}"
 echo 'cmake --version'
 cmake --version
@@ -50,7 +53,7 @@ cmake --build . --config Release --target bladebit_harvester
 cmake --install . --prefix harvester_dist
 
 if [[ "$host_os" == "windows" ]]; then
-  OBJDUMP=$("${CUDA_PATH}"\\bin\\cuobjdump bladebit_harvester.dll)
+  OBJDUMP=$("${CUDA_PATH}"\bin\cuobjdump bladebit_harvester.dll)
 elif [[ "$host_os" == "linux" ]]; then
   OBJDUMP=$(/usr/local/cuda/bin/cuobjdump libbladebit_harvester.so)
 fi
