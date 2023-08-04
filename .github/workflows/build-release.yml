@@ -40,7 +40,7 @@ jobs:
           echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
           # emits env.harvester_artifact_path
           BUILD_OUTPUT=$(bash .github/actions/build-harvester.sh --artifact "${artifact_name}")
-          gh run annotate "$GITHUB_RUN_ID" --message "$BUILD_OUTPUT"
+          echo "$BUILD_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Harvester Artifact
         uses: actions/upload-artifact@v3
