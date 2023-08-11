@@ -53,7 +53,7 @@ __global__ void CudaConvertInlinedXsToLinePoints(
     {
         const Pair p = inXs[gid];
         CUDA_ASSERT( p.left || p.right );
-        
+
         lp     = CudaSquareToLinePoint64( p.left, p.right );
         bucket = (uint32)(lp >> bucketShift);
         offset = atomicAdd( &sharedBuckets[bucket], 1 );
@@ -78,7 +78,6 @@ __global__ void CudaConvertInlinedXsToLinePoints(
     outLPs    [dst] = lp;
     outIndices[dst] = rIndex;
 }
-
 
 //-----------------------------------------------------------
 __global__ void CudaTestPrune(
@@ -251,7 +250,6 @@ void CudaK32PlotPhase3( CudaK32PlotContext& cx )
         CompressInlinedTable( cx );
         auto elapsed = TimerEnd( timer );
         Log::Line( " Step 1 completed step in %.2lf seconds.", elapsed );
-
         timer = TimerBegin();
         CudaK32PlotPhase3Step3( cx );
 
@@ -259,11 +257,11 @@ void CudaK32PlotPhase3( CudaK32PlotContext& cx )
         elapsed = TimerEnd( timer );
         Log::Line( " Step 2 completed step in %.2lf seconds.", elapsed );
 
-
         const uint64 baseEntryCount   = cx.tableEntryCounts[(int)cx.table];
         const uint64 prunedEntryCount = cx.phase3->prunedTableEntryCounts[(int)cx.table];
         Log::Line( "Completed table %u in %.2lf seconds with %llu / %llu entries ( %.2lf%% ).",
             cx.table, tableElapsed, prunedEntryCount, baseEntryCount, (prunedEntryCount / (double)baseEntryCount) * 100.0 );
+
     }
     // else if( compressionLevel > 0 )
     // {
@@ -340,26 +338,22 @@ void Step1( CudaK32PlotContext& cx )
         auto&         p3     = *cx.phase3;
         auto&         s1     = p3.step1;
 
-        const uint32 entryCount = BBCU_BUCKET_ENTRY_COUNT;
+        if( bucket == 0 && cx.cfg.hybrid128Mode )
+        {
+            cx.diskContext->tablesL[(int)rTable]->Swap();
+            cx.diskContext->tablesR[(int)rTable]->Swap();
 
-        // uint32* hostPairsL = cx.hostTableSortedL + p3.pairsLoadOffset;
-        // uint16* hostPairsR = cx.hostTableSortedR + p3.pairsLoadOffset;
+            s1.pairsLIn.AssignDiskBuffer( cx.diskContext->tablesL[(int)rTable] );
+            s1.pairsRIn.AssignDiskBuffer( cx.diskContext->tablesR[(int)rTable] );
+        }
+
+        const uint32 entryCount = cx.bucketCounts[(int)rTable][bucket]; //BBCU_BUCKET_ENTRY_COUNT;
+
         uint32* hostPairsL = cx.hostBackPointers[(int)rTable].left  + p3.pairsLoadOffset;
         uint16* hostPairsR = cx.hostBackPointers[(int)rTable].right + p3.pairsLoadOffset;
 
-        // if( rTable < TableId::Table7 )
-        // {
-        //     const uint32* nextHostPairsL = cx.hostBackPointers[(int)rTable + 1].left  + p3.pairsLoadOffset;
-        //     const uint16* nextHostPairsR = cx.hostBackPointers[(int)rTable + 1].right + p3.pairsLoadOffset;
-
-        //     s1.pairsLIn.UploadAndPreLoadT( hostPairsL, entryCount, nextHostPairsL, entryCount );
-        //     s1.pairsRIn.UploadAndPreLoadT( hostPairsR, entryCount, nextHostPairsR, entryCount );
-        // }
-        // else
-        {
-            s1.pairsLIn.UploadT( hostPairsL, entryCount );
-            s1.pairsRIn.UploadT( hostPairsR, entryCount );
-        }
+        s1.pairsLIn.UploadT( hostPairsL, entryCount );
+        s1.pairsRIn.UploadT( hostPairsR, entryCount );
 
         p3.pairsLoadOffset += entryCount;
     };
@@ -403,9 +397,9 @@ void Step1( CudaK32PlotContext& cx )
         const uint32* devLPairs = (uint32*)s1.pairsLIn.GetUploadedDeviceBuffer( cx.computeStream );
         const uint16* devRPairs = (uint16*)s1.pairsRIn.GetUploadedDeviceBuffer( cx.computeStream );
 
-        const uint32 entryCount = bucket == BBCU_BUCKET_COUNT-1 ?
-                                  ( cx.tableEntryCounts[(int)rTable] - (BBCU_BUCKET_ENTRY_COUNT * (BBCU_BUCKET_COUNT-1)) ) :    // Get only the remaining entries for the last bucket
-                                  BBCU_BUCKET_ENTRY_COUNT;                                                                      // Otherwise, use a whole bucket's worth.
+        const uint32 entryCount = cx.bucketCounts[(int)rTable][bucket];// bucket == BBCU_BUCKET_COUNT-1 ?
+                                //   ( cx.tableEntryCounts[(int)rTable] - (BBCU_BUCKET_ENTRY_COUNT * (BBCU_BUCKET_COUNT-1)) ) :    // Get only the remaining entries for the last bucket
+                                //   BBCU_BUCKET_ENTRY_COUNT;                                                                      // Otherwise, use a whole bucket's worth.
 
         auto* devRMap = (RMap*)s1.rMapOut.LockDeviceBuffer( cx.computeStream );
 
@@ -464,6 +458,10 @@ void Step1( CudaK32PlotContext& cx )
         for( uint32 i = 0; i < BBCU_BUCKET_COUNT; i++ )
             p3.prunedTableEntryCounts[(int)rTable] += p3.prunedBucketCounts[(int)rTable][i];
     }
+
+    // #if _DEBUG
+    //     DbgValidateRMap( cx );
+    // #endif
 }
 
 //-----------------------------------------------------------
@@ -478,17 +476,25 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
         auto& p3 = *cx.phase3;
         auto& tx = p3.xTable;
 
-        if( bucket == 0 )
-            p3.pairsLoadOffset = 0;
-
         // Load inlined x's
         const TableId rTable     = TableId::Table2 + (TableId)cx.gCfg->numDroppedTables;
         const uint32  entryCount = cx.bucketCounts[(int)rTable][bucket];
 
+        if( bucket == 0 )
+        {
+            p3.pairsLoadOffset = 0;
+
+            if( cx.cfg.hybrid128Mode )
+            {
+                cx.diskContext->tablesL[(int)rTable]->Swap();
+                tx.xIn.AssignDiskBuffer( cx.diskContext->tablesL[(int)rTable] );
+            }
+        }
+
         const Pair* inlinedXs = ((Pair*)cx.hostBackPointers[(int)rTable].left) + p3.pairsLoadOffset;
 
         tx.xIn.UploadT( inlinedXs, entryCount, cx.computeStream );
-    
+
         p3.pairsLoadOffset += entryCount;
     };
 
@@ -511,8 +517,8 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
     const bool   isCompressed     = cx.gCfg->compressionLevel > 0;
     const uint32 compressedLPBits = isCompressed ? GetCompressedLPBitCount( cx.gCfg->compressionLevel ) : 0;
 
-    const uint32 lpBits        = isCompressed ? compressedLPBits : BBCU_K * 2 - 1;
-    const uint32 lpBucketShift = lpBits - BBC_BUCKET_BITS;
+    const uint32 lpBits           = isCompressed ? compressedLPBits : BBCU_K * 2 - 1;
+    const uint32 lpBucketShift    = lpBits - BBC_BUCKET_BITS;
 
     uint64 tablePrunedEntryCount = 0;
     uint32 rTableOffset          = 0;
@@ -556,7 +562,7 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
 
         rTableOffset += entryCount;
     }
-    
+
     cudaStream_t downloadStream = tx.lpOut.GetQueue()->GetStream();
 
     CudaErrCheck( cudaMemcpyAsync( cx.hostBucketSlices, cx.devSliceCounts, sizeof( uint32 ) * BBCU_BUCKET_COUNT * BBCU_BUCKET_COUNT, 
@@ -592,11 +598,11 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
             p3.prunedTableEntryCounts[(int)rTable] += p3.prunedBucketCounts[(int)rTable][i];
     }
 
-#if _DEBUG
-    // DbgValidateIndices( cx );
-    // DbgValidateStep2Output( cx );
-    // DbgDumpSortedLinePoints( cx );
-#endif
+// #if _DEBUG
+//     // DbgValidateIndices( cx );
+//     DbgValidateStep2Output( cx );
+//     // DbgDumpSortedLinePoints( cx );
+// #endif
 }
 
 
@@ -616,10 +622,15 @@ void CudaK32PlotPhase3AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocConte
     p3.hostRMap             = acx.hostTempAllocator->CAlloc<RMap>( BBCU_TABLE_ALLOC_ENTRY_COUNT );     // Used for rMap and index
     p3.hostLinePoints       = acx.hostTempAllocator->CAlloc<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );   // Used for lMap and LPs
 
+    if( cx.cfg.hybrid64Mode )
+    {
+        Panic( "Unimplemented for 64G mode. Need to offload LMap/Line Points to disk." );
+    }
+
     if( !acx.dryRun )
     {
-        ASSERT( (uintptr_t)(p3.hostLinePoints + BBCU_TABLE_ALLOC_ENTRY_COUNT ) <= (uintptr_t)cx.hostTableL );
-        ASSERT( (uintptr_t)(p3.hostLinePoints + BBCU_TABLE_ALLOC_ENTRY_COUNT ) < (uintptr_t)cx.hostTableSortedL );
+        // ASSERT( (uintptr_t)(p3.hostLinePoints + BBCU_TABLE_ALLOC_ENTRY_COUNT ) <= (uintptr_t)cx.hostTableL );
+        // ASSERT( (uintptr_t)(p3.hostLinePoints + BBCU_TABLE_ALLOC_ENTRY_COUNT ) < (uintptr_t)cx.hostTableSortedL );
     }
     // p3.hostBucketCounts     = acx.pinnedAllocator->CAlloc<uint32>( BBCU_BUCKET_COUNT, acx.alignment );
 
@@ -687,28 +698,53 @@ void CudaK32PlotPhase3AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocConte
 //-----------------------------------------------------------
 void AllocXTableStep( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
+    GpuStreamDescriptor desc{};
+    desc.entriesPerSlice = BBCU_MAX_SLICE_ENTRY_COUNT;
+    desc.sliceCount      = BBCU_BUCKET_COUNT;
+    desc.sliceAlignment  = acx.alignment;
+    desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
+    desc.deviceAllocator = acx.devAllocator;
+    desc.pinnedAllocator = cx.cfg.disableDirectDownloads ? acx.pinnedAllocator : nullptr;
+
+    GpuStreamDescriptor uploadDesc = desc;
+    if( cx.cfg.hybrid128Mode )
+        uploadDesc.pinnedAllocator = acx.pinnedAllocator;
+
     auto& tx = cx.phase3->xTable;
 
     tx.devRMarks = (uint64*)acx.devAllocator->AllocT<uint64>( GetMarkingTableBitFieldSize(), acx.alignment );
-    tx.xIn       = cx.gpuUploadStream[0]->CreateUploadBuffer(sizeof(Pair) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, acx.alignment, acx.dryRun);
-    tx.lpOut     = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer( sizeof( uint64 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, acx.alignment, acx.dryRun );
-    tx.indexOut  = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer( sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, acx.alignment, acx.dryRun );
+
+    tx.xIn       = cx.gpuUploadStream[0]->CreateUploadBufferT<Pair>( uploadDesc, acx.dryRun );
+    tx.lpOut     = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint64>( desc, acx.dryRun );
+    tx.indexOut  = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( desc, acx.dryRun );
 }
 
 //-----------------------------------------------------------
 void CudaK32PlotAllocateBuffersStep1( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
+    GpuStreamDescriptor desc{};
+    desc.entriesPerSlice = BBCU_MAX_SLICE_ENTRY_COUNT;
+    desc.sliceCount      = BBCU_BUCKET_COUNT;
+    desc.sliceAlignment  = acx.alignment;
+    desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
+    desc.deviceAllocator = acx.devAllocator;
+    desc.pinnedAllocator = cx.cfg.disableDirectDownloads ? acx.pinnedAllocator : nullptr;
+
+    GpuStreamDescriptor uploadDesc = desc;
+    if( cx.cfg.hybrid128Mode )
+        uploadDesc.pinnedAllocator = acx.pinnedAllocator;
+
     auto&        s1        = cx.phase3->step1;
     const size_t alignment = acx.alignment;
 
-    s1.pairsLIn = cx.gpuUploadStream[0]->CreateUploadBuffer(
-                    sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+    s1.pairsLIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( uploadDesc,  acx.dryRun );
+                    // sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
     
-    s1.pairsRIn = cx.gpuUploadStream[0]->CreateUploadBuffer(
-                    sizeof( uint16 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+    s1.pairsRIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint16>( uploadDesc,  acx.dryRun );
+                    // sizeof( uint16 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
 
-    s1.rMapOut  = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer(
-                    sizeof( RMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
+    s1.rMapOut  = cx.gpuDownloadStream[0]->CreateDownloadBufferT<RMap>( desc, acx.dryRun );
+                    // sizeof( RMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
 
     s1.rTableMarks = (uint64*)acx.devAllocator->AllocT<uint64>( GetMarkingTableBitFieldSize(), acx.alignment );
 }
@@ -716,20 +752,28 @@ void CudaK32PlotAllocateBuffersStep1( CudaK32PlotContext& cx, CudaK32AllocContex
 //-----------------------------------------------------------
 void CudaK32PlotAllocateBuffersStep2( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
+    GpuStreamDescriptor desc{};
+    desc.entriesPerSlice = BBCU_MAX_SLICE_ENTRY_COUNT;
+    desc.sliceCount      = BBCU_BUCKET_COUNT;
+    desc.sliceAlignment  = acx.alignment;
+    desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
+    desc.deviceAllocator = acx.devAllocator;
+    desc.pinnedAllocator = cx.cfg.disableDirectDownloads ? acx.pinnedAllocator : nullptr;
+
     auto&        s2        = cx.phase3->step2;
     const size_t alignment = acx.alignment;
 
-    s2.rMapIn = cx.gpuUploadStream[0]->CreateUploadBuffer(
-        sizeof( RMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+    s2.rMapIn = cx.gpuUploadStream[0]->CreateUploadBufferT<RMap>( desc, acx.dryRun );
+        // sizeof( RMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
 
-    s2.lMapIn = cx.gpuUploadStream[0]->CreateUploadBuffer(
-        sizeof( LMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+    s2.lMapIn = cx.gpuUploadStream[0]->CreateUploadBufferT<LMap>( desc, acx.dryRun );
+        // sizeof( LMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
 
-    s2.lpOut = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer(
-        sizeof( uint64 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
+    s2.lpOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint64>( desc, acx.dryRun );
+        // sizeof( uint64 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
 
-    s2.indexOut = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer(
-        sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
+    s2.indexOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32> (desc, acx.dryRun );
+        // sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
     
     s2.devLTable[0] = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
     s2.devLTable[1] = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
@@ -738,23 +782,33 @@ void CudaK32PlotAllocateBuffersStep2( CudaK32PlotContext& cx, CudaK32AllocContex
 //-----------------------------------------------------------
 void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
+    GpuStreamDescriptor desc{};
+    desc.entriesPerSlice = BBCU_MAX_SLICE_ENTRY_COUNT;
+    desc.sliceCount      = BBCU_BUCKET_COUNT;
+    desc.sliceAlignment  = acx.alignment;
+    desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
+    desc.deviceAllocator = acx.devAllocator;
+    desc.pinnedAllocator = cx.cfg.disableDirectDownloads ? acx.pinnedAllocator : nullptr;
+
     auto&        s3        = cx.phase3->step3;
     const size_t alignment = acx.alignment;
 
     s3.hostParkOverrunCount = acx.pinnedAllocator->CAlloc<uint32>( 1 );
 
+    s3.lpIn    = cx.gpuUploadStream[0]->CreateUploadBufferT<uint64>( desc, acx.dryRun );
+    s3.indexIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( desc, acx.dryRun );
+
+    s3.mapOut  = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint64>( desc, acx.dryRun );
+
     const size_t devParkAllocSize = DEV_MAX_PARK_SIZE * P3_PRUNED_MAX_PARKS_PER_BUCKET;
 
-    s3.lpIn = cx.gpuUploadStream[0]->CreateUploadBuffer(
-        sizeof( uint64 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+    GpuStreamDescriptor parksDesc = desc;
+    parksDesc.sliceCount      = 1;
+    parksDesc.entriesPerSlice = devParkAllocSize;
+    parksDesc.sliceAlignment  = RoundUpToNextBoundaryT<size_t>( DEV_MAX_PARK_SIZE, sizeof( uint64 ) );
 
-    s3.indexIn = cx.gpuUploadStream[0]->CreateUploadBuffer(
-        sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-
-    s3.mapOut = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer(
-        sizeof( uint64 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
-
-    s3.parksOut = cx.gpuDownloadStream[0]->CreateDownloadBuffer(devParkAllocSize, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun);
+    s3.parksOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<byte>( parksDesc, acx.dryRun );
+    // cx.gpuDownloadStream[0]->CreateDownloadBuffer( devParkAllocSize, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
 
     if( acx.dryRun )
     {
@@ -827,6 +881,9 @@ void DbgValidateRMap( CudaK32PlotContext& cx )
 
         RMap* rMap = bbcvirtallocbounded<RMap>( BBCU_BUCKET_ALLOC_ENTRY_COUNT );
 
+        // blake3_hasher hasher;
+        // blake3_hasher_init( &hasher );
+
         for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
         {
             const RMap* reader = p3.hostRMap + bucket * P3_PRUNED_BUCKET_MAX;
@@ -838,7 +895,7 @@ void DbgValidateRMap( CudaK32PlotContext& cx )
             {
                 const uint32 copyCount = s1.prunedBucketSlices[slice][bucket];
                 bbmemcpy_t( writer, reader, copyCount );
-                
+
                 writer     += copyCount;
                 entryCount += copyCount;
 
@@ -858,13 +915,18 @@ void DbgValidateRMap( CudaK32PlotContext& cx )
                 const uint32 right = map.dstR - bucketOffset;
                 ASSERT( left  < BBCU_BUCKET_ALLOC_ENTRY_COUNT );
                 ASSERT( right < BBCU_BUCKET_ALLOC_ENTRY_COUNT );
-                CUDA_ASSERT( left < right );
-
+                ASSERT( left < right );
             }
+
+            // Hash bucket
+            // blake3_hasher_update( &hasher, rMap, sizeof( RMap ) * entryCount );
         }
 
+        // Print hash
+        // DbgFinishAndPrintHash( hasher, "r_map", (uint)cx.table + 1 );
+
         bbvirtfreebounded( rMap );
-        Log::Line( "[DEBUG] CPU OK" );
+        Log::Line( " [DEBUG] CPU OK" );
     }
 
     // Validate in CUDA
@@ -899,10 +961,12 @@ void DbgValidateRMap( CudaK32PlotContext& cx )
 
             p3.step2.rMapIn.ReleaseDeviceBuffer( cx.computeStream );
         }
-        Log::Line( "[DEBUG] CUDA OK" );
+        Log::Line( " [DEBUG] CUDA OK" );
 
         p3.step2.lMapIn.Reset();
     }
+
+    Log::Line( "[DEBUG] RMap validation OK" );
 }
 
 //-----------------------------------------------------------
@@ -949,10 +1013,36 @@ void DbgValidateIndices( CudaK32PlotContext& cx )
         ASSERT( indices[i] > indices[i-1] );
     }
 
+    DbgHashDataT( indices, entryCount, "indices", (uint32)cx.table+1 );
+
     bbvirtfreebounded( indices );
     bbvirtfreebounded( idxTmp );
 
-    Log::Line( "[DEBUG] OK" );
+    Log::Line( "[DEBUG] Index validation OK" );
+}
+
+//-----------------------------------------------------------
+void DbgHashData( const void* data, size_t size, const char* name, uint32 index )
+{
+    blake3_hasher hasher;
+    blake3_hasher_init( &hasher );
+    blake3_hasher_update( &hasher, data, size );
+
+    DbgFinishAndPrintHash( hasher, name, index );
+}
+
+//-----------------------------------------------------------
+void DbgFinishAndPrintHash( blake3_hasher& hasher, const char* name, uint32 index )
+{
+    constexpr size_t HASH_LEN = 256/8;
+    byte output[HASH_LEN];
+    blake3_hasher_finalize( &hasher, output, HASH_LEN );
+
+    Log::Write( "[DEBUG] %s_%u hash: 0x", name, index );
+    for( uint32 i = 0; i < HASH_LEN; i++ )
+        Log::Write( "%02x", output[i] );
+    
+    Log::NewLine();
 }
 
 #endif

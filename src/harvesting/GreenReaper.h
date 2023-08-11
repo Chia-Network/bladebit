@@ -69,7 +69,7 @@ typedef enum GRResult
 typedef struct GRCompressionInfo
 {
     uint32_t entrySizeBits;
-    uint32_t subtSizeBits;
+    uint32_t stubSizeBits;
     size_t   tableParkSize;
     double   ansRValue;
 } GRCompressionInfo;

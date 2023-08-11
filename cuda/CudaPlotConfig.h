@@ -42,12 +42,12 @@ static_assert( BBCU_BUCKET_ALLOC_ENTRY_COUNT / BBCU_BUCKET_COUNT == BBCU_MAX_SLI
     #ifdef _WIN32
         #define DBG_BBCU_DBG_DIR "D:/dbg/cuda/"
     #else
-        // #define DBG_BBCU_DBG_DIR "/home/harold/plot/dbg/cuda/"
-        #define DBG_BBCU_DBG_DIR "/home/harito/plot/dbg/cuda/"
+        #define DBG_BBCU_DBG_DIR "/home/harold/plotdisk/dbg/cuda/"
+        // #define DBG_BBCU_DBG_DIR "/home/harito/plots/dbg/cuda/"
     #endif
-    // #define DBG_BBCU_REF_DIR       "/home/harold/plot/ref/"
+    // #define DBG_BBCU_REF_DIR       "/home/harold/plots/ref/"
 
-    
+
     // #define BBCU_DBG_SKIP_PHASE_1   1   // Skip phase 1 and load pairs from disk
     // #define BBCU_DBG_SKIP_PHASE_2   1   // Skip phase 1 and 2 and load pairs and marks from disk
 

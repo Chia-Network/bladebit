@@ -353,7 +353,7 @@ GRResult grGetCompressionInfo( GRCompressionInfo* outInfo, const size_t infoStru
 
     auto c = GetCompressionInfoForLevel( compressionLevel );
     outInfo->entrySizeBits = c.entrySizeBits;
-    outInfo->subtSizeBits  = c.subtSizeBits;
+    outInfo->stubSizeBits  = c.stubSizeBits;
     outInfo->tableParkSize = c.tableParkSize;
     outInfo->ansRValue     = c.ansRValue;
 

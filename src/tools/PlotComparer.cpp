@@ -1,5 +1,6 @@
 #include "io/FileStream.h"
 #include "ChiaConsts.h"
+#include "tools/PlotReader.h"
 #include "util/Util.h"
 #include "util/Log.h"
 #include "util/CliParser.h"
@@ -11,279 +12,17 @@
 #include <vector>
 #include <algorithm>
 
-class PlotInfo;
 
-void TestTable( TableId table, PlotInfo& ref, PlotInfo& tgt );
-void TestC3Table( PlotInfo& ref, PlotInfo& tgt );
-void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table );
+void DumpPlotHeader( FilePlot& plot );
+void TestTable( TableId table, FilePlot& ref, FilePlot& tgt );
+void TestC3Table( FilePlot& ref, FilePlot& tgt );
+void TestTable( FilePlot& ref, FilePlot& tgt, TableId table );
 
-void UnpackPark7( const byte* srcBits, uint64* dstEntries );
+void UnpackPark7( uint32 k, const byte* srcBits, uint64* dstEntries );
 
-void DumpP7( PlotInfo& plot, const char* path );
+void DumpP7( FilePlot& plot, const char* path );
 
-Span<uint> ReadC1Table( PlotInfo& plot );
-
-class PlotInfo
-{
-public:
-    PlotInfo() {}
-
-    ~PlotInfo()
-    {
-
-    }
-
-    void Open( const char* path )
-    {
-        _path = path;
-        FatalIf( IsOpen(), "Plot is already open." );
-
-        // FileFlags::NoBuffering | FileFlags::NoBuffering ),   // #TODO: allow unbuffered reading with our own buffer... For now just use like this
-        FatalIf( !_plotFile.Open( path, FileMode::Open, FileAccess::Read, FileFlags::None ), 
-            "Failed to open plot '%s' with error %d.", path, _plotFile.GetError() );
-
-        const size_t blockSize = _plotFile.BlockSize();
-        _blockBuffer = bbvirtalloc<byte>( blockSize );
-
-        ///
-        /// Read header
-        ///
-
-        // Magic
-        {
-            char magic[sizeof( kPOSMagic )-1] = { 0 };
-            Read( sizeof( magic ), magic );
-            FatalIf( !MemCmp( magic, kPOSMagic, sizeof( magic ) ), "Invalid plot magic." );
-        }
-        
-        // Plot Id
-        {
-            Read( sizeof( _id ), _id );
-
-            char str[65] = { 0 };
-            size_t numEncoded = 0;
-            BytesToHexStr( _id, sizeof( _id ), str, sizeof( str ), numEncoded );
-            ASSERT( numEncoded == sizeof( _id ) );
-            _idString = str;
-        }
-
-        // K
-        {
-            byte k = 0;
-            Read( 1, &k );
-            _k = k;
-        }
-
-        // Format Descritption
-        {
-            const uint formatDescSize =  ReadUInt16();
-            FatalIf( formatDescSize != sizeof( kFormatDescription ) - 1, "Invalid format description size." );
-
-            char desc[sizeof( kFormatDescription )-1] = { 0 };
-            Read( sizeof( desc ), desc );
-            FatalIf( !MemCmp( desc, kFormatDescription, sizeof( desc ) ), "Invalid format description." );
-        }
-        
-        // Memo
-        {
-            uint memoSize = ReadUInt16();
-            FatalIf( memoSize > sizeof( _memo ), "Invalid memo." );
-            _memoLength = memoSize;
-
-            Read( memoSize, _memo );
-
-            char str[BB_PLOT_MEMO_MAX_SIZE*2+1] = { 0 };
-            size_t numEncoded = 0;
-            BytesToHexStr( _memo, memoSize, str, sizeof( str ), numEncoded );
-            
-            _memoString = str;
-        }
-
-        // Table pointers
-        Read( sizeof( _tablePtrs ), _tablePtrs );
-        for( int i = 0; i < 10; i++ )
-            _tablePtrs[i] = Swap64( _tablePtrs[i] );
-
-        // What follows is table data
-    }
-
-public:
-    const bool IsOpen() const { return _plotFile.IsOpen(); }
-
-    const byte* PlotId() const { return _id; }
-
-    const std::string& PlotIdStr() const { return _idString; }
-
-    uint PlotMemoSize() const { return _memoLength; }
-
-    const byte* PlotMemo() const { return _memo; }
-
-    const std::string& PlotMemoStr() const { return _memoString; }
-
-    uint K() const { return _k; }
-
-    FileStream& PlotFile() { return _plotFile; }
-
-    uint64 TableAddress( TableId table ) const
-    {
-        ASSERT( table >= TableId::Table1 && table <= TableId::Table7 );
-        return _tablePtrs[(int)table];
-    }
-
-    uint64 CTableAddress( int c )
-    {
-        ASSERT( c >= 1 && c <= 3 );
-
-        return _tablePtrs[c+6];
-    }
-
-    size_t TableSize( int tableIndex )
-    {
-        ASSERT( tableIndex >= 0 && tableIndex < 10 );
-
-        const uint64 address = _tablePtrs[tableIndex];
-        uint64 endAddress = _plotFile.Size();
-
-        // Check all table entris where we find and address that is 
-        // greater than ours and less than the current end address
-        for( int i = 0; i < 10; i++ )
-        {
-            const uint64 a = _tablePtrs[i];
-            if( a > address && a < endAddress )
-                endAddress = a;
-        }
-
-        return (size_t)( endAddress - address );
-    }
-
-    ssize_t Read( size_t size, void* buffer )
-    {
-        ASSERT( buffer );
-        if( size == 0 )
-            return 0;
-
-        const size_t blockSize  = _plotFile.BlockSize();
-
-        // Read-in any data already left-over in the block buffer
-        // if( _blockRemainder )
-        // {
-        //     const size_t copySize = std::min( _blockRemainder, size );
-        //     memcpy( buffer, _blockBuffer + _blockOffset, copySize );
-
-        //     _blockOffset    += copySize;
-        //     _blockRemainder -= copySize;
-
-        //     buffer = (void*)((byte*)buffer + copySize);
-        //     size -= copySize;
-
-        //     if( size == 0 )
-        //         return copySize;
-        // }
-
-        const size_t blockCount = size / blockSize;
-
-        size_t blockSizeToRead = blockCount * blockSize;
-        const size_t remainder  = size - blockSizeToRead;
-
-        byte* reader = (byte*)buffer;
-        ssize_t sizeRead = 0;
-
-        while( blockSizeToRead )
-        {
-            ssize_t read = _plotFile.Read( reader, blockSizeToRead );
-            FatalIf( read < 0 , "Plot %s failed to read with error: %d.", _path.c_str(), _plotFile.GetError() );
-            
-            reader   += read;
-            sizeRead += read;
-            blockSizeToRead -= (size_t)read;
-        }
-
-        if( remainder )
-        {
-            ssize_t read = _plotFile.Read( reader, remainder );
-            
-            // ssize_t read = _plotFile.Read( _blockBuffer, blockSize );
-            ASSERT( read == (ssize_t)remainder || read == (ssize_t)blockSize );       
-
-            // FatalIf( read < (ssize_t)remainder, "Failed to read a full block on plot %s.", _path.c_str() );
-
-            // memcpy( reader, _blockBuffer, remainder );
-            sizeRead += read;
-
-            // // Save any left over data in the block buffer
-            // _blockOffset    = remainder;
-            // _blockRemainder = blockSize - remainder;
-        }
-
-        return sizeRead;
-    }
-
-    uint16 ReadUInt16()
-    {
-        uint16 value = 0;
-        Read( sizeof( value ), &value );
-        return Swap16( value );
-    }
-
-    void ReadTable( int tableIndex, void* buffer )
-    {
-        const size_t size = TableSize( tableIndex );
-        
-        _blockRemainder = 0;
-        FatalIf( !_plotFile.Seek( (int64)_tablePtrs[tableIndex], SeekOrigin::Begin ),
-            "Failed to seek to table %u.", tableIndex+1 );
-
-        Read( size, buffer );
-    }
-
-    void DumpHeader()
-    {
-        Log::Line( "Plot %s", _path.c_str() );
-        Log::Line( "-----------------------------------------" );
-        Log::Line( "Id       : %s", _idString.c_str() );
-        Log::Line( "Memo     : %s", _memoString.c_str() );
-        Log::Line( "K        : %u", _k );
-
-        for( int i = 0; i <= (int)TableId::Table7; i++ )
-        {
-            const size_t size = TableSize( i );
-
-            Log::Line( "Table %u  : %16lu ( 0x%016lx ) : %8llu MiB ( %.2lf GiB )", 
-                i+1, _tablePtrs[i], _tablePtrs[i],
-                size BtoMB, (double)size BtoGB );
-
-        }
-
-        for( int i = (int)TableId::Table7+1; i < 10; i++ )
-        {
-            const size_t size = TableSize( i );
-
-            Log::Line( "C%u       : %16lu ( 0x%016lx ) : %8llu MiB ( %.2lf GiB )",
-                i-6, _tablePtrs[i], _tablePtrs[i],
-                size BtoMB, (double)size BtoGB );
-        }
-    }
-
-private:
-    FileStream  _plotFile;
-    byte        _id[BB_PLOT_ID_LEN]          = { 0 };
-    byte        _memo[BB_PLOT_MEMO_MAX_SIZE] = { 0 };
-    uint        _memoLength     = 0;
-    std::string _idString       = "";
-    std::string _memoString     = "";
-    uint        _k              = 0;
-    std::string _path           = "";
-    uint64      _tablePtrs[10]  = { 0 };
-    byte*       _blockBuffer    = nullptr;
-    size_t      _blockRemainder = 0;
-    size_t      _blockOffset    = 0;
-
-    // size_t      _readBufferSize = 32 MB;
-    // byte*       _readBuffer     = nullptr;
-
-};
-
-
+Span<uint> ReadC1Table( FilePlot& plot );
 
 //-----------------------------------------------------------
 const char USAGE[] = R"(plotcmp <plot_a_path> <plot_b_path>
@@ -330,8 +69,8 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli )
     opts.plotAPath = cli.ArgConsume();
     opts.plotBPath = cli.ArgConsume();
 
-    PlotInfo refPlot; // Reference
-    PlotInfo tgtPlot; // Target
+    FilePlot refPlot; // Reference
+    FilePlot tgtPlot; // Target
 
     {
         const char* refPath = opts.plotAPath;
@@ -340,9 +79,12 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli )
         refPlot.Open( refPath );
         tgtPlot.Open( tgtPath );
 
-        refPlot.DumpHeader();
-        Log::Line( "" );
-        tgtPlot.DumpHeader();
+        Log::Line( "[Reference Plot]" );
+        DumpPlotHeader( refPlot );
+        Log::NewLine();
+        Log::Line( "[Target Plot]" );
+        DumpPlotHeader( tgtPlot );
+        Log::NewLine();
     }
 
     FatalIf( refPlot.K() != 32, "Plot A is k%u. Only k32 plots are currently supported.", refPlot.K() );
@@ -352,29 +94,56 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli )
     // FatalIf( !MemCmp( refPlot.PlotMemo(), tgtPlot.PlotMemo(), std::min( refPlot.PlotMemoSize(), tgtPlot.PlotMemoSize() ) ), "Plot memo mismatch." );
     FatalIf( refPlot.K() != tgtPlot.K(), "K value mismatch." );
 
+    FatalIf( refPlot.CompressionLevel() != tgtPlot.CompressionLevel(), 
+        "Compression mismatch. %u != %u.", refPlot.CompressionLevel(), tgtPlot.CompressionLevel() );
+
     // Test P7, dump it
     // DumpP7( refPlot, "/mnt/p5510a/reference/p7.tmp" );
 
-    // TestC3Table( refPlot, tgtPlot );
+    // TestC3Table( refPlot, tgtPlot ); Exit( 0 );
+
     // TestTable( refPlot, tgtPlot, TableId::Table7 );
     // TestTable( refPlot, tgtPlot, TableId::Table3 );
 
-    TestC3Table( refPlot, tgtPlot );
+    // TestC3Table( refPlot, tgtPlot );
 
     for( TableId table = TableId::Table1; table <= TableId::Table7; table++ )
         TestTable( refPlot, tgtPlot, table );
 
-    // TestC3Table( refPlot, tgtPlot );
+    TestC3Table( refPlot, tgtPlot );
 }
 
 //-----------------------------------------------------------
-Span<uint> ReadC1Table( PlotInfo& plot )
+void DumpPlotHeader( FilePlot& p )
 {
-    const size_t tableSize  = plot.TableSize( 7 );
+    // Log::Line( "Id: %")
+    Log::Line( "K: %u", p.K() );
+    Log::Line( "Compression Level: %u", p.CompressionLevel() );
+
+    Log::Line( "Table Addresses:" );
+    for( uint32 i = 0; i < 10; i++ )
+        Log::Line( " [%2u] : 0x%016llx", i+1, (llu)p.TableAddress( (PlotTable)i ) );
+
+    if( p.Version() >= PlotVersion::v2_0 )
+    {
+        const auto sizes = p.TableSizes();
+
+        Log::Line( "Table Sizes:" );
+        for( uint32 i = 0; i < 10; i++ )
+            Log::Line( " [%2u] : %-12llu B | %llu MiB", i+1, (llu)sizes[i], (llu)(sizes[i] BtoMB) );
+    }
+}
+
+//-----------------------------------------------------------
+Span<uint> ReadC1Table( FilePlot& plot )
+{
+    const size_t tableSize  = plot.TableSize( PlotTable::C1 );
     const uint32 entryCount = (uint)( tableSize / sizeof( uint32 ) );
-    
+
     uint32* c1 = bbvirtalloc<uint32>( tableSize );
-    plot.ReadTable( 7, c1 );
+
+    FatalIf( !plot.SeekToTable( PlotTable::C1 ), "Failed to seek to table C1." );
+    plot.Read( tableSize, c1 );
 
     for( uint i = 0; i < entryCount; i++ )
         c1[i] = Swap32( c1[i] );
@@ -383,13 +152,15 @@ Span<uint> ReadC1Table( PlotInfo& plot )
 }
 
 //-----------------------------------------------------------
-Span<uint> ReadC2Table( PlotInfo& plot )
+Span<uint> ReadC2Table( FilePlot& plot )
 {
-    const size_t tableSize  = plot.TableSize( 8 );
+    const size_t tableSize  = plot.TableSize( PlotTable::C2 );
     const uint32 entryCount = (uint)( tableSize / sizeof( uint32 ) );
     
     uint32* c2 = bbvirtalloc<uint32>( tableSize );
-    plot.ReadTable( 8, c2 );
+
+    FatalIf( !plot.SeekToTable( PlotTable::C2 ), "Failed to seek to table C1." );
+    plot.Read( tableSize, c2 );
 
     for( uint i = 0; i < entryCount; i++ )
         c2[i] = Swap32( c2[i] );
@@ -398,13 +169,9 @@ Span<uint> ReadC2Table( PlotInfo& plot )
 }
 
 //-----------------------------------------------------------
-void TestC3Table( PlotInfo& ref, PlotInfo& tgt )
+void TestC3Table( FilePlot& ref, FilePlot& tgt )
 {
     Log::Line( "Reading C tables..." );
-    // const size_t refSize = ref.TableSize( 9 );
-    // const size_t tgtSize = tgt.TableSize( 9 );
-
-    // const size_t c3Size = std::min( refSize, tgtSize );
 
     // Read C1 so that we know how many parks we got
     Span<uint> refC1 = ReadC1Table( ref );
@@ -463,14 +230,17 @@ void TestC3Table( PlotInfo& ref, PlotInfo& tgt )
 
     Log::Line( "Validating C3 table..." );
     {
-        const size_t refC3Size = ref.TableSize( 9 );
-        const size_t tgtC3Size = tgt.TableSize( 9 );
+        const size_t refC3Size = ref.TableSize( PlotTable::C3 );
+        const size_t tgtC3Size = tgt.TableSize( PlotTable::C3 );
 
         byte* refC3 = bbvirtalloc<byte>( refC3Size );
         byte* tgtC3 = bbvirtalloc<byte>( tgtC3Size );
 
-        ref.ReadTable( 9, refC3 );
-        tgt.ReadTable( 9, tgtC3 );
+        FatalIf( !ref.SeekToTable( PlotTable::C3 ), "Failed to seek ref plot to C3 table." );
+        FatalIf( !tgt.SeekToTable( PlotTable::C3 ), "Failed to seek tgt plot to C3 table." );
+
+        FatalIf( (ssize_t)refC3Size != ref.Read( refC3Size, refC3 ), "Failed to read ref C3 table." );
+        FatalIf( (ssize_t)tgtC3Size != tgt.Read( tgtC3Size, tgtC3 ), "Failed to read tgt C3 table." );
 
         // const size_t c3Size = std::min( refC3Size, tgtC3Size );
 
@@ -515,7 +285,7 @@ void TestC3Table( PlotInfo& ref, PlotInfo& tgt )
 }
 
 //-----------------------------------------------------------
-uint64 CompareP7( PlotInfo& ref, PlotInfo& tgt, const byte* p7RefBytes, const byte* p7TgtBytes, const int64 parkCount )
+uint64 CompareP7( FilePlot& ref, FilePlot& tgt, const byte* p7RefBytes, const byte* p7TgtBytes, const int64 parkCount )
 {
     // Double-buffer parks at a time so that we can compare entries across parks
     uint64 refParks[2][kEntriesPerPark];
@@ -529,8 +299,8 @@ uint64 CompareP7( PlotInfo& ref, PlotInfo& tgt, const byte* p7RefBytes, const by
 
     const size_t parkSize = CalculatePark7Size( ref.K() );
 
-    UnpackPark7( p7RefBytes, refParks[0] );
-    UnpackPark7( p7TgtBytes, tgtParks[0] );
+    UnpackPark7( ref.K(), p7RefBytes, refParks[0] );
+    UnpackPark7( tgt.K(), p7TgtBytes, tgtParks[0] );
     p7RefBytes += parkSize;
     p7TgtBytes += parkSize;
 
@@ -543,8 +313,8 @@ uint64 CompareP7( PlotInfo& ref, PlotInfo& tgt, const byte* p7RefBytes, const by
         // Load the next park, if we can
         if( !isLastPark )
         {
-            UnpackPark7( p7RefBytes, refParks[1] );
-            UnpackPark7( p7TgtBytes, tgtParks[1] );
+            UnpackPark7( ref.K(), p7RefBytes, refParks[1] );
+            UnpackPark7( tgt.K(), p7TgtBytes, tgtParks[1] );
             p7RefBytes += parkSize;
             p7TgtBytes += parkSize;
         }
@@ -601,31 +371,60 @@ uint64 CompareP7( PlotInfo& ref, PlotInfo& tgt, const byte* p7RefBytes, const by
 }
 
 //-----------------------------------------------------------
-void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
+void TestTable( FilePlot& ref, FilePlot& tgt, TableId table )
 {
+    if( table == TableId::Table1 && tgt.CompressionLevel() > 0 )
+        return;
+
+    if( table == TableId::Table2 && tgt.CompressionLevel() >= 9 )
+        return;
+
+    // if( table == TableId::Table7 ) return;
+
     Log::Line( "Reading Table %u...", table+1 );
 
-    const size_t parkSize = table < TableId::Table7 ? CalculateParkSize( table ) : CalculatePark7Size( ref.K() );
+    const uint32 numTablesDropped = tgt.CompressionLevel() >= 9 ? 2 :
+                                    tgt.CompressionLevel() >= 1 ? 1 : 0;
 
-    const size_t sizeRef = ref.TableSize( (int)table );
-    const size_t sizeTgt = tgt.TableSize( (int)table );
+    const size_t parkSize = table < TableId::Table7 ? 
+                                (uint)table == numTablesDropped ? 
+                                    GetCompressionInfoForLevel( tgt.CompressionLevel() ).tableParkSize : CalculateParkSize( table ) :
+                                CalculatePark7Size( ref.K() );
+
+    const size_t sizeRef = ref.TableSize( (PlotTable)table );
+    const size_t sizeTgt = tgt.TableSize( (PlotTable)table );
 
     byte* tableParksRef = bbvirtalloc<byte>( sizeRef );
     byte* tableParksTgt = bbvirtalloc<byte>( sizeTgt );
 
-    ref.ReadTable( (int)table, tableParksRef );
-    tgt.ReadTable( (int)table, tableParksTgt );
-
     const size_t tableSize = std::min( sizeRef, sizeTgt );
     const int64  parkCount = (int64)( tableSize / parkSize );
 
+    FatalIf( !ref.SeekToTable( (PlotTable)table ), "Failed to seek to table %u on reference plot.", (uint32)table+1 );
+    FatalIf( !tgt.SeekToTable( (PlotTable)table ), "Failed to seek to table %u on target plot.", (uint32)table+1 );
+
+    {
+        const ssize_t refRead = ref.Read( tableSize, tableParksRef );
+        FatalIf( (ssize_t)tableSize != refRead, "Failed to read reference table %u.", (uint32)table+1 );
+        
+        const ssize_t tgtRead = tgt.Read( tableSize, tableParksTgt );
+        FatalIf( (ssize_t)tableSize != tgtRead, "Failed to read target table %u.", (uint32)table+1 );
+
+    }
+
     const byte* parkRef = tableParksRef;
     const byte* parkTgt = tableParksTgt;
-    
     Log::Line( "Validating Table %u...", table+1 );
 
-    const uint64 stubBitSize      = (_K - kStubMinusBits);
+    uint64 stubBitSize = (ref.K() - kStubMinusBits);
+    if( ref.CompressionLevel() > 0 )
+    {
+        auto cInfo = GetCompressionInfoForLevel( ref.CompressionLevel() );
+        stubBitSize = cInfo.stubSizeBits;
+    }
+
     const size_t stubSectionBytes = CDiv( (kEntriesPerPark - 1) * stubBitSize, 8 );
+
 
     uint64 failureCount = 0;
     if( table == TableId::Table7 )
@@ -643,7 +442,6 @@ void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
         for( int64 i = 0; i < parkCount; i++ )
         {
             // Ignore buffer zone
-
             const uint16 pRefCSize = *(uint16*)(parkRef + stubSectionBytes + sizeof( uint64 ) );
             const uint16 pTgtCSize = *(uint16*)(parkTgt + stubSectionBytes + sizeof( uint64 ) );
 
@@ -652,7 +450,7 @@ void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
             if( !failed )
             {
                 const size_t realParkSize = sizeof( uint64 ) + stubSectionBytes + pRefCSize;
-                failed =!MemCmp( parkRef, parkTgt, realParkSize );
+                failed = !MemCmp( parkRef, parkTgt, realParkSize );
             }
             // if( pRefCSize != pTgtCSize || !MemCmp( parkRef, parkTgt, parkSize ) )
 
@@ -661,7 +459,7 @@ void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
 
                 if( failed )
                 {
-                    bool stubsEqual = MemCmp( parkRef, parkTgt, stubSectionBytes + sizeof( uint64 ) );
+                    // bool stubsEqual = MemCmp( parkRef, parkTgt, stubSectionBytes + sizeof( uint64 ) );
                     Log::Line( " T%u park %lld failed.", table+1, i );
                     failureCount++;
                 }
@@ -705,20 +503,19 @@ void TestTable( PlotInfo& ref, PlotInfo& tgt, TableId table )
 // Unpack a single park 7,
 // ensure srcBits is algined to uint64
 //-----------------------------------------------------------
-void UnpackPark7( const byte* srcBits, uint64* dstEntries )
+void UnpackPark7( const uint32 k, const byte* srcBits, uint64* dstEntries )
 {
     ASSERT( ((uintptr_t)srcBits & 7 ) == 0 );
-    const uint32 _k = _K;
 
-    const uint32 bitsPerEntry = _k + 1;
-    CPBitReader reader( srcBits, CalculatePark7Size( _k ) * 8, 0  );
+    const uint32 bitsPerEntry = k + 1;
+    CPBitReader reader( srcBits, CalculatePark7Size( k ) * 8, 0  );
 
     for( int32 i = 0; i < kEntriesPerPark; i++ )
         dstEntries[i] = reader.Read64Aligned( bitsPerEntry );
 }
 
 //-----------------------------------------------------------
-void DumpP7( PlotInfo& plot, const char* path )
+void DumpP7( FilePlot& plot, const char* path )
 {
     FileStream file;
     FatalIf( !file.Open( path, FileMode::Create, FileAccess::Write, FileFlags::LargeFile | FileFlags::NoBuffering ),
@@ -726,14 +523,14 @@ void DumpP7( PlotInfo& plot, const char* path )
 
     const size_t parkSize = CalculatePark7Size( plot.K() );
 
-    const size_t tableSize  = plot.TableSize( (int)TableId::Table7 );
+    const size_t tableSize  = plot.TableSize( PlotTable::Table7 );
     const int64  parkCount  = (int64)( tableSize / parkSize );
     const uint64 numEntries = (uint64)parkCount * kEntriesPerPark;
 
     byte* p7Bytes = bbvirtalloc<byte>( tableSize );
 
     Log::Line( "Reading Table7..." );
-    plot.ReadTable( (int)TableId::Table7, p7Bytes );
+    // plot.ReadTable( (int)TableId::Table7, p7Bytes );
 
     Log::Line( "Unpacking Table 7..." );
     uint64* entries = bbvirtalloc<uint64>( RoundUpToNextBoundaryT( (size_t)numEntries* sizeof( uint64 ), file.BlockSize() ) );
@@ -742,7 +539,7 @@ void DumpP7( PlotInfo& plot, const char* path )
           uint64* entryWriter = entries;
     for( int64 i = 0; i < parkCount; i++ )
     {
-        UnpackPark7( p7Bytes, entryWriter );
+        UnpackPark7( plot.K(), p7Bytes, entryWriter );
 
         parkReader  += parkSize;
         entryWriter += kEntriesPerPark;

@@ -153,7 +153,7 @@ private:
         if constexpr ( CheckAlignment )
         {
             isPtrAligned = ((uintptr_t)pField & 7) == 0; // % 8
-            isLastField  = fieldIndex == ( sizeBits >> 6 ) - 1;
+            isLastField  = fieldIndex == ( sizeBits >> 6 );
             
             if( isPtrAligned && !isLastField )
                 field = *((uint64*)pField);

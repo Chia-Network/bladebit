@@ -62,7 +62,7 @@ template<uint32 level>
 void GetCompressionInfoForLevel( CompressionInfo& info )
 {
     info.entrySizeBits = CompressionLevelInfo<level>::ENTRY_SIZE;
-    info.subtSizeBits  = CompressionLevelInfo<level>::STUB_BIT_SIZE;
+    info.stubSizeBits  = CompressionLevelInfo<level>::STUB_BIT_SIZE;
     info.tableParkSize = CompressionLevelInfo<level>::TABLE_PARK_SIZE;
     info.ansRValue     = CompressionLevelInfo<level>::ANS_R_VALUE;
 }

@@ -45,6 +45,21 @@ bool CliParser::ReadStr( const char*& value, const char* paramA, const char* par
 }
 
 //-----------------------------------------------------------
+bool CliParser::ReadStr( std::string& value, const char* paramA, const char* paramB )
+{
+    if( !ArgMatch( paramA, paramB ) )
+        return false;
+
+    NextArg();
+    FatalIf( !HasArgs(), "Expected a value for argument '%s'.", _argv[_i-1] );
+
+    value = _argv[_i];
+    NextArg();
+
+    return true;
+}
+
+//-----------------------------------------------------------
 uint64 CliParser::ReadU64()
 {
     const char* strValue = Arg();
@@ -317,7 +332,7 @@ bool CliParser::ReadHexStr( const char*& hexStr, const size_t maxStrLength, cons
         return false;
     
     size_t len = strlen( hexStr );
-    if( len >= 2 && hexStr[0] == '0' && hexStr[0] == 'x' )
+    if( len >= 2 && hexStr[0] == '0' && hexStr[1] == 'x' )
     {
         hexStr += 2;
         len -= 2;

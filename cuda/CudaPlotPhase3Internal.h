@@ -10,8 +10,18 @@
     #include "plotdisk/jobs/IOJob.h"
     #include "algorithm/RadixSort.h"
     #include "plotmem/ParkWriter.h"
+    #include "b3/blake3.h"
 
     void DbgValidateStep2Output( CudaK32PlotContext& cx );
+
+    void DbgHashData( const void* data, size_t size, const char* name, uint32 index );
+
+    void DbgFinishAndPrintHash( blake3_hasher& hasher, const char* name, uint32 index );
+    template<typename T>
+    inline void DbgHashDataT( const T* data, uint64 count, const char* name, uint32 index )
+    {
+        DbgHashData( data, (size_t)count * sizeof( T ), name, index );
+    }
 #endif
 
 using LMap = CudaK32Phase3::LMap;

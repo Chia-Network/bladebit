@@ -1,5 +1,6 @@
 #include "pos/chacha8.h"
 #include "CudaPlotContext.h"
+#include "plotting/DiskBucketBuffer.h"
 
 // #TEST
 #if _DEBUG
@@ -247,6 +248,9 @@ void GenF1Cuda( CudaK32PlotContext& cx )
     cx.metaOut.WaitForCompletion();
     cx.yOut   .Reset();
     cx.metaOut.Reset();
+
+    if( cx.cfg.hybrid64Mode )
+        cx.diskContext->metaBuffer->Swap();
 }
 
 ///

@@ -4,7 +4,7 @@
 #include "tools/PlotReader.h"
 #include "plotting/PlotValidation.h"
 #include "plotting/f1/F1Gen.h"
-
+#include "harvesting/GreenReaper.h"
 
 struct Config
 {
@@ -12,6 +12,9 @@ struct Config
 
     uint64      proofCount = 100;
     const char* plotPath   = "";
+          byte  seed[BB_PLOT_ID_LEN]   = {};
+          bool  noGpu      = false;
+          int32 gpuIndex   = -1;
 };
 
 void CmdPlotsCheckHelp();
@@ -23,6 +26,8 @@ void CmdPlotsCheckMain( GlobalPlotConfig& gCfg, CliParser& cli )
     Config cfg = {};
     cfg.gCfg = &gCfg;
 
+    bool hasSeed = false;
+
     while( cli.HasArgs() )
     {
         if( cli.ArgConsume( "-h", "--help" ) )
@@ -30,7 +35,13 @@ void CmdPlotsCheckMain( GlobalPlotConfig& gCfg, CliParser& cli )
             CmdPlotsCheckHelp();
             Exit( 0 );
         }
+        if( cli.ReadHexStrAsBytes( cfg.seed, sizeof( cfg.seed ), "-s", "--seed" ) )
+        {
+            hasSeed = true;
+        }
         else if( cli.ReadU64( cfg.proofCount, "-n", "--iterations" ) ) continue;
+        else if( cli.ReadSwitch( cfg.noGpu, "-g", "--no-gpu" ) ) continue;
+        else if( cli.ReadI32( cfg.gpuIndex, "-d", "--device" ) ) continue;
         else
             break;
     }
@@ -55,19 +66,34 @@ void CmdPlotsCheckMain( GlobalPlotConfig& gCfg, CliParser& cli )
     const uint32 threadCount = gCfg.threadCount == 0 ? SysHost::GetLogicalCPUCount() :
                                 std::min( (uint32)MAX_THREADS, std::min( gCfg.threadCount, SysHost::GetLogicalCPUCount() ) );
 
+    const bool useGpu = plot.CompressionLevel() > 0 && !cfg.noGpu;
+
     PlotReader reader( plot );
-    reader.ConfigDecompressor( threadCount, gCfg.disableCpuAffinity );
+    reader.ConfigDecompressor( threadCount, gCfg.disableCpuAffinity, 0, useGpu, (int)cfg.gpuIndex );
 
     const uint32 k = plot.K();
 
     byte AlignAs(8) seed[BB_PLOT_ID_LEN] = {};
-    SysHost::Random( seed, sizeof( seed ) );
+
+    if( !hasSeed )
+        SysHost::Random( seed, sizeof( seed ) );
+    else
+        memcpy( seed, cfg.seed, sizeof( cfg.seed ) );
 
     {
         std::string seedHex = BytesToHexStdString( seed, sizeof( seed ) );
         Log::Line( "Checking %llu random proofs with seed 0x%s...", (llu)cfg.proofCount, seedHex.c_str() );
     }
     Log::Line( "Plot compression level: %u", plot.CompressionLevel() );
+
+    if( plot.CompressionLevel() > 0 && useGpu )
+    {
+        const bool hasGPU = grHasGpuDecompressor( reader.GetDecompressorContext() );
+        if( hasGPU )
+            Log::Line( "Using GPU for decompression." );
+        else
+            Log::Line( "No GPU was selected for decompression." );
+    }
 
     const uint64 f7Mask = (1ull << k) - 1;
 

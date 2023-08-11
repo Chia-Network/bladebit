@@ -315,7 +315,7 @@ inline void MTJobSyncT<TJob>::WaitForRelease()
     // Trace( "- locked: %d", count );
     
     // Wait for the control thread (id == 0 ) to signal us
-    while( finishedCount.load( std::memory_order_relaxed ) != 0 );
+    while( finishedCount.load( std::memory_order_relaxed ) != 0 ){}
 
     // Ensure all threads have been released (prevent re-locking before another thread has been released)
     // count = releaseLock.load( std::memory_order_acquire );

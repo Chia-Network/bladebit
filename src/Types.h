@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 typedef uint8_t                 byte;
 typedef uint8_t                 uint8;
 typedef uint16_t                uint16;
@@ -67,3 +69,13 @@ typedef uint128_t uint128;
 typedef std::chrono::steady_clock::duration   Duration;
 typedef std::chrono::steady_clock::time_point TimePoint;
 typedef std::chrono::nanoseconds              NanoSeconds;
+
+
+template<typename T>
+using ptr = std::unique_ptr<T>;
+
+template<typename T>
+using sptr = std::shared_ptr<T>;
+
+template<typename T>
+using wptr = std::weak_ptr<T>;

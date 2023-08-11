@@ -4,16 +4,16 @@
         "nominmax"
     ],
     "files.associations": {
+        "*.sd": "yaml",
+        "*.userprefs": "xml",
+        "*.make": "makefile",
         "Fastfile": "ruby",
         "*.plist": "xml",
-        "*.sd": "yaml",
         "*.json": "jsonc",
         "*.ir": "llvm",
         "*.qs": "javascript",
         "*.ac": "shellscript",
         "player": "json",
-        "*.userprefs": "xml",
-        "*.make": "makefile",
         "memory": "cpp",
         "cstddef": "cpp",
         "string": "cpp",
@@ -113,7 +113,18 @@
         "filesystem": "cpp",
         "__bits": "cpp",
         "csignal": "cpp",
-        "cfenv": "cpp"
+        "cfenv": "cpp",
+        "ranges": "cpp",
+        "xhash": "cpp",
+        "xmemory": "cpp",
+        "xstddef": "cpp",
+        "xstring": "cpp",
+        "xtr1common": "cpp",
+        "xtree": "cpp",
+        "xutility": "cpp",
+        "__assert": "cpp",
+        "*.inc": "cpp",
+        "xiosbase": "cpp"
     },
     "cSpell.words": [
         "Ryzen"
@@ -124,7 +135,12 @@
     "cmake.preferredGenerators": [
         "Unix Makefiles",
         "Visual Studio 17 2022"
-    ]
+    ],
+    // "cmake.buildArgs": [],
+    "cmake.configureSettings": {
+        "BB_ENABLE_TESTS": "ON"
+    },
+    "C_Cpp.dimInactiveRegions": false,
     // "cmake.generator": "Unix Makefiles"
     // "cmake.generator": "Visual Studio 17 2022"
 

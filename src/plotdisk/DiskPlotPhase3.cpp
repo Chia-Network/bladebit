@@ -1065,7 +1065,7 @@ private:
 
             auto info = GetCompressionInfoForLevel( _context.cfg->globalCfg->compressionLevel );
             outParkSize    = info.tableParkSize;
-            outStubBitSize = info.subtSizeBits;
+            outStubBitSize = info.stubSizeBits;
             outCtable      = _context.cfg->globalCfg->ctable;
         }
         else

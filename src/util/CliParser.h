@@ -97,6 +97,8 @@ public:
     bool ReadUnswitch( bool& value, const char* paramA, const char* paramB = nullptr );
 
     bool ReadStr( const char*& value, const char* paramA, const char* paramB = nullptr );
+
+    bool ReadStr( std::string& value, const char* paramA, const char* paramB = nullptr );
     
     uint64 ReadU64();
     

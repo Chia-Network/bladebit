@@ -1,4 +1,4 @@
-add_library(bladebit_core)
+add_library(bladebit_core src/plotting/DiskBuffer.h src/plotting/DiskBufferBase.cpp src/plotting/DiskBufferBase.h)
 target_link_libraries(bladebit_core PUBLIC bladebit_config)
 
 target_include_directories(bladebit_core PUBLIC
@@ -227,6 +227,8 @@ set(src_bladebit
     src/plotting/PlotWriter.cpp
     src/plotting/PlotWriter.h
     src/plotting/Tables.h
+    src/plotting/BufferChain.h
+    src/plotting/BufferChain.cpp
     
     src/plotting/f1/F1Gen.h
     src/plotting/f1/F1Gen.cpp
@@ -289,6 +291,14 @@ set(src_bladebit
     src/harvesting/GreenReaper.h
     src/harvesting/GreenReaperInternal.h
     src/harvesting/Thresher.h
+
+    src/plotting/DiskQueue.h
+    src/plotting/DiskQueue.cpp
+    src/plotting/DiskBuffer.cpp
+    src/plotting/DiskBucketBuffer.h
+    src/plotting/DiskBucketBuffer.cpp
+    src/util/MPMCQueue.h
+    src/util/CommandQueue.h
 )
 
 target_sources(bladebit_core PUBLIC ${src_bladebit})

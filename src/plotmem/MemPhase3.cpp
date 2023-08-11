@@ -185,7 +185,7 @@ uint64 MemPhase3::ProcessTable( uint32* lEntries, uint64* lpBuffer, Pair* rTable
     if( tableId == TableId::Table2 && cx.cfg.gCfg->compressionLevel > 0 )
     {
         parkSize    = cx.cfg.gCfg->compressionInfo.tableParkSize;
-        stubBitSize = cx.cfg.gCfg->compressionInfo.subtSizeBits;
+        stubBitSize = cx.cfg.gCfg->compressionInfo.stubSizeBits;
         cTable      = cx.cfg.gCfg->ctable;
     }
 

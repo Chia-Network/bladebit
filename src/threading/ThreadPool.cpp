@@ -157,7 +157,7 @@ void ThreadPool::FixedThreadRunner( void* tParam )
 
     for( ;; )
     {
-        if( exitSignal.load( std::memory_order::memory_order_acquire ) )
+        if( exitSignal.load( std::memory_order_acquire ) )
             break;
 
         // Wait until we are signalled to go
@@ -190,7 +190,7 @@ void ThreadPool::GreedyThreadRunner( void* tParam )
 
     for( ;; )
     {
-        if( pool._exitSignal.load( std::memory_order::memory_order_acquire ) )
+        if( pool._exitSignal.load( std::memory_order_acquire ) )
             return;
 
         // Wait until we are signalled to go

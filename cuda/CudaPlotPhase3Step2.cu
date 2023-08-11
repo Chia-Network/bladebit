@@ -248,7 +248,7 @@ void CudaK32PlotPhase3Step2( CudaK32PlotContext& cx )
 
         s2.rMapIn.UploadArrayT<RMap>( rmap, BBCU_BUCKET_COUNT, P3_PRUNED_SLICE_MAX, BBCU_BUCKET_COUNT, rSliceCounts );
     };
-    
+
 
     const TableId rTable = cx.table;
     const TableId lTable = rTable-1;
@@ -309,14 +309,13 @@ void CudaK32PlotPhase3Step2( CudaK32PlotContext& cx )
         const auto*  rMap        = (RMap*)s2.rMapIn.GetUploadedDeviceBuffer( cx.computeStream );
         const uint32 rEntryCount = p3.prunedBucketCounts[(int)rTable][bucket];
 
-        
+
         uint64* devOutLPs     = (uint64*)s2.lpOut   .LockDeviceBuffer( cx.computeStream );
         uint32* devOutIndices = (uint32*)s2.indexOut.LockDeviceBuffer( cx.computeStream );
 
         ConvertRMapToLinePoints( cx, rEntryCount, rTableOffset, devLTable, rMap, devOutLPs, devOutIndices, cx.computeStream );
         s2.rMapIn.ReleaseDeviceBuffer( cx.computeStream );
         rTableOffset += rEntryCount;
-
 
         // Horizontal download (write 1 row)
         s2.lpOut   .Download2DT<uint64>( p3.hostLinePoints + (size_t)bucket * P3_PRUNED_BUCKET_MAX  , P3_PRUNED_SLICE_MAX, BBCU_BUCKET_COUNT, P3_PRUNED_SLICE_MAX  , P3_PRUNED_SLICE_MAX, cx.computeStream );
@@ -354,7 +353,7 @@ void CudaK32PlotPhase3Step2( CudaK32PlotContext& cx )
 
     CudaErrCheck( cudaMemcpyAsync( cx.hostBucketSlices, cx.devSliceCounts, sizeof( uint32 ) * BBCU_BUCKET_COUNT * BBCU_BUCKET_COUNT,
                     cudaMemcpyDeviceToHost, downloadStream ) );
-    
+
     memset( p3.prunedBucketCounts[(int)rTable], 0, BBCU_BUCKET_COUNT * sizeof( uint32 ) );
 
     CudaErrCheck( cudaStreamSynchronize( downloadStream ) );
@@ -371,7 +370,7 @@ void CudaK32PlotPhase3Step2( CudaK32PlotContext& cx )
     }
 
     // #if _DEBUG
-    // if( cx.table > TableId::Table3 )
+    // // if( cx.table > TableId::Table3 )
     // {
     //    DbgValidateStep2Output( cx );
     // }
@@ -534,6 +533,7 @@ void _DbgValidateOutput( CudaK32PlotContext& cx )
     auto& s2 = p3.step2;
 
     // Validate line points...
+    Log::Debug( "[DEBUG] Validating line points..." );
     uint64* refLinePoints = bbcvirtallocboundednuma<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );
     uint64* tmpLinePoints = bbcvirtallocboundednuma<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );
     uint32* indices       = bbcvirtallocboundednuma<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT );
@@ -614,9 +614,13 @@ void _DbgValidateOutput( CudaK32PlotContext& cx )
         }
     }
 
+    DbgHashDataT( refLinePoints, prunedEntryCount, "line_points", (uint32)cx.table+1 );
+
     bbvirtfreebounded( refLinePoints );
     bbvirtfreebounded( tmpLinePoints );
     bbvirtfreebounded( indices );
+
+    Log::Debug( "[DEBUG] Line point validation OK" );
 }
 
 #endif
@@ -658,6 +662,8 @@ void DbgDumpSortedLinePoints( CudaK32PlotContext& cx )
     // Sort
     ThreadPool& pool = *cx.threadPool; //DbgGetThreadPool( cx );
     RadixSort256::Sort<BB_MAX_JOBS>( pool, sortedLinePoints, tmpLinePoints, prunedEntryCount );
+
+    // DbgHashDataT( sortedLinePoints, prunedEntryCount, "sorted_line_points", (uint32)cx.table+1 );
 
     // Write to disk
     {
