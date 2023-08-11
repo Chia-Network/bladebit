@@ -166,6 +166,7 @@ set(cuda_archs
             -gencode=arch=compute_89,code=sm_89         # NVIDIA GeForce RTX 4090, RTX 4080, RTX 6000, Tesla L40
             -gencode=arch=compute_89,code=compute_89    # Future proofing
         >
+    >
 
     $<${is_cuda_debug}:
         -arch=native
