@@ -5,6 +5,8 @@
 [tT]mp/
 _[tT]mp/
 
+.idea/
+.vscode/
 .vs/
 .sandbox/
 .dist/
