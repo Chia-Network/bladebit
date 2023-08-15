@@ -138,7 +138,8 @@
     ],
     // "cmake.buildArgs": [],
     "cmake.configureSettings": {
-        "BB_ENABLE_TESTS": "ON"
+        "BB_ENABLE_TESTS": "ON",
+        "BB_CUDA_USE_NATIVE": "ON"
     },
     "C_Cpp.dimInactiveRegions": false,
     // "cmake.generator": "Unix Makefiles"

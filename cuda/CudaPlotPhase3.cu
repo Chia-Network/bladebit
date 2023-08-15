@@ -615,24 +615,24 @@ void CudaK32PlotPhase3AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocConte
     auto& p3 = *cx.phase3;
 
     // Shared allocations
-    p3.devBucketCounts      = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_COUNT, acx.alignment );
-    p3.devPrunedEntryCount  = acx.devAllocator->CAlloc<uint32>( 1, acx.alignment );
+    p3.devBucketCounts     = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_COUNT, acx.alignment );
+    p3.devPrunedEntryCount = acx.devAllocator->CAlloc<uint32>( 1, acx.alignment );
 
     // Host allocations
-    p3.hostRMap             = acx.hostTempAllocator->CAlloc<RMap>( BBCU_TABLE_ALLOC_ENTRY_COUNT );     // Used for rMap and index
-    p3.hostLinePoints       = acx.hostTempAllocator->CAlloc<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );   // Used for lMap and LPs
+    p3.hostRMap            = acx.hostTempAllocator->CAlloc<RMap>( BBCU_TABLE_ALLOC_ENTRY_COUNT );     // Used for rMap and index
+    p3.hostLinePoints      = acx.hostTempAllocator->CAlloc<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );   // Used for lMap and LPs
 
     if( cx.cfg.hybrid64Mode )
     {
         Panic( "Unimplemented for 64G mode. Need to offload LMap/Line Points to disk." );
     }
 
-    if( !acx.dryRun )
-    {
-        // ASSERT( (uintptr_t)(p3.hostLinePoints + BBCU_TABLE_ALLOC_ENTRY_COUNT ) <= (uintptr_t)cx.hostTableL );
-        // ASSERT( (uintptr_t)(p3.hostLinePoints + BBCU_TABLE_ALLOC_ENTRY_COUNT ) < (uintptr_t)cx.hostTableSortedL );
-    }
-    // p3.hostBucketCounts     = acx.pinnedAllocator->CAlloc<uint32>( BBCU_BUCKET_COUNT, acx.alignment );
+    #if _DEBUG
+        if( !acx.dryRun && !cx.cfg.hybrid128Mode )
+        {
+            ASSERT( (uintptr_t)(p3.hostLinePoints + BBCU_TABLE_ALLOC_ENTRY_COUNT ) <= (uintptr_t)cx.hostTableL );
+        }
+    #endif
 
     if( acx.dryRun )
     {
@@ -704,7 +704,7 @@ void AllocXTableStep( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
     desc.sliceAlignment  = acx.alignment;
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
-    desc.pinnedAllocator = cx.cfg.disableDirectDownloads ? acx.pinnedAllocator : nullptr;
+    desc.pinnedAllocator = cx.downloadDirect ? nullptr : acx.pinnedAllocator;
 
     GpuStreamDescriptor uploadDesc = desc;
     if( cx.cfg.hybrid128Mode )
@@ -728,7 +728,7 @@ void CudaK32PlotAllocateBuffersStep1( CudaK32PlotContext& cx, CudaK32AllocContex
     desc.sliceAlignment  = acx.alignment;
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
-    desc.pinnedAllocator = cx.cfg.disableDirectDownloads ? acx.pinnedAllocator : nullptr;
+    desc.pinnedAllocator = cx.downloadDirect ? nullptr : acx.pinnedAllocator;
 
     GpuStreamDescriptor uploadDesc = desc;
     if( cx.cfg.hybrid128Mode )
@@ -738,13 +738,8 @@ void CudaK32PlotAllocateBuffersStep1( CudaK32PlotContext& cx, CudaK32AllocContex
     const size_t alignment = acx.alignment;
 
     s1.pairsLIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( uploadDesc,  acx.dryRun );
-                    // sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-    
     s1.pairsRIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint16>( uploadDesc,  acx.dryRun );
-                    // sizeof( uint16 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-
     s1.rMapOut  = cx.gpuDownloadStream[0]->CreateDownloadBufferT<RMap>( desc, acx.dryRun );
-                    // sizeof( RMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
 
     s1.rTableMarks = (uint64*)acx.devAllocator->AllocT<uint64>( GetMarkingTableBitFieldSize(), acx.alignment );
 }
@@ -758,23 +753,17 @@ void CudaK32PlotAllocateBuffersStep2( CudaK32PlotContext& cx, CudaK32AllocContex
     desc.sliceAlignment  = acx.alignment;
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
-    desc.pinnedAllocator = cx.cfg.disableDirectDownloads ? acx.pinnedAllocator : nullptr;
+    desc.pinnedAllocator = cx.downloadDirect ? nullptr : acx.pinnedAllocator;
 
     auto&        s2        = cx.phase3->step2;
     const size_t alignment = acx.alignment;
 
     s2.rMapIn = cx.gpuUploadStream[0]->CreateUploadBufferT<RMap>( desc, acx.dryRun );
-        // sizeof( RMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-
     s2.lMapIn = cx.gpuUploadStream[0]->CreateUploadBufferT<LMap>( desc, acx.dryRun );
-        // sizeof( LMap ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
 
-    s2.lpOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint64>( desc, acx.dryRun );
-        // sizeof( uint64 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
-
+    s2.lpOut    = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint64>( desc, acx.dryRun );
     s2.indexOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32> (desc, acx.dryRun );
-        // sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
-    
+
     s2.devLTable[0] = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
     s2.devLTable[1] = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
 }
@@ -788,7 +777,7 @@ void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32AllocContex
     desc.sliceAlignment  = acx.alignment;
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
-    desc.pinnedAllocator = cx.cfg.disableDirectDownloads ? acx.pinnedAllocator : nullptr;
+    desc.pinnedAllocator = cx.downloadDirect ? nullptr : acx.pinnedAllocator;
 
     auto&        s3        = cx.phase3->step3;
     const size_t alignment = acx.alignment;
@@ -808,7 +797,6 @@ void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32AllocContex
     parksDesc.sliceAlignment  = RoundUpToNextBoundaryT<size_t>( DEV_MAX_PARK_SIZE, sizeof( uint64 ) );
 
     s3.parksOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<byte>( parksDesc, acx.dryRun );
-    // cx.gpuDownloadStream[0]->CreateDownloadBuffer( devParkAllocSize, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
 
     if( acx.dryRun )
     {
@@ -827,9 +815,6 @@ void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32AllocContex
     s3.devLinePoints      = acx.devAllocator->CAlloc<uint64>( linePointAllocCount, alignment );
     s3.devDeltaLinePoints = acx.devAllocator->CAlloc<uint64>( linePointAllocCount, alignment );
     s3.devIndices         = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
-
-    // s3.devParks  = acx.devAllocator->AllocT<uint64>( parkAllocSize, alignment );
-    // s3.hostParks = acx.devAllocator->AllocT<byte>  ( maxParkSize  , alignment );
 
     s3.devCTable           = acx.devAllocator->AllocT<FSE_CTable>( P3_MAX_CTABLE_SIZE, alignment );
     s3.devParkOverrunCount = acx.devAllocator->CAlloc<uint32>( 1 );

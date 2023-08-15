@@ -65,6 +65,12 @@ GPU-based (CUDA) plotter
  -t2, --temp2         : Temporary directory 2. Used for temporary, shorted-lived read and writes.
                          NOTE: If only one of -t1 or -t2 is specified, both will be
                                set to the same directory.
+  
+  --no-direct-buffers : Disable using direct downloads and uploads from/to GPU and host.
+                        If this is set, intermediate buffers are used between the GPU and host,
+                        which will means slower plotting times.
+                        This is forcefully enabled on Windows to avoid limited pinnable memory.
+
 )";
 
 ///
@@ -105,6 +111,8 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
             continue;
         if( cli.ReadUnswitch( cfg.temp2DirectIO, "--no-t2-direct" ) )
             continue;
+        if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-buffers" ) )
+            continue;
         if( cli.ArgMatch( "--help", "-h" ) )
         {
             Log::Line( USAGE );
@@ -144,6 +152,9 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     cx.firstStoredTable = TableId::Table2 + (TableId)cx.gCfg->numDroppedTables;
 
     Log::Line( "[Bladebit CUDA Plotter]" );
+    Log::Line( " Host RAM: %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
+    Log::NewLine();
+   
     CudaInit( cx );
 
     CudaErrCheck( cudaStreamCreateWithFlags( &cx.computeStream , cudaStreamNonBlocking ) );
@@ -165,11 +176,12 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     cx.plotFence  = new Fence();
     cx.parkFence  = new Fence();
 
-    #if __linux__
-        cx.downloadDirect = cfg.disableDirectDownloads ? false : true;
+    #if __WIN32
+        // #MAYBE: Add a configurable option to enable direct downloads on windows?
+        // On windows always default to using intermediate pinned buffers
+        cx.downloadDirect = false;
     #else
-        // #TODO: One windows, check if we have enough memory, if so, default to true.
-        cx.downloadDirect = true ;//false;
+        cx.downloadDirect = cfg.disableDirectDownloads ? false : true;
     #endif
 
     // cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
@@ -177,9 +189,10 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     //     cx.plotWriter->EnableDummyMode();
 
     // Need to do allocations for park serialization differently under the following conditions
-    if( cx.cfg.disableDirectDownloads || cx.cfg.hybrid128Mode ) //cx.cfg.hybrid64Mode )
+    if( cx.downloadDirect || cx.cfg.hybrid128Mode )
     {
-        cx.parkContext = new CudaK32ParkContext{};
+        cx.parkContext    = new CudaK32ParkContext{};
+        cx.useParkContext = true;
     }
 
     // Check for hybrid mode
@@ -1198,11 +1211,11 @@ void AllocBuffers( CudaK32PlotContext& cx )
     cx.hostTempAllocSize  = 0;
     cx.devAllocSize       = 0;
 
-    size_t parksPinnedSize = 0;
-
-    // If on <= 64G mode or not using direct downloads, 
+    // If on <= 128G mode or not using direct downloads, 
     // we need to use a separate buffer for downloading parks, instead of re-using exisintg ones.
-    const bool allocateParkBuffers = cx.cfg.disableDirectDownloads || cx.cfg.hybrid128Mode; //cx.cfg.hybrid64Mode;
+    // If on <= 64G mode or not using direct downloads, 
+    const bool allocateParkBuffers = cx.downloadDirect || cx.cfg.hybrid128Mode;
+    size_t parksPinnedSize = 0;
 
     // Gather the size needed first
     {
@@ -1280,40 +1293,34 @@ void AllocBuffers( CudaK32PlotContext& cx )
     Log::Line( "GPU RAM required          : %-12llu bytes ( %-9.2lf MiB or %-6.2lf GiB )", cx.devAllocSize,
                    (double)cx.devAllocSize BtoMB, (double)cx.devAllocSize BtoGB );
 
-    Log::Line( "Allocating buffers" );
     // Now actually allocate the buffers
+    Log::Line( "Allocating buffers..." );
     CudaErrCheck( cudaMallocHost( &cx.pinnedBuffer, cx.pinnedAllocSize, cudaHostAllocDefault ) );
 
     #if _DEBUG
         cx.hostBufferTables = bbvirtallocboundednuma<byte>( cx.hostTableAllocSize );
     #else
         #if !_WIN32
-        // if( cx.downloadDirect )
             CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
-        // else
-        // {
-        //     // #TODO: On windows, first check if we have enough shared memory (512G)? 
-        //     //        and attempt to alloc that way first. Otherwise, use intermediate pinned buffers.
         #else
+            // On windows we always force the use of intermediate buffers, so we allocate on the host
             cx.hostBufferTables = bbvirtallocboundednuma<byte>( cx.hostTableAllocSize );
         #endif
-        // }
     #endif
 
-    //CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
-
     cx.hostBufferTemp = nullptr;
-#if _DEBUG
-    if( cx.hostTempAllocSize )
-        cx.hostBufferTemp   = bbvirtallocboundednuma<byte>( cx.hostTempAllocSize );
-#endif
+    #if _DEBUG
+        if( cx.hostTempAllocSize )
+            cx.hostBufferTemp = bbvirtallocboundednuma<byte>( cx.hostTempAllocSize );
+    #endif
+
     if( cx.hostBufferTemp == nullptr && cx.hostTempAllocSize )
         CudaErrCheck( cudaMallocHost( &cx.hostBufferTemp, cx.hostTempAllocSize, cudaHostAllocDefault ) );
 
     CudaErrCheck( cudaMalloc( &cx.deviceBuffer, cx.devAllocSize ) );
 
     // Warm start
-    if( true )
+    if( true )// cx.gCfg->warmStart )
     {
         FaultMemoryPages::RunJob( *cx.threadPool, cx.threadPool->ThreadCount(), cx.pinnedBuffer    , cx.pinnedAllocSize    );
         FaultMemoryPages::RunJob( *cx.threadPool, cx.threadPool->ThreadCount(), cx.hostBufferTables, cx.hostTableAllocSize );
@@ -1493,36 +1500,35 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
 
         // In disk-backed mode, we always have pinned buffers,
         // which are the same buffers used to write and read from disk.
-        GpuStreamDescriptor diskDescTables = directDesc;
-        GpuStreamDescriptor diskDescXPair  = directDesc;
-        GpuStreamDescriptor diskDescMeta   = directDesc;
+        GpuStreamDescriptor descSortedTables = directDesc;
+        GpuStreamDescriptor descXPair        = directDesc;
+        GpuStreamDescriptor descMeta         = directDesc;
 
         if( cx.cfg.hybrid128Mode )
         {
             // Temp 1 Queue
-            diskDescTables.pinnedAllocator = acx.pinnedAllocator;
-            diskDescTables.sliceAlignment  = cx.diskContext->temp1Queue->BlockSize();
+            descSortedTables.pinnedAllocator = acx.pinnedAllocator;
+            descSortedTables.sliceAlignment  = cx.diskContext->temp1Queue->BlockSize();
 
             // Temp 2 Queue
-            diskDescXPair.pinnedAllocator  = acx.pinnedAllocator;
-            diskDescXPair.sliceAlignment   = cx.diskContext->temp2Queue->BlockSize();
+            descXPair.pinnedAllocator  = acx.pinnedAllocator;
+            descXPair.sliceAlignment   = cx.diskContext->temp2Queue->BlockSize();
 
             if( cx.cfg.hybrid64Mode )
             {
-                diskDescMeta.pinnedAllocator = acx.pinnedAllocator;
-                diskDescMeta.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
+                descMeta.pinnedAllocator = acx.pinnedAllocator;
+                descMeta.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
             }
         }
 
         // In direct mode, we don't have any intermediate pinned buffers,
         // but our destination buffer is already a pinned buffer.
-        if( cx.cfg.disableDirectDownloads )
+        if( !cx.downloadDirect )
         {
-            directDesc.pinnedAllocator = acx.pinnedAllocator;
-
-            // Assign these here too in case we're not in disk-backed mode
-            diskDescTables.pinnedAllocator = acx.pinnedAllocator;
-            diskDescMeta  .pinnedAllocator = acx.pinnedAllocator;
+            directDesc      .pinnedAllocator = acx.pinnedAllocator;
+            descSortedTables.pinnedAllocator = acx.pinnedAllocator;
+            descMeta        .pinnedAllocator = acx.pinnedAllocator;
+            descXPair       .pinnedAllocator = acx.pinnedAllocator;
         }
 
 
@@ -1531,7 +1537,7 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
         /// Downloads
         ///
         cx.yOut    = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( directDesc, acx.dryRun );
-        cx.metaOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<K32Meta4>( diskDescMeta, acx.dryRun );
+        cx.metaOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<K32Meta4>( descMeta, acx.dryRun );
 
         {
             // These download buffers share the same backing buffers
@@ -1545,7 +1551,7 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.xPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( diskDescXPair, acx.dryRun );
+            cx.xPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( descXPair, acx.dryRun );
         }
 
         {
@@ -1553,21 +1559,21 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
             const size_t devMarker    = acx.devAllocator->Size();
             const size_t pinnedMarker = acx.pinnedAllocator->Size();
 
-            cx.sortedPairsLOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( diskDescTables, acx.dryRun );
-            cx.sortedPairsROut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint16>( diskDescTables, acx.dryRun );
+            cx.sortedPairsLOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( descSortedTables, acx.dryRun );
+            cx.sortedPairsROut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint16>( descSortedTables, acx.dryRun );
 
             acx.devAllocator->PopToMarker( devMarker );
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.sortedXPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( diskDescTables, acx.dryRun );
+            cx.sortedXPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( descSortedTables, acx.dryRun );
         }
 
         ///
         /// Uploads
         ///
         cx.yIn    = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( directDesc, acx.dryRun );
-        cx.metaIn = cx.gpuUploadStream[0]->CreateUploadBufferT<K32Meta4>( diskDescMeta, acx.dryRun );
+        cx.metaIn = cx.gpuUploadStream[0]->CreateUploadBufferT<K32Meta4>( descMeta, acx.dryRun );
 
         // These uploaded buffers share the same backing buffers
         {
@@ -1581,7 +1587,7 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.xPairsIn = cx.gpuUploadStream[0]->CreateUploadBufferT<Pair>( diskDescXPair, acx.dryRun );
+            cx.xPairsIn = cx.gpuUploadStream[0]->CreateUploadBufferT<Pair>( descXPair, acx.dryRun );
         }
 
         /// Device-only allocations
