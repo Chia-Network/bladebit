@@ -41,7 +41,7 @@ void GpuDownloadBuffer::Download( void* hostBuffer, const size_t size, cudaStrea
 
 void GpuDownloadBuffer::DownloadAndCopy( void* hostBuffer, void* finalBuffer, const size_t size, cudaStream_t workStream  )
 {
-    ASSERT( 0 );
+    Panic( "Unavailable" );
     // ASSERT( self->outgoingSequence < BBCU_BUCKET_COUNT );
     // ASSERT( hostBuffer );
     // ASSERT( workStream );

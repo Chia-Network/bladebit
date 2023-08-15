@@ -71,8 +71,8 @@
 [[noreturn]] void Exit( int code );
 [[noreturn]] void FatalExit();
 [[noreturn]] void PanicExit();
-[[noreturn]] void FatalErrorMsg( const char* message, ... );
-[[noreturn]] void PanicErrorMsg( const char* message, ... );
+void FatalErrorMsg( const char* message, ... );
+void PanicErrorMsg( const char* message, ... );
 
 // Fatal: Post a message and exit with error
 // Panic: Same as panic, but the error is unexpected,

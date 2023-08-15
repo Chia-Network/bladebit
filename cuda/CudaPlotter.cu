@@ -66,7 +66,7 @@ GPU-based (CUDA) plotter
                          NOTE: If only one of -t1 or -t2 is specified, both will be
                                set to the same directory.
   
-  --no-direct-buffers : Disable using direct downloads and uploads from/to GPU and host.
+ --no-direct-buffers : Disable using direct downloads and uploads from/to GPU and host.
                         If this is set, intermediate buffers are used between the GPU and host,
                         which will means slower plotting times.
                         This is forcefully enabled on Windows to avoid limited pinnable memory.
@@ -152,7 +152,8 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     cx.firstStoredTable = TableId::Table2 + (TableId)cx.gCfg->numDroppedTables;
 
     Log::Line( "[Bladebit CUDA Plotter]" );
-    Log::Line( " Host RAM: %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
+    Log::Line( " Host RAM        : %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
+    Log::Line( " Direct transfers: %s", cfg.disableDirectDownloads ? "false" : "true" );
     Log::NewLine();
    
     CudaInit( cx );
