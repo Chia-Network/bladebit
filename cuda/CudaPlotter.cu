@@ -1557,7 +1557,7 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.xPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( descTablePairs, acx.dryRun );
+            cx.xPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( descXPairs, acx.dryRun );
         }
 
         {
@@ -1565,14 +1565,14 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
             const size_t devMarker    = acx.devAllocator->Size();
             const size_t pinnedMarker = acx.pinnedAllocator->Size();
 
-            cx.sortedPairsLOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( descTablePairs, acx.dryRun );
-            cx.sortedPairsROut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint16>( descTablePairs, acx.dryRun );
+            cx.sortedPairsLOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( descTableSortedPairs, acx.dryRun );
+            cx.sortedPairsROut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint16>( descTableSortedPairs, acx.dryRun );
 
             acx.devAllocator->PopToMarker( devMarker );
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.sortedXPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( descTablePairs, acx.dryRun );
+            cx.sortedXPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( descXPairs, acx.dryRun );
         }
 
         ///
@@ -1593,7 +1593,7 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.xPairsIn = cx.gpuUploadStream[0]->CreateUploadBufferT<Pair>( descTablePairs, acx.dryRun );
+            cx.xPairsIn = cx.gpuUploadStream[0]->CreateUploadBufferT<Pair>( descXPairs, acx.dryRun );
         }
 
         /// Device-only allocations
