@@ -177,7 +177,7 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     cx.plotFence  = new Fence();
     cx.parkFence  = new Fence();
 
-    #if __WIN32
+    #if _WIN32
         // #MAYBE: Add a configurable option to enable direct downloads on windows?
         // On windows always default to using intermediate pinned buffers
         cx.downloadDirect = false;
@@ -1510,13 +1510,20 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
 
         // In disk-backed mode, we always have pinned buffers,
         // which are the same buffers used to write and read from disk.
-        GpuStreamDescriptor descTablePairs   = yDesc;
-        GpuStreamDescriptor descMeta         = yDesc;
+        GpuStreamDescriptor descTablePairs       = yDesc;
+        GpuStreamDescriptor descTableSortedPairs = yDesc;
+        GpuStreamDescriptor descXPairs           = yDesc;
+        GpuStreamDescriptor descMeta             = yDesc;
 
         if( cx.cfg.hybrid128Mode )
         {
-            descTablePairs.pinnedAllocator = acx.pinnedAllocator;
-            descTablePairs.sliceAlignment  = cx.diskContext->temp1Queue->BlockSize();
+            // Temp 1 Queue
+            descTableSortedPairs.pinnedAllocator = acx.pinnedAllocator;
+            descTableSortedPairs.sliceAlignment  = cx.diskContext->temp1Queue->BlockSize();
+
+            // Temp 2 Queue
+            descXPairs.pinnedAllocator   = acx.pinnedAllocator;
+            descXPairs.sliceAlignment    = cx.diskContext->temp2Queue->BlockSize();
 
             if( cx.cfg.hybrid64Mode )
             {
