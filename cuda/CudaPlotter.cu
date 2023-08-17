@@ -56,7 +56,7 @@ GPU-based (CUDA) plotter
 [OPTIONS]:
  -h, --help           : Shows this help message and exits.
  -d, --device         : Select the CUDA device index. (default=0)
- 
+
  --disk-128           : Enable hybrid disk plotting for 128G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
  --disk-64            : Enable hybrid disk plotting for 64G system RAM. 
@@ -65,7 +65,7 @@ GPU-based (CUDA) plotter
  -t2, --temp2         : Temporary directory 2. Used for temporary, shorted-lived read and writes.
                          NOTE: If only one of -t1 or -t2 is specified, both will be
                                set to the same directory.
-  
+
  --no-direct-buffers : Disable using direct downloads and uploads from/to GPU and host.
                         If this is set, intermediate buffers are used between the GPU and host,
                         which will means slower plotting times.
