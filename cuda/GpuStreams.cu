@@ -50,7 +50,7 @@ void GpuUploadBuffer::Upload( const void* hostBuffer, size_t size, cudaStream_t 
             diskBuffer->ReadNextBucket();
 
             // Block until the buffer is fully read from disk
-            // #TODO: Also not do this here, but in a disk stream,
+            // #TODO: Also should not do this here, but in a host-to-host background stream,
             //        so that the next I/O read can happen in the background while
             //        the previous upload to disk is happening, if needed.
             (void)diskBuffer->GetNextReadBuffer();
@@ -58,7 +58,12 @@ void GpuUploadBuffer::Upload( const void* hostBuffer, size_t size, cudaStream_t 
     }
     else if( !isDirect )
     {
-        Panic( "Unimplemented!" );
+        // Copy from unpinned to pinned first
+        // #TODO: This should be done in a different backgrund host-to-host copy stream
+        CudaErrCheck( cudaStreamWaitEvent( uploadStream, self->pinnedEvent[index] ) );
+        CudaErrCheck( cudaMemcpyAsync( self->pinnedBuffer[index], hostBuffer, size, cudaMemcpyHostToHost, uploadStream ) );
+
+        hostBuffer = self->pinnedBuffer[index];
     }
 
     // Ensure the device buffer is ready for use
@@ -66,6 +71,12 @@ void GpuUploadBuffer::Upload( const void* hostBuffer, size_t size, cudaStream_t 
 
     // Upload to the device buffer
     CudaErrCheck( cudaMemcpyAsync( self->deviceBuffer[index], hostBuffer, size, cudaMemcpyHostToDevice, uploadStream ) );
+
+    if( !isDirect )
+    {
+        // Signal that the pinned buffer is ready for re-use
+        CudaErrCheck( cudaEventRecord( self->pinnedEvent[index], uploadStream ) );
+    }
 
     // Signal work stream that the device buffer is ready to be used
     CudaErrCheck( cudaEventRecord( self->readyEvents[index], uploadStream ) );

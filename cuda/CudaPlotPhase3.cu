@@ -704,7 +704,7 @@ void AllocXTableStep( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
     desc.sliceAlignment  = acx.alignment;
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
-    desc.pinnedAllocator = cx.downloadDirect ? nullptr : acx.pinnedAllocator;
+    desc.pinnedAllocator = nullptr;
 
     GpuStreamDescriptor uploadDesc = desc;
     if( cx.cfg.hybrid128Mode )
@@ -728,7 +728,7 @@ void CudaK32PlotAllocateBuffersStep1( CudaK32PlotContext& cx, CudaK32AllocContex
     desc.sliceAlignment  = acx.alignment;
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
-    desc.pinnedAllocator = cx.downloadDirect ? nullptr : acx.pinnedAllocator;
+    desc.pinnedAllocator = nullptr;
 
     GpuStreamDescriptor uploadDesc = desc;
     if( cx.cfg.hybrid128Mode )
@@ -753,7 +753,7 @@ void CudaK32PlotAllocateBuffersStep2( CudaK32PlotContext& cx, CudaK32AllocContex
     desc.sliceAlignment  = acx.alignment;
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
-    desc.pinnedAllocator = cx.downloadDirect ? nullptr : acx.pinnedAllocator;
+    desc.pinnedAllocator = nullptr;
 
     auto&        s2        = cx.phase3->step2;
     const size_t alignment = acx.alignment;
@@ -777,7 +777,7 @@ void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32AllocContex
     desc.sliceAlignment  = acx.alignment;
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
-    desc.pinnedAllocator = cx.downloadDirect ? nullptr : acx.pinnedAllocator;
+    desc.pinnedAllocator = nullptr;
 
     auto&        s3        = cx.phase3->step3;
     const size_t alignment = acx.alignment;
