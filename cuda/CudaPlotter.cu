@@ -321,7 +321,7 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     if( cx.plotRequest.IsFinalPlot && cx.cfg.hybrid128Mode )
     {
         if( cx.diskContext->metaBuffer ) delete cx.diskContext->metaBuffer;
-        if( cx.diskContext->unsortedXs ) delete cx.diskContext->unsortedXs;
+        if( cx.diskContext->unsortedL ) delete cx.diskContext->unsortedL;
 
         for( TableId t = TableId::Table1; t <= TableId::Table7; t++ )
         {
@@ -506,13 +506,17 @@ void FpTable( CudaK32PlotContext& cx )
 
     if( cx.cfg.hybrid128Mode )
     {
-        if( cx.table == cx.firstStoredTable || cx.table == cx.firstStoredTable + 1 )
+        if( cx.cfg.hybrid64Mode || cx.table == cx.firstStoredTable || cx.table == cx.firstStoredTable + 1 )
         {
-            cx.diskContext->unsortedXs->Swap();
+            cx.diskContext->unsortedL->Swap();
         }
 
         if( cx.cfg.hybrid64Mode )
+        {
+            cx.diskContext->yBuffer->Swap();
             cx.diskContext->metaBuffer->Swap();
+            cx.diskContext->unsortedR->Swap();
+        }
     }
 
     cx.yIn     .Reset();
@@ -1003,6 +1007,9 @@ void FinalizeTable7( CudaK32PlotContext& cx )
     {
         cx.diskContext->tablesL[(int)TableId::Table7]->Swap();
         cx.diskContext->tablesR[(int)TableId::Table7]->Swap();
+
+        if( cx.cfg.hybrid64Mode )
+            cx.diskContext->yBuffer->Swap();
     }
 
     auto elapsed = TimerEnd( timer );
@@ -1394,20 +1401,24 @@ void AllocateP1Buffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
         // Temp allocations are pinned host buffers that can be re-used for other means in different phases.
         // This is roughly equivalent to temp2 dir during disk plotting.
 
-        cx.hostY = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
 
         if( !cx.cfg.hybrid64Mode )
         {
+            cx.hostY = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
             cx.hostMeta = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT * BBCU_HOST_META_MULTIPLIER, alignment );
         }
         else if( !cx.diskContext->metaBuffer )
         {
+            const size_t ySliceSize    = sizeof( uint32 ) * BBCU_MAX_SLICE_ENTRY_COUNT;
             const size_t metaSliceSize = sizeof( uint32 ) * BBCU_META_SLICE_ENTRY_COUNT;
+
+            cx.diskContext->yBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "y.tmp", 
+                                            BBCU_BUCKET_COUNT, ySliceSize, FileMode::Create, FileAccess::ReadWrite, tmp2FileFlags );
+            FatalIf( !cx.diskContext->yBuffer, "Failed to create y.tmp disk buffer." );
 
             cx.diskContext->metaBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "metadata.tmp", 
                                             BBCU_BUCKET_COUNT, metaSliceSize, FileMode::Create, FileAccess::ReadWrite, tmp2FileFlags );
-
-            FatalIf( !cx.diskContext->metaBuffer, "Failed to create metadata disk buffer." );
+            FatalIf( !cx.diskContext->metaBuffer, "Failed to create metadata.tmp disk buffer." );
         }
 Log::Line( "Host Temp @ %llu GiB", (llu)acx.hostTempAllocator->Size() BtoGB );
 Log::Line( "Host Tables B @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB );
@@ -1486,14 +1497,24 @@ Log::Line( "Host Tables B @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
                 multiplier = 1;
             }
 
-            cx.hostTableL = acx.hostTableAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
-            cx.hostTableR = acx.hostTableAllocator->CAlloc<uint16>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
-
             // When storing unsorted inlined x's, we don't have enough space in RAM, store i disk instead.
             const size_t xSliceSize = BBCU_MAX_SLICE_ENTRY_COUNT * sizeof( Pair );
-            cx.diskContext->unsortedXs = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "unsorted_x.tmp", 
+            cx.diskContext->unsortedL = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "unsorted_l.tmp", 
                                                                    BBCU_BUCKET_COUNT, xSliceSize, fileMode, FileAccess::ReadWrite, tmp2FileFlags );
-            FatalIf( !cx.diskContext->unsortedXs, "Failed to create unsorted_x.tmp disk buffer." );
+            FatalIf( !cx.diskContext->unsortedL, "Failed to create unsorted_l.tmp disk buffer." );
+
+            if( cx.cfg.hybrid64Mode )
+            {
+                cx.diskContext->unsortedR = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "unsorted_r.tmp", 
+                                                                    BBCU_BUCKET_COUNT, BBCU_MAX_SLICE_ENTRY_COUNT * sizeof( uint16 ), fileMode, FileAccess::ReadWrite, tmp2FileFlags );
+                FatalIf( !cx.diskContext->unsortedR, "Failed to create unsorted_r.tmp disk buffer." );
+            }
+            else
+            {
+                // In 128G mode we can store intermediate pairs in the host
+                cx.hostTableL = acx.hostTableAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
+                cx.hostTableR = acx.hostTableAllocator->CAlloc<uint16>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
+            }
         }
     }
 Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB );
@@ -1527,8 +1548,14 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
 
             if( cx.cfg.hybrid64Mode )
             {
+                yDesc.pinnedAllocator = acx.pinnedAllocator;
+                yDesc.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
+
                 descMeta.pinnedAllocator = acx.pinnedAllocator;
                 descMeta.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
+
+                descTablePairs.pinnedAllocator = acx.pinnedAllocator;
+                descTablePairs.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
             }
         }
 
@@ -1629,11 +1656,20 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
     /// In disk-backed mode, assign disk buffers to gpu buffers
     if( cx.cfg.hybrid128Mode && !acx.dryRun )
     {
-        cx.xPairsOut.AssignDiskBuffer( cx.diskContext->unsortedXs );
-        cx.xPairsIn .AssignDiskBuffer( cx.diskContext->unsortedXs );
+        cx.xPairsOut.AssignDiskBuffer( cx.diskContext->unsortedL );
+        cx.xPairsIn .AssignDiskBuffer( cx.diskContext->unsortedL );
 
         if( cx.cfg.hybrid64Mode )
         {
+            cx.pairsLOut.AssignDiskBuffer( cx.diskContext->unsortedL );
+            cx.pairsLIn .AssignDiskBuffer( cx.diskContext->unsortedL );
+
+            cx.pairsROut.AssignDiskBuffer( cx.diskContext->unsortedR );
+            cx.pairsRIn .AssignDiskBuffer( cx.diskContext->unsortedR );
+
+            cx.yOut.AssignDiskBuffer( cx.diskContext->yBuffer );
+            cx.yIn .AssignDiskBuffer( cx.diskContext->yBuffer );
+
             cx.metaOut.AssignDiskBuffer( cx.diskContext->metaBuffer );
             cx.metaIn .AssignDiskBuffer( cx.diskContext->metaBuffer );
         }

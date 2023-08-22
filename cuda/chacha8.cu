@@ -250,7 +250,10 @@ void GenF1Cuda( CudaK32PlotContext& cx )
     cx.metaOut.Reset();
 
     if( cx.cfg.hybrid64Mode )
+    {
+        cx.diskContext->yBuffer->Swap();
         cx.diskContext->metaBuffer->Swap();
+    }
 }
 
 ///

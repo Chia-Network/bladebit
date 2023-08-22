@@ -47,8 +47,10 @@ struct CudaK32HybridMode
     DiskQueue*  temp1Queue;  // Tables Queue
     DiskQueue*  temp2Queue;  // Metadata Queue (could be the same as temp1Queue)
 
-    DiskBucketBuffer* metaBuffer;   // Enabled in 64G mode
-    DiskBucketBuffer* unsortedXs;   // Unsorted Xs are written to disk (uint64 entries)
+    DiskBucketBuffer* metaBuffer;   // Enabled in < 128G mode
+    DiskBucketBuffer* yBuffer;      // Enabled in < 128G mode
+    DiskBucketBuffer* unsortedL;    // Unsorted Xs (or L pairs in < 128G) are written to disk (uint64 entries)
+    DiskBucketBuffer* unsortedR;    // Unsorted R pairs in < 128G mode
 
     DiskBuffer*       tablesL[7];
     DiskBuffer*       tablesR[7];

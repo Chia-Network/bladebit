@@ -203,7 +203,7 @@ __global__ void PruneAndWriteRMap(
 */
 //-----------------------------------------------------------
 void CudaK32PlotPhase3( CudaK32PlotContext& cx )
-{
+{Log::Line("That's all for now");Exit(0);
     // Set-up our context
     memset( cx.phase3->prunedBucketCounts    , 0, sizeof( cx.phase3->prunedBucketCounts ) );
     memset( cx.phase3->prunedTableEntryCounts, 0, sizeof( cx.phase3->prunedTableEntryCounts ) );
@@ -612,6 +612,7 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
 //-----------------------------------------------------------
 void CudaK32PlotPhase3AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
+return;
     auto& p3 = *cx.phase3;
 
     // Shared allocations
