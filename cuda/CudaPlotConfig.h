@@ -48,8 +48,8 @@ static_assert( BBCU_BUCKET_ALLOC_ENTRY_COUNT / BBCU_BUCKET_COUNT == BBCU_MAX_SLI
     // #define DBG_BBCU_REF_DIR       "/home/harold/plots/ref/"
 
 
-    // #define BBCU_DBG_SKIP_PHASE_1   1   // Skip phase 1 and load pairs from disk
-    // #define BBCU_DBG_SKIP_PHASE_2   1   // Skip phase 1 and 2 and load pairs and marks from disk
+    #define BBCU_DBG_SKIP_PHASE_1   1   // Skip phase 1 and load pairs from disk
+    #define BBCU_DBG_SKIP_PHASE_2   1   // Skip phase 1 and 2 and load pairs and marks from disk
 
     #if (defined( BBCU_DBG_SKIP_PHASE_2 ) && !defined( BBCU_DBG_SKIP_PHASE_1 ) )
         #define BBCU_DBG_SKIP_PHASE_1 1
@@ -60,6 +60,7 @@ static_assert( BBCU_BUCKET_ALLOC_ENTRY_COUNT / BBCU_BUCKET_COUNT == BBCU_MAX_SLI
     // #define DBG_BBCU_P2_WRITE_MARKS   1
 
     // #define DBG_BBCU_P2_COUNT_PRUNED_ENTRIES 1
+    #define DBG_BBCU_KEEP_TEMP_FILES 1
 
 
     #define _ASSERT_DOES_NOT_OVERLAP( b0, b1, size ) ASSERT( (b1+size) <= b0 || b1 >= (b0+size) )

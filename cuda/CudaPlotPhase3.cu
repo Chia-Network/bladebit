@@ -203,7 +203,7 @@ __global__ void PruneAndWriteRMap(
 */
 //-----------------------------------------------------------
 void CudaK32PlotPhase3( CudaK32PlotContext& cx )
-{Log::Line("That's all for now");Exit(0);
+{
     // Set-up our context
     memset( cx.phase3->prunedBucketCounts    , 0, sizeof( cx.phase3->prunedBucketCounts ) );
     memset( cx.phase3->prunedTableEntryCounts, 0, sizeof( cx.phase3->prunedTableEntryCounts ) );
@@ -235,6 +235,13 @@ void CudaK32PlotPhase3( CudaK32PlotContext& cx )
     }
     #endif
 
+    if( cx.cfg.hybrid64Mode )
+    {
+        cx.diskContext->phase3.lMapBuffer->Swap();
+        cx.diskContext->phase3.rMapBuffer->Swap();
+    }
+
+
     const uint32 compressionLevel = cx.gCfg->compressionLevel;
 
     // Special case with the starting table, since it has the values inlined already
@@ -250,6 +257,7 @@ void CudaK32PlotPhase3( CudaK32PlotContext& cx )
         CompressInlinedTable( cx );
         auto elapsed = TimerEnd( timer );
         Log::Line( " Step 1 completed step in %.2lf seconds.", elapsed );
+
         timer = TimerBegin();
         CudaK32PlotPhase3Step3( cx );
 
@@ -598,6 +606,12 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
             p3.prunedTableEntryCounts[(int)rTable] += p3.prunedBucketCounts[(int)rTable][i];
     }
 
+    if( cx.cfg.hybrid64Mode )
+    {
+        cx.diskContext->phase3.lpBuffer->Swap();
+        cx.diskContext->phase3.indexBuffer->Swap();
+    }
+
 // #if _DEBUG
 //     // DbgValidateIndices( cx );
 //     DbgValidateStep2Output( cx );
@@ -612,7 +626,6 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
 //-----------------------------------------------------------
 void CudaK32PlotPhase3AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
-return;
     auto& p3 = *cx.phase3;
 
     // Shared allocations
@@ -623,9 +636,12 @@ return;
     p3.hostRMap            = acx.hostTempAllocator->CAlloc<RMap>( BBCU_TABLE_ALLOC_ENTRY_COUNT );     // Used for rMap and index
     p3.hostLinePoints      = acx.hostTempAllocator->CAlloc<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );   // Used for lMap and LPs
 
+    
     if( cx.cfg.hybrid64Mode )
     {
-        Panic( "Unimplemented for 64G mode. Need to offload LMap/Line Points to disk." );
+        // Re-purpose these disk buffers for our use
+        cx.diskContext->phase3.rMapBuffer = cx.diskContext->metaBuffer;
+        cx.diskContext->phase3.lMapBuffer = cx.diskContext->unsortedL;
     }
 
     #if _DEBUG
@@ -709,7 +725,12 @@ void AllocXTableStep( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 
     GpuStreamDescriptor uploadDesc = desc;
     if( cx.cfg.hybrid128Mode )
+    {
         uploadDesc.pinnedAllocator = acx.pinnedAllocator;
+
+        if( cx.cfg.hybrid64Mode )
+            desc.pinnedAllocator = acx.pinnedAllocator;
+    }
 
     auto& tx = cx.phase3->xTable;
 
@@ -718,6 +739,12 @@ void AllocXTableStep( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
     tx.xIn       = cx.gpuUploadStream[0]->CreateUploadBufferT<Pair>( uploadDesc, acx.dryRun );
     tx.lpOut     = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint64>( desc, acx.dryRun );
     tx.indexOut  = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( desc, acx.dryRun );
+
+    if( !acx.dryRun && cx.cfg.hybrid64Mode )
+    {
+        tx.lpOut   .AssignDiskBuffer( cx.diskContext->phase3.lpBuffer );
+        tx.indexOut.AssignDiskBuffer( cx.diskContext->phase3.indexBuffer );
+    }
 }
 
 //-----------------------------------------------------------
@@ -733,7 +760,12 @@ void CudaK32PlotAllocateBuffersStep1( CudaK32PlotContext& cx, CudaK32AllocContex
 
     GpuStreamDescriptor uploadDesc = desc;
     if( cx.cfg.hybrid128Mode )
+    {
         uploadDesc.pinnedAllocator = acx.pinnedAllocator;
+
+        if( cx.cfg.hybrid64Mode )
+            desc.pinnedAllocator = acx.pinnedAllocator;
+    }
 
     auto&        s1        = cx.phase3->step1;
     const size_t alignment = acx.alignment;
@@ -743,6 +775,11 @@ void CudaK32PlotAllocateBuffersStep1( CudaK32PlotContext& cx, CudaK32AllocContex
     s1.rMapOut  = cx.gpuDownloadStream[0]->CreateDownloadBufferT<RMap>( desc, acx.dryRun );
 
     s1.rTableMarks = (uint64*)acx.devAllocator->AllocT<uint64>( GetMarkingTableBitFieldSize(), acx.alignment );
+
+    if( !acx.dryRun && cx.cfg.hybrid64Mode )
+    {
+        s1.rMapOut.AssignDiskBuffer( cx.diskContext->phase3.rMapBuffer );
+    }
 }
 
 //-----------------------------------------------------------
@@ -756,6 +793,12 @@ void CudaK32PlotAllocateBuffersStep2( CudaK32PlotContext& cx, CudaK32AllocContex
     desc.deviceAllocator = acx.devAllocator;
     desc.pinnedAllocator = nullptr;
 
+    GpuStreamDescriptor uploadDesc = desc;
+    if( cx.cfg.hybrid64Mode )
+    {
+        desc.pinnedAllocator = acx.pinnedAllocator;
+    }
+
     auto&        s2        = cx.phase3->step2;
     const size_t alignment = acx.alignment;
 
@@ -767,6 +810,15 @@ void CudaK32PlotAllocateBuffersStep2( CudaK32PlotContext& cx, CudaK32AllocContex
 
     s2.devLTable[0] = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
     s2.devLTable[1] = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
+
+    if( !acx.dryRun && cx.cfg.hybrid64Mode )
+    {
+        s2.rMapIn.AssignDiskBuffer( cx.diskContext->phase3.rMapBuffer );
+        s2.lMapIn.AssignDiskBuffer( cx.diskContext->phase3.lMapBuffer );
+
+        s2.lpOut   .AssignDiskBuffer( cx.diskContext->phase3.lpBuffer );
+        s2.indexOut.AssignDiskBuffer( cx.diskContext->phase3.indexBuffer );
+    }
 }
 
 //-----------------------------------------------------------
@@ -779,6 +831,11 @@ void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32AllocContex
     desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
     desc.deviceAllocator = acx.devAllocator;
     desc.pinnedAllocator = nullptr;
+
+    if( cx.cfg.hybrid64Mode )
+    {
+        desc.pinnedAllocator = acx.pinnedAllocator;
+    }
 
     auto&        s3        = cx.phase3->step3;
     const size_t alignment = acx.alignment;
@@ -819,6 +876,14 @@ void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32AllocContex
 
     s3.devCTable           = acx.devAllocator->AllocT<FSE_CTable>( P3_MAX_CTABLE_SIZE, alignment );
     s3.devParkOverrunCount = acx.devAllocator->CAlloc<uint32>( 1 );
+
+    if( !acx.dryRun && cx.cfg.hybrid64Mode )
+    {
+        s3.lpIn   .AssignDiskBuffer( cx.diskContext->phase3.lpBuffer );
+        s3.indexIn.AssignDiskBuffer( cx.diskContext->phase3.indexBuffer );
+
+        s3.mapOut.AssignDiskBuffer( cx.diskContext->phase3.lMapBuffer );
+    }
 }
 
 
@@ -972,7 +1037,6 @@ void DbgValidateIndices( CudaK32PlotContext& cx )
 
     const uint32* reader       = p3.hostIndices;
     const size_t  readerStride = P3_PRUNED_SLICE_MAX * 3;
-
     uint64 entryCount = 0;
 
     for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
@@ -981,12 +1045,26 @@ void DbgValidateIndices( CudaK32PlotContext& cx )
         {
             const uint32 copyCount = s2.prunedBucketSlices[bucket][slice];
 
-            bbmemcpy_t( idxWriter, reader, copyCount );
+            if( cx.cfg.hybrid64Mode )
+            {
+                cx.diskContext->phase3.indexBuffer->ReadNextBucket();
+                const auto readBucket = cx.diskContext->phase3.indexBuffer->GetNextReadBufferAs<uint32>();
+
+                bbmemcpy_t( idxWriter, readBucket.Ptr(), readBucket.Length() );
+            }
+            else
+                bbmemcpy_t( idxWriter, reader, copyCount );
 
             idxWriter += copyCount;
             entryCount += copyCount;
             reader += readerStride;
         }
+    }
+
+    if( cx.cfg.hybrid64Mode )
+    {
+        cx.diskContext->phase3.indexBuffer->Swap();
+        cx.diskContext->phase3.indexBuffer->Swap();
     }
 
     ASSERT( entryCount == p3.prunedTableEntryCounts[(int)cx.table] );

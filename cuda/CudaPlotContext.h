@@ -60,8 +60,19 @@ struct CudaK32HybridMode
 
     struct
     {
-        DiskBucketBuffer* lpOut;
-        DiskBucketBuffer* indexOut;
+        // #NOTE: These are an alias to the unsortedL buffer from phase 1.
+        //        The same file & disk buffer is repurposed for this usage.
+        union {
+            DiskBucketBuffer* lpBuffer;
+            DiskBucketBuffer* lMapBuffer;
+        };
+
+        // #NOTE: These are an alias to metaBuffer from phase 1.
+        //        The same file & disk buffer is repurposed for phase 3.
+        union {
+            DiskBucketBuffer* indexBuffer;
+            DiskBucketBuffer* rMapBuffer;
+        };
 
     } phase3;
 };
@@ -153,7 +164,7 @@ struct CudaK32Phase3
     struct {
         GpuUploadBuffer   lpIn;         // Line points from step 2
         GpuUploadBuffer   indexIn;      // Indices from step 2
-        GpuDownloadBuffer mapOut;       // lTable for next step 1
+        GpuDownloadBuffer mapOut;       // lTable for next step 2
         GpuDownloadBuffer parksOut;     // Downloads park buffers to host
 
         uint32*           hostParkOverrunCount;

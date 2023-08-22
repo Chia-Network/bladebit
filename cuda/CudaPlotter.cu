@@ -318,6 +318,7 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     cx.plotWriter = nullptr;
 
     // Delete any temporary files
+    #if !(DBG_BBCU_KEEP_TEMP_FILES)
     if( cx.plotRequest.IsFinalPlot && cx.cfg.hybrid128Mode )
     {
         if( cx.diskContext->metaBuffer ) delete cx.diskContext->metaBuffer;
@@ -329,6 +330,7 @@ void CudaK32Plotter::Run( const PlotRequest& req )
             if( cx.diskContext->tablesR[(int)t] ) delete cx.diskContext->tablesR[(int)t];
         }
     }
+    #endif
 }
 
 //-----------------------------------------------------------
