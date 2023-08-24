@@ -114,10 +114,11 @@ void DiskBufferBase::Swap()
 
 void* DiskBufferBase::GetNextWriteBuffer()
 {
-    FatalIf( (int64)_nextWriteLock - (int64)_nextWriteBucket >= 2, "Invalid write buffer lock for '%s'.", _name.c_str() );
+    PanicIf( _nextWriteLock >= _bucketCount, "Write bucket overflow." );
+    PanicIf( (int64)_nextWriteLock - (int64)_nextWriteBucket >= 2, "Invalid write buffer lock for '%s'.", _name.c_str() );
 
     void* buf = _writeBuffers[_nextWriteLock % 2];
-    FatalIf( !buf, "No write buffer reserved for '%s'.", _name.c_str() );
+    PanicIf( !buf, "No write buffer reserved for '%s'.", _name.c_str() );
 
     if( _nextWriteLock++ >= 2 )
         WaitForWriteToComplete( _nextWriteLock-2 );
@@ -127,11 +128,13 @@ void* DiskBufferBase::GetNextWriteBuffer()
 
 void* DiskBufferBase::PeekReadBufferForBucket( uint32 bucket )
 {
+    PanicIf( _nextReadLock >= _bucketCount, "Read bucket overflow." );
     return _readBuffers[bucket % 2];
 }
 
 void* DiskBufferBase::PeekWriteBufferForBucket( const uint32 bucket )
 {
+    PanicIf( _nextWriteLock >= _bucketCount, "Write bucket overflow." );
     return _writeBuffers[bucket % 2];
 }
 
@@ -150,10 +153,11 @@ void DiskBufferBase::WaitForLastWriteToComplete()
 
 void* DiskBufferBase::GetNextReadBuffer()
 {
-    FatalIf( _nextReadLock >= _nextReadBucket, "Invalid read buffer lock for '%s'.", _name.c_str() );
+    PanicIf( _nextReadLock >= _bucketCount, "Read bucket overflow." );
+    PanicIf( _nextReadLock >= _nextReadBucket, "Invalid read buffer lock for '%s'.", _name.c_str() );
 
     void* buf = _readBuffers[_nextReadLock % 2];
-    FatalIf( !buf, "No read buffer reserved for '%s'.", _name.c_str() );
+    PanicIf( !buf, "No read buffer reserved for '%s'.", _name.c_str() );
 
     WaitForReadToComplete( _nextReadLock++ );
     return buf;
