@@ -1317,7 +1317,7 @@ Log::Line( "P3: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTe
         bool allocateHostTablesPinned = cx.downloadDirect;
         #if _WIN32
             // On windows we always force the use of intermediate buffers, so we allocate on the host
-            allocateHostTablesPinned = true;
+            allocateHostTablesPinned = false;
         #endif
 
         Log::Line( "Table pairs allocated as pinned: %s", allocateHostTablesPinned ? "true" : "false" );
@@ -1328,7 +1328,7 @@ Log::Line( "P3: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTe
     #endif
 
     cx.hostBufferTemp = nullptr;
-    #if _DEBUG
+    #if _DEBUG || _WIN32
         if( cx.hostTempAllocSize )
             cx.hostBufferTemp = bbvirtallocboundednuma<byte>( cx.hostTempAllocSize );
     #endif
@@ -1564,7 +1564,11 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
         if( !cx.downloadDirect )
         {
             // Use intermediate pinned buffer for transfers to non-pinned destinations
-            descTablePairs.pinnedAllocator = acx.pinnedAllocator;
+            yDesc.pinnedAllocator                = acx.pinnedAllocator;
+            descTablePairs.pinnedAllocator       = acx.pinnedAllocator;
+            descTableSortedPairs.pinnedAllocator = acx.pinnedAllocator;
+            descXPairs.pinnedAllocator           = acx.pinnedAllocator;
+            descMeta.pinnedAllocator             = acx.pinnedAllocator;
         }
 
 
