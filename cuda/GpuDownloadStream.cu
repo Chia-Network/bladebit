@@ -148,6 +148,8 @@ void GpuDownloadBuffer::PerformDownload2D( void* hostBuffer, size_t width, size_
         CallHostFunctionOnStream( downloadStream, [this](){
             self->diskBuffer->GetNextWriteBuffer();
         });
+
+        pinnedBuffer = self->diskBuffer->PeekWriteBufferForBucket( self->outgoingSequence-1 ); 
     }
 
     if( !isDirect )
