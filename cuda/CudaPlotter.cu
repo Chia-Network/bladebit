@@ -1247,7 +1247,7 @@ void AllocBuffers( CudaK32PlotContext& cx )
         acx.devAllocator       = &devAllocator;
 
         AllocateP1Buffers( cx, acx );
-
+Log::Line( "P1: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTempAllocator.Size() BtoMB );
         cx.pinnedAllocSize    = pinnedAllocator   .Size();
         cx.hostTableAllocSize = hostTableAllocator.Size();
         cx.hostTempAllocSize  = hostTempAllocator .Size();
@@ -1260,7 +1260,7 @@ void AllocBuffers( CudaK32PlotContext& cx )
         devAllocator       = {};
 
         CudaK32PlotPhase2AllocateBuffers( cx, acx );
-
+Log::Line( "P2: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTempAllocator.Size() BtoMB );
         cx.pinnedAllocSize    = std::max( cx.pinnedAllocSize   , pinnedAllocator   .Size() );
         cx.hostTableAllocSize = std::max( cx.hostTableAllocSize, hostTableAllocator.Size() );
         cx.hostTempAllocSize  = std::max( cx.hostTempAllocSize , hostTempAllocator .Size() );
@@ -1273,7 +1273,7 @@ void AllocBuffers( CudaK32PlotContext& cx )
         devAllocator       = {};
 
         CudaK32PlotPhase3AllocateBuffers( cx, acx );
-
+Log::Line( "P3: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTempAllocator.Size() BtoMB );
         cx.pinnedAllocSize    = std::max( cx.pinnedAllocSize   , pinnedAllocator   .Size() );
         cx.hostTableAllocSize = std::max( cx.hostTableAllocSize, hostTableAllocator.Size() );
         cx.hostTempAllocSize  = std::max( cx.hostTempAllocSize , hostTempAllocator .Size() );
@@ -1289,8 +1289,8 @@ void AllocBuffers( CudaK32PlotContext& cx )
     }
 
 
-    size_t totalPinnedSize = cx.pinnedAllocSize + cx.hostTempAllocSize + parksPinnedSize;
-    size_t totalHostSize   = cx.hostTableAllocSize + totalPinnedSize;
+    const size_t totalPinnedSize = cx.pinnedAllocSize + cx.hostTempAllocSize + parksPinnedSize;
+    const size_t totalHostSize   = cx.hostTableAllocSize + totalPinnedSize;
     Log::Line( "Kernel RAM required       : %-12llu bytes ( %-9.2lf MiB or %-6.2lf GiB )", totalPinnedSize,
                    (double)totalPinnedSize BtoMB, (double)totalPinnedSize BtoGB );
 
@@ -1319,7 +1319,7 @@ void AllocBuffers( CudaK32PlotContext& cx )
             // On windows we always force the use of intermediate buffers, so we allocate on the host
             allocateHostTablesPinned = true;
         #endif
-        
+
         Log::Line( "Table pairs allocated as pinned: %s", allocateHostTablesPinned ? "true" : "false" );
         if( allocateHostTablesPinned )
             CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
@@ -1414,13 +1414,13 @@ void AllocateP1Buffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
             const size_t ySliceSize    = sizeof( uint32 ) * BBCU_MAX_SLICE_ENTRY_COUNT;
             const size_t metaSliceSize = sizeof( uint32 ) * BBCU_META_SLICE_ENTRY_COUNT;
 
-            cx.diskContext->yBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "y.tmp", 
+            cx.diskContext->yBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::Y_DISK_BUFFER_FILE_NAME.data(), 
                                             BBCU_BUCKET_COUNT, ySliceSize, FileMode::Create, FileAccess::ReadWrite, tmp2FileFlags );
-            FatalIf( !cx.diskContext->yBuffer, "Failed to create y.tmp disk buffer." );
+            FatalIf( !cx.diskContext->yBuffer, "Failed to create y disk buffer." );
 
-            cx.diskContext->metaBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "metadata.tmp", 
+            cx.diskContext->metaBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::META_DISK_BUFFER_FILE_NAME.data(), 
                                             BBCU_BUCKET_COUNT, metaSliceSize, FileMode::Create, FileAccess::ReadWrite, tmp2FileFlags );
-            FatalIf( !cx.diskContext->metaBuffer, "Failed to create metadata.tmp disk buffer." );
+            FatalIf( !cx.diskContext->metaBuffer, "Failed to create metadata disk buffer." );
         }
 Log::Line( "Host Temp @ %llu GiB", (llu)acx.hostTempAllocator->Size() BtoGB );
 Log::Line( "Host Tables B @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB );
@@ -1501,15 +1501,15 @@ Log::Line( "Host Tables B @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
 
             // When storing unsorted inlined x's, we don't have enough space in RAM, store i disk instead.
             const size_t xSliceSize = BBCU_MAX_SLICE_ENTRY_COUNT * sizeof( Pair );
-            cx.diskContext->unsortedL = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "unsorted_l.tmp", 
-                                                                   BBCU_BUCKET_COUNT, xSliceSize, fileMode, FileAccess::ReadWrite, tmp2FileFlags );
-            FatalIf( !cx.diskContext->unsortedL, "Failed to create unsorted_l.tmp disk buffer." );
+            cx.diskContext->unsortedL = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::LPAIRS_DISK_BUFFER_FILE_NAME.data(), 
+                                                                   BBCU_BUCKET_COUNT, xSliceSize, FileMode::OpenOrCreate, FileAccess::ReadWrite, tmp2FileFlags );
+            FatalIf( !cx.diskContext->unsortedL, "Failed to create unsorted L disk buffer." );
 
             if( cx.cfg.hybrid64Mode )
             {
-                cx.diskContext->unsortedR = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "unsorted_r.tmp", 
-                                                                    BBCU_BUCKET_COUNT, BBCU_MAX_SLICE_ENTRY_COUNT * sizeof( uint16 ), fileMode, FileAccess::ReadWrite, tmp2FileFlags );
-                FatalIf( !cx.diskContext->unsortedR, "Failed to create unsorted_r.tmp disk buffer." );
+                cx.diskContext->unsortedR = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "p1unsorted_r.tmp", 
+                                                                    BBCU_BUCKET_COUNT, BBCU_MAX_SLICE_ENTRY_COUNT * sizeof( uint16 ), FileMode::OpenOrCreate, FileAccess::ReadWrite, tmp2FileFlags );
+                FatalIf( !cx.diskContext->unsortedR, "Failed to create unsorted R disk buffer." );
             }
             else
             {

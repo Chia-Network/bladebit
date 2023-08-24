@@ -369,6 +369,13 @@ void CudaK32PlotPhase3Step2( CudaK32PlotContext& cx )
         ASSERT( p3.prunedBucketCounts[(int)rTable][bucket] <= P3_PRUNED_BUCKET_MAX );
     }
 
+    if( cx.cfg.hybrid64Mode )
+    {
+        cx.diskContext->phase3.rMapBuffer->Swap();
+        cx.diskContext->phase3.lpAndLMapBuffer->Swap();
+        cx.diskContext->phase3.indexBuffer->Swap();
+    }
+
     // #if _DEBUG
     // // if( cx.table > TableId::Table3 )
     // {
@@ -418,7 +425,10 @@ void WritePark7( CudaK32PlotContext& cx )
     constexpr size_t maxParksPerBucket = CDiv( BBCU_BUCKET_ALLOC_ENTRY_COUNT, kEntriesPerPark ) + 2;
     static_assert( sizeof( uint64 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT >= maxParksPerBucket * parkSize );
 
-
+if( cx.cfg.hybrid64Mode )
+{
+    Fatal( "Park 7 Serialization still unimplemented for 16G Mode." );
+}
     // Host stuff
     constexpr size_t hostMetaTableSize = sizeof( RMap ) * BBCU_TABLE_ALLOC_ENTRY_COUNT;
     StackAllocator hostAllocator( p3.hostRMap, hostMetaTableSize );

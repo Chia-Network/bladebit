@@ -44,6 +44,17 @@ struct CudaK32ParkContext
 
 struct CudaK32HybridMode
 {
+    // For clarity, these are the file names for the disk buffers
+    // whose disk space will be shared for temp data in both phase 1 and phase 3.
+    // The name indicates their usage and in which phase.
+    static constexpr std::string_view Y_DISK_BUFFER_FILE_NAME      = "p1y-p3index.tmp";
+    static constexpr std::string_view META_DISK_BUFFER_FILE_NAME   = "p1meta-p3rmap.tmp";
+    static constexpr std::string_view LPAIRS_DISK_BUFFER_FILE_NAME = "p1unsortedx-p1lpairs-p3lp-p3-lmap.tmp";
+
+    static constexpr std::string_view P3_RMAP_DISK_BUFFER_FILE_NAME        = META_DISK_BUFFER_FILE_NAME;
+    static constexpr std::string_view P3_INDEX_DISK_BUFFER_FILE_NAME       = Y_DISK_BUFFER_FILE_NAME;
+    static constexpr std::string_view P3_LP_AND_LMAP_DISK_BUFFER_FILE_NAME = LPAIRS_DISK_BUFFER_FILE_NAME;
+
     DiskQueue*  temp1Queue;  // Tables Queue
     DiskQueue*  temp2Queue;  // Metadata Queue (could be the same as temp1Queue)
 
@@ -60,19 +71,11 @@ struct CudaK32HybridMode
 
     struct
     {
-        // #NOTE: These are an alias to the unsortedL buffer from phase 1.
-        //        The same file & disk buffer is repurposed for this usage.
-        union {
-            DiskBucketBuffer* lpBuffer;
-            DiskBucketBuffer* lMapBuffer;
-        };
-
-        // #NOTE: These are an alias to metaBuffer from phase 1.
-        //        The same file & disk buffer is repurposed for phase 3.
-        union {
-            DiskBucketBuffer* indexBuffer;
-            DiskBucketBuffer* rMapBuffer;
-        };
+        // #NOTE: These buffers shared the same file-backed storage as
+        //        with other buffers in phase 1.
+        DiskBucketBuffer* rMapBuffer;           // Step 1
+        DiskBucketBuffer* indexBuffer;          // X-step/Step 2
+        DiskBucketBuffer* lpAndLMapBuffer;      // X-step/Step 2 (LP) | Step 3 (LMap)
 
     } phase3;
 };

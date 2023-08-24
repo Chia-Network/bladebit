@@ -105,7 +105,7 @@ void PlotCompareMain( GlobalPlotConfig& gCfg, CliParser& cli )
     // TestTable( refPlot, tgtPlot, TableId::Table7 );
     // TestTable( refPlot, tgtPlot, TableId::Table3 );
 
-    // TestC3Table( refPlot, tgtPlot );
+    TestC3Table( refPlot, tgtPlot );
 
     for( TableId table = TableId::Table1; table <= TableId::Table7; table++ )
         TestTable( refPlot, tgtPlot, table );

@@ -320,7 +320,8 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
 
     if( cx.cfg.hybrid64Mode )
     {
-        cx.diskContext->phase3.lMapBuffer->Swap();
+        cx.diskContext->phase3.lpAndLMapBuffer->Swap();
+        cx.diskContext->phase3.indexBuffer->Swap();
     }
 
 

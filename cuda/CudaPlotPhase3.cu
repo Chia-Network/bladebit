@@ -237,8 +237,9 @@ void CudaK32PlotPhase3( CudaK32PlotContext& cx )
 
     if( cx.cfg.hybrid64Mode )
     {
-        cx.diskContext->phase3.lMapBuffer->Swap();
         cx.diskContext->phase3.rMapBuffer->Swap();
+        cx.diskContext->phase3.indexBuffer->Swap();
+        cx.diskContext->phase3.lpAndLMapBuffer->Swap();
     }
 
 
@@ -292,7 +293,7 @@ void CudaK32PlotPhase3( CudaK32PlotContext& cx )
         Log::Line( "Compressing tables %u and %u...", (uint)rTable, (uint)rTable+1 );
 
         cx.table = rTable;
-        
+
         #if BBCU_DBG_SKIP_PHASE_2
             if( rTable < TableId::Table7 )
                 DbgLoadTablePairs( cx, rTable+1, false );
@@ -386,7 +387,6 @@ void Step1( CudaK32PlotContext& cx )
     p3.pairsLoadOffset = 0;
     LoadBucket( cx, 0 );
 
-
     ///
     /// Process buckets
     ///
@@ -432,7 +432,7 @@ void Step1( CudaK32PlotContext& cx )
         s1.rMapOut.Download2DT<RMap>( p3.hostRMap + (size_t)bucket * P3_PRUNED_SLICE_MAX,
             P3_PRUNED_SLICE_MAX, BBCU_BUCKET_COUNT, P3_PRUNED_BUCKET_MAX, P3_PRUNED_SLICE_MAX, cx.computeStream );
     }
-    
+
     // Download slice counts
     cudaStream_t downloadStream = s1.rMapOut.GetQueue()->GetStream();
 
@@ -465,6 +465,11 @@ void Step1( CudaK32PlotContext& cx )
 
         for( uint32 i = 0; i < BBCU_BUCKET_COUNT; i++ )
             p3.prunedTableEntryCounts[(int)rTable] += p3.prunedBucketCounts[(int)rTable][i];
+    }
+
+    if( cx.cfg.hybrid64Mode )
+    {
+        cx.diskContext->phase3.rMapBuffer->Swap();
     }
 
     // #if _DEBUG
@@ -608,13 +613,13 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
 
     if( cx.cfg.hybrid64Mode )
     {
-        cx.diskContext->phase3.lpBuffer->Swap();
+        cx.diskContext->phase3.lpAndLMapBuffer->Swap();
         cx.diskContext->phase3.indexBuffer->Swap();
     }
 
 // #if _DEBUG
-//     // DbgValidateIndices( cx );
-//     DbgValidateStep2Output( cx );
+//     DbgValidateIndices( cx );
+//     // DbgValidateStep2Output( cx );
 //     // DbgDumpSortedLinePoints( cx );
 // #endif
 }
@@ -626,6 +631,8 @@ void CompressInlinedTable( CudaK32PlotContext& cx )
 //-----------------------------------------------------------
 void CudaK32PlotPhase3AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
+    static_assert( sizeof( LMap ) == sizeof( uint64 ) );
+
     auto& p3 = *cx.phase3;
 
     // Shared allocations
@@ -633,15 +640,30 @@ void CudaK32PlotPhase3AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocConte
     p3.devPrunedEntryCount = acx.devAllocator->CAlloc<uint32>( 1, acx.alignment );
 
     // Host allocations
-    p3.hostRMap            = acx.hostTempAllocator->CAlloc<RMap>( BBCU_TABLE_ALLOC_ENTRY_COUNT );     // Used for rMap and index
-    p3.hostLinePoints      = acx.hostTempAllocator->CAlloc<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );   // Used for lMap and LPs
-
-    
-    if( cx.cfg.hybrid64Mode )
+    if( !cx.cfg.hybrid64Mode )
     {
-        // Re-purpose these disk buffers for our use
-        cx.diskContext->phase3.rMapBuffer = cx.diskContext->metaBuffer;
-        cx.diskContext->phase3.lMapBuffer = cx.diskContext->unsortedL;
+        p3.hostRMap       = acx.hostTempAllocator->CAlloc<RMap>( BBCU_TABLE_ALLOC_ENTRY_COUNT );     // Used for rMap and index
+        p3.hostLinePoints = acx.hostTempAllocator->CAlloc<uint64>( BBCU_TABLE_ALLOC_ENTRY_COUNT );   // Used for lMap and LPs
+    }
+    else if( !cx.diskContext->phase3.rMapBuffer )
+    {
+        const size_t RMAP_SLICE_SIZE        = sizeof( RMap )   * P3_PRUNED_SLICE_MAX;
+        const size_t INDEX_SLICE_SIZE       = sizeof( uint32 ) * P3_PRUNED_SLICE_MAX;
+        const size_t LP_AND_LMAP_SLICE_SIZE = sizeof( uint64 ) * P3_PRUNED_SLICE_MAX;
+
+        const FileFlags TMP2_QUEUE_FILE_FLAGS = cx.cfg.temp2DirectIO ? FileFlags::NoBuffering | FileFlags::LargeFile : FileFlags::LargeFile;
+
+        cx.diskContext->phase3.rMapBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::P3_RMAP_DISK_BUFFER_FILE_NAME.data(), 
+                                            BBCU_BUCKET_COUNT, RMAP_SLICE_SIZE, FileMode::OpenOrCreate, FileAccess::ReadWrite, TMP2_QUEUE_FILE_FLAGS );
+        FatalIf( !cx.diskContext->phase3.rMapBuffer, "Failed to create R Map disk buffer." );
+
+        cx.diskContext->phase3.indexBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::P3_INDEX_DISK_BUFFER_FILE_NAME.data(), 
+                                            BBCU_BUCKET_COUNT, INDEX_SLICE_SIZE, FileMode::OpenOrCreate, FileAccess::ReadWrite, TMP2_QUEUE_FILE_FLAGS );
+        FatalIf( !cx.diskContext->phase3.indexBuffer, "Failed to create index disk buffer." );
+
+        cx.diskContext->phase3.lpAndLMapBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::P3_LP_AND_LMAP_DISK_BUFFER_FILE_NAME.data(), 
+                                            BBCU_BUCKET_COUNT, RMAP_SLICE_SIZE, FileMode::OpenOrCreate, FileAccess::ReadWrite, TMP2_QUEUE_FILE_FLAGS );
+        FatalIf( !cx.diskContext->phase3.lpAndLMapBuffer, "Failed to create LP/LMap disk buffer." );
     }
 
     #if _DEBUG
@@ -742,7 +764,7 @@ void AllocXTableStep( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 
     if( !acx.dryRun && cx.cfg.hybrid64Mode )
     {
-        tx.lpOut   .AssignDiskBuffer( cx.diskContext->phase3.lpBuffer );
+        tx.lpOut   .AssignDiskBuffer( cx.diskContext->phase3.lpAndLMapBuffer );
         tx.indexOut.AssignDiskBuffer( cx.diskContext->phase3.indexBuffer );
     }
 }
@@ -814,9 +836,9 @@ void CudaK32PlotAllocateBuffersStep2( CudaK32PlotContext& cx, CudaK32AllocContex
     if( !acx.dryRun && cx.cfg.hybrid64Mode )
     {
         s2.rMapIn.AssignDiskBuffer( cx.diskContext->phase3.rMapBuffer );
-        s2.lMapIn.AssignDiskBuffer( cx.diskContext->phase3.lMapBuffer );
+        s2.lMapIn.AssignDiskBuffer( cx.diskContext->phase3.lpAndLMapBuffer );
 
-        s2.lpOut   .AssignDiskBuffer( cx.diskContext->phase3.lpBuffer );
+        s2.lpOut   .AssignDiskBuffer( cx.diskContext->phase3.lpAndLMapBuffer );
         s2.indexOut.AssignDiskBuffer( cx.diskContext->phase3.indexBuffer );
     }
 }
@@ -879,10 +901,10 @@ void CudaK32PlotAllocateBuffersStep3( CudaK32PlotContext& cx, CudaK32AllocContex
 
     if( !acx.dryRun && cx.cfg.hybrid64Mode )
     {
-        s3.lpIn   .AssignDiskBuffer( cx.diskContext->phase3.lpBuffer );
+        s3.lpIn   .AssignDiskBuffer( cx.diskContext->phase3.lpAndLMapBuffer );
         s3.indexIn.AssignDiskBuffer( cx.diskContext->phase3.indexBuffer );
 
-        s3.mapOut.AssignDiskBuffer( cx.diskContext->phase3.lMapBuffer );
+        s3.mapOut.AssignDiskBuffer( cx.diskContext->phase3.lpAndLMapBuffer );
     }
 }
 
@@ -1041,23 +1063,32 @@ void DbgValidateIndices( CudaK32PlotContext& cx )
 
     for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
     {
-        for( uint32 slice = 0; slice < BBCU_BUCKET_COUNT; slice++ )
+        if( cx.cfg.hybrid64Mode )
         {
-            const uint32 copyCount = s2.prunedBucketSlices[bucket][slice];
+            const uint32* sizeSlices = &s2.prunedBucketSlices[0][bucket];
 
-            if( cx.cfg.hybrid64Mode )
+            cx.diskContext->phase3.indexBuffer->OverrideReadSlices( bucket, sizeof( uint32 ), sizeSlices, BBCU_BUCKET_COUNT );
+            cx.diskContext->phase3.indexBuffer->ReadNextBucket();
+            const auto readBucket = cx.diskContext->phase3.indexBuffer->GetNextReadBufferAs<uint32>();
+            ASSERT( readBucket.Length() == p3.prunedBucketCounts[(int)cx.table][bucket] );
+
+            bbmemcpy_t( idxWriter, readBucket.Ptr(), readBucket.Length() );
+
+            idxWriter  += readBucket.Length();
+            entryCount += readBucket.Length();
+        }
+        else
+        {
+            for( uint32 slice = 0; slice < BBCU_BUCKET_COUNT; slice++ )
             {
-                cx.diskContext->phase3.indexBuffer->ReadNextBucket();
-                const auto readBucket = cx.diskContext->phase3.indexBuffer->GetNextReadBufferAs<uint32>();
+                const uint32 copyCount = s2.prunedBucketSlices[slice][bucket];
 
-                bbmemcpy_t( idxWriter, readBucket.Ptr(), readBucket.Length() );
-            }
-            else
                 bbmemcpy_t( idxWriter, reader, copyCount );
 
-            idxWriter += copyCount;
-            entryCount += copyCount;
-            reader += readerStride;
+                idxWriter  += copyCount;
+                entryCount += copyCount;
+                reader     += readerStride;
+            }
         }
     }
 
