@@ -830,6 +830,16 @@ void CudaK32PlotAllocateBuffersStep2( CudaK32PlotContext& cx, CudaK32AllocContex
     s2.lpOut    = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint64>( desc, acx.dryRun );
     s2.indexOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32> (desc, acx.dryRun );
 
+
+    const size_t devParkAllocSize = P3_PARK_7_SIZE * P3_MAX_P7_PARKS_PER_BUCKET;
+
+    GpuStreamDescriptor parksDesc = desc;
+    parksDesc.sliceCount      = 1;
+    parksDesc.entriesPerSlice = devParkAllocSize;
+    parksDesc.sliceAlignment  = RoundUpToNextBoundaryT<size_t>( P3_PARK_7_SIZE, sizeof( uint64 ) );
+
+    s2.parksOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<byte>( parksDesc, acx.dryRun );
+
     s2.devLTable[0] = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
     s2.devLTable[1] = acx.devAllocator->CAlloc<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, alignment );
 

@@ -37,7 +37,7 @@ public:
 private:
     Fence        _fence;
     Span<byte*>  _buffers;
-    IAllocator*  _allocator = nullptr;
+    IAllocator*  _allocator           = nullptr;
     size_t       _bufferSize          = 0;  // Size of each individual buffer
     uint32       _nextBufferToLock    = 0;
     uint32       _nextBufferToRelease = 0;

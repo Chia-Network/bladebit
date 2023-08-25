@@ -158,6 +158,7 @@ struct CudaK32Phase3
         GpuUploadBuffer   lMapIn;       // Output map (uint64) from the previous table run. Or, when L table is the first stored table, it is inlined x values
         GpuDownloadBuffer lpOut;        // Output line points (uint64)
         GpuDownloadBuffer indexOut;     // Output source line point index (uint32) (taken from the rMap source value)
+        GpuDownloadBuffer parksOut;     // Output P7 parks on the last table
         uint32*           devLTable[2]; // Unpacked L table bucket
 
         uint32 prunedBucketSlices[BBCU_BUCKET_COUNT][BBCU_BUCKET_COUNT];
