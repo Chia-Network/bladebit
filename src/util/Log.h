@@ -47,4 +47,5 @@ private:
 private:
     static FILE* _outStream;
     static FILE* _errStream;
+    static char *GetTimestamp();
 };

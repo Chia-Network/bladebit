@@ -1,4 +1,7 @@
 #include "Log.h"
+#include <iostream>
+#include <chrono>
+#include <ctime>
 
 #if _DEBUG && defined( _WIN32 )
     #include <Windows.h>
@@ -81,10 +84,18 @@ void Log::Write( const char* msg, va_list args )
 #endif
 }
 
+
 //-----------------------------------------------------------
 void Log::WriteLine( const char* msg, va_list args )
 {
     FILE* stream = GetOutStream();
+    std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+    std::time_t now_time_t = std::chrono::system_clock::to_time_t(now);
+    char timestamp[80];
+    std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", std::localtime(&now_time_t));
+    std::string current_time_str(timestamp);
+
+    fprintf(stream, "[%s] ", timestamp);
     vfprintf( stream, msg, args );
     fputc( '\n', stream );
 }
