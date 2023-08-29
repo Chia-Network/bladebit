@@ -1693,7 +1693,7 @@ void AllocateParkSerializationBuffers( CudaK32PlotContext& cx, IAllocator& pinne
     // Get the largest park size
     const size_t maxParkSize = cx.cfg.gCfg->compressionLevel == 0 ?
                                 CalculateParkSize( TableId::Table1 ) :
-                                GetCompressionInfoForLevel( cx.cfg.gCfg->compressionLevel ).tableParkSize;
+                                GetLargestCompressedParkSize();
 
     const size_t parksPerBuffer       = CDivT<size_t>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, kEntriesPerPark ) + 2;
     // CDiv( BBCU_BUCKET_ALLOC_ENTRY_COUNT, kCheckpoint1Interval ) + 1; // Need an extra park for left-over entries
