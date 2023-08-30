@@ -4,18 +4,16 @@ if((NOT DEFINED ENV{CI}) AND (NOT DEFINED CACHE{bb_version_embedded}))
 
     set(bb_version_embedded on CACHE BOOL "Version embedding has already happened.")
 
-    set(cmd_ver bash)
     set(ext_ver sh)
     if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-        set(cmd_ver pwsh)
         set(ext_ver ps1)
     endif()
 
-    execute_process(COMMAND ${cmd_ver} ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} major    OUTPUT_VARIABLE bb_ver_maj    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} minor    OUTPUT_VARIABLE bb_ver_min    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} revision OUTPUT_VARIABLE bb_ver_rev    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} suffix   OUTPUT_VARIABLE bb_ver_suffix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_ver} ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} commit   OUTPUT_VARIABLE bb_ver_commit WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} major    OUTPUT_VARIABLE bb_ver_maj    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} minor    OUTPUT_VARIABLE bb_ver_min    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} revision OUTPUT_VARIABLE bb_ver_rev    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} suffix   OUTPUT_VARIABLE bb_ver_suffix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${CMAKE_SOURCE_DIR}/extract-version.${ext_ver} commit   OUTPUT_VARIABLE bb_ver_commit WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
 
     # Remove trailing whitespace incurred in windows gitbash
     string(STRIP "${bb_ver_maj}"    bb_ver_maj)
