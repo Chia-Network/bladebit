@@ -83,8 +83,9 @@ target_sources(bladebit_harvester PRIVATE
         cuda/CudaMatch.cu
         cuda/CudaPlotUtil.cu
 
-        # TODO: Remove this, ought not be needed in harvester
+        # TODO: Does this have to be here?
         cuda/GpuStreams.cu
+        cuda/GpuDownloadStream.cu
     >
 
     $<$<NOT:${have_cuda}>:
