@@ -498,7 +498,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     while( cli.HasArgs() )
     {
         outPath = cli.Arg();
-        FatalIf( outPath[0] == '-', "Unrecognized argument '%s'.", outPath );
+        FatalIf( outPath[0] == '-', "Unrecognized argument '%s'.", outPath.c_str() );
 
         // Add trailing slash?
         const char endChar = outPath.back();
