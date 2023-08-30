@@ -10,7 +10,7 @@ if((NOT DEFINED ENV{CI}) AND (NOT DEFINED CACHE{bb_version_embedded}))
 
         if(${bash_path} MATCHES "-NOTFOUND")
             message("Bash was not found")
-            set(cmd_ver pwsh)
+            set(cmd_ver powershell)
             set(ext_ver ps1)
         else()
             set(cmd_ver "${bash_path}")
