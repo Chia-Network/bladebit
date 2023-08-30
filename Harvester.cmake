@@ -82,7 +82,7 @@ target_sources(bladebit_harvester PRIVATE
         cuda/CudaF1.cu
         cuda/CudaMatch.cu
         cuda/CudaPlotUtil.cu
-        cuda/CudaQueue.cu
+        cuda/GpuQueue.cu
 
         # TODO: Does this have to be here?
         cuda/GpuStreams.cu
