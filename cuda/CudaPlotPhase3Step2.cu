@@ -369,7 +369,7 @@ void CudaK32PlotPhase3Step2( CudaK32PlotContext& cx )
         ASSERT( p3.prunedBucketCounts[(int)rTable][bucket] <= P3_PRUNED_BUCKET_MAX );
     }
 
-    if( cx.cfg.hybrid64Mode )
+    if( cx.cfg.hybrid16Mode )
     {
         cx.diskContext->phase3.rMapBuffer->Swap();
         cx.diskContext->phase3.lpAndLMapBuffer->Swap();

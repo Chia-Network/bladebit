@@ -59,18 +59,12 @@ GPU-based (CUDA) plotter
 
  --disk-128           : Enable hybrid disk plotting for 128G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
- --disk-64            : Enable hybrid disk plotting for 64G system RAM. 
+ --disk-16            : Enable hybrid disk plotting for 16G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
  -t1, --temp1         : Temporary directory 1. Used for longer-lived, sequential writes.
  -t2, --temp2         : Temporary directory 2. Used for temporary, shorted-lived read and writes.
                          NOTE: If only one of -t1 or -t2 is specified, both will be
                                set to the same directory.
-
- --no-direct-buffers : Disable using direct downloads and uploads from/to GPU and host.
-                        If this is set, intermediate buffers are used between the GPU and host,
-                        which will means slower plotting times.
-                        This is forcefully enabled on Windows to avoid limited pinnable memory.
-
 )";
 
 ///
@@ -86,11 +80,9 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
     {
         if( cli.ReadU32( cfg.deviceIndex, "-d", "--device" ) )
             continue;
-        if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-downloads" ) )
-            continue;
         if( cli.ReadSwitch( cfg.hybrid128Mode, "--disk-128" ) )
             continue;
-        if( cli.ReadSwitch( cfg.hybrid64Mode, "--disk-64" ) )
+        if( cli.ReadSwitch( cfg.hybrid16Mode, "--disk-16" ) )
         {
             cfg.hybrid128Mode = true;
             continue;
@@ -111,8 +103,8 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
             continue;
         if( cli.ReadUnswitch( cfg.temp2DirectIO, "--no-t2-direct" ) )
             continue;
-        if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-buffers" ) )
-            continue;
+        // if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-buffers" ) )
+        //     continue;
         if( cli.ArgMatch( "--help", "-h" ) )
         {
             Log::Line( USAGE );
@@ -194,7 +186,7 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     {
         cx.parkContext    = new CudaK32ParkContext{};
 
-        if( cx.cfg.hybrid64Mode )
+        if( cx.cfg.hybrid16Mode )
             cx.useParkContext = true;
     }
 
@@ -319,17 +311,17 @@ void CudaK32Plotter::Run( const PlotRequest& req )
 
     // Delete any temporary files
     #if !(DBG_BBCU_KEEP_TEMP_FILES)
-    if( cx.plotRequest.IsFinalPlot && cx.cfg.hybrid128Mode )
-    {
-        if( cx.diskContext->metaBuffer ) delete cx.diskContext->metaBuffer;
-        if( cx.diskContext->unsortedL ) delete cx.diskContext->unsortedL;
-
-        for( TableId t = TableId::Table1; t <= TableId::Table7; t++ )
+        if( cx.plotRequest.IsFinalPlot && cx.cfg.hybrid128Mode )
         {
-            if( cx.diskContext->tablesL[(int)t] ) delete cx.diskContext->tablesL[(int)t];
-            if( cx.diskContext->tablesR[(int)t] ) delete cx.diskContext->tablesR[(int)t];
+            if( cx.diskContext->metaBuffer ) delete cx.diskContext->metaBuffer;
+            if( cx.diskContext->unsortedL ) delete cx.diskContext->unsortedL;
+
+            for( TableId t = TableId::Table1; t <= TableId::Table7; t++ )
+            {
+                if( cx.diskContext->tablesL[(int)t] ) delete cx.diskContext->tablesL[(int)t];
+                if( cx.diskContext->tablesR[(int)t] ) delete cx.diskContext->tablesR[(int)t];
+            }
         }
-    }
     #endif
 }
 
@@ -508,12 +500,12 @@ void FpTable( CudaK32PlotContext& cx )
 
     if( cx.cfg.hybrid128Mode )
     {
-        if( cx.cfg.hybrid64Mode || cx.table == cx.firstStoredTable || cx.table == cx.firstStoredTable + 1 )
+        if( cx.cfg.hybrid16Mode || cx.table == cx.firstStoredTable || cx.table == cx.firstStoredTable + 1 )
         {
             cx.diskContext->unsortedL->Swap();
         }
 
-        if( cx.cfg.hybrid64Mode )
+        if( cx.cfg.hybrid16Mode )
         {
             cx.diskContext->yBuffer->Swap();
             cx.diskContext->metaBuffer->Swap();
@@ -1010,7 +1002,7 @@ void FinalizeTable7( CudaK32PlotContext& cx )
         cx.diskContext->tablesL[(int)TableId::Table7]->Swap();
         cx.diskContext->tablesR[(int)TableId::Table7]->Swap();
 
-        if( cx.cfg.hybrid64Mode )
+        if( cx.cfg.hybrid16Mode )
             cx.diskContext->yBuffer->Swap();
     }
 
@@ -1247,7 +1239,6 @@ void AllocBuffers( CudaK32PlotContext& cx )
         acx.devAllocator       = &devAllocator;
 
         AllocateP1Buffers( cx, acx );
-Log::Line( "P1: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTempAllocator.Size() BtoMB );
         cx.pinnedAllocSize    = pinnedAllocator   .Size();
         cx.hostTableAllocSize = hostTableAllocator.Size();
         cx.hostTempAllocSize  = hostTempAllocator .Size();
@@ -1260,7 +1251,6 @@ Log::Line( "P1: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTe
         devAllocator       = {};
 
         CudaK32PlotPhase2AllocateBuffers( cx, acx );
-Log::Line( "P2: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTempAllocator.Size() BtoMB );
         cx.pinnedAllocSize    = std::max( cx.pinnedAllocSize   , pinnedAllocator   .Size() );
         cx.hostTableAllocSize = std::max( cx.hostTableAllocSize, hostTableAllocator.Size() );
         cx.hostTempAllocSize  = std::max( cx.hostTempAllocSize , hostTempAllocator .Size() );
@@ -1273,7 +1263,6 @@ Log::Line( "P2: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTe
         devAllocator       = {};
 
         CudaK32PlotPhase3AllocateBuffers( cx, acx );
-Log::Line( "P3: p: %llu MiB | t: %llu MiB", pinnedAllocator.Size() BtoMB, hostTempAllocator.Size() BtoMB );
         cx.pinnedAllocSize    = std::max( cx.pinnedAllocSize   , pinnedAllocator   .Size() );
         cx.hostTableAllocSize = std::max( cx.hostTableAllocSize, hostTableAllocator.Size() );
         cx.hostTempAllocSize  = std::max( cx.hostTempAllocSize , hostTempAllocator .Size() );
@@ -1404,7 +1393,7 @@ void AllocateP1Buffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
         // This is roughly equivalent to temp2 dir during disk plotting.
 
 
-        if( !cx.cfg.hybrid64Mode )
+        if( !cx.cfg.hybrid16Mode )
         {
             cx.hostY = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
             cx.hostMeta = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT * BBCU_HOST_META_MULTIPLIER, alignment );
@@ -1422,8 +1411,6 @@ void AllocateP1Buffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
                                             BBCU_BUCKET_COUNT, metaSliceSize, FileMode::Create, FileAccess::ReadWrite, tmp2FileFlags );
             FatalIf( !cx.diskContext->metaBuffer, "Failed to create metadata disk buffer." );
         }
-Log::Line( "Host Temp @ %llu GiB", (llu)acx.hostTempAllocator->Size() BtoGB );
-Log::Line( "Host Tables B @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB );
 
         // Marking tables used to prune back pointers
         {
@@ -1505,7 +1492,7 @@ Log::Line( "Host Tables B @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
                                                                    BBCU_BUCKET_COUNT, xSliceSize, FileMode::OpenOrCreate, FileAccess::ReadWrite, tmp2FileFlags );
             FatalIf( !cx.diskContext->unsortedL, "Failed to create unsorted L disk buffer." );
 
-            if( cx.cfg.hybrid64Mode )
+            if( cx.cfg.hybrid16Mode )
             {
                 cx.diskContext->unsortedR = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "p1unsorted_r.tmp", 
                                                                     BBCU_BUCKET_COUNT, BBCU_MAX_SLICE_ENTRY_COUNT * sizeof( uint16 ), FileMode::OpenOrCreate, FileAccess::ReadWrite, tmp2FileFlags );
@@ -1519,7 +1506,6 @@ Log::Line( "Host Tables B @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
             }
         }
     }
-Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB );
 
     /// Device & Pinned allocations
     {
@@ -1548,7 +1534,7 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
             descXPairs.pinnedAllocator   = acx.pinnedAllocator;
             descXPairs.sliceAlignment    = cx.diskContext->temp2Queue->BlockSize();
 
-            if( cx.cfg.hybrid64Mode )
+            if( cx.cfg.hybrid16Mode )
             {
                 yDesc.pinnedAllocator = acx.pinnedAllocator;
                 yDesc.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
@@ -1665,7 +1651,7 @@ Log::Line( "Host Tables A @ %llu GiB", (llu)acx.hostTableAllocator->Size() BtoGB
         cx.xPairsOut.AssignDiskBuffer( cx.diskContext->unsortedL );
         cx.xPairsIn .AssignDiskBuffer( cx.diskContext->unsortedL );
 
-        if( cx.cfg.hybrid64Mode )
+        if( cx.cfg.hybrid16Mode )
         {
             cx.pairsLOut.AssignDiskBuffer( cx.diskContext->unsortedL );
             cx.pairsLIn .AssignDiskBuffer( cx.diskContext->unsortedL );
