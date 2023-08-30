@@ -86,6 +86,9 @@ target_sources(bladebit_harvester PRIVATE
         # TODO: Does this have to be here?
         cuda/GpuStreams.cu
         cuda/GpuDownloadStream.cu
+        src/plotting/DiskBuffer.cpp
+        src/plotting/DiskBucketBuffer.cpp
+        src/plotting/DiskBufferBase.cpp
     >
 
     $<$<NOT:${have_cuda}>:

@@ -147,7 +147,7 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     Log::Line( " Host RAM        : %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
     Log::Line( " Direct transfers: %s", cfg.disableDirectDownloads ? "false" : "true" );
     Log::NewLine();
-   
+
     CudaInit( cx );
 
     CudaErrCheck( cudaStreamCreateWithFlags( &cx.computeStream , cudaStreamNonBlocking ) );
