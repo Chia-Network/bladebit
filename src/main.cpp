@@ -477,7 +477,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     Log::Line( " Benchmark mode        : %s", cfg.benchmarkMode ? "enabled" : "disabled" );
     // Log::Line( " Output path           : %s", cfg.outputFolder );
     // Log::Line( "" );
-    
+
 
     FatalIf( plotter == nullptr, "No plotter type chosen." );
 
@@ -486,7 +486,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
 
     // Parse plotter-specific CLI
     plotter->ParseCLI( cfg, cli );
-    
+
     // Parse remaining args as output directories
     cfg.outputFolderCount = (uint32)cli.RemainingArgCount();
     FatalIf( cfg.outputFolderCount < 1, "At least one output folder must be specified." );
@@ -498,6 +498,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     while( cli.HasArgs() )
     {
         outPath = cli.Arg();
+        FatalIf( outPath[0] == '-', "Unrecognized argument '%s'.", outPath.c_str() );
 
         // Add trailing slash?
         const char endChar = outPath.back();

@@ -318,6 +318,11 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
     s3.lpIn   .Reset();
     s3.indexIn.Reset();
 
+    if( cx.cfg.hybrid16Mode )
+    {
+        cx.diskContext->phase3.lpAndLMapBuffer->Swap();
+        cx.diskContext->phase3.indexBuffer->Swap();
+    }
 
 
     // #if _DEBUG

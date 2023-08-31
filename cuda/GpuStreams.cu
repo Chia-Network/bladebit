@@ -50,11 +50,20 @@ void GpuUploadBuffer::Upload( const void* hostBuffer, size_t size, cudaStream_t 
             diskBuffer->ReadNextBucket();
 
             // Block until the buffer is fully read from disk
-            // #TODO: Also not do this here, but in a disk stream,
+            // #TODO: Also should not do this here, but in a host-to-host background stream,
             //        so that the next I/O read can happen in the background while
             //        the previous upload to disk is happening, if needed.
             (void)diskBuffer->GetNextReadBuffer();
         });
+    }
+    else if( !isDirect )
+    {
+        // Copy from unpinned to pinned first
+        // #TODO: This should be done in a different backgrund host-to-host copy stream
+        CudaErrCheck( cudaStreamWaitEvent( uploadStream, self->pinnedEvent[index] ) );
+        CudaErrCheck( cudaMemcpyAsync( self->pinnedBuffer[index], hostBuffer, size, cudaMemcpyHostToHost, uploadStream ) );
+
+        hostBuffer = self->pinnedBuffer[index];
     }
 
     // Ensure the device buffer is ready for use
@@ -62,6 +71,12 @@ void GpuUploadBuffer::Upload( const void* hostBuffer, size_t size, cudaStream_t 
 
     // Upload to the device buffer
     CudaErrCheck( cudaMemcpyAsync( self->deviceBuffer[index], hostBuffer, size, cudaMemcpyHostToDevice, uploadStream ) );
+
+    if( !isDirect )
+    {
+        // Signal that the pinned buffer is ready for re-use
+        CudaErrCheck( cudaEventRecord( self->pinnedEvent[index], uploadStream ) );
+    }
 
     // Signal work stream that the device buffer is ready to be used
     CudaErrCheck( cudaEventRecord( self->readyEvents[index], uploadStream ) );
@@ -143,8 +158,38 @@ void GpuUploadBuffer::UploadArray( const void* hostBuffer, uint32 length, uint32
             (void)diskBuffer->GetNextReadBuffer();
         });
     }
+    else
+    {
+        // Perform fragmented uploads
+        const auto waitEvent = isDirect ? self->deviceEvents[index] : self->pinnedEvent[index];
+        const auto copyMode  = isDirect ? cudaMemcpyHostToDevice : cudaMemcpyHostToHost;
 
-    // Upload to device buffer
+        // Wait on device or pinned buffer to be ready (depending if a direct copy or not)
+        CudaErrCheck( cudaStreamWaitEvent( uploadStream, waitEvent ) );
+
+        const byte*   src   = (byte*)hostBuffer;
+              byte*   dst   = (byte*)( isDirect ? self->deviceBuffer[index] : self->pinnedBuffer[index] );
+        const uint32* sizes = counts;
+
+        for( uint32 i = 0; i < length; i++ )
+        {
+            const size_t size = *sizes * (size_t)elementSize;
+
+            CudaErrCheck( cudaMemcpyAsync( dst, src, size, copyMode, uploadStream ) );
+
+            dst    += size;
+            src    += srcStride;
+            sizes += countStride;
+        }
+
+        if( !isDirect )
+        {
+            // Set the pinned buffer as the host buffer so that we can do a sequential copy to the device now
+            hostBuffer = self->pinnedBuffer[index];
+        }
+    }
+
+    // Upload to device buffer if in non-direct mode
     if( !isDirect )
     {
         for( uint32 i = 0; i < length; i++ )
@@ -154,78 +199,16 @@ void GpuUploadBuffer::UploadArray( const void* hostBuffer, uint32 length, uint32
             counts += countStride;
         }
 
-        // #TODO: These should be done in a copy stream to perform the copies in the background
-        if( diskBuffer )
-        {
-            CudaErrCheck( cudaStreamWaitEvent( uploadStream, self->deviceEvents[index] ) );
-            CudaErrCheck( cudaMemcpyAsync( self->deviceBuffer[index], hostBuffer, totalBufferSize, cudaMemcpyHostToDevice, uploadStream ) );
-        }
-        else
-        {
-            CudaErrCheck( cudaMemcpyAsync( self->pinnedBuffer[index], hostBuffer, totalBufferSize, cudaMemcpyHostToHost, uploadStream ) );
-            CudaErrCheck( cudaStreamWaitEvent( uploadStream, self->deviceEvents[index] ) );
-            CudaErrCheck( cudaMemcpyAsync( self->deviceBuffer[index], self->pinnedBuffer[index], totalBufferSize, cudaMemcpyHostToDevice, uploadStream ) );
-        }
-    }
-    else
-    {
-        // Perform fragmented uploads
+        // #TODO: This should be done in a copy stream to perform the copies in the background
         CudaErrCheck( cudaStreamWaitEvent( uploadStream, self->deviceEvents[index] ) );
+        CudaErrCheck( cudaMemcpyAsync( self->deviceBuffer[index], hostBuffer, totalBufferSize, cudaMemcpyHostToDevice, uploadStream ) );
 
-        const byte* src = (byte*)hostBuffer;
-              byte* dst = (byte*)self->deviceBuffer[index];
-
-        for( uint32 i = 0; i < length; i++ )
-        {
-            const size_t size = *counts * (size_t)elementSize;
-
-            CudaErrCheck( cudaMemcpyAsync( dst, src, size, cudaMemcpyHostToDevice, uploadStream ) );
-
-            dst    += size;
-            src    += srcStride;
-            counts += countStride;
-        }
+        if( !self->diskBuffer )
+            CudaErrCheck( cudaEventRecord( self->pinnedEvent[index], uploadStream ) );
     }
 
     // Signal work stream that the device buffer is ready to be used
     CudaErrCheck( cudaEventRecord( self->readyEvents[index], uploadStream ) );
-
-
-
-    ///
-    /// Old pre-disk Impl
-    ///
-    // ASSERT( hostBuffer );
-    // const uint32 index = SynchronizeOutgoingSequence();
-
-    // auto stream = self->queue->GetStream();
-
-    // // Ensure the device buffer is ready for use
-    // CudaErrCheck( cudaStreamWaitEvent( stream, self->events[index] ) );
-
-    // // Perform uploads
-    // //size_t deviceCopySize = 0;
-    // const byte* src = (byte*)hostBuffer;
-    //       byte* dst = (byte*)self->deviceBuffer[index];
-
-    // for( uint32 i = 0; i < length; i++ )
-    // {
-    //     const size_t size = *counts * (size_t)elementSize;
-    //     //memcpy( dst, src, size );
-    //     CudaErrCheck( cudaMemcpyAsync( dst, src, size, cudaMemcpyHostToDevice, stream ) );
-
-    //     //deviceCopySize += size;
-
-    //     dst    += size;
-    //     src    += srcStride;
-    //     counts += countStride;
-    // }
-
-    // // Copy to device buffer
-    // //CudaErrCheck( cudaMemcpyAsync( self->deviceBuffer[index], cpy.dstBuffer, deviceCopySize, cudaMemcpyHostToDevice, _stream ) );
-
-    // // Signal work stream that the device buffer is ready to be used
-    // CudaErrCheck( cudaEventRecord( self->readyEvents[index], stream ) );
 }
 
 void GpuUploadBuffer::UploadArrayForIndex( const uint32 index, const void* hostBuffer, uint32 length, 

@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_OSX_DEPLOYMENT_TARGET 10.16)
 
 set(CMAKE_CONFIGURATION_TYPES Release Debug)
 
@@ -19,7 +18,7 @@ if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW) 
 endif()
 
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version.")
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.16" CACHE STRING "macOS minimum supported version.")
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC Runtime Library")
 
 project(bladebit LANGUAGES C CXX ASM)
@@ -85,7 +84,7 @@ endif()
 # NOTE: These are mostly sandbox test environment, not proper tests
 option(BB_ENABLE_TESTS "Enable tests." OFF)
 option(NO_CUDA_HARVESTER "Explicitly disable CUDA in the bladebit_harvester target." OFF)
-option(BB_NO_EMBED_VERSION "Disable embedding the version when building locally (non-CI)." ON)
+option(BB_NO_EMBED_VERSION "Disable embedding the version when building locally (non-CI)." OFF)
 option(BB_HARVESTER_ONLY "Enable only the harvester target." OFF)
 option(BB_HARVESTER_STATIC "Build the harvester target as a static library." OFF)
 option(BB_CUDA_USE_NATIVE "Only build the native CUDA architecture when in release mode." OFF)
@@ -146,7 +145,7 @@ endif()
 include(Config.cmake)
 
 if(NOT ${BB_HARVESTER_ONLY})
-    if(NOT BB_IS_DEPENDENCY AND (NOT BB_NO_EMBED_VERSION))
+    if((NOT BB_IS_DEPENDENCY) AND (NOT BB_NO_EMBED_VERSION))
         include(cmake_modules/EmbedVersion.cmake)
     endif()
 

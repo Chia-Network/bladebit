@@ -41,7 +41,7 @@ void GpuDownloadBuffer::Download( void* hostBuffer, const size_t size, cudaStrea
 
 void GpuDownloadBuffer::DownloadAndCopy( void* hostBuffer, void* finalBuffer, const size_t size, cudaStream_t workStream  )
 {
-    ASSERT( 0 );
+    Panic( "Unavailable" );
     // ASSERT( self->outgoingSequence < BBCU_BUCKET_COUNT );
     // ASSERT( hostBuffer );
     // ASSERT( workStream );
@@ -148,6 +148,8 @@ void GpuDownloadBuffer::PerformDownload2D( void* hostBuffer, size_t width, size_
         CallHostFunctionOnStream( downloadStream, [this](){
             self->diskBuffer->GetNextWriteBuffer();
         });
+
+        pinnedBuffer = self->diskBuffer->PeekWriteBufferForBucket( self->outgoingSequence-1 ); 
     }
 
     if( !isDirect )

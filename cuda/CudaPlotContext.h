@@ -44,11 +44,24 @@ struct CudaK32ParkContext
 
 struct CudaK32HybridMode
 {
+    // For clarity, these are the file names for the disk buffers
+    // whose disk space will be shared for temp data in both phase 1 and phase 3.
+    // The name indicates their usage and in which phase.
+    static constexpr std::string_view Y_DISK_BUFFER_FILE_NAME      = "p1y-p3index.tmp";
+    static constexpr std::string_view META_DISK_BUFFER_FILE_NAME   = "p1meta-p3rmap.tmp";
+    static constexpr std::string_view LPAIRS_DISK_BUFFER_FILE_NAME = "p1unsortedx-p1lpairs-p3lp-p3-lmap.tmp";
+
+    static constexpr std::string_view P3_RMAP_DISK_BUFFER_FILE_NAME        = META_DISK_BUFFER_FILE_NAME;
+    static constexpr std::string_view P3_INDEX_DISK_BUFFER_FILE_NAME       = Y_DISK_BUFFER_FILE_NAME;
+    static constexpr std::string_view P3_LP_AND_LMAP_DISK_BUFFER_FILE_NAME = LPAIRS_DISK_BUFFER_FILE_NAME;
+
     DiskQueue*  temp1Queue;  // Tables Queue
     DiskQueue*  temp2Queue;  // Metadata Queue (could be the same as temp1Queue)
 
-    DiskBucketBuffer* metaBuffer;   // Enabled in 64G mode
-    DiskBucketBuffer* unsortedXs;   // Unsorted Xs are written to disk (uint64 entries)
+    DiskBucketBuffer* metaBuffer;   // Enabled in < 128G mode
+    DiskBucketBuffer* yBuffer;      // Enabled in < 128G mode
+    DiskBucketBuffer* unsortedL;    // Unsorted Xs (or L pairs in < 128G) are written to disk (uint64 entries)
+    DiskBucketBuffer* unsortedR;    // Unsorted R pairs in < 128G mode
 
     DiskBuffer*       tablesL[7];
     DiskBuffer*       tablesR[7];
@@ -58,8 +71,11 @@ struct CudaK32HybridMode
 
     struct
     {
-        DiskBucketBuffer* lpOut;
-        DiskBucketBuffer* indexOut;
+        // #NOTE: These buffers shared the same file-backed storage as
+        //        with other buffers in phase 1.
+        DiskBucketBuffer* rMapBuffer;           // Step 1
+        DiskBucketBuffer* indexBuffer;          // X-step/Step 2
+        DiskBucketBuffer* lpAndLMapBuffer;      // X-step/Step 2 (LP) | Step 3 (LMap)
 
     } phase3;
 };
@@ -142,6 +158,7 @@ struct CudaK32Phase3
         GpuUploadBuffer   lMapIn;       // Output map (uint64) from the previous table run. Or, when L table is the first stored table, it is inlined x values
         GpuDownloadBuffer lpOut;        // Output line points (uint64)
         GpuDownloadBuffer indexOut;     // Output source line point index (uint32) (taken from the rMap source value)
+        GpuDownloadBuffer parksOut;     // Output P7 parks on the last table
         uint32*           devLTable[2]; // Unpacked L table bucket
 
         uint32 prunedBucketSlices[BBCU_BUCKET_COUNT][BBCU_BUCKET_COUNT];
@@ -151,7 +168,7 @@ struct CudaK32Phase3
     struct {
         GpuUploadBuffer   lpIn;         // Line points from step 2
         GpuUploadBuffer   indexIn;      // Indices from step 2
-        GpuDownloadBuffer mapOut;       // lTable for next step 1
+        GpuDownloadBuffer mapOut;       // lTable for next step 2
         GpuDownloadBuffer parksOut;     // Downloads park buffers to host
 
         uint32*           hostParkOverrunCount;

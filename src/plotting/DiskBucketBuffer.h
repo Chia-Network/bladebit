@@ -87,7 +87,7 @@ private:
 
 private:
     size_t _sliceCapacity;         // Maximum size of each slice
-    
+
     bool   _verticalWrite = false;
     // size_t _writeSliceStride;      // Offset to the start of the next slices when writing
     // size_t _readSliceStride;       // Offset to the start of the next slice when reading (these are swapped between tables).

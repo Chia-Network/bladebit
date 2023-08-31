@@ -419,7 +419,7 @@ void CudaK32PlotPhase2AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocConte
         desc.sliceAlignment  = cx.diskContext->temp1Queue->BlockSize();
     }
 
-    if( cx.cfg.disableDirectDownloads )
+    if( !cx.downloadDirect )
         desc.pinnedAllocator = acx.pinnedAllocator;
 
     CudaK32Phase2& p2 = *cx.phase2;

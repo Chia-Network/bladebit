@@ -41,8 +41,8 @@ byte* BufferChain::GetNextBuffer()
 {
     const uint32 bufferCount = (uint32)_buffers.Length();
 
-    ASSERT( _nextBufferToRelease <= _nextBufferToLock );
-    ASSERT( _nextBufferToLock - _nextBufferToRelease <= bufferCount );
+    PanicIf( _nextBufferToRelease > _nextBufferToLock, "" );
+    PanicIf( _nextBufferToLock - _nextBufferToRelease > bufferCount, "" );
 
     if( _nextBufferToLock >= bufferCount )
     {
@@ -55,12 +55,17 @@ byte* BufferChain::GetNextBuffer()
 void BufferChain::ReleaseNextBuffer()
 {
     PanicIf( _nextBufferToRelease >= _nextBufferToLock, "" );
+    PanicIf(_nextBufferToLock - _nextBufferToRelease > (uint32)_buffers.Length(), "" );
+
     _fence.Signal( ++_nextBufferToRelease );
 }
 
 void BufferChain::Reset()
 {
-    GetNextBuffer();
+    // Wait for the last buffer to be released
+    _fence.Wait( _nextBufferToLock );
+
+    // Reset state
     _fence.Reset( 0 );
     _nextBufferToRelease = 0;
     _nextBufferToLock    = 0;

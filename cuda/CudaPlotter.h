@@ -15,7 +15,7 @@ struct CudaK32PlotConfig
                                             // May be necessarry on Windows because of shared memory limitations (usual 50% of system memory)
 
     bool hybrid128Mode            = false;  // Enable hybrid disk-offload w/ 128G of RAM.
-    bool hybrid64Mode             = false;  // Enable hybrid disk-offload w/ 64G of RAM.
+    bool hybrid16Mode             = false;  // Enable hybrid disk-offload w/ 64G of RAM.
 
     const char* temp1Path         = nullptr; // For 128G RAM mode
     const char* temp2Path         = nullptr; // For 64G RAM mode

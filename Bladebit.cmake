@@ -1,4 +1,4 @@
-add_library(bladebit_core src/plotting/DiskBuffer.h src/plotting/DiskBufferBase.cpp src/plotting/DiskBufferBase.h)
+add_library(bladebit_core)
 target_link_libraries(bladebit_core PUBLIC bladebit_config)
 
 target_include_directories(bladebit_core PUBLIC
@@ -294,9 +294,13 @@ set(src_bladebit
 
     src/plotting/DiskQueue.h
     src/plotting/DiskQueue.cpp
+    src/plotting/DiskBuffer.h
     src/plotting/DiskBuffer.cpp
     src/plotting/DiskBucketBuffer.h
     src/plotting/DiskBucketBuffer.cpp
+    src/plotting/DiskBufferBase.h
+    src/plotting/DiskBufferBase.cpp
+
     src/util/MPMCQueue.h
     src/util/CommandQueue.h
 )
