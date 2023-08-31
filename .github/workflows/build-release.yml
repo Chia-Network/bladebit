@@ -449,7 +449,6 @@ jobs:
         run: |
           mkdir build && cd build
           cmake ..
-          bash -eo pipefail ../embed-version.sh
           cat ../src/Version.h
           cmake --build . --target bladebit --config Release
 
