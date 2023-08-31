@@ -21,7 +21,7 @@ endif()
 # Determine if we are in a CI environment
 if(DEFINED ENV{CI})
     # CI build; use the suffix from the VERSION file
-    set(bb_ver_suffix_final "${bb_ver_suffix}")
+    set(bb_ver_suffix_final "-${bb_ver_suffix}")
 else()
     # Local build; use "-dev" as the suffix
     set(bb_ver_suffix_final "-dev")
