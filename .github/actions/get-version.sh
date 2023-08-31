@@ -4,28 +4,38 @@ set -eo pipefail
 os=$1
 arch=$2
 
-# Reading the VERSION file
-readarray -t lines < VERSION
-
-ver_maj=$(echo "${lines[0]}" | cut -d'.' -f1)
-ver_min=$(echo "${lines[0]}" | cut -d'.' -f2)
-ver_rev=$(echo "${lines[0]}" | cut -d'.' -f3)
-
-# Extracting suffix from VERSION file
-ver_suffix=${lines[1]}
-
-# Suffix logic based on CI environment variable
-if [ -z "$CI" ]; then
-    ver_suffix="-dev"
+version_file="./VERSION"
+if [ ! -f "$version_file" ]; then
+  echo "VERSION file not found!"
+  exit 1
 fi
 
-# Forming the full version string
-version="${ver_maj}.${ver_min}.${ver_rev}${ver_suffix}"
+# Read VERSION file into an array
+declare -a version_info=()
+while IFS= read -r line; do
+  version_info+=("$line")
+done < "$version_file"
 
+# Extract major, minor, and revision numbers
+IFS='.' read -ra ver_parts <<< "${version_info[0]}"
+major="${ver_parts[0]}"
+minor="${ver_parts[1]}"
+revision="${ver_parts[2]}"
+
+# Set suffix
+suffix="${version_info[1]}"
+if [ -z "$CI" ]; then
+  suffix="-dev"
+fi
+
+# Set artifact extension
 ext="tar.gz"
 if [[ "$os" == "windows" ]]; then
     ext="zip"
 fi
+
+# Create a full version string
+version="${major}.${minor}.${revision}${suffix}"
 
 echo "BB_VERSION=$version" >> "$GITHUB_ENV"
 echo "BB_ARTIFACT_NAME=bladebit-v${version}-${os}-${arch}.${ext}" >> "$GITHUB_ENV"
