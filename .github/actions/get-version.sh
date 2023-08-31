@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# NOTE: This is meant to be run from the repo root dir
+#
 set -eo pipefail
 
 os=$1

@@ -66,6 +66,7 @@ inline const char* BBGetCompilerVersion()
     return c;
 }
 
+
 #define BLADEBIT_VERSION \
     ((uint64)BLADEBIT_VERSION_MAJ) << 32 \
     ((uint64)BLADEBIT_VERSION_MIN) << 16 \
@@ -74,3 +75,4 @@ inline const char* BBGetCompilerVersion()
 #define BLADEBIT_VERSION_STR \
     STR( BLADEBIT_VERSION_MAJ ) "." STR( BLADEBIT_VERSION_MIN ) "." STR( BLADEBIT_VERSION_REV ) \
     BLADEBIT_VERSION_SUFFIX
+
