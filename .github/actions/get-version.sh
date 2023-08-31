@@ -13,6 +13,7 @@ fi
 # Read VERSION file into an array
 declare -a version_info=()
 while IFS= read -r line; do
+  line=$(echo -n "$line" | tr -d '\r')
   version_info+=("$line")
 done < "$version_file"
 
