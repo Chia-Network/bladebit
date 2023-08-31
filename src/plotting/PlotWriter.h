@@ -8,8 +8,12 @@
 #include "threading/AutoResetSignal.h"
 #include "threading/Fence.h"
 #include <functional>
-#include <mutex>
-#include <queue>
+
+#define BB_LOCKFREE_BASED_QUEUE 1
+#if !BB_LOCKFREE_BASED_QUEUE
+    #include <mutex>
+    #include <queue>
+#endif
 
 /**
  * Handles writing the final plot data to disk asynchronously.
@@ -161,8 +165,12 @@ private:
         int32 compressionLevel );
 
     Command& GetCommand( CommandType type );
-    void SubmitCommands();
-    void SubmitCommand( const Command cmd );
+
+    #if BB_LOCKFREE_BASED_QUEUE
+        void SubmitCommands();
+    #else
+        void SubmitCommand( const Command cmd );
+    #endif
     
     void SeekToLocation( size_t location );
 
@@ -286,10 +294,12 @@ private:
     size_t                 _tableStart          = 0;    // Current table start location
     uint64                 _tablePointers[10]   = {};
     uint64                 _tableSizes   [10]   = {};
-    // SPCQueue<Command, 512> _queue;
 
-    std::queue<Command>     _queue;
-    std::mutex              _queueLock;
-    // std::mutex              _pushLock;
+    #if BB_LOCKFREE_BASED_QUEUE
+        SPCQueue<Command,4096> _queue;
+    #else
+        std::queue<Command>     _queue;
+        std::mutex              _queueLock;
+    #endif
 };
 

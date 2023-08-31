@@ -10,7 +10,6 @@ PlotWriter::PlotWriter() : PlotWriter( true ) {}
 PlotWriter::PlotWriter( bool useDirectIO )
     : _writerThread( new Thread( 4 MiB ) )
     , _directIO    ( useDirectIO )
-    , _queue()
 {
     _readyToPlotSignal.Signal();    // Start ready to plot
 
@@ -276,16 +275,18 @@ void PlotWriter::EndPlot( const bool rename )
 
     ASSERT( _stream.IsOpen() );
 
-    // auto& cmd = GetCommand( CommandType::EndPlot );
-    // cmd.endPlot.fence    = &_completedFence;
-    // cmd.endPlot.rename   = rename;
-    // SubmitCommands();
-
-    SubmitCommand({ .type = CommandType::EndPlot,
-        .endPlot{ .fence    = &_completedFence,
-                  .rename   = rename
-        }
-    });
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::EndPlot );
+        cmd.endPlot.fence    = &_completedFence;
+        cmd.endPlot.rename   = rename;
+        SubmitCommands();
+    #else
+        SubmitCommand({ .type = CommandType::EndPlot,
+            .endPlot{ .fence    = &_completedFence,
+                      .rename   = rename
+            }
+        });
+    #endif
 }
 
 
@@ -337,14 +338,16 @@ void PlotWriter::BeginTable( const PlotTable table )
 {
     if( _dummyMode ) return;
 
-    SubmitCommand({
-        .type = CommandType::BeginTable,
-        .beginTable{ .table = table }
-    });
-    // auto& cmd = GetCommand( CommandType::BeginTable );
-    // auto cmd = GetCommand( CommandType::BeginTable );
-    // cmd.beginTable.table = table;
-    // SubmitCommands();
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::BeginTable );
+        cmd.beginTable.table = table;
+        SubmitCommands();
+    #else
+        SubmitCommand({
+            .type = CommandType::BeginTable,
+            .beginTable{ .table = table }
+        });
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -352,18 +355,20 @@ void PlotWriter::ReserveTableSize( const PlotTable table, const size_t size )
 {
     if( _dummyMode ) return;
 
-    // auto& cmd = GetCommand( CommandType::ReserveTable );
-    // cmd.reserveTable.table = table;
-    // cmd.reserveTable.size  = size;
-    // SubmitCommands();
-
-     SubmitCommand({
-        .type = CommandType::ReserveTable,
-        .reserveTable { 
-            .table = table,
-            .size  = size 
-        }
-    });
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::ReserveTable );
+        cmd.reserveTable.table = table;
+        cmd.reserveTable.size  = size;
+        SubmitCommands();
+    #else
+         SubmitCommand({
+            .type = CommandType::ReserveTable,
+            .reserveTable { 
+                .table = table,
+                .size  = size 
+            }
+        });
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -371,9 +376,12 @@ void PlotWriter::EndTable()
 {
     if( _dummyMode ) return;
 
-    // auto& cmd = GetCommand( CommandType::EndTable );
-    // SubmitCommands();
-    SubmitCommand({ .type = CommandType::EndTable });
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::EndTable );
+        SubmitCommands();
+    #else
+        SubmitCommand({ .type = CommandType::EndTable });
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -381,16 +389,18 @@ void PlotWriter::WriteTableData( const void* data, const size_t size )
 {
     if( _dummyMode ) return;
 
-    // auto& cmd = GetCommand( CommandType::WriteTable );
-    // cmd.writeTable.buffer = (byte*)data;
-    // cmd.writeTable.size   = size;
-    // SubmitCommands();
-
-    SubmitCommand({ .type = CommandType::WriteTable,
-        .writeTable{ .buffer = (byte*)data,
-                     .size   = size,
-        }
-    });
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::WriteTable );
+        cmd.writeTable.buffer = (byte*)data;
+        cmd.writeTable.size   = size;
+        SubmitCommands();
+    #else
+        SubmitCommand({ .type = CommandType::WriteTable,
+            .writeTable{ .buffer = (byte*)data,
+                         .size   = size,
+            }
+        });
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -398,17 +408,19 @@ void PlotWriter::WriteReservedTable( const PlotTable table, const void* data )
 {
     if( _dummyMode ) return;
 
-    // auto& cmd = GetCommand( CommandType::WriteReservedTable );
-    // cmd.writeReservedTable.table  = table;
-    // cmd.writeReservedTable.buffer = (byte*)data;
-    // SubmitCommands();
-
-    SubmitCommand({ .type = CommandType::WriteReservedTable,
-        .writeReservedTable{ 
-            .table  = table,
-            .buffer = (byte*)data
-        }
-    });
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::WriteReservedTable );
+        cmd.writeReservedTable.table  = table;
+        cmd.writeReservedTable.buffer = (byte*)data;
+        SubmitCommands();
+    #else
+        SubmitCommand({ .type = CommandType::WriteReservedTable,
+            .writeReservedTable{ 
+                .table  = table,
+                .buffer = (byte*)data
+            }
+        });
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -420,16 +432,18 @@ void PlotWriter::SignalFence( Fence& fence )
         return;
     }
 
-    // auto& cmd = GetCommand( CommandType::SignalFence );
-    // cmd.signalFence.fence    = &fence;
-    // cmd.signalFence.sequence = -1;
-    // SubmitCommands();
-
-    SubmitCommand({ .type = CommandType::SignalFence,
-        .signalFence{ .fence    = &fence,
-                      .sequence = -1
-        }
-    });
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::SignalFence );
+        cmd.signalFence.fence    = &fence;
+        cmd.signalFence.sequence = -1;
+        SubmitCommands();
+    #else
+        SubmitCommand({ .type = CommandType::SignalFence,
+            .signalFence{ .fence    = &fence,
+                        .sequence = -1
+            }
+        });
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -441,16 +455,18 @@ void PlotWriter::SignalFence( Fence& fence, uint32 sequence )
         return;
     }
 
-    // auto& cmd = GetCommand( CommandType::SignalFence );
-    // cmd.signalFence.fence    = &fence;
-    // cmd.signalFence.sequence = (int64)sequence;
-    // SubmitCommands();
-    
-    SubmitCommand({ .type = CommandType::SignalFence,
-        .signalFence{ .fence    = &fence,
-                      .sequence = (int64)sequence
-        }
-    });
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::SignalFence );
+        cmd.signalFence.fence    = &fence;
+        cmd.signalFence.sequence = (int64)sequence;
+        SubmitCommands();
+    #else
+        SubmitCommand({ .type = CommandType::SignalFence,
+            .signalFence{ .fence    = &fence,
+                        .sequence = (int64)sequence
+            }
+        });
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -462,69 +478,87 @@ void PlotWriter::CallBack( std::function<void()> func )
         return;
     }
 
-    // auto& cmd = GetCommand( CommandType::CallBack );
-    // cmd.callback.func = new std::function<void()>( std::move( func ) );
-    // SubmitCommands();
-
-    SubmitCommand({ .type =  CommandType::CallBack,
-        .callback{ .func = new std::function<void()>( std::move( func ) ) }
-    });
+    #if BB_LOCKFREE_BASED_QUEUE
+        auto& cmd = GetCommand( CommandType::CallBack );
+        cmd.callback.func = new std::function<void()>( std::move( func ) );
+        SubmitCommands();
+    #else
+        SubmitCommand({ .type =  CommandType::CallBack,
+            .callback{ .func = new std::function<void()>( std::move( func ) ) }
+        });
+    #endif
 }
 
 //-----------------------------------------------------------
 void PlotWriter::ExitWriterThread()
 {
-    // Signal writer thread to exit after it finishes its commands
-    // auto& cmd = GetCommand( CommandType::Exit );
-    // cmd.signalFence.fence = &_completedFence;
-    // SubmitCommands();
-
-    SubmitCommand({ .type = CommandType::Exit,
-        .signalFence{ .fence = &_completedFence }
-    });
-
+    #if BB_LOCKFREE_BASED_QUEUE
+        // Signal writer thread to exit after it finishes its commands
+        auto& cmd = GetCommand( CommandType::Exit );
+        cmd.signalFence.fence = &_completedFence;
+        SubmitCommands();
+    #else
+        SubmitCommand({ .type = CommandType::Exit,
+            .signalFence{ .fence = &_completedFence }
+        });
+    #endif
     // Wait for writer thread to exit
     _completedFence.Wait();
     ASSERT( _writerThread->HasExited() );
 }
 
+#if BB_LOCKFREE_BASED_QUEUE
 //-----------------------------------------------------------
 PlotWriter::Command& PlotWriter::GetCommand( CommandType type )
 {
-    Panic( "Don't use me!" );
+    if( _owner != nullptr )
+    {
+        auto* cmd = _owner->GetCommandObject( DiskBufferQueue::Command::CommandType::PlotWriterCommand );
+        ASSERT( cmd );
 
-    // if( _owner != nullptr )
-    // {
-    //     auto* cmd = _owner->GetCommandObject( DiskBufferQueue::Command::CommandType::PlotWriterCommand );
-    //     ASSERT( cmd );
+        ZeroMem( &cmd->plotWriterCmd );
+        cmd->plotWriterCmd.writer   = this;
+        cmd->plotWriterCmd.cmd.type = type;
+        return cmd->plotWriterCmd.cmd;
+    }
+    else
+    {
+        Command* cmd = nullptr;
+        while( !_queue.Write( cmd ) )
+        {
+            Log::Line( "[PlotWriter] Command buffer full. Waiting for commands." );
+            auto waitTimer = TimerBegin();
 
-    //     ZeroMem( &cmd->plotWriterCmd );
-    //     cmd->plotWriterCmd.writer   = this;
-    //     cmd->plotWriterCmd.cmd.type = type;
-    //     return cmd->plotWriterCmd.cmd;
-    // }
-    // else
-    // {
-    //     Command* cmd = nullptr;
-    //     while( !_queue.Write( cmd ) )
-    //     {
-    //         Log::Line( "[PlotWriter] Command buffer full. Waiting for commands." );
-    //         auto waitTimer = TimerBegin();
-
-    //         // Block and wait until we have commands free in the buffer
-    //         _cmdConsumedSignal.Wait();
+            // Block and wait until we have commands free in the buffer
+            _cmdConsumedSignal.Wait();
             
-    //         Log::Line( "[PlotWriter] Waited %.6lf seconds for a Command to be available.", TimerEnd( waitTimer ) );
-    //     }
+            Log::Line( "[PlotWriter] Waited %.6lf seconds for a Command to be available.", TimerEnd( waitTimer ) );
+        }
         
-    //     ASSERT( cmd );
-    //     ZeroMem( cmd );
-    //     cmd->type = type;
+        ASSERT( cmd );
+        ZeroMem( cmd );
+        cmd->type = type;
 
-    //     return *cmd;
-    // }
+        return *cmd;
+    }
 }
 
+//-----------------------------------------------------------
+void PlotWriter::SubmitCommands()
+{
+    // Panic( "" );
+    if( _owner != nullptr )
+    {
+        _owner->CommitCommands();
+    }
+    else
+    {
+        _queue.Commit();
+        _cmdReadySignal.Signal();
+    }
+}
+
+#else
 //-----------------------------------------------------------
 void PlotWriter::SubmitCommand( const Command cmd )
 {
@@ -532,20 +566,8 @@ void PlotWriter::SubmitCommand( const Command cmd )
     _queue.push( cmd );
     _cmdReadySignal.Signal();
 }
+#endif // BB_LOCKFREE_BASED_QUEUE
 
-//-----------------------------------------------------------
-void PlotWriter::SubmitCommands()
-{Panic( "" );
-    // if( _owner != nullptr )
-    // {
-    //     _owner->CommitCommands();
-    // }
-    // else
-    // {
-    //     _queue.Commit();
-    //     _cmdReadySignal.Signal();
-    // }
-}
 
 
 ///
@@ -569,60 +591,62 @@ void PlotWriter::WriterThreadMain()
         _cmdReadySignal.Wait();
 
         // Load commands from the queue
-        // int32 cmdCount;
-        // while( ( ( cmdCount = _queue.Dequeue( commands, MAX_COMMANDS ) ) ) )
-        // {
-        //     // Notify we consumed commands
-        //     _cmdConsumedSignal.Signal();
-
-        //     for( int32 i = 0; i < cmdCount; i++ )
-        //     {
-        //         if( commands[i].type == CommandType::Exit )
-        //         {
-        //             commands[i].signalFence.fence->Signal();
-        //             return;
-        //         }
-
-        //         ExecuteCommand( commands[i] );
-        //     }
-        // }
-
-        // Consume commands from the queue and execute them
-        // until there are none more found in the queue
-        size_t cmdCount = 0;
-        for( ;; )
-        {
-            // Consume commands from queue
+        #if BB_LOCKFREE_BASED_QUEUE
+            int32 cmdCount = 0;
+            while( ( cmdCount = _queue.Dequeue( commands, MAX_COMMANDS ) ) > 0 )
             {
-                std::unique_lock lock( _queueLock );
-                cmdCount = std::min<size_t>( _queue.size(), MAX_COMMANDS );
-                
-                for( size_t i = 0; i < cmdCount; i++ )
+                // Notify we consumed commands
+                _cmdConsumedSignal.Signal();
+
+                for( int32 i = 0; i < cmdCount; i++ )
                 {
-                    commands[i] = _queue.front();
-                    _queue.pop();
+                    if( commands[i].type == CommandType::Exit )
+                    {
+                        commands[i].signalFence.fence->Signal();
+                        return;
+                    }
+
+                    ExecuteCommand( commands[i] );
                 }
             }
-
-            // Notify we consumed commands
-            _cmdConsumedSignal.Signal();
-
-            if( cmdCount < 1 )
-                break;
-
-            // Execute commands
-            for( int32 i = 0; i < cmdCount; i++ )
+        #else
+            // Consume commands from the queue and execute them
+            // until there are none more found in the queue
+            size_t cmdCount = 0;
+            for( ;; )
             {
-                if( commands[i].type == CommandType::Exit )
+                // Consume commands from queue
                 {
-                    commands[i].signalFence.fence->Signal();
-                    return;
+                    std::unique_lock lock( _queueLock );
+                    cmdCount = std::min<size_t>( _queue.size(), MAX_COMMANDS );
+                    
+                    for( size_t i = 0; i < cmdCount; i++ )
+                    {
+                        commands[i] = _queue.front();
+                        _queue.pop();
+                    }
                 }
 
-                ExecuteCommand( commands[i] );
+                // Notify we consumed commands
+                _cmdConsumedSignal.Signal();
+
+                if( cmdCount < 1 )
+                    break;
+
+                // Execute commands
+                for( int32 i = 0; i < cmdCount; i++ )
+                {
+                    if( commands[i].type == CommandType::Exit )
+                    {
+                        commands[i].signalFence.fence->Signal();
+                        return;
+                    }
+
+                    ExecuteCommand( commands[i] );
+                }
             }
-        }
-    }
+        #endif
+    } // End for( ;; )
 }
 
 //-----------------------------------------------------------
