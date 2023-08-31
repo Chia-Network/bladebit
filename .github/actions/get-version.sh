@@ -26,6 +26,8 @@ revision="${ver_parts[2]}"
 suffix="${version_info[1]}"
 if [ -z "$CI" ]; then
   suffix="-dev"
+elif [[ -n "$suffix" ]] && [[ "${suffix:0:1}" != "-" ]]; then
+  suffix="-${suffix}"
 fi
 
 # Set artifact extension
@@ -37,6 +39,12 @@ fi
 # Create a full version string
 version="${major}.${minor}.${revision}${suffix}"
 
-echo "BB_VERSION=$version" >> "$GITHUB_ENV"
-echo "BB_ARTIFACT_NAME=bladebit-v${version}-${os}-${arch}.${ext}" >> "$GITHUB_ENV"
-echo "BB_ARTIFACT_NAME_CUDA=bladebit-cuda-v${version}-${os}-${arch}.${ext}" >> "$GITHUB_ENV"
+if [[ -n $CI ]]; then
+  echo "BB_VERSION=$version" >> "$GITHUB_ENV"
+  echo "BB_ARTIFACT_NAME=bladebit-v${version}-${os}-${arch}.${ext}" >> "$GITHUB_ENV"
+  echo "BB_ARTIFACT_NAME_CUDA=bladebit-cuda-v${version}-${os}-${arch}.${ext}" >> "$GITHUB_ENV"
+else
+  echo "BB_VERSION=$version"
+  echo "BB_ARTIFACT_NAME=bladebit-v${version}-${os}-${arch}.${ext}"
+  echo "BB_ARTIFACT_NAME_CUDA=bladebit-cuda-v${version}-${os}-${arch}.${ext}"
+fi
