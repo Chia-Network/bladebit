@@ -139,12 +139,17 @@
             "args":
             // "-w -z 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot ~/plot/tmp",
 
-            // "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot /home/harold/plot",
+            // "-w -z 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 --benchmark cudaplot /home/harold/plot",
+            // "-w -z 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 --benchmark cudaplot --disk-128 -t1 /home/harold/plotdisk /home/harold/plot",
+            // "-w -z 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i 7427409e2bc8a501cdf069679dbb3897d9bb9b88b33d5c40c13648e918fee097 cudaplot /home/harold/plot",
+            // "-w -z 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i 1929f0655c87a13b216a34172e0c565e49f6d732bbe1a66137c63b21e40ff781 cudaplot /home/harold/plot",
+            
+            // "-w -z 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i 7427409e2bc8a501cdf069679dbb3897d9bb9b88b33d5c40c13648e918fee097 cudaplot --disk-128 -t1 /home/harold/plotdisk /home/harold/plot",
+            // "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot --disk-16 -t1 /home/harold/plotdisk /home/harold/plot",
+            "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i 7427409e2bc8a501cdf069679dbb3897d9bb9b88b33d5c40c13648e918fee097 cudaplot --disk-16 -t1 /home/harold/plotdisk /home/harold/plot",
+
             // "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot --disk-128 -t1 /home/harold/plotdisk --no-direct-buffers /home/harold/plot",
-            // "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot --disk-128 -t1 /home/harold/plotdisk /home/harold/plot",
-            "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot --disk-64 -t1 /home/harold/plotdisk /home/harold/plot",
-            
-            
+
             "windows": {
                 "type": "cppvsdbg",
                 "program": "${workspaceFolder}/build/Debug/bladebit_cuda.exe",
