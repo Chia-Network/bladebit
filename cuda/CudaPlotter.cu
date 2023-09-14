@@ -313,8 +313,10 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     #if !(DBG_BBCU_KEEP_TEMP_FILES)
         if( cx.plotRequest.IsFinalPlot && cx.cfg.hybrid128Mode )
         {
+            if( cx.diskContext->yBuffer ) delete cx.diskContext->yBuffer;
             if( cx.diskContext->metaBuffer ) delete cx.diskContext->metaBuffer;
             if( cx.diskContext->unsortedL ) delete cx.diskContext->unsortedL;
+            if( cx.diskContext->unsortedR ) delete cx.diskContext->unsortedR;
 
             for( TableId t = TableId::Table1; t <= TableId::Table7; t++ )
             {
@@ -1309,7 +1311,7 @@ void AllocBuffers( CudaK32PlotContext& cx )
             allocateHostTablesPinned = false;
         #endif
 
-        Log::Line( "Table pairs allocated as pinned: %s", allocateHostTablesPinned ? "true" : "false" );
+        // Log::Line( "Table pairs allocated as pinned: %s", allocateHostTablesPinned ? "true" : "false" );
         if( allocateHostTablesPinned )
             CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
         else

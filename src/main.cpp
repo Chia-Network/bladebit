@@ -177,9 +177,11 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
             // The next parameter is potentially the compression level
              if( IsNumber( cli.Peek() ) )
                 cfg.compressionLevel = (uint32)cli.ReadU64();
-            
+
             continue;
         }
+        else if( cli.ReadSwitch( cfg.disableOutputDirectIO, "--no-direct-io" ) )
+            continue;
         else if( cli.ReadStr( cfg.plotMemoStr, "--memo" ) )
             continue;
         else if( cli.ReadSwitch( cfg.showMemo, "--show-memo" ) )
@@ -542,7 +544,7 @@ R"(
 
  -t, --threads        : Maximum number of threads to use.
                         By default, this is set to the maximum number of logical cpus present.
- 
+
  -n, --count          : Number of plots to create. Default = 1.
 
  -f, --farmer-key     : Farmer public key, specified in hexadecimal format.
@@ -561,7 +563,11 @@ R"(
                         Current compression levels supported are from 0 to 7 (inclusive).
                         Where 0 means no compression, and 7 is the highest compression.
                         Higher compression means smaller plots, but more CPU usage during harvesting.
- 
+
+ --no-direct-io       : Disable direct I/O when writing plot files.
+                        Enable this if writing to a storage destination 
+                        that does not support direct I/O.
+
  --benchmark          : Enables benchmark mode. This is meant to test plotting without
                         actually writing a final plot to disk.
 
@@ -583,10 +589,10 @@ R"(
                         This is useful when running multiple simultaneous
                         instances of Bladebit as you can manually
                         assign thread affinity yourself when launching Bladebit.
- 
+
  --memory             : Display system memory available, in bytes, and the 
                         required memory to run Bladebit, in bytes.
- 
+
  --memory-json        : Same as --memory, but formats the output as json.
 
  --version            : Display current version.
