@@ -8,10 +8,11 @@
 
 struct PlotRequest
 {
-    const byte* plotId;       // Id of the plot we want to create       
-    const char* outDir;       // Output plot directory
-    const char* plotFileName; // .plot.tmp file name
-    const byte* memo;         // Plot memo
+    const byte* plotId;         // Id of the plot we want to create       
+    const char* outDir;         // Output plot directory
+    const char* plotFileName;   // .plot.tmp file name
+    const char* plotOutPath;    // Full output path for the final .plot.tmp file
+    const byte* memo;           // Plot memo
     uint16      memoSize;
     bool        isFirstPlot;
     bool        IsFinalPlot;

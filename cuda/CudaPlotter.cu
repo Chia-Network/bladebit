@@ -10,7 +10,7 @@
 #include "plotting/TableWriter.h"
 #include "plotting/PlotTools.h"
 #include "util/VirtualAllocator.h"
-
+#include "harvesting/GreenReaper.h"
 
 // TEST/DEBUG
 #if _DEBUG
@@ -59,17 +59,34 @@ GPU-based (CUDA) plotter
 
  --disk-128           : Enable hybrid disk plotting for 128G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
+
  --disk-16            : Enable hybrid disk plotting for 16G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
+
  -t1, --temp1         : Temporary directory 1. Used for longer-lived, sequential writes.
+
  -t2, --temp2         : Temporary directory 2. Used for temporary, shorted-lived read and writes.
                          NOTE: If only one of -t1 or -t2 is specified, both will be
                                set to the same directory.
+
+ --check <n>          : Perform a plot check for <n> proofs on the newly created plot.
+
+ --check-threshold <f>: Proof threshold rate below which the plots that don't pass
+                         the check will be deleted.
+                         That is, the number of proofs fetched / proof check count
+                         must be above or equal to this threshold to pass.
+                         (default=0.6).
 )";
 
 ///
 /// CLI
 ///
+//-----------------------------------------------------------
+void CudaK32PlotterPrintHelp()
+{
+    Log::Line( USAGE );
+}
+
 //-----------------------------------------------------------
 void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
 {
@@ -103,11 +120,16 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
             continue;
         if( cli.ReadUnswitch( cfg.temp2DirectIO, "--no-t2-direct" ) )
             continue;
+
+        if( cli.ReadU64( cfg.plotCheckCount, "--check" ) )
+            continue;
+        if( cli.ReadF64( cfg.plotCheckThreshhold, "--check-threshold" ) )
+            continue;
         // if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-buffers" ) )
         //     continue;
         if( cli.ArgMatch( "--help", "-h" ) )
         {
-            Log::Line( USAGE );
+            CudaK32PlotterPrintHelp();
             exit( 0 );
         }
         else
@@ -144,8 +166,17 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     cx.firstStoredTable = TableId::Table2 + (TableId)cx.gCfg->numDroppedTables;
 
     Log::Line( "[Bladebit CUDA Plotter]" );
-    Log::Line( " Host RAM        : %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
-    Log::Line( " Direct transfers: %s", cfg.disableDirectDownloads ? "false" : "true" );
+    Log::Line( " Host RAM            : %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
+    
+    if( cx.cfg.plotCheckCount == 0 )
+        Log::Line( " Plot checks         : disabled" );
+    else
+    {
+        Log::Line( " Plot checks         : enabled ( %llu )", (llu)cx.cfg.plotCheckCount );
+        Log::Line( " Plot check threshold: %.3lf", cx.cfg.plotCheckThreshhold );
+    }
+
+    // Log::Line( " Direct transfers: %s", cfg.disableDirectDownloads ? "false" : "true" );
     Log::NewLine();
 
     CudaInit( cx );
@@ -212,6 +243,23 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     Log::Line( "Allocating buffers (this may take a few seconds)..." );
     AllocBuffers( cx );
     InitFSEBitMask( cx );
+    Log::Line( "Done." );
+
+
+    // Allocate GR Context if --check was specified
+    if( cfg.plotCheckCount > 0 )
+    {
+        GreenReaperConfig grCfg{
+            .apiVersion     = GR_API_VERSION,
+            .threadCount    = 1,
+            .gpuRequest     = GRGpuRequestKind_ExactDevice,
+            .gpuDeviceIndex = cfg.deviceIndex
+        };
+
+        const auto grResult = grCreateContext( &cx.grCheckContext, &grCfg, sizeof( grCfg ) );
+        FatalIf( grResult != GRResult_OK, "Failed to create decompression context for plot check with error '%s' (%d).",
+                 grResultToString( grResult ), (int)grResult );
+    }
 }
 
 //-----------------------------------------------------------
@@ -304,19 +352,23 @@ void CudaK32Plotter::Run( const PlotRequest& req )
 
         cx.plotWriter->DumpTables();
     }
-    Log::Line( "" );
-
+    Log::NewLine();
+    
     delete cx.plotWriter;
     cx.plotWriter = nullptr;
+
+    // Perform checks if neccesarry
+    CheckPlot( req, cx );
+
 
     // Delete any temporary files
     #if !(DBG_BBCU_KEEP_TEMP_FILES)
         if( cx.plotRequest.IsFinalPlot && cx.cfg.hybrid128Mode )
         {
-            if( cx.diskContext->yBuffer ) delete cx.diskContext->yBuffer;
+            if( cx.diskContext->yBuffer )    delete cx.diskContext->yBuffer;
             if( cx.diskContext->metaBuffer ) delete cx.diskContext->metaBuffer;
-            if( cx.diskContext->unsortedL ) delete cx.diskContext->unsortedL;
-            if( cx.diskContext->unsortedR ) delete cx.diskContext->unsortedR;
+            if( cx.diskContext->unsortedL )  delete cx.diskContext->unsortedL;
+            if( cx.diskContext->unsortedR )  delete cx.diskContext->unsortedR;
 
             for( TableId t = TableId::Table1; t <= TableId::Table7; t++ )
             {
@@ -1201,6 +1253,68 @@ void UploadBucketForTable( CudaK32PlotContext& cx, const uint64 bucket )
     }
 }
 
+
+//-----------------------------------------------------------
+void CheckPlot( const PlotRequest& req, CudaK32PlotContext& cx )
+{
+    const auto& cfg = cx.cfg;
+    if( cfg.plotCheckCount <= 0 )
+        return;
+
+    std::string plotPath = req.plotOutPath;
+    plotPath.resize( plotPath.length() - 4 );   // Remove '.tmp'
+
+    PlotCheckConfig checksCfg{
+        .proofCount = cfg.plotCheckCount,
+        .plotPath   = plotPath.c_str(),
+        .gpuIndex   = (int)cfg.deviceIndex,
+        .silent     = false,
+        .grContext  = cx.grCheckContext
+    };
+
+    // Log::Line( "Running plot check with %llu proofs...", (llu)cfg.plotCheckCount );
+    PlotCheckResult checksResult{};
+
+    if( !RunPlotsCheck( checksCfg, 1, false, &checksResult ) )
+    {
+        Log::Line( "An error occured checking the plot: %s.", checksResult.error.c_str() );
+        Log::Line( "Any actions against plot '%s' will be ignored.", plotPath.c_str() );
+    }
+    else
+    {
+        const double passRate = checksResult.proofCount / (double)checksResult.checkCount;
+
+        // Print stats
+        std::string seedHex = BytesToHexStdString( checksResult.seedUsed, sizeof( checksResult.seedUsed ) );
+        Log::Line( "Seed used: 0x%s", seedHex.c_str() );
+        Log::Line( "Proofs requested/fetched: %llu / %llu ( %.3lf%% )", checksResult.proofCount, checksResult.checkCount, passRate * 100.0 );
+
+        if( checksResult.proofFetchFailCount > 0 )
+            Log::Line( "Proof fetches failed    : %llu ( %.3lf%% )", checksResult.proofFetchFailCount, checksResult.proofFetchFailCount / (double)checksResult.checkCount * 100.0 );
+        if( checksResult.proofValidationFailCount > 0 )
+            Log::Line( "Proof validation failed : %llu ( %.3lf%% )", checksResult.proofValidationFailCount, checksResult.proofValidationFailCount / (double)checksResult.checkCount * 100.0 );
+        Log::NewLine();
+
+        // Delete the plot if it's below the set threshold
+        if( checksResult.proofFetchFailCount > 0 || passRate < cfg.plotCheckThreshhold )
+        {
+            if( checksResult.proofFetchFailCount > 0 )
+             Log::Line( "WARNING: Deleting plot '%s' as it failed to fetch some proofs. This might indicate corrupt plot file.",
+                    plotPath.c_str() );
+            else
+                Log::Line( "WARNING: Deleting plot '%s' as it is below the proof threshold: %.3lf / %.3lf.",
+                    plotPath.c_str(), passRate, cfg.plotCheckThreshhold );
+
+            remove( plotPath.c_str() );
+            Log::NewLine();
+        }
+        else
+        {
+            Log::Line( "Plot is OK. It passed the proof threshold of %.3lf%%", cfg.plotCheckThreshhold * 100.0 );
+            Log::NewLine();
+        }
+    }
+}
 
 ///
 /// Allocations

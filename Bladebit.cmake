@@ -260,6 +260,7 @@ set(src_bladebit
     src/tools/PlotReader.cpp
     src/tools/PlotReader.h
     src/tools/PlotValidator.cpp
+    src/tools/PlotChecker.cpp
 
     src/util/Array.h
     src/util/Array.inl

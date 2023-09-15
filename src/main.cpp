@@ -135,6 +135,7 @@ int main( int argc, const char* argv[] )
         req.memoSize     = plotMemoSize;
         req.outDir       = plotOutFolder;
         req.plotFileName = plotFileName;
+        req.plotOutPath  = plotOutPath;
         req.isFirstPlot  = i == 0;
         req.IsFinalPlot  = i == plotCount-1;
 
@@ -327,8 +328,10 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
                     DiskPlotter::PrintUsage();
                 else if( cli.ArgMatch( "ramplot" ) )
                     Log::Line( "bladebit -f ... -p/c ... ramplot <out_dirs>" );
+            #if BB_CUDA_ENABLED
                 else if( cli.ArgMatch( "cudaplot" ) )
-                    Log::Line( "bladebit_cuda -f ... -p/c ... cudaplot [-d=device] <out_dirs>" );
+                    CudaK32PlotterPrintHelp();
+            #endif
                 else if( cli.ArgMatch( "iotest" ) )
                     IOTestPrintUsage();
                 else if( cli.ArgMatch( "memtest" ) )
@@ -393,7 +396,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     {
         // #TODO: Remove this when added
         if( cfg.compressionLevel > 7 )
-            Log::Line( "[WARNING] Compression levels greater than 7 are only for testing purposes and are not configured to the final plot size." );
+            Log::Line( "WARNING: Compression levels greater than 7 are only for testing purposes and are not configured to the final plot size." );
 
         cfg.compressedEntryBits = 17 - cfg.compressionLevel;
         cfg.ctable              = CreateCompressionCTable( cfg.compressionLevel, &cfg.cTableSize );

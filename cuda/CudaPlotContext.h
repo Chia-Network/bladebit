@@ -327,6 +327,9 @@ struct CudaK32PlotContext
     CudaK32ParkContext* parkContext    = nullptr;
     bool                useParkContext = false;
 
+    // Used when '--check' is enabled
+    struct GreenReaperContext* grCheckContext = nullptr;
+
     struct
     {
         Duration uploadTime   = Duration::zero();   // Host-to-device wait time

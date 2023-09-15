@@ -82,7 +82,7 @@ class PlotWriter
 public:
 
     PlotWriter();
-    PlotWriter( bool useDirectIO );
+    PlotWriter( bool useDirectIO, struct PlotCheckConfig* plotCheckCfg= nullptr );
     PlotWriter( DiskBufferQueue& ownerQueue );
     virtual ~PlotWriter();
     
@@ -160,6 +160,8 @@ private:
         const byte* plotMemo, const uint16 plotMemoSize,
         int32 compressionLevel );
 
+    bool CheckPlot();
+
     Command& GetCommand( CommandType type );
     void SubmitCommands();
     void SubmitCommand( const Command cmd );
@@ -174,6 +176,7 @@ private:
     void FlushRetainedBytes();
 
     void WriteData( const byte* data, size_t size );
+
 
 private:
     void CmdBeginTable( const Command& cmd );
@@ -291,5 +294,7 @@ private:
     std::queue<Command>     _queue;
     std::mutex              _queueLock;
     // std::mutex              _pushLock;
+
+    struct PlotCheckConfig* _plotCheckCfg = nullptr;
 };
 
