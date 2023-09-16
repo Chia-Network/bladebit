@@ -7,6 +7,7 @@
 class PlotCheckerImpl : public PlotChecker
 {
     PlotCheckerConfig _cfg;
+    bool              _lastPlotDeleted = false;
 public:
 
     //-----------------------------------------------------------
@@ -20,6 +21,8 @@ public:
     //-----------------------------------------------------------
     void CheckPlot( const char* plotPath, PlotCheckResult* outResult ) override
     {
+        _lastPlotDeleted = false;
+
         PlotCheckResult result{};
         PerformPlotCheck( plotPath, result );
 
@@ -70,7 +73,8 @@ public:
                 }
 
                 remove( plotPath );
-                result.deleted = true;
+                result.deleted   = true;
+                _lastPlotDeleted = true;
             }
             else
             {
@@ -194,6 +198,12 @@ public:
         result.error.clear();
         static_assert( sizeof(PlotCheckResult::seedUsed) == sizeof(seed) );
         memcpy( result.seedUsed, seed, sizeof( result.seedUsed ) );
+    }
+
+    //-----------------------------------------------------------
+    bool LastPlotDeleted() override
+    {
+        return _lastPlotDeleted;
     }
 };
 

@@ -44,4 +44,7 @@ public:
     // Add a plot ot the queue to be checked
     /// Returns true if the plot passed the threshold check
     virtual void CheckPlot( const char* plotPath, PlotCheckResult* outResult ) = 0;
+
+    // Returns true if the last plot checked was deleted
+    virtual bool LastPlotDeleted() = 0;
 };

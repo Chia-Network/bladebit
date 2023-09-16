@@ -370,6 +370,7 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     // #TODO: Move it elsewhere, using different buffers for parks
     //        so that we can continue writing to disk until we get to
     //        actually writing the next plot in table 7 finalization.
+    if( !cx.plotChecker || !cx.plotChecker->LastPlotDeleted() )
     {
         const auto pltoCompleteTimer = TimerBegin();
         cx.plotWriter->WaitForPlotToComplete();
@@ -377,8 +378,8 @@ void CudaK32Plotter::Run( const PlotRequest& req )
         Log::Line( "Completed writing plot in %.2lf seconds", plotIOTime );
 
         cx.plotWriter->DumpTables();
+        Log::NewLine();
     }
-    Log::NewLine();
     
     delete cx.plotWriter;
     cx.plotWriter = nullptr;
