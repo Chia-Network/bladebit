@@ -3,13 +3,12 @@
 #include "plotdisk/jobs/IOJob.h"
 #include "plotdisk/DiskBufferQueue.h"
 #include "harvesting/GreenReaper.h"
-#include "commands/CmdPlotCheckInternal.h"
 
 //-----------------------------------------------------------
 PlotWriter::PlotWriter() : PlotWriter( true ) {}
 
 //-----------------------------------------------------------
-PlotWriter::PlotWriter( bool useDirectIO, PlotCheckConfig* plotCheckCfg )
+PlotWriter::PlotWriter( bool useDirectIO )
     : _writerThread( new Thread( 4 MiB ) )
     , _directIO    ( useDirectIO )
     , _queue()
@@ -18,12 +17,6 @@ PlotWriter::PlotWriter( bool useDirectIO, PlotCheckConfig* plotCheckCfg )
 
     // #MAYBE: Start the thread at first plot?
     _writerThread->Run( WriterThreadEntry, this );
-
-    if( plotCheckCfg && plotCheckCfg->proofCount > 0 )
-    {
-        _plotCheckCfg = new PlotCheckConfig{};
-        *_plotCheckCfg = *plotCheckCfg;
-    }
 }
 
 //-----------------------------------------------------------
@@ -48,8 +41,12 @@ PlotWriter::~PlotWriter()
         free( _plotFinalPathName );
     if( _writeBuffer.Ptr() )
         bbvirtfree( _writeBuffer.Ptr() );
-    if( _plotCheckCfg )
-        delete _plotCheckCfg;
+}
+
+//-----------------------------------------------------------
+void PlotWriter::EnablePlotChecking( PlotChecker& checker )
+{
+    _plotChecker = &checker;
 }
 
 //-----------------------------------------------------------
@@ -300,63 +297,17 @@ void PlotWriter::EndPlot( const bool rename )
 //-----------------------------------------------------------
 bool PlotWriter::CheckPlot()
 {
-    if( _dummyMode ) return false;
+    if( _dummyMode || !_plotChecker ) return false;
 
     const char* plotPath = _plotPathBuffer.Ptr();
 
-    _plotCheckCfg->plotPath = plotPath;
-
-    // Log::Line( "Running plot check with %llu proofs...", (llu)cfg.plotCheckCount );
     PlotCheckResult checksResult{};
+    _plotChecker->CheckPlot( plotPath, &checksResult );
 
-    if( !RunPlotsCheck( *_plotCheckCfg, 1, false, &checksResult ) )
-    {
-        Log::Line( "An error occured checking the plot: %s.", checksResult.error.c_str() );
-        Log::Line( "Any actions against plot '%s' will be ignored.", plotPath );
-        return true;
-    }
-    else
-    {
-        const double passRate = checksResult.proofCount / (double)checksResult.checkCount;
-
-        // Print stats
-        std::string seedHex = BytesToHexStdString( checksResult.seedUsed, sizeof( checksResult.seedUsed ) );
-        Log::Line( "Seed used: 0x%s", seedHex.c_str() );
-        Log::Line( "Proofs requested/fetched: %llu / %llu ( %.3lf%% )", checksResult.proofCount, checksResult.checkCount, passRate * 100.0 );
-
-        if( checksResult.proofFetchFailCount > 0 )
-            Log::Line( "Proof fetches failed    : %llu ( %.3lf%% )", checksResult.proofFetchFailCount, checksResult.proofFetchFailCount / (double)checksResult.checkCount * 100.0 );
-        if( checksResult.proofValidationFailCount > 0 )
-            Log::Line( "Proof validation failed : %llu ( %.3lf%% )", checksResult.proofValidationFailCount, checksResult.proofValidationFailCount / (double)checksResult.checkCount * 100.0 );
-        Log::NewLine();
-
-        // Delete the plot if it's below the set threshold
-        if( checksResult.proofFetchFailCount > 0 || passRate < cfg.plotCheckThreshhold )
-        {
-            if( checksResult.proofFetchFailCount > 0 )
-            {
-                Log::Line( "WARNING: Deleting plot '%s' as it failed to fetch some proofs. This might indicate corrupt plot file.", plotPath );
-            }
-            else
-            {
-                Log::Line( "WARNING: Deleting plot '%s' as it is below the proof threshold: %.3lf / %.3lf.",
-                    plotPath, passRate, cfg.plotCheckThreshhold );
-            }
-
-            // Delete the plot
-            remove( plotPath );
-            Log::NewLine();
-        }
-        else
-        {
-            Log::Line( "Plot is OK. It passed the proof threshold of %.3lf%%", cfg.plotCheckThreshhold * 100.0 );
-            Log::NewLine();
-
-            return true;
-        }
-
+    if( !checksResult.error.empty() )
         return false;
-    }
+
+    return !checksResult.deleted;
 }
 
 
@@ -1021,7 +972,7 @@ void PlotWriter::CmdEndPlot( const Command& cmd )
     _stream.Close();
 
     bool renamePlot = cmd.endPlot.rename;
-    if( _plotCheckCfg )
+    if( _plotChecker )
     {
         renamePlot = CheckPlot();
     }

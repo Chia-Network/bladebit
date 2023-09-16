@@ -3,6 +3,7 @@
 #include "util/SPCQueue.h"
 #include "plotting/PlotTypes.h"
 #include "plotting/PlotHeader.h"
+#include "tools/PlotChecker.h"
 #include "io/FileStream.h"
 #include "threading/Thread.h"
 #include "threading/AutoResetSignal.h"
@@ -82,10 +83,11 @@ class PlotWriter
 public:
 
     PlotWriter();
-    PlotWriter( bool useDirectIO, struct PlotCheckConfig* plotCheckCfg= nullptr );
+    PlotWriter( bool useDirectIO );
     PlotWriter( DiskBufferQueue& ownerQueue );
     virtual ~PlotWriter();
     
+    void EnablePlotChecking( PlotChecker& checker );
 
     // Begins writing a new plot. Any previous plot must have finished before calling this
     bool BeginPlot( PlotVersion version, 
@@ -295,6 +297,6 @@ private:
     std::mutex              _queueLock;
     // std::mutex              _pushLock;
 
-    struct PlotCheckConfig* _plotCheckCfg = nullptr;
+    PlotChecker* _plotChecker              = nullptr;    // User responsible for ownership of checker. Must live until this PlotWriter's lifetime neds.
 };
 

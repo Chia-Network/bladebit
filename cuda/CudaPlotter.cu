@@ -11,6 +11,8 @@
 #include "plotting/PlotTools.h"
 #include "util/VirtualAllocator.h"
 #include "harvesting/GreenReaper.h"
+#include "tools/PlotChecker.h"
+
 
 // TEST/DEBUG
 #if _DEBUG
@@ -249,16 +251,38 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     // Allocate GR Context if --check was specified
     if( cfg.plotCheckCount > 0 )
     {
-        GreenReaperConfig grCfg{
-            .apiVersion     = GR_API_VERSION,
-            .threadCount    = 1,
-            .gpuRequest     = GRGpuRequestKind_ExactDevice,
-            .gpuDeviceIndex = cfg.deviceIndex
+        if( cfg.gCfg->compressionLevel > 0 )
+        {
+            GreenReaperConfig grCfg{
+                .apiVersion     = GR_API_VERSION,
+                .threadCount    = 1,
+                .gpuRequest     = GRGpuRequestKind_ExactDevice,
+                .gpuDeviceIndex = cfg.deviceIndex
+            };
+
+            auto grResult = grCreateContext( &cx.grCheckContext, &grCfg, sizeof( grCfg ) );
+            FatalIf( grResult != GRResult_OK, "Failed to create decompression context for plot check with error '%s' (%d).",
+                    grResultToString( grResult ), (int)grResult );
+
+            grResult = grPreallocateForCompressionLevel( cx.grCheckContext, BBCU_K, cfg.gCfg->compressionLevel );
+            FatalIf( grResult != GRResult_OK, "Failed to preallocate memory for decompression context with error '%s' (%d).",
+                    grResultToString( grResult ), (int)grResult );
+        }
+
+        PlotCheckerConfig checkerCfg{
+            .proofCount         = cfg.plotCheckCount,
+            .noGpu              = false,
+            .gpuIndex           = cfg.deviceIndex,
+            .threadCount        = 1,
+            .disableCpuAffinity = false,
+            .silent             = false,
+            .hasSeed            = false,
+            .deletePlots        = true,
+            .deleteThreshold    = cfg.plotCheckThreshhold,
+            .grContext          = cx.grCheckContext
         };
 
-        const auto grResult = grCreateContext( &cx.grCheckContext, &grCfg, sizeof( grCfg ) );
-        FatalIf( grResult != GRResult_OK, "Failed to create decompression context for plot check with error '%s' (%d).",
-                 grResultToString( grResult ), (int)grResult );
+        cx.plotChecker = PlotChecker::Create( checkerCfg );
     }
 }
 
@@ -330,6 +354,8 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
     if( cx.gCfg->benchmarkMode )
         cx.plotWriter->EnableDummyMode();
+    if( cx.plotChecker )
+        cx.plotWriter->EnablePlotChecking( *cx.plotChecker );
 
     FatalIf( !cx.plotWriter->BeginPlot( cfg.gCfg->compressionLevel > 0 ? PlotVersion::v2_0 : PlotVersion::v1_0, 
             req.outDir, req.plotFileName, req.plotId, req.memo, req.memoSize, cfg.gCfg->compressionLevel ), 
@@ -356,9 +382,6 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     
     delete cx.plotWriter;
     cx.plotWriter = nullptr;
-
-    // Perform checks if neccesarry
-    CheckPlot( req, cx );
 
 
     // Delete any temporary files
@@ -1254,67 +1277,6 @@ void UploadBucketForTable( CudaK32PlotContext& cx, const uint64 bucket )
 }
 
 
-//-----------------------------------------------------------
-void CheckPlot( const PlotRequest& req, CudaK32PlotContext& cx )
-{
-    const auto& cfg = cx.cfg;
-    if( cfg.plotCheckCount <= 0 )
-        return;
-
-    std::string plotPath = req.plotOutPath;
-    plotPath.resize( plotPath.length() - 4 );   // Remove '.tmp'
-
-    PlotCheckConfig checksCfg{
-        .proofCount = cfg.plotCheckCount,
-        .plotPath   = plotPath.c_str(),
-        .gpuIndex   = (int)cfg.deviceIndex,
-        .silent     = false,
-        .grContext  = cx.grCheckContext
-    };
-
-    // Log::Line( "Running plot check with %llu proofs...", (llu)cfg.plotCheckCount );
-    PlotCheckResult checksResult{};
-
-    if( !RunPlotsCheck( checksCfg, 1, false, &checksResult ) )
-    {
-        Log::Line( "An error occured checking the plot: %s.", checksResult.error.c_str() );
-        Log::Line( "Any actions against plot '%s' will be ignored.", plotPath.c_str() );
-    }
-    else
-    {
-        const double passRate = checksResult.proofCount / (double)checksResult.checkCount;
-
-        // Print stats
-        std::string seedHex = BytesToHexStdString( checksResult.seedUsed, sizeof( checksResult.seedUsed ) );
-        Log::Line( "Seed used: 0x%s", seedHex.c_str() );
-        Log::Line( "Proofs requested/fetched: %llu / %llu ( %.3lf%% )", checksResult.proofCount, checksResult.checkCount, passRate * 100.0 );
-
-        if( checksResult.proofFetchFailCount > 0 )
-            Log::Line( "Proof fetches failed    : %llu ( %.3lf%% )", checksResult.proofFetchFailCount, checksResult.proofFetchFailCount / (double)checksResult.checkCount * 100.0 );
-        if( checksResult.proofValidationFailCount > 0 )
-            Log::Line( "Proof validation failed : %llu ( %.3lf%% )", checksResult.proofValidationFailCount, checksResult.proofValidationFailCount / (double)checksResult.checkCount * 100.0 );
-        Log::NewLine();
-
-        // Delete the plot if it's below the set threshold
-        if( checksResult.proofFetchFailCount > 0 || passRate < cfg.plotCheckThreshhold )
-        {
-            if( checksResult.proofFetchFailCount > 0 )
-             Log::Line( "WARNING: Deleting plot '%s' as it failed to fetch some proofs. This might indicate corrupt plot file.",
-                    plotPath.c_str() );
-            else
-                Log::Line( "WARNING: Deleting plot '%s' as it is below the proof threshold: %.3lf / %.3lf.",
-                    plotPath.c_str(), passRate, cfg.plotCheckThreshhold );
-
-            remove( plotPath.c_str() );
-            Log::NewLine();
-        }
-        else
-        {
-            Log::Line( "Plot is OK. It passed the proof threshold of %.3lf%%", cfg.plotCheckThreshhold * 100.0 );
-            Log::NewLine();
-        }
-    }
-}
 
 ///
 /// Allocations

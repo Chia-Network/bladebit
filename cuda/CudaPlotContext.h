@@ -329,6 +329,7 @@ struct CudaK32PlotContext
 
     // Used when '--check' is enabled
     struct GreenReaperContext* grCheckContext = nullptr;
+    class  PlotChecker*        plotChecker    = nullptr;
 
     struct
     {
