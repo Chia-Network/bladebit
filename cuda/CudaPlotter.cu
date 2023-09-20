@@ -253,12 +253,11 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     {
         if( cfg.gCfg->compressionLevel > 0 )
         {
-            GreenReaperConfig grCfg{
-                .apiVersion     = GR_API_VERSION,
-                .threadCount    = 1,
-                .gpuRequest     = GRGpuRequestKind_ExactDevice,
-                .gpuDeviceIndex = cfg.deviceIndex
-            };
+            GreenReaperConfig grCfg{};
+            grCfg.apiVersion     = GR_API_VERSION;
+            grCfg.threadCount    = 1;
+            grCfg.gpuRequest     = GRGpuRequestKind_ExactDevice;
+            grCfg.gpuDeviceIndex = cfg.deviceIndex;
 
             auto grResult = grCreateContext( &cx.grCheckContext, &grCfg, sizeof( grCfg ) );
             FatalIf( grResult != GRResult_OK, "Failed to create decompression context for plot check with error '%s' (%d).",
