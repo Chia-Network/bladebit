@@ -10,6 +10,8 @@
 #include "plotting/TableWriter.h"
 #include "plotting/PlotTools.h"
 #include "util/VirtualAllocator.h"
+#include "harvesting/GreenReaper.h"
+#include "tools/PlotChecker.h"
 
 
 // TEST/DEBUG
@@ -59,17 +61,34 @@ GPU-based (CUDA) plotter
 
  --disk-128           : Enable hybrid disk plotting for 128G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
+
  --disk-16            : (experimental) Enable hybrid disk plotting for 16G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
+
  -t1, --temp1         : Temporary directory 1. Used for longer-lived, sequential writes.
+
  -t2, --temp2         : Temporary directory 2. Used for temporary, shorted-lived read and writes.
                          NOTE: If only one of -t1 or -t2 is specified, both will be
                                set to the same directory.
+
+ --check <n>          : Perform a plot check for <n> proofs on the newly created plot.
+
+ --check-threshold <f>: Proof threshold rate below which the plots that don't pass
+                         the check will be deleted.
+                         That is, the number of proofs fetched / proof check count
+                         must be above or equal to this threshold to pass.
+                         (default=0.6).
 )";
 
 ///
 /// CLI
 ///
+//-----------------------------------------------------------
+void CudaK32PlotterPrintHelp()
+{
+    Log::Line( USAGE );
+}
+
 //-----------------------------------------------------------
 void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
 {
@@ -103,11 +122,16 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
             continue;
         if( cli.ReadUnswitch( cfg.temp2DirectIO, "--no-t2-direct" ) )
             continue;
+
+        if( cli.ReadU64( cfg.plotCheckCount, "--check" ) )
+            continue;
+        if( cli.ReadF64( cfg.plotCheckThreshhold, "--check-threshold" ) )
+            continue;
         // if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-buffers" ) )
         //     continue;
         if( cli.ArgMatch( "--help", "-h" ) )
         {
-            Log::Line( USAGE );
+            CudaK32PlotterPrintHelp();
             exit( 0 );
         }
         else
@@ -155,8 +179,17 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     cx.firstStoredTable = TableId::Table2 + (TableId)cx.gCfg->numDroppedTables;
 
     Log::Line( "[Bladebit CUDA Plotter]" );
-    Log::Line( " Host RAM        : %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
-    Log::Line( " Direct transfers: %s", cfg.disableDirectDownloads ? "false" : "true" );
+    Log::Line( " Host RAM            : %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
+    
+    if( cx.cfg.plotCheckCount == 0 )
+        Log::Line( " Plot checks         : disabled" );
+    else
+    {
+        Log::Line( " Plot checks         : enabled ( %llu )", (llu)cx.cfg.plotCheckCount );
+        Log::Line( " Plot check threshold: %.3lf", cx.cfg.plotCheckThreshhold );
+    }
+
+    // Log::Line( " Direct transfers: %s", cfg.disableDirectDownloads ? "false" : "true" );
     Log::NewLine();
 
     CudaInit( cx );
@@ -223,6 +256,43 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     Log::Line( "Allocating buffers (this may take a few seconds)..." );
     AllocBuffers( cx );
     InitFSEBitMask( cx );
+    Log::Line( "Done." );
+
+
+    // Allocate GR Context if --check was specified
+    if( cfg.plotCheckCount > 0 )
+    {
+        if( cfg.gCfg->compressionLevel > 0 )
+        {
+            GreenReaperConfig grCfg{};
+            grCfg.apiVersion     = GR_API_VERSION;
+            grCfg.threadCount    = 1;
+            grCfg.gpuRequest     = GRGpuRequestKind_ExactDevice;
+            grCfg.gpuDeviceIndex = cfg.deviceIndex;
+
+            auto grResult = grCreateContext( &cx.grCheckContext, &grCfg, sizeof( grCfg ) );
+            FatalIf( grResult != GRResult_OK, "Failed to create decompression context for plot check with error '%s' (%d).",
+                    grResultToString( grResult ), (int)grResult );
+
+            grResult = grPreallocateForCompressionLevel( cx.grCheckContext, BBCU_K, cfg.gCfg->compressionLevel );
+            FatalIf( grResult != GRResult_OK, "Failed to preallocate memory for decompression context with error '%s' (%d).",
+                    grResultToString( grResult ), (int)grResult );
+        }
+
+        PlotCheckerConfig checkerCfg{};
+        checkerCfg.proofCount         = cfg.plotCheckCount;
+        checkerCfg.noGpu              = false;
+        checkerCfg.gpuIndex           = cfg.deviceIndex;
+        checkerCfg.threadCount        = 1;
+        checkerCfg.disableCpuAffinity = false;
+        checkerCfg.silent             = false;
+        checkerCfg.hasSeed            = false;
+        checkerCfg.deletePlots        = true;
+        checkerCfg.deleteThreshold    = cfg.plotCheckThreshhold;
+        checkerCfg.grContext          = cx.grCheckContext;
+
+        cx.plotChecker = PlotChecker::Create( checkerCfg );
+    }
 }
 
 //-----------------------------------------------------------
@@ -293,6 +363,8 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
     if( cx.gCfg->benchmarkMode )
         cx.plotWriter->EnableDummyMode();
+    if( cx.plotChecker )
+        cx.plotWriter->EnablePlotChecking( *cx.plotChecker );
 
     FatalIf( !cx.plotWriter->BeginPlot( cfg.gCfg->compressionLevel > 0 ? PlotVersion::v2_0 : PlotVersion::v1_0, 
             req.outDir, req.plotFileName, req.plotId, req.memo, req.memoSize, cfg.gCfg->compressionLevel ), 
@@ -313,21 +385,25 @@ void CudaK32Plotter::Run( const PlotRequest& req )
         const double plotIOTime = TimerEnd( pltoCompleteTimer );
         Log::Line( "Completed writing plot in %.2lf seconds", plotIOTime );
 
-        cx.plotWriter->DumpTables();
+        if( !cx.plotChecker || !cx.plotChecker->LastPlotDeleted() )
+        {
+            cx.plotWriter->DumpTables();
+            Log::NewLine();
+        }
     }
-    Log::Line( "" );
-
+    
     delete cx.plotWriter;
     cx.plotWriter = nullptr;
+
 
     // Delete any temporary files
     #if !(DBG_BBCU_KEEP_TEMP_FILES)
         if( cx.plotRequest.IsFinalPlot && cx.cfg.hybrid128Mode )
         {
-            if( cx.diskContext->yBuffer ) delete cx.diskContext->yBuffer;
+            if( cx.diskContext->yBuffer )    delete cx.diskContext->yBuffer;
             if( cx.diskContext->metaBuffer ) delete cx.diskContext->metaBuffer;
-            if( cx.diskContext->unsortedL ) delete cx.diskContext->unsortedL;
-            if( cx.diskContext->unsortedR ) delete cx.diskContext->unsortedR;
+            if( cx.diskContext->unsortedL )  delete cx.diskContext->unsortedL;
+            if( cx.diskContext->unsortedR )  delete cx.diskContext->unsortedR;
 
             for( TableId t = TableId::Table1; t <= TableId::Table7; t++ )
             {
@@ -1211,6 +1287,7 @@ void UploadBucketForTable( CudaK32PlotContext& cx, const uint64 bucket )
         cx.metaIn.UploadArray( hostMeta + offset * 4, BBCU_BUCKET_COUNT, metaSize, stride * sizeof( K32Meta4 ), BBCU_BUCKET_COUNT, counts, actualMetaStream );
     }
 }
+
 
 
 ///

@@ -276,8 +276,9 @@ private:
     Span<uint64> _c2Entries;
     Span<uint64> _c3Buffer;
 
-    struct GreenReaperContext* _grContext = nullptr;    // Used for decompressing
-    
+    struct GreenReaperContext* _grContext     = nullptr;    // Used for decompressing
+    bool                       _ownsGrContext = true;
+
     int64  _park7Index = -1;
     uint64 _park7Entries[kEntriesPerPark];
 };

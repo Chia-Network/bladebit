@@ -3,6 +3,7 @@
 #include "util/SPCQueue.h"
 #include "plotting/PlotTypes.h"
 #include "plotting/PlotHeader.h"
+#include "tools/PlotChecker.h"
 #include "io/FileStream.h"
 #include "threading/Thread.h"
 #include "threading/AutoResetSignal.h"
@@ -86,6 +87,7 @@ public:
     PlotWriter( DiskBufferQueue& ownerQueue );
     virtual ~PlotWriter();
     
+    void EnablePlotChecking( PlotChecker& checker );
 
     // Begins writing a new plot. Any previous plot must have finished before calling this
     bool BeginPlot( PlotVersion version, 
@@ -160,6 +162,8 @@ private:
         const byte* plotMemo, const uint16 plotMemoSize,
         int32 compressionLevel );
 
+    bool CheckPlot();
+
     Command& GetCommand( CommandType type );
     void SubmitCommands();
     void SubmitCommand( const Command cmd );
@@ -174,6 +178,7 @@ private:
     void FlushRetainedBytes();
 
     void WriteData( const byte* data, size_t size );
+
 
 private:
     void CmdBeginTable( const Command& cmd );
@@ -291,5 +296,7 @@ private:
     std::queue<Command>     _queue;
     std::mutex              _queueLock;
     // std::mutex              _pushLock;
+
+    PlotChecker* _plotChecker              = nullptr;    // User responsible for ownership of checker. Must live until this PlotWriter's lifetime neds.
 };
 

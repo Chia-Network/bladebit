@@ -2,6 +2,7 @@
 #include "ChiaConsts.h"
 #include "plotdisk/jobs/IOJob.h"
 #include "plotdisk/DiskBufferQueue.h"
+#include "harvesting/GreenReaper.h"
 
 //-----------------------------------------------------------
 PlotWriter::PlotWriter() : PlotWriter( true ) {}
@@ -40,6 +41,12 @@ PlotWriter::~PlotWriter()
         free( _plotFinalPathName );
     if( _writeBuffer.Ptr() )
         bbvirtfree( _writeBuffer.Ptr() );
+}
+
+//-----------------------------------------------------------
+void PlotWriter::EnablePlotChecking( PlotChecker& checker )
+{
+    _plotChecker = &checker;
 }
 
 //-----------------------------------------------------------
@@ -268,7 +275,6 @@ bool PlotWriter::BeginPlotInternal( PlotVersion version,
     return true;
 }
 
-
 //-----------------------------------------------------------
 void PlotWriter::EndPlot( const bool rename )
 {
@@ -286,6 +292,22 @@ void PlotWriter::EndPlot( const bool rename )
                   .rename   = rename
         }
     });
+}
+
+//-----------------------------------------------------------
+bool PlotWriter::CheckPlot()
+{
+    if( _dummyMode || !_plotChecker ) return false;
+
+    const char* plotPath = _plotPathBuffer.Ptr();
+
+    PlotCheckResult checksResult{};
+    _plotChecker->CheckPlot( plotPath, &checksResult );
+
+    if( !checksResult.error.empty() )
+        return false;
+
+    return !checksResult.deleted;
 }
 
 
@@ -949,8 +971,14 @@ void PlotWriter::CmdEndPlot( const Command& cmd )
     FlushRetainedBytes();
     _stream.Close();
 
+    bool renamePlot = cmd.endPlot.rename;
+    if( _plotChecker )
+    {
+        renamePlot = CheckPlot();
+    }
+
     // Now rename to its final non-temp name
-    if( cmd.endPlot.rename )
+    if( renamePlot )
     {
         const uint32 RETRY_COUNT  = 10;
         const long   MS_WAIT_TIME = 1000;

@@ -39,7 +39,7 @@ PlotReader::~PlotReader()
 
     bbvirtfreebounded_span( _c3Buffer );
 
-    if( _grContext )
+    if( _grContext && _ownsGrContext )
         grDestroyContext( _grContext );
     _grContext = nullptr;
 }
@@ -936,18 +936,21 @@ void PlotReader::AssignDecompressionContext( struct GreenReaperContext* context 
     if( !context)
         return;
 
-    if( _grContext )
+    if( _grContext && _ownsGrContext )
         grDestroyContext( _grContext );
     
-    _grContext = context;
+    _grContext     = context;
+    _ownsGrContext = false;
 }
 
 //-----------------------------------------------------------
 void PlotReader::ConfigDecompressor( const uint32 threadCount, const bool disableCPUAffinity, const uint32 cpuOffset, bool useGpu, int gpuIndex )
 {
-    if( _grContext )
+    if( _grContext && _ownsGrContext )
         grDestroyContext( _grContext );
-    _grContext = nullptr;
+
+    _grContext     = nullptr;
+    _ownsGrContext = true;
 
     GreenReaperConfig cfg = {};
     cfg.apiVersion         = GR_API_VERSION;
@@ -973,6 +976,8 @@ GreenReaperContext* PlotReader::GetGRContext()
 
         auto result = grCreateContext( &_grContext, &cfg, sizeof( GreenReaperConfig ) );
         ASSERT( result == GRResult_OK );
+
+        _ownsGrContext = true;
     }
 
     return _grContext;
