@@ -154,6 +154,13 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
         #else
             Log::Line( "Warning: 16G mode is experimental and still under development." );
             Log::Line( "         Please use the --check <n> parameter to validate plots when using this mode." );
+
+            if( cfg.temp1DirectIO || cfg.temp2DirectIO )
+            {
+                Log::Line( "         Direct I/O not supported in 16G mode at the moment. Disabing it." );
+                cfg.temp1DirectIO = cfg.temp2DirectIO = false;
+            }
+
         #endif
     }
 }
