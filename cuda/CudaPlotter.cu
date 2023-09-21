@@ -59,7 +59,7 @@ GPU-based (CUDA) plotter
 
  --disk-128           : Enable hybrid disk plotting for 128G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
- --disk-16            : Enable hybrid disk plotting for 16G system RAM. 
+ --disk-16            : (experimental) Enable hybrid disk plotting for 16G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
  -t1, --temp1         : Temporary directory 1. Used for longer-lived, sequential writes.
  -t2, --temp2         : Temporary directory 2. Used for temporary, shorted-lived read and writes.
@@ -120,6 +120,17 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
     {
         Log::Error( "Error: Cannot plot classic (uncompressed) plots in 128G or 64G mode." );
         Exit( -1 );
+    }
+
+    if( cfg.hybrid16Mode )
+    {
+        #if PLATFORM_IS_WINDOWS
+            Log::Error( "16G mode is currently unsupported on Windows." );
+            Exit( -1 );
+        #else
+            Log::Line( "Warning: 16G mode is experimental and still under development." );
+            Log::Line( "         Please use the --check <n> parameter to validate plots when using this mode." );
+        #endif
     }
 }
 
