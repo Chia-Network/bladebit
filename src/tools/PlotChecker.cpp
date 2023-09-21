@@ -36,26 +36,27 @@ public:
                     Log::Line( "Any actions against plot '%s' will be ignored.", plotPath );
             }
         }
-        else if( _cfg.deletePlots )
+
+        // Check threshold for plot deletion
+        const double passRate = result.proofCount / (double)result.checkCount;
+
+        // Print stats
+        if( !_cfg.silent )
         {
-            // Check threshold for plot deletion
-            const double passRate = result.proofCount / (double)result.checkCount;
+            std::string seedHex = BytesToHexStdString( result.seedUsed, sizeof( result.seedUsed ) );
+            Log::Line( "Seed used: 0x%s", seedHex.c_str() );
+            Log::Line( "Proofs requested/fetched: %llu / %llu ( %.3lf%% )", result.proofCount, result.checkCount, passRate * 100.0 );
 
-            // Print stats
-            if( !_cfg.silent )
-            {
-                std::string seedHex = BytesToHexStdString( result.seedUsed, sizeof( result.seedUsed ) );
-                Log::Line( "Seed used: 0x%s", seedHex.c_str() );
-                Log::Line( "Proofs requested/fetched: %llu / %llu ( %.3lf%% )", result.proofCount, result.checkCount, passRate * 100.0 );
+            if( result.proofFetchFailCount > 0 )
+                Log::Line( "Proof fetches failed    : %llu ( %.3lf%% )", result.proofFetchFailCount, result.proofFetchFailCount / (double)result.checkCount * 100.0 );
+            if( result.proofValidationFailCount > 0 )
+                Log::Line( "Proof validation failed : %llu ( %.3lf%% )", result.proofValidationFailCount, result.proofValidationFailCount / (double)result.checkCount * 100.0 );
+            Log::NewLine();
+        }
 
-                if( result.proofFetchFailCount > 0 )
-                    Log::Line( "Proof fetches failed    : %llu ( %.3lf%% )", result.proofFetchFailCount, result.proofFetchFailCount / (double)result.checkCount * 100.0 );
-                if( result.proofValidationFailCount > 0 )
-                    Log::Line( "Proof validation failed : %llu ( %.3lf%% )", result.proofValidationFailCount, result.proofValidationFailCount / (double)result.checkCount * 100.0 );
-                Log::NewLine();
-            }
-
-            // Delete the plot if it's below the set threshold
+        // Delete the plot if it's below the set threshold
+        if( _cfg.deletePlots )
+        {
             if( result.proofFetchFailCount > 0 || passRate < _cfg.deleteThreshold )
             {
                 if( !_cfg.silent )
