@@ -268,18 +268,17 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
                     grResultToString( grResult ), (int)grResult );
         }
 
-        PlotCheckerConfig checkerCfg{
-            .proofCount         = cfg.plotCheckCount,
-            .noGpu              = false,
-            .gpuIndex           = cfg.deviceIndex,
-            .threadCount        = 1,
-            .disableCpuAffinity = false,
-            .silent             = false,
-            .hasSeed            = false,
-            .deletePlots        = true,
-            .deleteThreshold    = cfg.plotCheckThreshhold,
-            .grContext          = cx.grCheckContext
-        };
+        PlotCheckerConfig checkerCfg{};
+        checkerCfg.proofCount         = cfg.plotCheckCount;
+        checkerCfg.noGpu              = false;
+        checkerCfg.gpuIndex           = cfg.deviceIndex;
+        checkerCfg.threadCount        = 1;
+        checkerCfg.disableCpuAffinity = false;
+        checkerCfg.silent             = false;
+        checkerCfg.hasSeed            = false;
+        checkerCfg.deletePlots        = true;
+        checkerCfg.deleteThreshold    = cfg.plotCheckThreshhold;
+        checkerCfg.grContext          = cx.grCheckContext;
 
         cx.plotChecker = PlotChecker::Create( checkerCfg );
     }
