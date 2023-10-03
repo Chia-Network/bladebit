@@ -367,7 +367,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     // The remainder should be output folders, which we parse after the plotter consumes it's config
 
     ///
-    /// Validate global conifg
+    /// Validate global config
     ///
     FatalIf( farmerPublicKey == nullptr, "A farmer public key must be specified." );
     FatalIf( !KeyTools::HexPKeyToG1Element( farmerPublicKey, *(cfg.farmerPublicKey = new bls::G1Element()) ),
