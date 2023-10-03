@@ -157,6 +157,8 @@ struct Span
 
         return Span<TCast>( reinterpret_cast<TCast*>( values ), targetLength );
     }
+
+    inline bool IsEmpty() const { return length == 0; }
 };
 
 typedef Span<uint8_t> ByteSpan;

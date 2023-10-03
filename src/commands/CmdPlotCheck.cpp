@@ -1,26 +1,31 @@
-#include "Commands.h"
-#include "plotting/GlobalPlotConfig.h"
 #include "threading/MTJob.h"
+#include "util/CliParser.h"
 #include "tools/PlotReader.h"
+#include "plotting/GlobalPlotConfig.h"
 #include "plotting/PlotValidation.h"
 #include "plotting/f1/F1Gen.h"
+#include "tools/PlotChecker.h"
+#include "harvesting/GreenReaper.h"
 
 
-struct Config
+struct PlotCheckConfig
 {
     GlobalPlotConfig* gCfg    = nullptr;
 
-    uint64      proofCount = 100;
-    const char* plotPath   = "";
+    uint64                   proofCount = 100;
+    std::vector<const char*> plotPaths{};
+    byte                     seed[BB_PLOT_ID_LEN]{};
+    bool                     hasSeed    = false;
+    bool                     noGpu      = false;
+    int32                    gpuIndex   = -1;
 };
 
 void CmdPlotsCheckHelp();
 
-
 //-----------------------------------------------------------
 void CmdPlotsCheckMain( GlobalPlotConfig& gCfg, CliParser& cli )
 {
-    Config cfg = {};
+    PlotCheckConfig cfg = {};
     cfg.gCfg = &gCfg;
 
     while( cli.HasArgs() )
@@ -30,107 +35,71 @@ void CmdPlotsCheckMain( GlobalPlotConfig& gCfg, CliParser& cli )
             CmdPlotsCheckHelp();
             Exit( 0 );
         }
+        if( cli.ReadHexStrAsBytes( cfg.seed, sizeof( cfg.seed ), "-s", "--seed" ) )
+        {
+            cfg.hasSeed = true;
+        }
         else if( cli.ReadU64( cfg.proofCount, "-n", "--iterations" ) ) continue;
+        else if( cli.ReadSwitch( cfg.noGpu, "-g", "--no-gpu" ) ) continue;
+        else if( cli.ReadI32( cfg.gpuIndex, "-d", "--device" ) ) continue;
         else
             break;
     }
 
     FatalIf( !cli.HasArgs(), "Expected a path to a plot file." );
+    do
     {
-        cfg.plotPath = cli.Arg();
+        cfg.plotPaths.push_back( cli.Arg() );
         cli.NextArg();
-
-        if( cli.HasArgs() )
-        {
-            Fatal( "Unexpected argument '%s'.", cli.Arg() );
-            Exit( 1 );
-        }
     }
+    while( cli.HasArgs() );
 
-    cfg.proofCount = std::max( cfg.proofCount, (uint64)1 );
+    
+    // GreenReaperContext* grContext = nullptr;
+    // {
+    //     // Pre-create decompressor here?
+    //     grCreateContext( &grcontext, grCfg, sizeof( GreenReaperConfig ) )
+    // }
 
-    FilePlot plot;
-    FatalIf( !plot.Open( cfg.plotPath ), "Failed to open plot file at '%s' with error %d.", cfg.plotPath, plot.GetError() );
+        // const bool hasGPU = grHasGpuDecompressor( reader.GetDecompressorContext() );
+        // if( hasGPU && !cfg.silent )
+        //     Log::Line( "Using GPU for decompression." );
+        // else if( !cfg.silent )
+        //     Log::Line( "No GPU was selected for decompression." );
 
-    const uint32 threadCount = gCfg.threadCount == 0 ? SysHost::GetLogicalCPUCount() :
-                                std::min( (uint32)MAX_THREADS, std::min( gCfg.threadCount, SysHost::GetLogicalCPUCount() ) );
+    PlotCheckerConfig checkerCfg{
+        .proofCount         = cfg.proofCount,
+        .noGpu              = cfg.noGpu,
+        .gpuIndex           = cfg.gpuIndex,
+        .threadCount        = gCfg.threadCount,
+        .disableCpuAffinity = gCfg.disableCpuAffinity,
+        .silent             = false,
+        .hasSeed            = cfg.hasSeed,
+        .deletePlots        = false,
+        .deleteThreshold    = 0.0
+    };
 
-    PlotReader reader( plot );
-    reader.ConfigDecompressor( threadCount, gCfg.disableCpuAffinity );
+    static_assert( sizeof( checkerCfg.seed ) == sizeof( cfg.seed ) );
+    if( cfg.hasSeed )
+        memcpy( checkerCfg.seed, cfg.seed, sizeof( checkerCfg.seed ) );
 
-    const uint32 k = plot.K();
+    ptr<PlotChecker> checker( PlotChecker::Create( checkerCfg ) );
 
-    byte AlignAs(8) seed[BB_PLOT_ID_LEN] = {};
-    SysHost::Random( seed, sizeof( seed ) );
-
+    for( auto* plotPath : cfg.plotPaths )
     {
-        std::string seedHex = BytesToHexStdString( seed, sizeof( seed ) );
-        Log::Line( "Checking %llu random proofs with seed 0x%s...", (llu)cfg.proofCount, seedHex.c_str() );
-    }
-    Log::Line( "Plot compression level: %u", plot.CompressionLevel() );
-
-    const uint64 f7Mask = (1ull << k) - 1;
-
-    uint64 prevF7     = 0;
-    uint64 proofCount = 0;
-
-    uint64 proofXs[BB_PLOT_PROOF_X_COUNT];
-
-    uint64 nextPercentage = 10;
-
-    for( uint64 i = 0; i < cfg.proofCount; i++ )
-    {
-        const uint64 f7 = F1GenSingleForK( k, seed, prevF7 ) & f7Mask;
-        prevF7 = f7;
-
-        uint64 startP7Idx = 0;
-        const uint64 nF7Proofs = reader.GetP7IndicesForF7( f7, startP7Idx );
-
-        for( uint64 j = 0; j < nF7Proofs; j++ )
+        PlotCheckResult result{};
+        checker->CheckPlot( plotPath, &result );
+        if( !result.error.empty() )
         {
-            uint64 p7Entry;
-            if( !reader.ReadP7Entry( startP7Idx + j, p7Entry ) )
-            {
-                // #TODO: Handle error
-                continue;
-            }
-
-            const auto r = reader.FetchProof( p7Entry, proofXs );
-            if( r == ProofFetchResult::OK )
-            {
-                // Convert to 
-                uint64 outF7 = 0;
-                if( PlotValidation::ValidateFullProof( k, plot.PlotId(), proofXs, outF7 ) )
-                {
-                    if( f7 == outF7 )
-                    {
-                        proofCount++;
-                    }
-                    else {}// #TODO: Handle error
-                }
-                else
-                {
-                    // #TODO: Handle error
-                }
-
-            }
-            else
-            {   
-                // #TODO: Handle error
-                continue;
-            }
+            Fatal( result.error.c_str() );
         }
 
-        const double percent = i / (double)cfg.proofCount * 100.0;
-        if( (uint64)percent == nextPercentage )
-        {
-            Log::Line( " %llu%%...", (llu)nextPercentage );
-            nextPercentage += 10;
-        }
+        Log::NewLine();
+
+        // Log::Line( "%llu / %llu (%.2lf%%) valid proofs found.",
+        //     (llu)result.proofCount, (llu)cfg.proofCount, ((double)result.proofCount / cfg.proofCount) * 100.0 );
     }
 
-    Log::Line( "%llu / %llu (%.2lf%%) valid proofs found.",
-        (llu)proofCount, (llu)cfg.proofCount, ((double)proofCount / cfg.proofCount) * 100.0 );
 }
 
 //-----------------------------------------------------------

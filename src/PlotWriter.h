@@ -3,6 +3,7 @@
 #include "threading/Thread.h"
 #include "threading/Semaphore.h"
 
+
 /**
  * Handles writing the final plot to disk
  *

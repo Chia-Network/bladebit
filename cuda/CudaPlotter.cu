@@ -9,6 +9,10 @@
 #include "plotting/CTables.h"
 #include "plotting/TableWriter.h"
 #include "plotting/PlotTools.h"
+#include "util/VirtualAllocator.h"
+#include "harvesting/GreenReaper.h"
+#include "tools/PlotChecker.h"
+
 
 // TEST/DEBUG
 #if _DEBUG
@@ -36,6 +40,7 @@ static void InlineTable( CudaK32PlotContext& cx, const uint32* devInX, cudaStrea
 
 static void AllocBuffers( CudaK32PlotContext& cx );
 static void AllocateP1Buffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx );
+static void AllocateParkSerializationBuffers( CudaK32PlotContext& cx, IAllocator& pinnedAllocator, bool dryRun );
 
 template<typename T>
 static void UploadBucketToGpu( CudaK32PlotContext& context, TableId table, const uint32* hostPtr, T* devPtr, uint64 bucket, uint64 stride );
@@ -53,11 +58,37 @@ GPU-based (CUDA) plotter
 [OPTIONS]:
  -h, --help           : Shows this help message and exits.
  -d, --device         : Select the CUDA device index. (default=0)
+
+ --disk-128           : Enable hybrid disk plotting for 128G system RAM. 
+                         Requires a --temp1 and --temp2 to be set.
+
+ --disk-16            : (experimental) Enable hybrid disk plotting for 16G system RAM. 
+                         Requires a --temp1 and --temp2 to be set.
+
+ -t1, --temp1         : Temporary directory 1. Used for longer-lived, sequential writes.
+
+ -t2, --temp2         : Temporary directory 2. Used for temporary, shorted-lived read and writes.
+                         NOTE: If only one of -t1 or -t2 is specified, both will be
+                               set to the same directory.
+
+ --check <n>          : Perform a plot check for <n> proofs on the newly created plot.
+
+ --check-threshold <f>: Proof threshold rate below which the plots that don't pass
+                         the check will be deleted.
+                         That is, the number of proofs fetched / proof check count
+                         must be above or equal to this threshold to pass.
+                         (default=0.6).
 )";
 
 ///
 /// CLI
 ///
+//-----------------------------------------------------------
+void CudaK32PlotterPrintHelp()
+{
+    Log::Line( USAGE );
+}
+
 //-----------------------------------------------------------
 void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
 {
@@ -68,18 +99,70 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
     {
         if( cli.ReadU32( cfg.deviceIndex, "-d", "--device" ) )
             continue;
-        if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-downloads" ) )
+        if( cli.ReadSwitch( cfg.hybrid128Mode, "--disk-128" ) )
             continue;
+        if( cli.ReadSwitch( cfg.hybrid16Mode, "--disk-16" ) )
+        {
+            cfg.hybrid128Mode = true;
+            continue;
+        }
+        if( cli.ReadStr( cfg.temp1Path, "-t1", "--temp1" ) )
+        {
+            if( !cfg.temp2Path )
+                cfg.temp2Path = cfg.temp1Path;
+            continue;
+        }
+        if( cli.ReadStr( cfg.temp2Path, "-t2", "--temp2" ) )
+        {
+            if( !cfg.temp1Path )
+                cfg.temp1Path = cfg.temp2Path;
+            continue;
+        }
+        if( cli.ReadUnswitch( cfg.temp1DirectIO, "--no-t1-direct" ) )
+            continue;
+        if( cli.ReadUnswitch( cfg.temp2DirectIO, "--no-t2-direct" ) )
+            continue;
+
+        if( cli.ReadU64( cfg.plotCheckCount, "--check" ) )
+            continue;
+        if( cli.ReadF64( cfg.plotCheckThreshhold, "--check-threshold" ) )
+            continue;
+        // if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-buffers" ) )
+        //     continue;
         if( cli.ArgMatch( "--help", "-h" ) )
         {
-            Log::Line( USAGE );
+            CudaK32PlotterPrintHelp();
             exit( 0 );
         }
         else
             break;  // Let the caller handle it
     }
-
     // The rest should be output directies, parsed by the global config parser.
+
+
+    if( cfg.hybrid128Mode && gCfg.compressionLevel <= 0 )
+    {
+        Log::Error( "Error: Cannot plot classic (uncompressed) plots in 128G or 64G mode." );
+        Exit( -1 );
+    }
+
+    if( cfg.hybrid16Mode )
+    {
+        #if PLATFORM_IS_WINDOWS
+            Log::Error( "16G mode is currently unsupported on Windows." );
+            Exit( -1 );
+        #else
+            Log::Line( "Warning: 16G mode is experimental and still under development." );
+            Log::Line( "         Please use the --check <n> parameter to validate plots when using this mode." );
+
+            if( cfg.temp1DirectIO || cfg.temp2DirectIO )
+            {
+                Log::Line( "         Direct I/O not supported in 16G mode at the moment. Disabing it." );
+                cfg.temp1DirectIO = cfg.temp2DirectIO = false;
+            }
+
+        #endif
+    }
 }
 
 //-----------------------------------------------------------
@@ -97,10 +180,25 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     auto& cx = *new CudaK32PlotContext{};
     outContext = &cx;
 
-    cx.cfg  = cfg;
-    cx.gCfg = cfg.gCfg;
+    cx.cfg        = cfg;
+    cx.gCfg       = cfg.gCfg;
+
+    cx.firstStoredTable = TableId::Table2 + (TableId)cx.gCfg->numDroppedTables;
 
     Log::Line( "[Bladebit CUDA Plotter]" );
+    Log::Line( " Host RAM            : %llu GiB", SysHost::GetTotalSystemMemory() BtoGB );
+    
+    if( cx.cfg.plotCheckCount == 0 )
+        Log::Line( " Plot checks         : disabled" );
+    else
+    {
+        Log::Line( " Plot checks         : enabled ( %llu )", (llu)cx.cfg.plotCheckCount );
+        Log::Line( " Plot check threshold: %.3lf", cx.cfg.plotCheckThreshhold );
+    }
+
+    // Log::Line( " Direct transfers: %s", cfg.disableDirectDownloads ? "false" : "true" );
+    Log::NewLine();
+
     CudaInit( cx );
 
     CudaErrCheck( cudaStreamCreateWithFlags( &cx.computeStream , cudaStreamNonBlocking ) );
@@ -119,27 +217,89 @@ void InitContext( CudaK32PlotConfig& cfg, CudaK32PlotContext*& outContext )
     }
 
     cx.threadPool = new ThreadPool( SysHost::GetLogicalCPUCount() );
+    cx.plotFence  = new Fence();
+    cx.parkFence  = new Fence();
 
-    #if __linux__
-        cx.downloadDirect = cfg.disableDirectDownloads ? false : true;
+    #if _WIN32
+        // #MAYBE: Add a configurable option to enable direct downloads on windows?
+        // On windows always default to using intermediate pinned buffers
+        cx.downloadDirect = false;
     #else
-        // #TODO: One windows, check if we have enough memory, if so, default to true.
-        cx.downloadDirect = true ;//false;
+        cx.downloadDirect = cfg.disableDirectDownloads ? false : true;
     #endif
 
     // cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
     // if( cx.gCfg->benchmarkMode )
     //     cx.plotWriter->EnableDummyMode();
 
-    cx.plotFence  = new Fence();
+    // Need to do allocations for park serialization differently under the following conditions
+    if( cx.downloadDirect || cx.cfg.hybrid128Mode )
+    {
+        cx.parkContext    = new CudaK32ParkContext{};
 
-    cx.phase2     = new CudaK32Phase2{};
-    cx.phase3     = new CudaK32Phase3{};
+        if( cx.cfg.hybrid16Mode )
+            cx.useParkContext = true;
+    }
+
+    // Check for hybrid mode
+    if( cx.cfg.hybrid128Mode )
+    {
+        cx.diskContext             = new CudaK32HybridMode{};
+        cx.diskContext->temp1Queue = new DiskQueue( cx.cfg.temp1Path );
+
+        // Re-use the same queue for temp2 if temp1 and temp2 are pointing to the same path
+        auto t1Path = std::filesystem::canonical( cx.cfg.temp1Path );
+        auto t2Path = std::filesystem::canonical( cx.cfg.temp2Path );
+        if( t1Path.compare( t2Path ) == 0 )
+            cx.diskContext->temp2Queue = cx.diskContext->temp1Queue;
+        else
+            cx.diskContext->temp2Queue = new DiskQueue( cx.cfg.temp2Path );
+    }
+
+    cx.phase2 = new CudaK32Phase2{};
+    cx.phase3 = new CudaK32Phase3{};
 
     // #TODO: Support non-warm starting
     Log::Line( "Allocating buffers (this may take a few seconds)..." );
     AllocBuffers( cx );
     InitFSEBitMask( cx );
+    Log::Line( "Done." );
+
+
+    // Allocate GR Context if --check was specified
+    if( cfg.plotCheckCount > 0 )
+    {
+        if( cfg.gCfg->compressionLevel > 0 )
+        {
+            GreenReaperConfig grCfg{};
+            grCfg.apiVersion     = GR_API_VERSION;
+            grCfg.threadCount    = 1;
+            grCfg.gpuRequest     = GRGpuRequestKind_ExactDevice;
+            grCfg.gpuDeviceIndex = cfg.deviceIndex;
+
+            auto grResult = grCreateContext( &cx.grCheckContext, &grCfg, sizeof( grCfg ) );
+            FatalIf( grResult != GRResult_OK, "Failed to create decompression context for plot check with error '%s' (%d).",
+                    grResultToString( grResult ), (int)grResult );
+
+            grResult = grPreallocateForCompressionLevel( cx.grCheckContext, BBCU_K, cfg.gCfg->compressionLevel );
+            FatalIf( grResult != GRResult_OK, "Failed to preallocate memory for decompression context with error '%s' (%d).",
+                    grResultToString( grResult ), (int)grResult );
+        }
+
+        PlotCheckerConfig checkerCfg{};
+        checkerCfg.proofCount         = cfg.plotCheckCount;
+        checkerCfg.noGpu              = false;
+        checkerCfg.gpuIndex           = cfg.deviceIndex;
+        checkerCfg.threadCount        = 1;
+        checkerCfg.disableCpuAffinity = false;
+        checkerCfg.silent             = false;
+        checkerCfg.hasSeed            = false;
+        checkerCfg.deletePlots        = true;
+        checkerCfg.deleteThreshold    = cfg.plotCheckThreshhold;
+        checkerCfg.grContext          = cx.grCheckContext;
+
+        cx.plotChecker = PlotChecker::Create( checkerCfg );
+    }
 }
 
 //-----------------------------------------------------------
@@ -210,6 +370,8 @@ void CudaK32Plotter::Run( const PlotRequest& req )
     cx.plotWriter = new PlotWriter( !cfg.gCfg->disableOutputDirectIO );
     if( cx.gCfg->benchmarkMode )
         cx.plotWriter->EnableDummyMode();
+    if( cx.plotChecker )
+        cx.plotWriter->EnablePlotChecking( *cx.plotChecker );
 
     FatalIf( !cx.plotWriter->BeginPlot( cfg.gCfg->compressionLevel > 0 ? PlotVersion::v2_0 : PlotVersion::v1_0, 
             req.outDir, req.plotFileName, req.plotId, req.memo, req.memoSize, cfg.gCfg->compressionLevel ), 
@@ -220,19 +382,43 @@ void CudaK32Plotter::Run( const PlotRequest& req )
 
     cx.plotWriter->EndPlot( true );
 
-    // #TODO: Ensure the last plot ended here for now
+    // Ensure the last plot has ended
+    // #TODO: Move it elsewhere, using different buffers for parks
+    //        so that we can continue writing to disk until we get to
+    //        actually writing the next plot in table 7 finalization.
     {
         const auto pltoCompleteTimer = TimerBegin();
         cx.plotWriter->WaitForPlotToComplete();
         const double plotIOTime = TimerEnd( pltoCompleteTimer );
         Log::Line( "Completed writing plot in %.2lf seconds", plotIOTime );
 
-        cx.plotWriter->DumpTables();
+        if( !cx.plotChecker || !cx.plotChecker->LastPlotDeleted() )
+        {
+            cx.plotWriter->DumpTables();
+            Log::NewLine();
+        }
     }
-    Log::Line( "" );
-
+    
     delete cx.plotWriter;
     cx.plotWriter = nullptr;
+
+
+    // Delete any temporary files
+    #if !(DBG_BBCU_KEEP_TEMP_FILES)
+        if( cx.plotRequest.IsFinalPlot && cx.cfg.hybrid128Mode )
+        {
+            if( cx.diskContext->yBuffer )    delete cx.diskContext->yBuffer;
+            if( cx.diskContext->metaBuffer ) delete cx.diskContext->metaBuffer;
+            if( cx.diskContext->unsortedL )  delete cx.diskContext->unsortedL;
+            if( cx.diskContext->unsortedR )  delete cx.diskContext->unsortedR;
+
+            for( TableId t = TableId::Table1; t <= TableId::Table7; t++ )
+            {
+                if( cx.diskContext->tablesL[(int)t] ) delete cx.diskContext->tablesL[(int)t];
+                if( cx.diskContext->tablesR[(int)t] ) delete cx.diskContext->tablesR[(int)t];
+            }
+        }
+    #endif
 }
 
 //-----------------------------------------------------------
@@ -243,26 +429,51 @@ void MakePlot( CudaK32PlotContext& cx )
     memset( cx.tableEntryCounts, 0, sizeof( cx.tableEntryCounts ) );
 
     cx.table = TableId::Table1;
+
     const auto plotTimer = TimerBegin();
     const auto p1Timer   = plotTimer;
 
     #if BBCU_DBG_SKIP_PHASE_1
         DbgLoadContextAndPairs( cx );
     #else
-    // F1
-    Log::Line( "Generating F1" );
-    const auto timer = TimerBegin();
-    GenF1Cuda( cx );
-    const auto elapsed = TimerEnd( timer );
-    Log::Line( "Finished F1 in %.2lf seconds.", elapsed );
 
-    // Time for FP   
+    if( cx.cfg.hybrid128Mode )
+    {
+        cx.sortedXPairsOut.AssignDiskBuffer( nullptr );
+        cx.sortedPairsLOut.AssignDiskBuffer( nullptr );
+        cx.sortedPairsROut.AssignDiskBuffer( nullptr );
+
+        if( !cx.plotRequest.isFirstPlot )
+        {
+            for( TableId t = TableId::Table1; t <= TableId::Table7; t++ )
+            {
+                if( cx.diskContext->tablesL[(int)t] ) cx.diskContext->tablesL[(int)t]->Swap();
+                if( cx.diskContext->tablesR[(int)t] ) cx.diskContext->tablesR[(int)t]->Swap();
+            }
+            
+        }
+    }
+
+    /// Generate F1 entries
+    {
+        Log::Line( "Generating F1" );
+        const auto timer = TimerBegin();
+
+        GenF1Cuda( cx );
+
+        const auto elapsed = TimerEnd( timer );
+        Log::Line( "Finished F1 in %.2lf seconds.", elapsed );
+    }
+
+    /// Forward-propagate the rest of the tables
     for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
     {
         cx.table  = table;
         cx.bucket = 0;
+
         FpTable( cx );
     }
+
     const auto p1Elapsed = TimerEnd( p1Timer );
     Log::Line( "Completed Phase 1 in %.2lf seconds", p1Elapsed );
     #endif
@@ -293,6 +504,22 @@ void FpTable( CudaK32PlotContext& cx )
     const TableId inTable = cx.table - 1;
 
     cx.prevTablePairOffset = 0;
+
+    if( cx.cfg.hybrid128Mode )
+    {
+        auto* diskBufferL = cx.diskContext->tablesL[(int)inTable];
+        auto* diskBufferR = cx.diskContext->tablesR[(int)inTable];
+
+        if( inTable == cx.firstStoredTable )
+        {
+            cx.sortedXPairsOut.AssignDiskBuffer( diskBufferL );
+        }
+        else if( inTable > cx.firstStoredTable )
+        {
+            cx.sortedPairsLOut.AssignDiskBuffer( diskBufferL );
+            cx.sortedPairsROut.AssignDiskBuffer( diskBufferR );
+        }
+    }
 
     // Clear slice counts
     CudaErrCheck( cudaMemsetAsync( cx.devSliceCounts, 0, sizeof( uint32 ) * BBCU_BUCKET_COUNT * BBCU_BUCKET_COUNT, cx.computeStream ) );
@@ -358,10 +585,28 @@ void FpTable( CudaK32PlotContext& cx )
     cx.sortedPairsROut.WaitForCompletion();//cx.sortedPairsROut.WaitForCopyCompletion();
     cx.sortedPairsROut.Reset();
 
-    
-    if( cx.table < TableId::Table7 )
+    if( cx.cfg.hybrid128Mode && inTable >= cx.firstStoredTable )
     {
+        if( cx.diskContext->tablesL[(int)inTable] ) cx.diskContext->tablesL[(int)inTable]->Swap();
+        if( cx.diskContext->tablesR[(int)inTable] ) cx.diskContext->tablesR[(int)inTable]->Swap();
+    }
+
+    if( cx.table < TableId::Table7 )
         cx.metaOut.WaitForCompletion(); cx.metaOut.Reset();
+
+    if( cx.cfg.hybrid128Mode )
+    {
+        if( cx.cfg.hybrid16Mode || cx.table == cx.firstStoredTable || cx.table == cx.firstStoredTable + 1 )
+        {
+            cx.diskContext->unsortedL->Swap();
+        }
+
+        if( cx.cfg.hybrid16Mode )
+        {
+            cx.diskContext->yBuffer->Swap();
+            cx.diskContext->metaBuffer->Swap();
+            cx.diskContext->unsortedR->Swap();
+        }
     }
 
     cx.yIn     .Reset();
@@ -373,23 +618,24 @@ void FpTable( CudaK32PlotContext& cx )
     Log::Line( "Table %u completed in %.2lf seconds with %llu entries.", 
                (uint32)cx.table+1, elapsed, cx.tableEntryCounts[(int)cx.table] );
 
+    /// DEBUG
     #if DBG_BBCU_P1_WRITE_PAIRS
         // Write them sorted, so have to wait until table 3 completes
         if( cx.table > TableId::Table2 )
             DbgWritePairs( cx, cx.table - 1 );
     #endif
-    
+
     if( cx.table == TableId::Table7 )
     {
        FinalizeTable7( cx );
 
-       #if DBG_BBCU_P1_WRITE_PAIRS
+        // DEBUG
+        #if DBG_BBCU_P1_WRITE_PAIRS
            DbgWritePairs( cx, TableId::Table7 );
-       #endif
-
+        #endif
         #if DBG_BBCU_P1_WRITE_CONTEXT
            DbgWriteContext( cx );
-       #endif
+        #endif
     }
 }
 
@@ -410,8 +656,8 @@ void FpTableBucket( CudaK32PlotContext& cx, const uint32 bucket )
     cudaStream_t metaStream  = cx.computeStream;//B;
     cudaStream_t pairsStream = cx.computeStream;//C;
 
-    uint32* sortKeyIn   = (uint32*)cx.devMatches;
-    uint32* sortKeyOut  = cx.devSortKey;
+    uint32* sortKeyIn  = (uint32*)cx.devMatches;
+    uint32* sortKeyOut = cx.devSortKey;
     if( cx.table > TableId::Table2 )
     {
         // Generate a sorting key
@@ -447,7 +693,7 @@ void FpTableBucket( CudaK32PlotContext& cx, const uint32 bucket )
 
     // Sort and download prev table's pairs
     const bool isLTableInlineable = cx.table == TableId::Table2 || (uint32)cx.table <= cx.gCfg->numDroppedTables+1;
-    
+
     if( !isLTableInlineable )
     {
         CudaErrCheck( cudaStreamWaitEvent( pairsStream, cx.computeEventC ) );   // Ensure sort key is ready
@@ -463,35 +709,36 @@ void FpTableBucket( CudaK32PlotContext& cx, const uint32 bucket )
             CudaK32PlotSortByKey( entryCount, sortKeyOut, pairsIn, sortedPairs, pairsStream );
             cx.xPairsIn.ReleaseDeviceBuffer( pairsStream );
 
-            Pair* hostPairs = ((Pair*)cx.hostBackPointers[(int)cx.table-1].left) + cx.prevTablePairOffset;
+            Pair* hostPairs = ((Pair*)cx.hostBackPointers[(int)inTable].left) + cx.prevTablePairOffset;
 
             // Write sorted pairs back to host
             cx.sortedXPairsOut.DownloadT( hostPairs, entryCount, pairsStream, cx.downloadDirect );
         }
         else
         {
-            uint32* hostPairsL, *hostPairsLFinal;
-            uint16* hostPairsR, *hostPairsRFinal;
+            // uint32* hostPairsL; 
+            // uint16* hostPairsR; 
 
             // Wait for pairs to complete loading and sort on Y (or do this before match? Giving us time to write to disk while matching?)
             uint32* pairsLIn     = (uint32*)cx.pairsLIn       .GetUploadedDeviceBuffer( pairsStream );
             uint32* sortedPairsL = (uint32*)cx.sortedPairsLOut.LockDeviceBuffer( pairsStream );
             CudaK32PlotSortByKey( entryCount, sortKeyOut, pairsLIn, sortedPairsL, pairsStream );
             cx.pairsLIn.ReleaseDeviceBuffer( pairsStream );
-            hostPairsL      = cx.hostTableSortedL + cx.prevTablePairOffset;
-            hostPairsLFinal = cx.hostBackPointers[(int)cx.table-1].left  + cx.prevTablePairOffset;
+            // hostPairsL      = cx.hostTableSortedL + cx.prevTablePairOffset;
 
+            uint32* hostPairsLFinal = cx.hostBackPointers[(int)inTable].left  + cx.prevTablePairOffset;
             cx.sortedPairsLOut.DownloadT( hostPairsLFinal, entryCount, pairsStream, cx.downloadDirect );
             // cx.sortedPairsLOut.DownloadAndCopyT( hostPairsL, hostPairsLFinal, entryCount, pairsStream );
-            
+
             // if( !isOutputCompressed )
             {
                 uint16* pairsRIn     = (uint16*)cx.pairsRIn       .GetUploadedDeviceBuffer( pairsStream );
                 uint16* sortedPairsR = (uint16*)cx.sortedPairsROut.LockDeviceBuffer( pairsStream );
                 CudaK32PlotSortByKey( entryCount, sortKeyOut, pairsRIn, sortedPairsR, pairsStream );
                 cx.pairsRIn.ReleaseDeviceBuffer( pairsStream );
-                hostPairsR      = cx.hostTableSortedR + cx.prevTablePairOffset; 
-                hostPairsRFinal = cx.hostBackPointers[(int)cx.table-1].right + cx.prevTablePairOffset;
+                // hostPairsR      = cx.hostTableSortedR + cx.prevTablePairOffset; 
+
+                uint16* hostPairsRFinal = cx.hostBackPointers[(int)inTable].right + cx.prevTablePairOffset;
                 
                 cx.sortedPairsROut.DownloadT( hostPairsRFinal, entryCount, pairsStream, cx.downloadDirect );
                 // cx.sortedPairsROut.DownloadAndCopyT( hostPairsR, hostPairsRFinal, entryCount, pairsStream );
@@ -557,7 +804,7 @@ void FpTableBucket( CudaK32PlotContext& cx, const uint32 bucket )
 void FinalizeTable7( CudaK32PlotContext& cx )
 {
     Log::Line( "Finalizing Table 7" );
-    
+
     const auto timer = TimerBegin();
 
     cx.table               = TableId::Table7+1;   // Set a false table
@@ -578,19 +825,41 @@ void FinalizeTable7( CudaK32PlotContext& cx )
     const size_t c1TableSizeBytes = c1TotalEntries * sizeof( uint32 );
     const size_t c2TableSizeBytes = c2TotalEntries * sizeof( uint32 );
 
+    if( cx.cfg.hybrid128Mode )
+    {
+        cx.sortedPairsLOut.AssignDiskBuffer( cx.diskContext->tablesL[(int)TableId::Table7] );
+        cx.sortedPairsROut.AssignDiskBuffer( cx.diskContext->tablesR[(int)TableId::Table7] );
+    }
+
+
+    // Re-use meta GPU downloader to download parks
+    GpuDownloadBuffer& parkDownloader = cx.metaOut;
+
+    // Store disk buffer temporarily, if there is one, since we don't want to write to meta now
+    DiskBufferBase* metaDiskBuffer = parkDownloader.GetDiskBuffer();
+
+    // Reset park buffer chain, if we're using it
+    if( cx.parkContext )
+    {
+        cx.parkContext->parkBufferChain->Reset();
+        parkDownloader.AssignDiskBuffer( nullptr ); // We want direct downloads to the park buffers, which are pinned already
+    }
 
     // Prepare host allocations
     constexpr size_t c3ParkSize = CalculateC3Size();
 
     const uint64 totalParkSize = CDivT( tableLength, (uint64)kCheckpoint1Interval ) * c3ParkSize;
 
-    StackAllocator hostAlloc( cx.hostMeta, BBCU_TABLE_ALLOC_ENTRY_COUNT * sizeof( uint32 ) * 4 );
+    StackAllocator hostAlloc = cx.parkContext
+        ? StackAllocator( cx.parkContext->table7Memory.Ptr(), cx.parkContext->table7Memory.Length() )
+        : StackAllocator( cx.hostMeta, BBCU_TABLE_ALLOC_ENTRY_COUNT * sizeof( uint32 ) * 4 );
+
     uint32* hostC1Buffer        = hostAlloc.CAlloc<uint32>( c1TotalEntries );
     uint32* hostC2Buffer        = hostAlloc.CAlloc<uint32>( c2TotalEntries );
     uint32* hostLastParkEntries = hostAlloc.CAlloc<uint32>( kCheckpoint1Interval );
     byte*   hostLastParkBuffer  = (byte*)hostAlloc.CAlloc<uint32>( kCheckpoint1Interval );
-    byte*   hostCompressedParks = hostAlloc.AllocT<byte>( totalParkSize );
-    
+    byte*   hostCompressedParks = cx.parkContext ? nullptr : hostAlloc.AllocT<byte>( totalParkSize );
+
     byte*   hostParkWriter      = hostCompressedParks;
     uint32* hostC1Writer        = hostC1Buffer;
 
@@ -606,8 +875,6 @@ void FinalizeTable7( CudaK32PlotContext& cx )
 
     const size_t parkBufferSize = kCheckpoint1Interval * sizeof( uint32 );
 
-    GpuDownloadBuffer& parkDownloader = cx.metaOut;
-
     cudaStream_t mainStream     = cx.computeStream;
     cudaStream_t metaStream     = cx.computeStream;//B;
     cudaStream_t pairsStream    = cx.computeStream;//C;
@@ -616,7 +883,7 @@ void FinalizeTable7( CudaK32PlotContext& cx )
     // Load CTable
     FSE_CTable* devCTable = devAlloc.AllocT<FSE_CTable>( sizeof( CTable_C3 ), sizeof( uint64 ) );
     CudaErrCheck( cudaMemcpyAsync( devCTable, CTable_C3, sizeof( CTable_C3 ), cudaMemcpyHostToDevice, cx.computeStream ) );
-
+    CudaErrCheck( cudaStreamSynchronize( cx.computeStream  ) );
 
     // Prepare plot tables
     cx.plotWriter->ReserveTableSize( PlotTable::C1, c1TableSizeBytes );
@@ -627,7 +894,6 @@ void FinalizeTable7( CudaK32PlotContext& cx )
     uint32  retainedC3EntryCount = 0;
     uint32* devYSorted           = cx.devYWork + kCheckpoint1Interval;
 
-    
     uint32* sortKeyIn  = (uint32*)cx.devMatches;
     uint32* sortKeyOut = cx.devSortKey;
 
@@ -732,13 +998,42 @@ void FinalizeTable7( CudaK32PlotContext& cx )
 
         // Download compressed parks to host
         const size_t parkDownloadSize = c3ParkSize * parkCount;
+
+        if( cx.parkContext )
+        {
+            ASSERT( parkDownloadSize <= cx.parkContext->parkBufferChain->BufferSize() );
+
+            // Override the park buffer to be used when using a park context
+            hostParkWriter = cx.parkContext->parkBufferChain->PeekBuffer( bucket );
+
+            // Wait for the next park buffer to be available to be used for download
+            parkDownloader.HostCallback([&cx]{
+               (void)cx.parkContext->parkBufferChain->GetNextBuffer();
+            });
+        }
+
+        const bool directOverride = cx.parkContext != nullptr;
+    
         parkDownloader.DownloadWithCallback( hostParkWriter, parkDownloadSize, 
             []( void* parksBuffer, size_t size, void* userData ) {
 
                 auto& cx = *reinterpret_cast<CudaK32PlotContext*>( userData );
+
                 cx.plotWriter->WriteTableData( parksBuffer, size );
-            }, &cx, mainStream );
+
+                // Release the buffer after the plot writer is done with it.
+                if( cx.parkContext )
+                {
+                    cx.plotWriter->CallBack([&cx](){
+                        cx.parkContext->parkBufferChain->ReleaseNextBuffer();
+                    });
+                }
+
+            }, &cx, mainStream, directOverride );
         hostParkWriter += parkDownloadSize;
+
+        if( cx.parkContext )
+            hostParkWriter = nullptr;
     }
 
     // Download c1 entries
@@ -788,14 +1083,24 @@ void FinalizeTable7( CudaK32PlotContext& cx )
 
 
     // Cleanup
-    // cx.sortedPairsLOut.WaitForCopyCompletion();
-    // cx.sortedPairsROut.WaitForCopyCompletion();
     cx.sortedPairsLOut.WaitForCompletion();
     cx.sortedPairsROut.WaitForCompletion();
     cx.sortedPairsLOut.Reset();
     cx.sortedPairsROut.Reset();
 
     cx.prevTablePairOffset = 0;
+
+    // Restore disk buffer on repurposed meta download stream
+    parkDownloader.AssignDiskBuffer( metaDiskBuffer );
+
+    if( cx.cfg.hybrid128Mode )
+    {
+        cx.diskContext->tablesL[(int)TableId::Table7]->Swap();
+        cx.diskContext->tablesR[(int)TableId::Table7]->Swap();
+
+        if( cx.cfg.hybrid16Mode )
+            cx.diskContext->yBuffer->Swap();
+    }
 
     auto elapsed = TimerEnd( timer );
     Log::Line( "Finalized Table 7 in %.2lf seconds.", elapsed );
@@ -834,7 +1139,7 @@ __global__ void CudaCompressTable( const uint32* entryCount, const uint32* inLEn
     const uint32 x0 = inLEntries[pair.left ];
     const uint32 x1 = inLEntries[pair.right];
 
-    // Convert to linepoint   
+    // Convert to linepoint
     if constexpr ( UseLP )         
         outREntries[gid] = (uint32)CudaSquareToLinePoint64( x1 >> bitShift, x0 >> bitShift );
     else
@@ -850,7 +1155,7 @@ void InlineTable( CudaK32PlotContext& cx, const uint32* devInX, cudaStream_t str
 
     const uint32 kthreads = 256;
     const uint32 kblocks  = CDiv( BBCU_BUCKET_ALLOC_ENTRY_COUNT, (int)kthreads );
-    
+
     if( isCompressedInput )
     {
         const bool   isFinalTable = cx.table == TableId::Table1 + (TableId)cx.gCfg->numDroppedTables;
@@ -870,7 +1175,7 @@ void InlineTable( CudaK32PlotContext& cx, const uint32* devInX, cudaStream_t str
 //-----------------------------------------------------------
 void CudaK32PlotDownloadBucket( CudaK32PlotContext& cx )
 {
-    const bool   writeVertical  = CudaK32PlotIsOutputInterleaved( cx );
+    const bool   writeVertical  = CudaK32PlotIsOutputVertical( cx );
     const size_t metaMultiplier = GetTableMetaMultiplier( cx.table );
 
     const bool   downloadCompressed   = cx.table > TableId::Table1 && (uint32)cx.table <= cx.gCfg->numDroppedTables;
@@ -879,8 +1184,8 @@ void CudaK32PlotDownloadBucket( CudaK32PlotContext& cx )
     uint32* hostY        = cx.hostY;
     uint32* hostMeta     = cx.hostMeta;
 
-    uint32* hostPairsL   = cx.hostTableL; //cx.hostBackPointers[6].left;
-    uint16* hostPairsR   = cx.hostTableR; //cx.hostBackPointers[6].right;
+    uint32* hostPairsL   = cx.hostTableL;
+    uint16* hostPairsR   = cx.hostTableR;
     Pair*   t2HostPairs  = (Pair*)cx.hostBackPointers[4].left;
 
     const size_t startOffset  = cx.bucket * ( writeVertical ? BBCU_MAX_SLICE_ENTRY_COUNT : BBCU_BUCKET_ALLOC_ENTRY_COUNT );  // vertical: offset to starting col. horizontal: to starting row
@@ -896,7 +1201,7 @@ void CudaK32PlotDownloadBucket( CudaK32PlotContext& cx )
     {
         const size_t metaSizeMultiplier = metaMultiplier == 3 ? 4 : metaMultiplier;
         const size_t metaSize           = sizeof( uint32 ) * metaSizeMultiplier;
-        
+
         const size_t  metaSrcStride = srcStride * metaSize;
         const size_t  metaDstStride = dstStride * sizeof( K32Meta4 );
         const size_t  metaWidth     = width * metaSize;
@@ -927,19 +1232,22 @@ void UploadBucketForTable( CudaK32PlotContext& cx, const uint64 bucket )
     const TableId rTable  = cx.table;
     const TableId inTable = rTable - 1;
 
-    uint32 metaMultiplier = GetTableMetaMultiplier( inTable );
+    const uint32  metaMultiplier = GetTableMetaMultiplier( inTable );
 
     const uint32  inIdx        = CudaK32PlotGetInputIndex( cx );
-    const bool    readVertical = CudaK32PlotIsOutputInterleaved( cx );
+    const bool    readVertical = CudaK32PlotIsOutputVertical( cx );
 
     const uint32* hostY        = cx.hostY;
     const uint32* hostMeta     = cx.hostMeta;
-    const uint32* hostPairsL   = cx.hostTableL; //cx.hostBackPointers[6].left;
-    const uint16* hostPairsR   = cx.hostTableR; //cx.hostBackPointers[6].right;
+    const uint32* hostPairsL   = cx.hostTableL;
+    const uint16* hostPairsR   = cx.hostTableR;
 
     const bool   uploadCompressed   = cx.table > TableId::Table2 && (uint32)cx.table-1 <= cx.gCfg->numDroppedTables;
     const bool   uploadInlinedPairs = !uploadCompressed && (uint32)cx.table == cx.gCfg->numDroppedTables+2;
     const Pair*  t2HostPairs        = (Pair*)cx.hostBackPointers[4].left; // Table 2 will use table 5, and overflow onto 6
+
+    if( cx.cfg.hybrid128Mode )
+        t2HostPairs = (Pair*)hostPairsL;
 
     uint32 stride = BBCU_BUCKET_ALLOC_ENTRY_COUNT;          // Start as vertical
     size_t offset = (size_t)bucket * BBCU_MAX_SLICE_ENTRY_COUNT;
@@ -974,7 +1282,7 @@ void UploadBucketForTable( CudaK32PlotContext& cx, const uint64 bucket )
                 cx.pairsRIn.UploadArrayT<uint16>( hostPairsR + offset, BBCU_BUCKET_COUNT, stride, BBCU_BUCKET_COUNT, counts, pairsStream );
         }
     }
-    
+
     // Meta
     if( metaMultiplier > 0 )
     {
@@ -982,9 +1290,11 @@ void UploadBucketForTable( CudaK32PlotContext& cx, const uint64 bucket )
         const size_t metaSize           = sizeof( uint32 ) * metaSizeMultiplier;
 
         auto actualMetaStream = inTable == TableId::Table1 ? cx.computeStream : metaStream;
+
         cx.metaIn.UploadArray( hostMeta + offset * 4, BBCU_BUCKET_COUNT, metaSize, stride * sizeof( K32Meta4 ), BBCU_BUCKET_COUNT, counts, actualMetaStream );
     }
 }
+
 
 
 ///
@@ -1002,13 +1312,19 @@ void AllocBuffers( CudaK32PlotContext& cx )
     cx.hostTempAllocSize  = 0;
     cx.devAllocSize       = 0;
 
+    // If on <= 128G mode or not using direct downloads, 
+    // we need to use a separate buffer for downloading parks, instead of re-using exisintg ones.
+    // If on <= 64G mode or not using direct downloads, 
+    const bool allocateParkBuffers = cx.downloadDirect || cx.cfg.hybrid128Mode;
+    size_t parksPinnedSize = 0;
+
     // Gather the size needed first
     {
         CudaK32AllocContext acx = {};
 
         acx.alignment = alignment;
         acx.dryRun    = true;
-        
+
         DummyAllocator pinnedAllocator;
         DummyAllocator hostTableAllocator;
         DummyAllocator hostTempAllocator;
@@ -1020,7 +1336,6 @@ void AllocBuffers( CudaK32PlotContext& cx )
         acx.devAllocator       = &devAllocator;
 
         AllocateP1Buffers( cx, acx );
-
         cx.pinnedAllocSize    = pinnedAllocator   .Size();
         cx.hostTableAllocSize = hostTableAllocator.Size();
         cx.hostTempAllocSize  = hostTempAllocator .Size();
@@ -1033,7 +1348,6 @@ void AllocBuffers( CudaK32PlotContext& cx )
         devAllocator       = {};
 
         CudaK32PlotPhase2AllocateBuffers( cx, acx );
-
         cx.pinnedAllocSize    = std::max( cx.pinnedAllocSize   , pinnedAllocator   .Size() );
         cx.hostTableAllocSize = std::max( cx.hostTableAllocSize, hostTableAllocator.Size() );
         cx.hostTempAllocSize  = std::max( cx.hostTempAllocSize , hostTempAllocator .Size() );
@@ -1046,15 +1360,23 @@ void AllocBuffers( CudaK32PlotContext& cx )
         devAllocator       = {};
 
         CudaK32PlotPhase3AllocateBuffers( cx, acx );
-
         cx.pinnedAllocSize    = std::max( cx.pinnedAllocSize   , pinnedAllocator   .Size() );
         cx.hostTableAllocSize = std::max( cx.hostTableAllocSize, hostTableAllocator.Size() );
         cx.hostTempAllocSize  = std::max( cx.hostTempAllocSize , hostTempAllocator .Size() );
         cx.devAllocSize       = std::max( cx.devAllocSize      , devAllocator      .Size() );
+
+        // May need to allocate extra pinned buffers for park buffers
+        if( allocateParkBuffers )
+        {
+            pinnedAllocator = {};
+            AllocateParkSerializationBuffers( cx, *acx.pinnedAllocator, acx.dryRun );
+            parksPinnedSize = pinnedAllocator.Size();
+        }
     }
 
-    size_t totalPinnedSize = cx.pinnedAllocSize + cx.hostTempAllocSize;
-    size_t totalHostSize   = cx.hostTableAllocSize + totalPinnedSize;
+
+    const size_t totalPinnedSize = cx.pinnedAllocSize + cx.hostTempAllocSize + parksPinnedSize;
+    const size_t totalHostSize   = cx.hostTableAllocSize + totalPinnedSize;
     Log::Line( "Kernel RAM required       : %-12llu bytes ( %-9.2lf MiB or %-6.2lf GiB )", totalPinnedSize,
                    (double)totalPinnedSize BtoMB, (double)totalPinnedSize BtoGB );
 
@@ -1070,43 +1392,46 @@ void AllocBuffers( CudaK32PlotContext& cx )
     Log::Line( "GPU RAM required          : %-12llu bytes ( %-9.2lf MiB or %-6.2lf GiB )", cx.devAllocSize,
                    (double)cx.devAllocSize BtoMB, (double)cx.devAllocSize BtoGB );
 
-    Log::Line( "Allocating buffers" );
     // Now actually allocate the buffers
+    Log::Line( "Allocating buffers..." );
     CudaErrCheck( cudaMallocHost( &cx.pinnedBuffer, cx.pinnedAllocSize, cudaHostAllocDefault ) );
 
     #if _DEBUG
         cx.hostBufferTables = bbvirtallocboundednuma<byte>( cx.hostTableAllocSize );
     #else
-        #if !_WIN32
-        // if( cx.downloadDirect )
-            CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
-        // else
-        // {
-        //     // #TODO: On windows, first check if we have enough shared memory (512G)? 
-        //     //        and attempt to alloc that way first. Otherwise, use intermediate pinned buffers.
-        #else
-            cx.hostBufferTables = bbvirtallocboundednuma<byte>( cx.hostTableAllocSize );
+
+        bool allocateHostTablesPinned = cx.downloadDirect;
+        #if _WIN32
+            // On windows we always force the use of intermediate buffers, so we allocate on the host
+            allocateHostTablesPinned = false;
         #endif
-        // }
+
+        // Log::Line( "Table pairs allocated as pinned: %s", allocateHostTablesPinned ? "true" : "false" );
+        if( allocateHostTablesPinned )
+            CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
+        else
+            cx.hostBufferTables = bbvirtallocboundednuma<byte>( cx.hostTableAllocSize );
     #endif
 
-    //CudaErrCheck( cudaMallocHost( &cx.hostBufferTables, cx.hostTableAllocSize, cudaHostAllocDefault ) );
-
     cx.hostBufferTemp = nullptr;
-#if _DEBUG
-    cx.hostBufferTemp   = bbvirtallocboundednuma<byte>( cx.hostTempAllocSize );
-#endif
-    if( cx.hostBufferTemp == nullptr )
+    #if _DEBUG || _WIN32
+        if( cx.hostTempAllocSize )
+            cx.hostBufferTemp = bbvirtallocboundednuma<byte>( cx.hostTempAllocSize );
+    #endif
+
+    if( cx.hostBufferTemp == nullptr && cx.hostTempAllocSize )
         CudaErrCheck( cudaMallocHost( &cx.hostBufferTemp, cx.hostTempAllocSize, cudaHostAllocDefault ) );
 
     CudaErrCheck( cudaMalloc( &cx.deviceBuffer, cx.devAllocSize ) );
 
     // Warm start
-    if( true )
+    if( true )// cx.gCfg->warmStart )
     {
-        FaultMemoryPages::RunJob( *cx.threadPool, cx.threadPool->ThreadCount(), cx.pinnedBuffer, cx.pinnedAllocSize );
+        FaultMemoryPages::RunJob( *cx.threadPool, cx.threadPool->ThreadCount(), cx.pinnedBuffer    , cx.pinnedAllocSize    );
         FaultMemoryPages::RunJob( *cx.threadPool, cx.threadPool->ThreadCount(), cx.hostBufferTables, cx.hostTableAllocSize );
-        FaultMemoryPages::RunJob( *cx.threadPool, cx.threadPool->ThreadCount(), cx.hostBufferTemp, cx.hostTempAllocSize );
+
+        if( cx.hostTempAllocSize )
+            FaultMemoryPages::RunJob( *cx.threadPool, cx.threadPool->ThreadCount(), cx.hostBufferTemp, cx.hostTempAllocSize );
     }
 
     {
@@ -1114,7 +1439,7 @@ void AllocBuffers( CudaK32PlotContext& cx )
 
         acx.alignment = alignment;
         acx.dryRun    = false;
-        
+
         StackAllocator pinnedAllocator   ( cx.pinnedBuffer    , cx.pinnedAllocSize    );
         StackAllocator hostTableAllocator( cx.hostBufferTables, cx.hostTableAllocSize );
         StackAllocator hostTempAllocator ( cx.hostBufferTemp  , cx.hostTempAllocSize  );
@@ -1137,106 +1462,254 @@ void AllocBuffers( CudaK32PlotContext& cx )
         hostTempAllocator .PopToMarker( 0 );
         devAllocator      .PopToMarker( 0 );
         CudaK32PlotPhase3AllocateBuffers( cx, acx );
+
+        if( allocateParkBuffers )
+        {
+            // Fine to leak. App-lifetime buffer
+            void* parksBuffer = nullptr;
+            CudaErrCheck( cudaMallocHost( &parksBuffer, parksPinnedSize, cudaHostAllocDefault ) );
+            StackAllocator parkAllocator( parksBuffer, parksPinnedSize );
+            AllocateParkSerializationBuffers( cx, parkAllocator, acx.dryRun );
+        }
     }
 }
 
 //-----------------------------------------------------------
 void AllocateP1Buffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
-    const size_t alignment = acx.alignment;
+    const size_t    alignment     = acx.alignment;
+    const bool      isCompressed  = cx.gCfg->compressionLevel > 0;
+    const TableId   firstTable    = cx.firstStoredTable;
 
-    const bool isCompressed = cx.gCfg->compressionLevel > 0;
+    const FileFlags tmp1FileFlags = cx.cfg.temp1DirectIO ? FileFlags::NoBuffering | FileFlags::LargeFile : FileFlags::LargeFile;
+    const FileFlags tmp2FileFlags = cx.cfg.temp2DirectIO ? FileFlags::NoBuffering | FileFlags::LargeFile : FileFlags::LargeFile;
 
-    // #TODO: Re-optimize usage here again for windows running 256G
     /// Host allocations
     {
         // Temp allocations are pinned host buffers that can be re-used for other means in different phases.
         // This is roughly equivalent to temp2 dir during disk plotting.
-        cx.hostY    = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
-        cx.hostMeta = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT * BBCU_HOST_META_MULTIPLIER, alignment );
 
-        const size_t markingTableBitFieldSize = GetMarkingTableBitFieldSize();
 
-        cx.hostMarkingTables[0] = nullptr;
-        cx.hostMarkingTables[1] = isCompressed ? nullptr : acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
-        cx.hostMarkingTables[2] = acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
-        cx.hostMarkingTables[3] = acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
-        cx.hostMarkingTables[4] = acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
-        cx.hostMarkingTables[5] = acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
+        if( !cx.cfg.hybrid16Mode )
+        {
+            cx.hostY = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
+            cx.hostMeta = acx.hostTempAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT * BBCU_HOST_META_MULTIPLIER, alignment );
+        }
+        else if( !cx.diskContext->metaBuffer )
+        {
+            const size_t ySliceSize    = sizeof( uint32 ) * BBCU_MAX_SLICE_ENTRY_COUNT;
+            const size_t metaSliceSize = sizeof( uint32 ) * BBCU_META_SLICE_ENTRY_COUNT;
 
-    
-        // NOTE: The first table has their values inlines into the backpointers of the next table
-        cx.hostBackPointers[0] = {};
+            cx.diskContext->yBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::Y_DISK_BUFFER_FILE_NAME.data(), 
+                                            BBCU_BUCKET_COUNT, ySliceSize, FileMode::Create, FileAccess::ReadWrite, tmp2FileFlags );
+            FatalIf( !cx.diskContext->yBuffer, "Failed to create y disk buffer." );
 
-        const TableId firstTable = TableId::Table2 + (TableId)cx.gCfg->numDroppedTables;
-        
-        Pair* firstTablePairs = acx.hostTableAllocator->CAlloc<Pair>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
-        cx.hostBackPointers[(int)firstTable] = { (uint32*)firstTablePairs, nullptr };
+            cx.diskContext->metaBuffer = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::META_DISK_BUFFER_FILE_NAME.data(), 
+                                            BBCU_BUCKET_COUNT, metaSliceSize, FileMode::Create, FileAccess::ReadWrite, tmp2FileFlags );
+            FatalIf( !cx.diskContext->metaBuffer, "Failed to create metadata disk buffer." );
+        }
 
-        for( TableId table = firstTable + 1; table <= TableId::Table7; table++ )
-            cx.hostBackPointers[(int)table] = { acx.hostTableAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment ), acx.hostTableAllocator->CAlloc<uint16>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment ) };
+        // Marking tables used to prune back pointers
+        {
+            const size_t markingTableBitFieldSize = GetMarkingTableBitFieldSize();
 
-        cx.hostTableL       = cx.hostBackPointers[6].left;     // Also used for Table 7
-        cx.hostTableR       = cx.hostBackPointers[6].right;
-        cx.hostTableSortedL = cx.hostBackPointers[5].left;
-        cx.hostTableSortedR = cx.hostBackPointers[5].right;
+            cx.hostMarkingTables[0] = nullptr;
+            cx.hostMarkingTables[1] = isCompressed ? nullptr : acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
+            cx.hostMarkingTables[2] = acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
+            cx.hostMarkingTables[3] = acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
+            cx.hostMarkingTables[4] = acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
+            cx.hostMarkingTables[5] = acx.hostTableAllocator->AllocT<uint64>( markingTableBitFieldSize, alignment );
+        }
+
+        if( !cx.cfg.hybrid128Mode )
+        {
+            // NOTE: The first table has their values inlined into the backpointers of the next table
+            cx.hostBackPointers[0] = {};
+
+            Pair* firstTablePairs = acx.hostTableAllocator->CAlloc<Pair>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
+
+            cx.hostBackPointers[(int)firstTable] = { (uint32*)firstTablePairs, nullptr };
+
+            for( TableId table = firstTable + 1; table <= TableId::Table7; table++ )
+            {
+                cx.hostBackPointers[(int)table] = { 
+                    acx.hostTableAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment ), 
+                    acx.hostTableAllocator->CAlloc<uint16>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment )
+                };
+            }
+
+            // These buffers, belonging to table 7, are re-used
+            // to store the unsorted back-pointers.
+            // For this to work, the reading ot table 7 must be horizontal (see CudaK32PlotIsOutputVertical()).
+            // This way, when we store the sorted pairs, we don't
+            // overwrite the unsorted data from other buckets.
+            cx.hostTableL = cx.hostBackPointers[6].left;
+            cx.hostTableR = cx.hostBackPointers[6].right;
+        }
+        else
+        {
+            char tableName[] = "table_l_000.tmp";
+
+            size_t multiplier = 2; // First table entries are Pair, not uint32s...
+
+            #if BBCU_DBG_SKIP_PHASE_1
+                const FileMode fileMode = FileMode::Open;
+            #else
+                const FileMode fileMode = FileMode::Create;
+            #endif
+
+            for( TableId table = firstTable; table <= TableId::Table7; table++ )
+            {
+                if( cx.diskContext->tablesL[(int)table] == nullptr )
+                {
+                    sprintf( tableName, "table_l_%d.tmp", (int32)table+1 );
+                    cx.diskContext->tablesL[(int)table] = DiskBuffer::Create(
+                        *cx.diskContext->temp1Queue, tableName, BBCU_BUCKET_COUNT, sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT * multiplier,
+                        fileMode, FileAccess::ReadWrite, tmp1FileFlags );
+
+                    FatalIf( !cx.diskContext->tablesL[(int)table], "Failed to create table %d L disk buffer.", (int)table+1 );
+                }
+
+                if( table > firstTable && cx.diskContext->tablesR[(int)table] == nullptr )
+                {
+                    sprintf( tableName, "table_r_%d.tmp", (int32)table+1 );
+                    cx.diskContext->tablesR[(int)table] = DiskBuffer::Create(
+                        *cx.diskContext->temp1Queue, tableName, BBCU_BUCKET_COUNT, sizeof( uint16 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT,
+                        fileMode, FileAccess::ReadWrite, tmp1FileFlags );
+
+                    FatalIf( !cx.diskContext->tablesR[(int)table], "Failed to create table %d R disk buffer.", (int)table+1 );
+                }
+
+                multiplier = 1;
+            }
+
+            // When storing unsorted inlined x's, we don't have enough space in RAM, store i disk instead.
+            const size_t xSliceSize = BBCU_MAX_SLICE_ENTRY_COUNT * sizeof( Pair );
+            cx.diskContext->unsortedL = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, CudaK32HybridMode::LPAIRS_DISK_BUFFER_FILE_NAME.data(), 
+                                                                   BBCU_BUCKET_COUNT, xSliceSize, FileMode::OpenOrCreate, FileAccess::ReadWrite, tmp2FileFlags );
+            FatalIf( !cx.diskContext->unsortedL, "Failed to create unsorted L disk buffer." );
+
+            if( cx.cfg.hybrid16Mode )
+            {
+                cx.diskContext->unsortedR = DiskBucketBuffer::Create( *cx.diskContext->temp2Queue, "p1unsorted_r.tmp", 
+                                                                    BBCU_BUCKET_COUNT, BBCU_MAX_SLICE_ENTRY_COUNT * sizeof( uint16 ), FileMode::OpenOrCreate, FileAccess::ReadWrite, tmp2FileFlags );
+                FatalIf( !cx.diskContext->unsortedR, "Failed to create unsorted R disk buffer." );
+            }
+            else
+            {
+                // In 128G mode we can store intermediate pairs in the host
+                cx.hostTableL = acx.hostTableAllocator->CAlloc<uint32>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
+                cx.hostTableR = acx.hostTableAllocator->CAlloc<uint16>( BBCU_TABLE_ALLOC_ENTRY_COUNT, alignment );
+            }
+        }
     }
 
     /// Device & Pinned allocations
     {
-        // #NOTE: The R pair is allocated as uint32 because for table 2 we want to download them as inlined x's, so we need 2 uint32 buffers
-        /// Device/Pinned allocations
-        // cx.yOut    = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-        // cx.metaOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<K32Meta4>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-        cx.yOut    = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer<uint32>  ( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
-        cx.metaOut = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer<K32Meta4>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
+        GpuStreamDescriptor yDesc{};
+        yDesc.entriesPerSlice = BBCU_MAX_SLICE_ENTRY_COUNT;
+        yDesc.sliceCount      = BBCU_BUCKET_COUNT;
+        yDesc.sliceAlignment  = alignment;
+        yDesc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
+        yDesc.deviceAllocator = acx.devAllocator;
+        yDesc.pinnedAllocator = nullptr;             // Start in direct mode (no intermediate pinined buffers)
 
-        // These download buffers share the same backing buffers
+        // In disk-backed mode, we always have pinned buffers,
+        // which are the same buffers used to write and read from disk.
+        GpuStreamDescriptor descTablePairs       = yDesc;
+        GpuStreamDescriptor descTableSortedPairs = yDesc;
+        GpuStreamDescriptor descXPairs           = yDesc;
+        GpuStreamDescriptor descMeta             = yDesc;
+
+        if( cx.cfg.hybrid128Mode )
         {
+            // Temp 1 Queue
+            descTableSortedPairs.pinnedAllocator = acx.pinnedAllocator;
+            descTableSortedPairs.sliceAlignment  = cx.diskContext->temp1Queue->BlockSize();
+
+            // Temp 2 Queue
+            descXPairs.pinnedAllocator   = acx.pinnedAllocator;
+            descXPairs.sliceAlignment    = cx.diskContext->temp2Queue->BlockSize();
+
+            if( cx.cfg.hybrid16Mode )
+            {
+                yDesc.pinnedAllocator = acx.pinnedAllocator;
+                yDesc.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
+
+                descMeta.pinnedAllocator = acx.pinnedAllocator;
+                descMeta.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
+
+                descTablePairs.pinnedAllocator = acx.pinnedAllocator;
+                descTablePairs.sliceAlignment  = cx.diskContext->temp2Queue->BlockSize();
+            }
+        }
+
+        if( !cx.downloadDirect )
+        {
+            // Use intermediate pinned buffer for transfers to non-pinned destinations
+            yDesc.pinnedAllocator                = acx.pinnedAllocator;
+            descTablePairs.pinnedAllocator       = acx.pinnedAllocator;
+            descTableSortedPairs.pinnedAllocator = acx.pinnedAllocator;
+            descXPairs.pinnedAllocator           = acx.pinnedAllocator;
+            descMeta.pinnedAllocator             = acx.pinnedAllocator;
+        }
+
+
+        ///
+        /// Downloads
+        ///
+        cx.yOut    = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( yDesc, acx.dryRun );
+        cx.metaOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<K32Meta4>( descMeta, acx.dryRun );
+
+        {
+            // These download buffers share the same backing buffers
             const size_t devMarker    = acx.devAllocator->Size();
             const size_t pinnedMarker = acx.pinnedAllocator->Size();
 
-            cx.pairsLOut = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
-            cx.pairsROut = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer<uint16>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, alignment, acx.dryRun );
+            cx.pairsLOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( descTablePairs, acx.dryRun );
+            cx.pairsROut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint16>( descTablePairs, acx.dryRun );
 
             acx.devAllocator->PopToMarker( devMarker );
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.xPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+            cx.xPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( descXPairs, acx.dryRun );
         }
 
-        // These download buffers share the same backing buffers
         {
+            // These download buffers share the same backing buffers
             const size_t devMarker    = acx.devAllocator->Size();
             const size_t pinnedMarker = acx.pinnedAllocator->Size();
 
-            cx.sortedPairsLOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-            cx.sortedPairsROut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint16>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+            cx.sortedPairsLOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint32>( descTableSortedPairs, acx.dryRun );
+            cx.sortedPairsROut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<uint16>( descTableSortedPairs, acx.dryRun );
 
             acx.devAllocator->PopToMarker( devMarker );
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.sortedXPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+            cx.sortedXPairsOut = cx.gpuDownloadStream[0]->CreateDownloadBufferT<Pair>( descXPairs, acx.dryRun );
         }
 
-        cx.yIn    = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-        cx.metaIn = cx.gpuUploadStream[0]->CreateUploadBufferT<K32Meta4>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+        ///
+        /// Uploads
+        ///
+        cx.yIn    = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( yDesc, acx.dryRun );
+        cx.metaIn = cx.gpuUploadStream[0]->CreateUploadBufferT<K32Meta4>( descMeta, acx.dryRun );
 
         // These uploaded buffers share the same backing buffers
         {
             const size_t devMarker    = acx.devAllocator->Size();
             const size_t pinnedMarker = acx.pinnedAllocator->Size();
 
-            cx.pairsLIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
-            cx.pairsRIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint16>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+            cx.pairsLIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( descTablePairs, acx.dryRun );
+            cx.pairsRIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint16>( descTablePairs, acx.dryRun );
 
             acx.devAllocator->PopToMarker( devMarker );
             acx.pinnedAllocator->PopToMarker( pinnedMarker );
 
             // Allocate Pair at the end, to ensure we grab the highest value
-            cx.xPairsIn = cx.gpuUploadStream[0]->CreateUploadBufferT<Pair>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, *acx.devAllocator, *acx.pinnedAllocator, alignment, acx.dryRun );
+            cx.xPairsIn = cx.gpuUploadStream[0]->CreateUploadBufferT<Pair>( descXPairs, acx.dryRun );
         }
 
         /// Device-only allocations
@@ -1268,7 +1741,54 @@ void AllocateP1Buffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
         cx.hostBucketCounts = acx.pinnedAllocator->CAlloc<uint32>( BBCU_BUCKET_COUNT, alignment );
         cx.hostBucketSlices = acx.pinnedAllocator->CAlloc<uint32>( BBCU_BUCKET_COUNT * BBCU_BUCKET_COUNT, alignment );
     }
+
+    /// In disk-backed mode, assign disk buffers to gpu buffers
+    if( cx.cfg.hybrid128Mode && !acx.dryRun )
+    {
+        cx.xPairsOut.AssignDiskBuffer( cx.diskContext->unsortedL );
+        cx.xPairsIn .AssignDiskBuffer( cx.diskContext->unsortedL );
+
+        if( cx.cfg.hybrid16Mode )
+        {
+            cx.pairsLOut.AssignDiskBuffer( cx.diskContext->unsortedL );
+            cx.pairsLIn .AssignDiskBuffer( cx.diskContext->unsortedL );
+
+            cx.pairsROut.AssignDiskBuffer( cx.diskContext->unsortedR );
+            cx.pairsRIn .AssignDiskBuffer( cx.diskContext->unsortedR );
+
+            cx.yOut.AssignDiskBuffer( cx.diskContext->yBuffer );
+            cx.yIn .AssignDiskBuffer( cx.diskContext->yBuffer );
+
+            cx.metaOut.AssignDiskBuffer( cx.diskContext->metaBuffer );
+            cx.metaIn .AssignDiskBuffer( cx.diskContext->metaBuffer );
+        }
+    }
 }
+
+//-----------------------------------------------------------
+void AllocateParkSerializationBuffers( CudaK32PlotContext& cx, IAllocator& pinnedAllocator, bool dryRun )
+{
+    ASSERT( cx.parkContext );
+
+    auto& pc = *cx.parkContext;
+    pc.maxParkBuffers = 3;
+
+    // Get the largest park size
+    const size_t maxParkSize = cx.cfg.gCfg->compressionLevel == 0 ?
+                                CalculateParkSize( TableId::Table1 ) :
+                                GetLargestCompressedParkSize();
+
+    const size_t parksPerBuffer       = CDivT<size_t>( BBCU_BUCKET_ALLOC_ENTRY_COUNT, kEntriesPerPark ) + 2;
+    // CDiv( BBCU_BUCKET_ALLOC_ENTRY_COUNT, kCheckpoint1Interval ) + 1; // Need an extra park for left-over entries
+    const size_t bucketParkBufferSize = parksPerBuffer * maxParkSize;
+    const size_t alignment            = 4096;
+
+    // Allocate some extra space for C tables (see FinalizeTable7)
+    pc.hostRetainedLinePoints = pinnedAllocator.CAlloc<uint64>( kEntriesPerPark );
+    pc.table7Memory           = pinnedAllocator.CAllocSpan<byte>( 8 MiB, alignment );
+    pc.parkBufferChain        = BufferChain::Create( pinnedAllocator, pc.maxParkBuffers, bucketParkBufferSize, alignment, dryRun );
+}
+
 
 
 ///
@@ -1278,6 +1798,9 @@ void AllocateP1Buffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 
 void DbgWritePairs( CudaK32PlotContext& cx, const TableId table )
 {
+    if( cx.cfg.hybrid128Mode )
+        return;
+
     const TableId earliestTable = TableId::Table1 + (TableId)cx.gCfg->numDroppedTables+1;
     if( table < earliestTable )
         return;
@@ -1332,7 +1855,7 @@ void DbgWriteContext( CudaK32PlotContext& cx )
     Log::Line( "[DEBUG] Writing context file." );
     FileStream contxetFile;
     sprintf( path, "%scontext.tmp", DBG_BBCU_DBG_DIR );
-    FatalIf( !contxetFile.Open( path, FileMode::Create, FileAccess::Write ), "Failed to open context file." );
+    FatalIf( !contxetFile.Open( path, FileMode::Create, FileAccess::Write ), "Failed to open context file at '%s'.", path );
     FatalIf( contxetFile.Write( &cx, sizeof( CudaK32PlotContext ) ) != (ssize_t)sizeof( CudaK32PlotContext ), "Failed to write context data." );
     
     contxetFile.Close();
@@ -1360,7 +1883,7 @@ void DbgLoadContextAndPairs( CudaK32PlotContext& cx, bool loadTables )
         memcpy( cx.bucketSlices, tmpCx.bucketSlices, sizeof( tmpCx.bucketSlices ) );
         memcpy( cx.tableEntryCounts, tmpCx.tableEntryCounts, sizeof( tmpCx.tableEntryCounts ) );        
     }
-    
+
     if( !loadTables )
         return;
 
@@ -1384,8 +1907,11 @@ void DbgLoadContextAndPairs( CudaK32PlotContext& cx, bool loadTables )
     }
 }
 
-void DbgLoadTablePairs( CudaK32PlotContext& cx, const TableId table, bool copyToPinnedBuffer )
+void DbgLoadTablePairs( CudaK32PlotContext& cx, const TableId table, bool useDiskHybridData )
 {
+    if( cx.cfg.hybrid128Mode )
+        return;
+
     char lPath[512];
     char rPath[512];
 
@@ -1393,57 +1919,227 @@ void DbgLoadTablePairs( CudaK32PlotContext& cx, const TableId table, bool copyTo
     if( table < earliestTable )
         return;
 
-    // for( TableId table = TableId::Table2; table <= TableId::Table7; table++ )
+    const uint64 entryCount = cx.tableEntryCounts[(int)table];
+    Pairs& pairs = cx.hostBackPointers[(int)table];
+
     {
         Log::Line( "[DEBUG] Loading table %d", (int)table + 1 );
 
         sprintf( lPath, "%st%d.l.tmp", DBG_BBCU_DBG_DIR, (int)table + 1 );
         sprintf( rPath, "%st%d.r.tmp", DBG_BBCU_DBG_DIR, (int)table + 1 );
 
-        const uint64 entryCount = cx.tableEntryCounts[(int)table];
         // cx.hostBackPointers[(int)table].left  = bbcvirtallocbounded<uint32>( entryCount );
         // cx.hostBackPointers[(int)table].right = bbcvirtallocbounded<uint16>( entryCount );
-        Pairs& pairs = cx.hostBackPointers[(int)table];
 
         int err;
 
-        if( table == earliestTable )
+        static DiskQueue* diskQueue = nullptr;
+
+        // Load disk-hybrid tables
+        // #NOTE: Enable (and disable the block below this one), to load tables from 
+        //        the disk-hybrid output. Also adjust path in the DiskQueue below.
+
+        // useDiskHybridData = true;
+        if( useDiskHybridData )
         {
-            FatalIf( !IOJob::ReadFromFile( lPath, pairs.left, entryCount * sizeof( Pair ), err ), "Failed to read table X pairs: %d", err );
+            if( diskQueue == nullptr )
+                diskQueue = new DiskQueue( "/home/harold/plotdisk" );
+
+            char lname[64] = {};
+            sprintf( lname, "table_l_%d.tmp", (int)table + 1 );
+
+            if( table == earliestTable )
+            {
+                DiskBuffer* buf = DiskBuffer::Create( *diskQueue, lname, BBCU_BUCKET_COUNT, sizeof( Pair ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT,
+                    FileMode::Open, FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering );
+                PanicIf( !buf, "No table file" );
+
+                VirtualAllocator valloc;
+                buf->ReserveBuffers( valloc );
+
+                Span<Pair> pairsWriter( (Pair*)pairs.left, BBCU_TABLE_ALLOC_ENTRY_COUNT );
+                buf->ReadNextBucket();
+
+                for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
+                {
+                    const size_t bucketLength = cx.bucketCounts[(int)table][bucket];
+
+                    buf->TryReadNextBucket();
+                    auto entries = buf->GetNextReadBufferAs<Pair>().SliceSize( bucketLength );
+
+                    entries.CopyTo( pairsWriter );
+                    pairsWriter = pairsWriter.Slice( entries.Length() );
+                }
+
+                delete buf;
+            }
+            else
+            {
+                char rname[64] = {};
+                sprintf( rname, "table_r_%d.tmp", (int)table + 1 );
+
+                DiskBuffer* lBuf = DiskBuffer::Create( *diskQueue, lname, BBCU_BUCKET_COUNT, sizeof( uint32 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT,
+                    FileMode::Open, FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering );
+                DiskBuffer* rBuf = DiskBuffer::Create( *diskQueue, rname, BBCU_BUCKET_COUNT, sizeof( uint16 ) * BBCU_BUCKET_ALLOC_ENTRY_COUNT,
+                    FileMode::Open, FileAccess::Read, FileFlags::LargeFile | FileFlags::NoBuffering );
+                PanicIf( !lBuf, "No table L file" );
+                PanicIf( !rBuf, "No table R file" );
+
+                VirtualAllocator valloc;
+                lBuf->ReserveBuffers( valloc );
+                rBuf->ReserveBuffers( valloc );
+
+                Span<uint32> lWriter( pairs.left , BBCU_TABLE_ALLOC_ENTRY_COUNT );
+                Span<uint16> rWriter( pairs.right, BBCU_TABLE_ALLOC_ENTRY_COUNT );
+
+                lBuf->ReadNextBucket();
+                rBuf->ReadNextBucket();
+
+                for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
+                {
+                    const size_t bucketLength = cx.bucketCounts[(int)table][bucket];
+
+                    lBuf->TryReadNextBucket();
+                    rBuf->TryReadNextBucket();
+
+                    auto lEntries = lBuf->GetNextReadBufferAs<uint32>().SliceSize( bucketLength );
+                    lEntries.CopyTo( lWriter );
+
+                    auto rEntries = rBuf->GetNextReadBufferAs<uint16>().SliceSize( bucketLength );
+                    rEntries.CopyTo( rWriter );
+
+                    lWriter = lWriter.Slice( lEntries.Length() );
+                    rWriter = rWriter.Slice( rEntries.Length() );
+                }
+
+                delete lBuf;
+                delete rBuf;
+            }
         }
         else
         {
-            FatalIf( !IOJob::ReadFromFile( lPath, pairs.left , entryCount * sizeof( uint32 ), err ), "Failed to read table L pairs: %d", err );
-            
-            // if( (uint32)table > cx.gCfg->numDroppedTables )
-                FatalIf( !IOJob::ReadFromFile( rPath, pairs.right, entryCount * sizeof( uint16 ), err ), "Failed to read table R pairs: %d", err );
-        }
-
-        // We expect table 7 to also be found in these buffers, so copy it
-        // if( table == TableId::Table7 )
-        if( copyToPinnedBuffer )
-        {
-            bbmemcpy_t( cx.hostTableSortedL, pairs.left , entryCount );
-            bbmemcpy_t( cx.hostTableSortedR, pairs.right, entryCount );
+            if( table == earliestTable )
+            {
+                FatalIf( !IOJob::ReadFromFile( lPath, pairs.left, entryCount * sizeof( Pair ), err ), "Failed to read table X pairs: %d", err );
+            }
+            else
+            {
+                FatalIf( !IOJob::ReadFromFile( lPath, pairs.left , entryCount * sizeof( uint32 ), err ), "Failed to read table L pairs: %d", err );
+                
+                // if( (uint32)table > cx.gCfg->numDroppedTables )
+                    FatalIf( !IOJob::ReadFromFile( rPath, pairs.right, entryCount * sizeof( uint16 ), err ), "Failed to read table R pairs: %d", err );
+            }
         }
     }
 
+
+    // if( table == earliestTable && !useDiskHybridData )
+    // {
+    //     uint64* tmpBucket = bbcvirtallocboundednuma<uint64>( BBCU_BUCKET_ALLOC_ENTRY_COUNT );
+
+    //     std::vector<std::string> hashesRam{};
+    //     std::vector<std::string> hashesDisk{};
+
+    //     byte hash[32];
+    //     char hashstr[sizeof(hash)*2+1] = {};
+    
+    //     for( uint32 run = 0; run < 2; run++ )
+    //     {
+    //         auto& hashes = run == 0 ? hashesRam : hashesDisk;
+
+    //         uint64* xs = (uint64*)pairs.left;
+    
+    //         for( uint32 b = 0; b < BBCU_BUCKET_COUNT; b++ )
+    //         {
+    //             const uint64 bucketEntryCount = cx.bucketCounts[(int)table][b];
+
+    //             RadixSort256::Sort<BB_MAX_JOBS>( DbgGetThreadPool( cx ), xs, tmpBucket, bucketEntryCount );
+
+    //             // Hash
+    //             {
+    //                 blake3_hasher hasher;
+    //                 blake3_hasher_init( &hasher );
+    //                 blake3_hasher_update( &hasher, xs, bucketEntryCount * sizeof( uint64 ) );
+    //                 blake3_hasher_finalize( &hasher, hash, sizeof( hash ) );
+
+    //                 size_t _;
+    //                 BytesToHexStr( hash, sizeof( hash ), hashstr, sizeof( hashstr ), _ );
+    //                 Log::Line( "[%3u] : 0x%s", b, hashstr );
+
+    //                 hashes.push_back( hashstr );
+        
+    //                 // DbgPrintHash( " :", xs, sizeof( uint64 ) * bucketEntryCount );
+    //             }
+            
+    //             xs += bucketEntryCount;
+    //         }
+
+    //         if( run == 0 )
+    //         {
+    //             DbgLoadTablePairs( cx, table, true );
+    //         }
+    //     }
+
+    //     // Compare hashes
+    //     {
+    //         for( uint32 b = 0; b < BBCU_BUCKET_COUNT; b++ )
+    //         {
+    //             if( hashesRam[b] != hashesDisk[b] )
+    //             {
+    //                 Panic( "Hash mismatch at bucket %u. %s != %s", b, hashesRam[b].c_str(), hashesDisk[b].c_str() );
+    //             }
+    //         }
+    //         Log::Line( "All hashes match!" );
+    //     }
+        
+
+    //     // DbgPrintHash( "Inlined X Table", cx.hostBackPointers[(int)table].left, sizeof( Pair ) * cx.tableEntryCounts[(int)table] );
+    //     Log::Line( "" );
+    //     bbvirtfreebounded( tmpBucket );
+    //     Exit( 0 );
+    // }
+    // else
+    // {
+    //     // DbgPrintHash( "L Table", cx.hostBackPointers[(int)table].left, sizeof( uint32 ) * cx.tableEntryCounts[(int)table] );
+    //     // DbgPrintHash( "R Table", cx.hostBackPointers[(int)table].right, sizeof( uint16 ) * cx.tableEntryCounts[(int)table] );
+    //     // Log::Line( "" );
+    // }
+
+    // Sort inlined xs
+    // if( table == earliestTable )
+    // {
+    //     uint64* tmpBucket = bbcvirtallocboundednuma<uint64>( BBCU_BUCKET_ALLOC_ENTRY_COUNT );
+    //     uint64* xs = (uint64*)pairs.left;
+
+    //     for( uint32 b = 0; b < BBCU_BUCKET_COUNT; b++ )
+    //     {
+    //         const uint64 bucketEntryCount = cx.bucketCounts[(int)table][b];
+    //         RadixSort256::Sort<BB_MAX_JOBS>( DbgGetThreadPool( cx ), xs, tmpBucket, bucketEntryCount );
+    //         xs += bucketEntryCount;
+    //     }
+
+    //     DbgPrintHash( "pre_sorted_xs", pairs.left, sizeof( uint64 ) * entryCount );
+    // }
+
     Log::Line( "[DEBUG] Done." );
 }
-
 
 void DbgLoadMarks( CudaK32PlotContext& cx )
 {
     char path[512];
 
+    std::string baseUrl = DBG_BBCU_DBG_DIR;
+    if( cx.cfg.hybrid128Mode )
+        baseUrl += "disk/";
+
     // const size_t tableSize = ((1ull << BBCU_K) / 64) * sizeof(uint64);
     Log::Line( "[DEBUG] Loadinging marking tables" );
 
-    const TableId startTable = TableId::Table2 + cx.gCfg->numDroppedTables; 
+    const TableId startTable = cx.firstStoredTable;
 
     for( TableId table = startTable; table < TableId::Table7; table++ )
     {
-        sprintf( path, "%smarks%d.tmp", DBG_BBCU_DBG_DIR, (int)table+1 );
+        sprintf( path, "%smarks%d.tmp", baseUrl.c_str(), (int)table+1 );
 
         int err = 0;
         cx.hostMarkingTables[(int)table] = (uint64*)IOJob::ReadAllBytesDirect( path, err );

@@ -52,12 +52,14 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
 
     // Load CTable
     const bool    isCompressed = cx.gCfg->compressionLevel > 0 && lTable <= (TableId)cx.gCfg->numDroppedTables;
-    const uint32  stubBitSize  = !isCompressed ? (BBCU_K - kStubMinusBits) : cx.gCfg->compressionInfo.subtSizeBits;
+    const uint32  stubBitSize  = !isCompressed ? (BBCU_K - kStubMinusBits) : cx.gCfg->compressionInfo.stubSizeBits;
     const TableId firstTable   = TableId::Table2 + (TableId)cx.gCfg->numDroppedTables;
-    
+
+    const bool    isFirstSerializedTable = firstTable == rTable;
+
     const size_t      cTableSize = !isCompressed ? sizeof( CTable_0 )   : cx.gCfg->cTableSize;             ASSERT( cTableSize <= P3_MAX_CTABLE_SIZE );
     const FSE_CTable* hostCTable = !isCompressed ? CTables[(int)lTable] : cx.gCfg->ctable;
-    
+
     // (upload must be loaded before first bucket, on the same stream)
     CudaErrCheck( cudaMemcpyAsync( s3.devCTable, hostCTable, cTableSize, cudaMemcpyHostToDevice, 
                     s3.lpIn.GetQueue()->GetStream() ) );
@@ -75,12 +77,31 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
     const size_t hostParkSize = isCompressed ? cx.gCfg->compressionInfo.tableParkSize : CalculateParkSize( lTable );
     ASSERT( DEV_MAX_PARK_SIZE >= hostParkSize );
 
-    // #TODO: Move this allocation to the beginning
-    if( s3.parkFence == nullptr )
-        s3.parkFence = new Fence();
-
     byte*   hostParksWriter     = (byte*)cx.hostBackPointers[(int)rTable].left;  //(byte*)cx.hostTableL; 
     uint64* hostRetainedEntries = nullptr;
+
+    if( cx.cfg.hybrid128Mode )
+    {
+        hostParksWriter = (byte*)cx.hostTableL;
+
+        if( !isFirstSerializedTable && !cx.useParkContext )
+        {
+            // Ensure the this buffer is no longer in use (the last table finished writing to disk.)
+            const bool willWaitForParkFence = cx.parkFence->Value() < BBCU_BUCKET_COUNT;
+            if( willWaitForParkFence )
+                Log::Line( " Waiting for parks buffer to become available." );
+
+            Duration parkWaitTime;
+            cx.parkFence->Wait( BBCU_BUCKET_COUNT, parkWaitTime );
+
+            if( willWaitForParkFence )
+                Log::Line( " Waited %.3lf seconds for the park buffer to be released.", TicksToSeconds( parkWaitTime ) );
+        }
+    }
+    if( cx.useParkContext )
+    {
+        cx.parkContext->parkBufferChain->Reset();
+    }
 
     // if( !isCompressed && lTable == TableId::Table1 )
     //     hostParksWriter = (byte*)cx.hostBackPointers[(int)TableId::Table2].left;
@@ -101,7 +122,7 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
     // Set initial event LP stream event as set.
     CudaErrCheck( cudaEventRecord( cx.computeEventA, lpStream ) );
 
-    s3.parkFence->Reset( 0 );
+    cx.parkFence->Reset( 0 );
     s3.parkBucket = 0;
 
     for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
@@ -200,7 +221,8 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
                 // No more buckets so we have to compress this last park on the CPU
                 CudaErrCheck( cudaStreamWaitEvent( downloadStream, cx.computeEventC ) );
 
-                hostRetainedEntries = (uint64*)( hostParksWriter + hostParkSize * parkCount );
+                hostRetainedEntries = cx.useParkContext ? cx.parkContext->hostRetainedLinePoints :
+                                                       (uint64*)( hostParksWriter + hostParkSize * parkCount );
                 CudaErrCheck( cudaMemcpyAsync( hostRetainedEntries, copySource, copySize, cudaMemcpyDeviceToHost, downloadStream ) );
             }
         }
@@ -209,6 +231,19 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
 
 
         // Download parks
+        if( cx.useParkContext )
+        {
+            ASSERT( hostParkSize * parkCount <= cx.parkContext->parkBufferChain->BufferSize() );
+
+            // Override the park buffer to be used when using a park context
+            hostParksWriter = cx.parkContext->parkBufferChain->PeekBuffer( bucket );
+
+            // Wait for the next park buffer to be available
+            s3.parksOut.HostCallback([&cx]{
+               (void)cx.parkContext->parkBufferChain->GetNextBuffer();
+            });
+        }
+
         s3.parksOut.Download2DWithCallback( hostParksWriter, hostParkSize, parkCount, hostParkSize, DEV_MAX_PARK_SIZE, 
             []( void* parksBuffer, size_t size, void* userData ) {
 
@@ -216,11 +251,22 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
                 auto& s3 = cx.phase3->step3;
 
                 cx.plotWriter->WriteTableData( parksBuffer, size );
-                cx.plotWriter->SignalFence( *s3.parkFence, ++s3.parkBucket );
+                cx.plotWriter->SignalFence( *cx.parkFence, ++s3.parkBucket );
+
+                // Release the buffer after the plot writer is done with it.
+                if( cx.useParkContext )
+                {
+                    cx.plotWriter->CallBack([&cx](){
+                        cx.parkContext->parkBufferChain->ReleaseNextBuffer();
+                    });
+                }
 
             }, &cx, lpStream, cx.downloadDirect );
 
         hostParksWriter += hostParkSize * parkCount;
+    
+        if( cx.useParkContext )
+            hostParksWriter = nullptr;
     }
 
     // Copy park overrun count
@@ -242,18 +288,24 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
     // Was there a left-over park?
     if( retainedLPCount > 0 )
     {
-        ASSERT( hostRetainedEntries );
-        
+        if( cx.useParkContext )
+            hostParksWriter = cx.parkContext->parkBufferChain->GetNextBuffer();
+
         uint64 lastParkEntries[kEntriesPerPark];
         bbmemcpy_t( lastParkEntries, hostRetainedEntries, retainedLPCount );
 
         WritePark( hostParkSize, retainedLPCount, lastParkEntries, hostParksWriter, stubBitSize, hostCTable );
         cx.plotWriter->WriteTableData( hostParksWriter, hostParkSize );
+
+        if( cx.useParkContext )
+        {
+            cx.plotWriter->CallBack([&cx](){
+                cx.parkContext->parkBufferChain->ReleaseNextBuffer();
+            });
+        }
     }
     cx.plotWriter->EndTable();
 
-    // Update buckets counts for L table
-    // #TODO: These should match Step 1 pruned entry count I believe, so just copy?
 
     memset( p3.prunedBucketCounts[(int)rTable], 0, sizeof( uint32 ) * BBCU_BUCKET_COUNT );
     for( uint32 i = 0; i < BBCU_BUCKET_COUNT; i++ )
@@ -266,12 +318,19 @@ void CudaK32PlotPhase3Step3( CudaK32PlotContext& cx )
     s3.lpIn   .Reset();
     s3.indexIn.Reset();
 
+    if( cx.cfg.hybrid16Mode )
+    {
+        cx.diskContext->phase3.lpAndLMapBuffer->Swap();
+        cx.diskContext->phase3.indexBuffer->Swap();
+    }
+
 
     // #if _DEBUG
     // //if( cx.table >= TableId::Table6 )
     // //{
-    //     DbgValidateLMap( cx );
-    //     DbgValidateLMapData( cx );
+    //     // DbgValidateLMap( cx );
+    //     // DbgValidateLMapData( cx );
+
     //     // DbgSaveLMap( cx );
     // //}
     // #endif
@@ -386,7 +445,7 @@ void DbgSaveLMap( CudaK32PlotContext& cx )
 
     char path[512];
     sprintf( path, DBG_BBCU_DBG_DIR "p3.lmap.t%u.tmp", (uint)cx.table+1 );
-    
+
     const size_t writeSize = sizeof( LMap ) * BBCU_TABLE_ALLOC_ENTRY_COUNT;
     int err;
     FatalIf( !IOJob::WriteToFile( path, p3.hostLMap, writeSize, err ),
@@ -399,7 +458,7 @@ void DbgSaveLMap( CudaK32PlotContext& cx )
     sprintf( path, DBG_BBCU_DBG_DIR "p3.lmap.t%u.buckets.tmp", (uint)cx.table+1 );
     FatalIf( !IOJob::WriteToFileUnaligned( path, p3.prunedBucketCounts[(int)cx.table], sizeof( uint32 ) * BBCU_BUCKET_COUNT, err ),
         "[DEBUG] Failed to write LMap buckets with error: %d", err );
-    
+
     Log::Line( " [DEBUG] OK" );
 }
 
@@ -410,7 +469,7 @@ void DbgLoadLMap( CudaK32PlotContext& cx )
 
     char path[512];
     sprintf( path, DBG_BBCU_DBG_DIR "p3.lmap.t%u.tmp", (uint)cx.table+1 );
-    
+
     const size_t writeSize = sizeof( LMap ) * BBCU_TABLE_ALLOC_ENTRY_COUNT;
     int err;
     FatalIf( !IOJob::ReadFromFile( path, p3.hostLMap, writeSize, err ),
@@ -438,10 +497,12 @@ void DbgValidateLMap( CudaK32PlotContext& cx )
     auto& p3 = *cx.phase3;
     auto& s3 = p3.step3;
 
-    LMap* lMap = bbcvirtallocbounded<LMap>( BBCU_TABLE_ENTRY_COUNT );
+    LMap* lMap = bbcvirtallocbounded<LMap>( BBCU_BUCKET_ALLOC_ENTRY_COUNT );
 
-    
     {
+        // blake3_hasher hasher;
+        // blake3_hasher_init( &hasher );
+
         for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
         {
             const LMap* reader = p3.hostLMap + bucket * P3_PRUNED_BUCKET_MAX;
@@ -471,14 +532,18 @@ void DbgValidateLMap( CudaK32PlotContext& cx )
                 ASSERT( map.sourceIndex || map.sortedIndex );
                 ASSERT( ( map.sourceIndex >> ( 32 - BBC_BUCKET_BITS ) ) == bucket );
             }
+
+            // Hash bucket
+            // blake3_hasher_update( &hasher, lMap, sizeof( LMap ) * entryCount );
         }
 
-        
+        // Print hash
+        // DbgFinishAndPrintHash( hasher, "l_map", (uint)cx.table + 1 );
     }
 
     bbvirtfreebounded( lMap );
 
-    Log::Line( "[DEBUG] OK" );
+    Log::Line( "[DEBUG] LMap OK" );
 }
 
 //-----------------------------------------------------------
@@ -566,7 +631,7 @@ void _DbgValidateLMapData( CudaK32PlotContext& cx )
     bbvirtfreebounded( dstIndices );
     bbvirtfreebounded( tmpIndices );
 
-    Log::Line( "[DEBUG] OK" );
+    Log::Line( "[DEBUG] LMap uniqueness OK" );
 }
 
 #endif

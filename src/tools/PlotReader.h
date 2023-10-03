@@ -88,6 +88,15 @@ public:
         return Swap16( value );
     }
 
+    inline bool SeekToTable( PlotTable table )
+    {
+        return Seek( SeekOrigin::Begin, (int64)TableAddress( table ) );
+    }
+
+    inline PlotVersion Version() { return _version; }
+
+    inline Span<uint64> TableSizes() { return Span<uint64>( _header.tableSizes, 10 ); }
+
     // Abstract Interface
 public:
     virtual bool Open( const char* path ) = 0;
@@ -233,7 +242,13 @@ public:
     // Takes ownership of a decompression context
     void AssignDecompressionContext( struct GreenReaperContext* context );
 
-    void ConfigDecompressor( uint32 threadCount, bool disableCPUAffinity, uint32 cpuOffset = 0 );
+    void ConfigDecompressor( uint32 threadCount, bool disableCPUAffinity, uint32 cpuOffset = 0, bool useGpu = false, int gpuIndex = -1 );
+
+    inline void ConfigGpuDecompressor( uint32 threadCount, bool disableCPUAffinity, uint32 cpuOffset = 0 )
+    {
+        ConfigDecompressor( threadCount, disableCPUAffinity, cpuOffset, true );
+    }
+
     inline struct GreenReaperContext* GetDecompressorContext() const { return _grContext; }
 
 private:
@@ -261,8 +276,9 @@ private:
     Span<uint64> _c2Entries;
     Span<uint64> _c3Buffer;
 
-    struct GreenReaperContext* _grContext = nullptr;    // Used for decompressing
-    
+    struct GreenReaperContext* _grContext     = nullptr;    // Used for decompressing
+    bool                       _ownsGrContext = true;
+
     int64  _park7Index = -1;
     uint64 _park7Entries[kEntriesPerPark];
 };

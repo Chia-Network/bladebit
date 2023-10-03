@@ -34,8 +34,11 @@ struct IOJob : MTJob<IOJob>
 
     static bool WriteToFile( const char* filePath, const void* writeBuffer, const size_t size, int& error );
 
+    // Aligned write.
+    // Guaranteed to write all data in the buffer, if not it returns false and sets the error.
+    // Negative error values are non-OS errors.
     static bool WriteToFile( IStream& file, const void* writeBuffer, const size_t size,
-                             void* fileBlockBuffer, const size_t blockSize, int& error );
+                             void* fileBlockBuffer, const size_t blockSize, int& error, size_t* outSizeWritten = nullptr );
     
     static bool WriteToFileUnaligned( const char* filePath, const void* writeBuffer, const size_t size, int& error );
     static bool WriteToFileUnaligned( IStream& file, const void* writeBuffer, const size_t size, int& error );

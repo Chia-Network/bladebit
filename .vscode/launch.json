@@ -131,19 +131,25 @@
             "preLaunchTask" : "build_cuda_debug",
 
             "program": "${workspaceFolder}/build/bladebit_cuda",
-            
+
             //                 "-c", "xch1uf48n3f50xrs7zds0uek9wp9wmyza6crnex6rw8kwm3jnm39y82q5mvps6",
             // "-i", "7a709594087cca18cffa37be61bdecf9b6b465de91acb06ecb6dbe0f4a536f73",    // Yes overflow
             // "--memo", "80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef207d52406afa2b6d7d92ea778f407205bd9dca40816c1b1cacfca2a6612b93eb",
+
+            "args":
+            "-w -n 1 -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot --check 100 --check-threshold 2 /home/harold/plot",
+
+            // "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot /home/harold/plot",
+            // "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot --disk-128 -t1 /home/harold/plotdisk --no-direct-buffers /home/harold/plot",
+            // "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot --disk-128 -t1 /home/harold/plotdisk /home/harold/plot",
+            "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot --disk-64 -t1 /home/harold/plotdisk /home/harold/plot",
             
-            "args": 
-            // "-w --compress 3 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot ~/plot/tmp",
-            "-w --compress 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot ~/plot",
             
             "windows": {
                 "type": "cppvsdbg",
                 "program": "${workspaceFolder}/build/Debug/bladebit_cuda.exe",
-                "args": "--benchmark --compress 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot D:/"
+                // "args": "--benchmark -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot D:/"
+                "args": "-w -z 1 -f ade0cc43610ce7540ab96a524d0ab17f5df7866ef13d1221a7203e5d10ad2a4ae37f7b73f6cdfd6ddf4122e8a1c2f8ef -p 80a836a74b077cabaca7a76d1c3c9f269f7f3a8f2fa196a65ee8953eb81274eb8b7328d474982617af5a0fe71b47e9b8 -i c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835 cudaplot -t2 D:/chia_test_plots D:/chia_test_plots",
             }
         },
 
@@ -236,7 +242,7 @@
 
         {
             "name"         : "Tests",
-            
+
             "type"          : "cppdbg",
             "osx": {
                 "MIMode": "lldb",
@@ -245,7 +251,7 @@
             "stopAtEntry"   : false,
             "cwd"           : "${workspaceFolder}",
             "preLaunchTask" : "build_tests_debug",
-            "console"       : "internalConsole",
+            // "console"       : "internalConsole",
 
             "program": "${workspaceRoot}/build/tests",
             
@@ -260,6 +266,8 @@
                 // { "name": "bb_plot"        , "value": "/home/harold/plot/tmp/plot-k32-c06-2023-02-14-21-43-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot" },
                 { "name": "bb_clevel"      , "value": "1" },
                 { "name": "bb_end_clevel"  , "value": "1" },
+
+                { "name": "bb_queue_path"  , "value": "/home/ubuntu/plot" },
             ],
 
             "args": [
@@ -273,7 +281,10 @@
                 // "line-point-deltas"
                 // "compressed-plot-proof"
                 // "compressed-plot-qualities"
-                "macos-threads"
+                // "macos-threads"
+                // "disk-slices"
+                // "disk-buckets"
+                "[disk-queue]"
             ]
         }
 
@@ -285,10 +296,16 @@
             "stopAtEntry"   : false,
             "cwd"           : "${workspaceFolder}",
             "preLaunchTask" : "build_debug",
-            "console"       : "internalConsole",
 
             "program": "${workspaceFolder}/build/bladebit",
-
+            // "program": "${workspaceFolder}/build/bladebit_cuda",
+            
+            "linux": {
+                "MIMode": "gdb",
+                "miDebuggerPath": "/usr/bin/gdb",
+                "program": "${workspaceFolder}/build/bladebit"
+            },
+    
             "windows": {
                 "type"   : "cppvsdbg",
                 "program": "${workspaceFolder}/build/debug/bladebit.exe"
@@ -300,6 +317,11 @@
                 /// Validate
                 // "-t", "48",
                 // "-t", "1",
+                
+                // "validate", "--f7", "2",
+                // "/home/harold/plot/jmplot-c01-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                // "/home/harold/plot/plot-k32-c01-2023-07-19-00-29-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+                // "/home/harold/plot/plot-k32-c01-2023-08-03-04-57-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
                 
                 // "-t", "1", "validate", "--f7", "324", "~/plot/tmp/plot-k32-c01-2023-02-13-22-21-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
                 // "validate", "--f7", "7", "~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
@@ -322,8 +344,8 @@
                 // // "/home/harold/plot/tmp/plot-k32-c04-2023-01-31-23-15-5cfc42dfaa5613da0b425994c2427a2ba4a8efcfb49e7844e93c0854baf09863.plot"
                 
                 // Simulation
-                "-t", "1", "simulate", "--seed", "b8e9ec6bc179ae6ba5f5c3483f7501db32879efa84b62001d27601a540dca5ff", 
-                    "-p", "16", "-n", "1", "--power", "45", "--size", "4PB", "~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                // "-t", "1", "simulate", "--seed", "b8e9ec6bc179ae6ba5f5c3483f7501db32879efa84b62001d27601a540dca5ff", 
+                //     "-p", "16", "-n", "1", "--power", "45", "--size", "4PB", "~/plot/tmp/plot-k32-c01-2023-03-09-14-07-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
                 // "-t", "30", "simulate", "-p", "2", "-n", "600", "~/plot/tmp/plot-k32-c07-2023-03-16-11-49-7732c75d9f3b5ad1fc804bb7429121e334bd4f25f9bbbb76ef0370b5a0e80aae.plot"
                 
                 // "-m",
@@ -335,11 +357,18 @@
                 // "--f7", "3983284117", "/home/harito/plot/tmp/gpu_1.plot",
 
                 /// Compare
-                // "plotcmp",
-                // "/home/harito/plot/tmp/gpu_1.plot.old",
-                // "/home/harold/plot-tmpfs/gpu_1.plot",
-                // "/home/harito/plot/tmp/gpu_1.plot",
-                // "/home/harito/plot/tmp/plot-k32-2022-11-21-05-59-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                "plotcmp",
+                "/home/harold/plot/plot-k32-c01-2023-08-22-16-21-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+                "/home/harold/plot/plot-k32-c01-2023-08-22-16-21-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot",
+
+                // "/home/harold/plot/plot-k32-c01-2023-08-03-22-59-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                // "/home/harold/plot/jmplot-c01-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                
+                // Check
+                // "check",
+                // "-n", "100", "--seed", "dc471c4d905ba3a65c6cecb46d97b132c0c98f51d416db5ec5cbdbe95ef2832f", 
+                // "/home/harold/plot/plot-k32-c01-2023-07-19-00-29-c6b84729c23dc6d60c92f22c17083f47845c1179227c5509f07a5d2804a7b835.plot"
+                // "/home/harold/plot/jm.plot"
             ]
         },
 

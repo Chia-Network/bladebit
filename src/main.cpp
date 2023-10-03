@@ -135,6 +135,7 @@ int main( int argc, const char* argv[] )
         req.memoSize     = plotMemoSize;
         req.outDir       = plotOutFolder;
         req.plotFileName = plotFileName;
+        req.plotOutPath  = plotOutPath;
         req.isFirstPlot  = i == 0;
         req.IsFinalPlot  = i == plotCount-1;
 
@@ -177,9 +178,11 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
             // The next parameter is potentially the compression level
              if( IsNumber( cli.Peek() ) )
                 cfg.compressionLevel = (uint32)cli.ReadU64();
-            
+
             continue;
         }
+        else if( cli.ReadSwitch( cfg.disableOutputDirectIO, "--no-direct-io" ) )
+            continue;
         else if( cli.ReadStr( cfg.plotMemoStr, "--memo" ) )
             continue;
         else if( cli.ReadSwitch( cfg.showMemo, "--show-memo" ) )
@@ -325,8 +328,10 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
                     DiskPlotter::PrintUsage();
                 else if( cli.ArgMatch( "ramplot" ) )
                     Log::Line( "bladebit -f ... -p/c ... ramplot <out_dirs>" );
+            #if BB_CUDA_ENABLED
                 else if( cli.ArgMatch( "cudaplot" ) )
-                    Log::Line( "bladebit_cuda -f ... -p/c ... cudaplot [-d=device] <out_dirs>" );
+                    CudaK32PlotterPrintHelp();
+            #endif
                 else if( cli.ArgMatch( "iotest" ) )
                     IOTestPrintUsage();
                 else if( cli.ArgMatch( "memtest" ) )
@@ -362,7 +367,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     // The remainder should be output folders, which we parse after the plotter consumes it's config
 
     ///
-    /// Validate global conifg
+    /// Validate global config
     ///
     FatalIf( farmerPublicKey == nullptr, "A farmer public key must be specified." );
     FatalIf( !KeyTools::HexPKeyToG1Element( farmerPublicKey, *(cfg.farmerPublicKey = new bls::G1Element()) ),
@@ -391,7 +396,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     {
         // #TODO: Remove this when added
         if( cfg.compressionLevel > 7 )
-            Log::Line( "[WARNING] Compression levels greater than 7 are only for testing purposes and are not configured to the final plot size." );
+            Log::Line( "WARNING: Compression levels greater than 7 are only for testing purposes and are not configured to the final plot size." );
 
         cfg.compressedEntryBits = 17 - cfg.compressionLevel;
         cfg.ctable              = CreateCompressionCTable( cfg.compressionLevel, &cfg.cTableSize );
@@ -477,7 +482,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     Log::Line( " Benchmark mode        : %s", cfg.benchmarkMode ? "enabled" : "disabled" );
     // Log::Line( " Output path           : %s", cfg.outputFolder );
     // Log::Line( "" );
-    
+
 
     FatalIf( plotter == nullptr, "No plotter type chosen." );
 
@@ -486,7 +491,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
 
     // Parse plotter-specific CLI
     plotter->ParseCLI( cfg, cli );
-    
+
     // Parse remaining args as output directories
     cfg.outputFolderCount = (uint32)cli.RemainingArgCount();
     FatalIf( cfg.outputFolderCount < 1, "At least one output folder must be specified." );
@@ -498,6 +503,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
     while( cli.HasArgs() )
     {
         outPath = cli.Arg();
+        FatalIf( outPath[0] == '-', "Unrecognized argument '%s'.", outPath.c_str() );
 
         // Add trailing slash?
         const char endChar = outPath.back();
@@ -541,7 +547,7 @@ R"(
 
  -t, --threads        : Maximum number of threads to use.
                         By default, this is set to the maximum number of logical cpus present.
- 
+
  -n, --count          : Number of plots to create. Default = 1.
 
  -f, --farmer-key     : Farmer public key, specified in hexadecimal format.
@@ -560,7 +566,11 @@ R"(
                         Current compression levels supported are from 0 to 7 (inclusive).
                         Where 0 means no compression, and 7 is the highest compression.
                         Higher compression means smaller plots, but more CPU usage during harvesting.
- 
+
+ --no-direct-io       : Disable direct I/O when writing plot files.
+                        Enable this if writing to a storage destination 
+                        that does not support direct I/O.
+
  --benchmark          : Enables benchmark mode. This is meant to test plotting without
                         actually writing a final plot to disk.
 
@@ -582,10 +592,10 @@ R"(
                         This is useful when running multiple simultaneous
                         instances of Bladebit as you can manually
                         assign thread affinity yourself when launching Bladebit.
- 
+
  --memory             : Display system memory available, in bytes, and the 
                         required memory to run Bladebit, in bytes.
- 
+
  --memory-json        : Same as --memory, but formats the output as json.
 
  --version            : Display current version.

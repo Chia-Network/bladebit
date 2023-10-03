@@ -19,7 +19,7 @@
 #define BBCU_TABLE_ENTRY_COUNT          (1ull<<32)
 #define BBCU_BUCKET_ENTRY_COUNT         (BBCU_TABLE_ENTRY_COUNT/BBCU_BUCKET_COUNT)
 //#define BBCU_XTRA_ENTRIES_PER_SLICE     (1024u*64u)
-#define BBCU_XTRA_ENTRIES_PER_SLICE     (4096u*1u)
+#define BBCU_XTRA_ENTRIES_PER_SLICE     (4096+1024)
 #define BBCU_MAX_SLICE_ENTRY_COUNT      ((BBCU_BUCKET_ENTRY_COUNT/BBCU_BUCKET_COUNT)+BBCU_XTRA_ENTRIES_PER_SLICE)
 #define BBCU_BUCKET_ALLOC_ENTRY_COUNT   (BBCU_MAX_SLICE_ENTRY_COUNT*BBCU_BUCKET_COUNT)
 #define BBCU_TABLE_ALLOC_ENTRY_COUNT    (((uint64)BBCU_BUCKET_ALLOC_ENTRY_COUNT)*BBCU_BUCKET_COUNT)
@@ -42,12 +42,12 @@ static_assert( BBCU_BUCKET_ALLOC_ENTRY_COUNT / BBCU_BUCKET_COUNT == BBCU_MAX_SLI
     #ifdef _WIN32
         #define DBG_BBCU_DBG_DIR "D:/dbg/cuda/"
     #else
-        // #define DBG_BBCU_DBG_DIR "/home/harold/plot/dbg/cuda/"
-        #define DBG_BBCU_DBG_DIR "/home/harito/plot/dbg/cuda/"
+        #define DBG_BBCU_DBG_DIR "/home/harold/plotdisk/dbg/cuda/"
+        // #define DBG_BBCU_DBG_DIR "/home/harito/plots/dbg/cuda/"
     #endif
-    // #define DBG_BBCU_REF_DIR       "/home/harold/plot/ref/"
+    // #define DBG_BBCU_REF_DIR       "/home/harold/plots/ref/"
 
-    
+
     // #define BBCU_DBG_SKIP_PHASE_1   1   // Skip phase 1 and load pairs from disk
     // #define BBCU_DBG_SKIP_PHASE_2   1   // Skip phase 1 and 2 and load pairs and marks from disk
 
@@ -60,6 +60,7 @@ static_assert( BBCU_BUCKET_ALLOC_ENTRY_COUNT / BBCU_BUCKET_COUNT == BBCU_MAX_SLI
     // #define DBG_BBCU_P2_WRITE_MARKS   1
 
     // #define DBG_BBCU_P2_COUNT_PRUNED_ENTRIES 1
+    // #define DBG_BBCU_KEEP_TEMP_FILES 1
 
 
     #define _ASSERT_DOES_NOT_OVERLAP( b0, b1, size ) ASSERT( (b1+size) <= b0 || b1 >= (b0+size) )

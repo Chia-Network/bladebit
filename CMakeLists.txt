@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_CONFIGURATION_TYPES Release Debug)
@@ -9,7 +10,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release"
         CACHE STRING "Possible values are: Release, Debug"
         FORCE
-   )
+    )
 endif()
 
 # Allows for CMAKE_MSVC_RUNTIME_LIBRARY
@@ -17,7 +18,7 @@ if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW) 
 endif()
 
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "macOS minimum supported version.")
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.16" CACHE STRING "macOS minimum supported version.")
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC Runtime Library")
 
 project(bladebit LANGUAGES C CXX ASM)
@@ -83,10 +84,10 @@ endif()
 # NOTE: These are mostly sandbox test environment, not proper tests
 option(BB_ENABLE_TESTS "Enable tests." OFF)
 option(NO_CUDA_HARVESTER "Explicitly disable CUDA in the bladebit_harvester target." OFF)
-option(BB_NO_EMBED_VERSION "Disable embedding the version when building locally (non-CI)." ON)
+option(BB_NO_EMBED_VERSION "Disable embedding the version when building locally (non-CI)." OFF)
 option(BB_HARVESTER_ONLY "Enable only the harvester target." OFF)
 option(BB_HARVESTER_STATIC "Build the harvester target as a static library." OFF)
-
+option(BB_CUDA_USE_NATIVE "Only build the native CUDA architecture when in release mode." OFF)
 
 #
 # Dependencies
@@ -103,7 +104,7 @@ if(NOT ${BB_HARVESTER_ONLY})
     GIT_REPOSITORY https://github.com/Chia-Network/bls-signatures.git
     GIT_TAG        2.0.2
     EXCLUDE_FROM_ALL ${BB_IS_DEPENDENCY}
-    )
+)
 
     set(BUILD_BLS_PYTHON_BINDINGS "0" CACHE STRING "0")
     set(BUILD_BLS_TESTS "0" CACHE STRING "")
@@ -130,6 +131,7 @@ set(is_x86 $<OR:$<STREQUAL:${CMAKE_HOST_SYSTEM_PROCESSOR},AMD64>,$<STREQUAL:${CM
 set(is_arm $<OR:$<STREQUAL:${CMAKE_HOST_SYSTEM_PROCESSOR},arm64>,$<STREQUAL:${CMAKE_HOST_SYSTEM_PROCESSOR},aarch64>>)
 set(is_msvc_c_cpp $<AND:${is_c_cpp},$<CXX_COMPILER_ID:MSVC>>)
 
+
 if(CUDAToolkit_FOUND AND NOT ${NO_CUDA_HARVESTER})
     set(have_cuda $<BOOL:1>)
 else()
@@ -143,7 +145,7 @@ endif()
 include(Config.cmake)
 
 if(NOT ${BB_HARVESTER_ONLY})
-    if(NOT BB_IS_DEPENDENCY AND (NOT BB_NO_EMBED_VERSION))
+    if((NOT BB_IS_DEPENDENCY) AND (NOT BB_NO_EMBED_VERSION))
         include(cmake_modules/EmbedVersion.cmake)
     endif()
 

@@ -10,6 +10,8 @@
 #include <chrono>
 #include <atomic>
 #include <cmath>
+#include <memory>
+#include <vector>
 #include "Platform.h"
 
 // Defined in Util.cpp

@@ -1,44 +1,5 @@
 #pragma once
-
-class IAllocator
-{
-public:
-    virtual ~IAllocator() {}
-
-    virtual void* Alloc( const size_t size, const size_t alignment ) = 0;
-
-    //-----------------------------------------------------------
-    template<typename T>
-    inline T* AllocT( const size_t size, size_t alignment = alignof( T ) )
-    {
-        return reinterpret_cast<T*>( Alloc( size, alignment ) );
-    }
-
-    //-----------------------------------------------------------
-    template<typename T>
-    inline T* CAlloc( const size_t count, size_t alignment = alignof( T ) )
-    {
-        const size_t allocSize = sizeof( T ) * count;
-        ASSERT( allocSize >= count );
-        
-        return AllocT<T>( allocSize, alignment );
-    }
-
-    //-----------------------------------------------------------
-    template<typename T>
-    inline Span<T> CAllocSpan( const size_t count, size_t alignment = alignof( T ) )
-    {
-        return Span<T>( this->CAlloc<T>( count, alignment ), count );
-    }
-
-    //-----------------------------------------------------------
-    inline void* CAlloc( const size_t count, const size_t size, const size_t alignment )
-    {
-        const size_t paddedSize = RoundUpToNextBoundaryT( size, alignment );
-        
-        return Alloc( paddedSize * count, alignment );
-    }
-};
+#include "IAllocator.h"
 
 class IStackAllocator : public IAllocator
 {
@@ -98,7 +59,7 @@ public:
     {
         // Start address must be aligned to the specified alignment
         const size_t paddedSize = RoundUpToNextBoundaryT( _size, alignment );
-        
+
         ASSERT( size > 0 );
         ASSERT( _size < _capacity ); 
         ASSERT( paddedSize <= _capacity );

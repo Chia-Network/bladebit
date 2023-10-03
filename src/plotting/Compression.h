@@ -4,7 +4,7 @@
 struct CompressionInfo
 {
     uint32_t entrySizeBits;
-    uint32_t subtSizeBits;
+    uint32_t stubSizeBits;
     size_t   tableParkSize;
     double   ansRValue;
 };
@@ -16,6 +16,7 @@ FSE_CTable*     CreateCompressionCTable( const uint32_t compressionLevel, size_t
 FSE_DTable*     CreateCompressionDTable( const uint32_t compressionLevel, size_t* outTableSize = nullptr );
 CompressionInfo GetCompressionInfoForLevel( const uint32_t compressionLevel );
 uint32_t        GetCompressedLPBitCount( const uint32_t compressionLevel );
+size_t          GetLargestCompressedParkSize();
 
 template<uint32_t level>
 struct CompressionLevelInfo 

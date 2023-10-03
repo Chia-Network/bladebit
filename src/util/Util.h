@@ -68,9 +68,9 @@
 ///
 /// Assorted utility functions
 /// 
-void Exit( int code );
-void FatalExit();
-void PanicExit();
+[[noreturn]] void Exit( int code );
+[[noreturn]] void FatalExit();
+[[noreturn]] void PanicExit();
 void FatalErrorMsg( const char* message, ... );
 void PanicErrorMsg( const char* message, ... );
 

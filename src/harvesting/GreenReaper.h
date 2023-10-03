@@ -69,7 +69,7 @@ typedef enum GRResult
 typedef struct GRCompressionInfo
 {
     uint32_t entrySizeBits;
-    uint32_t subtSizeBits;
+    uint32_t stubSizeBits;
     size_t   tableParkSize;
     double   ansRValue;
 } GRCompressionInfo;
@@ -164,6 +164,22 @@ GR_API size_t grGetMemoryUsage( GreenReaperContext* context );
 GR_API GRBool grHasGpuDecompressor( GreenReaperContext* context );
 
 GR_API GRResult grGetCompressionInfo( GRCompressionInfo* outInfo, size_t infoStructSize, uint32_t k, uint32_t compressionLevel );
+
+inline const char* grResultToString( const GRResult r )
+{
+    switch( r )
+    {
+        case GRResult_Failed       : return "GRResult_Failed";
+        case GRResult_OK           : return "GRResult_OK";
+        case GRResult_OutOfMemory  : return "GRResult_OutOfMemory";
+        case GRResult_NoProof      : return "GRResult_NoProof";
+        case GRResult_WrongVersion : return "GRResult_WrongVersion";
+        case GRResult_InvalidGPU   : return "GRResult_InvalidGPU";
+        case GRResult_InvalidArg   : return "GRResult_InvalidArg";
+    }
+
+    return "Unknown";
+}
 
 #ifdef __cplusplus
 }

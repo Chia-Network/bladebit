@@ -227,6 +227,8 @@ set(src_bladebit
     src/plotting/PlotWriter.cpp
     src/plotting/PlotWriter.h
     src/plotting/Tables.h
+    src/plotting/BufferChain.h
+    src/plotting/BufferChain.cpp
     
     src/plotting/f1/F1Gen.h
     src/plotting/f1/F1Gen.cpp
@@ -258,6 +260,7 @@ set(src_bladebit
     src/tools/PlotReader.cpp
     src/tools/PlotReader.h
     src/tools/PlotValidator.cpp
+    src/tools/PlotChecker.cpp
 
     src/util/Array.h
     src/util/Array.inl
@@ -289,6 +292,18 @@ set(src_bladebit
     src/harvesting/GreenReaper.h
     src/harvesting/GreenReaperInternal.h
     src/harvesting/Thresher.h
+
+    src/plotting/DiskQueue.h
+    src/plotting/DiskQueue.cpp
+    src/plotting/DiskBuffer.h
+    src/plotting/DiskBuffer.cpp
+    src/plotting/DiskBucketBuffer.h
+    src/plotting/DiskBucketBuffer.cpp
+    src/plotting/DiskBufferBase.h
+    src/plotting/DiskBufferBase.cpp
+
+    src/util/MPMCQueue.h
+    src/util/CommandQueue.h
 )
 
 target_sources(bladebit_core PUBLIC ${src_bladebit})

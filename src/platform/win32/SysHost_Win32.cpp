@@ -684,8 +684,7 @@ bool EnableLockMemoryPrivilege()
 
     // Still have to check if it actually adjusted the privilege
     // #See: https://devblogs.microsoft.com/oldnewthing/20211126-00/?p=105973
-    DWORD r = ::GetLastError();
-    if( r != ERROR_SUCCESS )
+    if( ::GetLastError() != ERROR_SUCCESS )
         goto Failed;
 
     _enabledState = 1;

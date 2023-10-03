@@ -146,21 +146,29 @@ bool IOJob::WriteToFile( const char* filePath, const void* writeBuffer, const si
 
 //-----------------------------------------------------------
 bool IOJob::WriteToFile( IStream& file, const void* writeBuffer, const size_t size,
-                         void* fileBlockBuffer, const size_t blockSize, int& error )                 
+                         void* fileBlockBuffer, const size_t blockSize, int& error, size_t* outSizeWritten )                 
 {
     error = 0;
 
     const byte* buffer      = (byte*)writeBuffer;
     byte*       blockBuffer = (byte*)fileBlockBuffer;
 
-    size_t       sizeToWrite = size / blockSize * blockSize;
-    const size_t remainder   = size - sizeToWrite;
+    const size_t totalSizeToWrite = size / blockSize * blockSize;           ASSERT( totalSizeToWrite <= size );
+
+    size_t       sizeToWrite = totalSizeToWrite;
+    const size_t remainder   = size - sizeToWrite;                          ASSERT( remainder < blockSize );
+    ASSERT( !remainder || blockBuffer );
 
     while( sizeToWrite )
     {
-        ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
+        const ssize_t sizeWritten = file.Write( buffer, sizeToWrite );
+
         if( sizeWritten < 1 )
         {
+            // Output size written thus far
+            if( outSizeWritten )
+                *outSizeWritten = totalSizeToWrite - sizeToWrite;
+
             error = file.GetError();
             return false;
         }
@@ -171,22 +179,48 @@ bool IOJob::WriteToFile( IStream& file, const void* writeBuffer, const size_t si
         buffer      += sizeWritten;
     }
 
+    // Write unaligned portion, if any
     if( remainder )
     {
-        ASSERT( blockBuffer );
-        
+        if( !blockBuffer )
+        {
+            // All aligned data was written (if there was any)
+            if( outSizeWritten )
+                *outSizeWritten = totalSizeToWrite;
+
+            error = -1;
+            return false;
+        }
+
         // Unnecessary zeroing of memory, but might be useful for debugging
         memset( blockBuffer, 0, blockSize );
         memcpy( blockBuffer, buffer, remainder );
 
-        ssize_t sizeWritten = file.Write( blockBuffer, blockSize );
+        const ssize_t sizeWritten = file.Write( blockBuffer, blockSize );
 
         if( sizeWritten < 1 )
         {
+            // All aligned data was written (if there was any)
+            if( outSizeWritten )
+                *outSizeWritten = totalSizeToWrite;
+
             error = file.GetError();
             return false;
         }
+
+        // Expect to always write a full block.
+        if( (size_t)sizeWritten != blockSize )
+        {
+            if( outSizeWritten )
+                *outSizeWritten = totalSizeToWrite + (size_t)sizeWritten;
+
+            error = -2;
+            return false;
+        }
     }
+
+    if( outSizeWritten )
+        *outSizeWritten = size;
 
     return true;
 }
@@ -332,6 +366,12 @@ bool IOJob::ReadFromFile( IStream& file, void* readBuffer, const size_t size,
 
     if( remainder )
     {
+        if( blockBuffer == nullptr )
+        {
+            error = -1;
+            return false;
+        }
+
         ssize_t sizeRead = file.Read( blockBuffer, blockSize );
 
         if( sizeRead < (ssize_t)remainder )

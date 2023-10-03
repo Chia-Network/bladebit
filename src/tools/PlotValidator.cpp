@@ -271,7 +271,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     {
         auto* memPlot = new MemoryPlot();
         plotFile = memPlot;
-        
+
         Log::Line( "Reading plot file into memory..." );
         if( memPlot->Open( options.plotPath.c_str() ) )
         {
@@ -305,7 +305,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
 
     // Duplicate the plot file,     
     ThreadPool pool( threadCount );
-    
+
     UnpackedK32Plot unpackedPlot;
     if( options.unpacked )
     {
@@ -332,7 +332,7 @@ bool ValidatePlot( const ValidatePlotOptions& options )
     }
 
     MTJobRunner<ValidateJob> jobs( pool );
-    
+
     for( uint32 i = 0; i < threadCount; i++ )
     {
         auto& job = jobs[i];

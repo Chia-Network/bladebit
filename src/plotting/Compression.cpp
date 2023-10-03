@@ -2,6 +2,7 @@
 #include "plotting/FSETableGenerator.h"
 #include "util/Util.h"
 #include <mutex>
+#include <algorithm>
 
 // Caches for C and D tables
 static std::atomic<FSE_CTable*> _cTableCache[32] = {};
@@ -62,7 +63,7 @@ template<uint32 level>
 void GetCompressionInfoForLevel( CompressionInfo& info )
 {
     info.entrySizeBits = CompressionLevelInfo<level>::ENTRY_SIZE;
-    info.subtSizeBits  = CompressionLevelInfo<level>::STUB_BIT_SIZE;
+    info.stubSizeBits  = CompressionLevelInfo<level>::STUB_BIT_SIZE;
     info.tableParkSize = CompressionLevelInfo<level>::TABLE_PARK_SIZE;
     info.ansRValue     = CompressionLevelInfo<level>::ANS_R_VALUE;
 }
@@ -140,4 +141,19 @@ uint32 GetCompressedLPBitCount( const uint32 compressionLevel )
     //     lpBitSize = lpBitSize * 2 - 1;
 
     return lpBitSize * 2 - 1;
+}
+
+size_t GetLargestCompressedParkSize()
+{
+    return std::max( {
+        GetCompressionInfoForLevel( 1 ).tableParkSize,
+        GetCompressionInfoForLevel( 2 ).tableParkSize,
+        GetCompressionInfoForLevel( 3 ).tableParkSize,
+        GetCompressionInfoForLevel( 4 ).tableParkSize,
+        GetCompressionInfoForLevel( 5 ).tableParkSize,
+        GetCompressionInfoForLevel( 6 ).tableParkSize,
+        GetCompressionInfoForLevel( 7 ).tableParkSize,
+        GetCompressionInfoForLevel( 8 ).tableParkSize,
+        GetCompressionInfoForLevel( 9 ).tableParkSize }
+    );
 }

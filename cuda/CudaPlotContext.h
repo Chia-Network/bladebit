@@ -7,11 +7,16 @@
 #include "plotting/PlotTypes.h"
 #include "plotting/PlotWriter.h"
 #include "GpuStreams.h"
+#include "GpuQueue.h"
 #include "util/StackAllocator.h"
 #include "fse/fse.h"
 #include "threading/Fence.h"
 #include "plotting/GlobalPlotConfig.h"
 #include "threading/ThreadPool.h"
+#include "plotting/BufferChain.h"
+#include "plotting/DiskBuffer.h"
+#include "plotting/DiskBucketBuffer.h"
+#include <filesystem>
 
 #include "cub/device/device_radix_sort.cuh"
 // #include <cub/device/device_radix_sort.cuh>
@@ -29,7 +34,51 @@ using namespace cooperative_groups;
 #endif
 
 
+struct CudaK32ParkContext
+{
+    Span<byte>        table7Memory;             // Memory buffer reserved for finalizing table7 and writing C parks
+    BufferChain*      parkBufferChain;
+    uint32            maxParkBuffers;           // Maximum number of park buffers
+    uint64*           hostRetainedLinePoints;
+};
 
+struct CudaK32HybridMode
+{
+    // For clarity, these are the file names for the disk buffers
+    // whose disk space will be shared for temp data in both phase 1 and phase 3.
+    // The name indicates their usage and in which phase.
+    static constexpr std::string_view Y_DISK_BUFFER_FILE_NAME      = "p1y-p3index.tmp";
+    static constexpr std::string_view META_DISK_BUFFER_FILE_NAME   = "p1meta-p3rmap.tmp";
+    static constexpr std::string_view LPAIRS_DISK_BUFFER_FILE_NAME = "p1unsortedx-p1lpairs-p3lp-p3-lmap.tmp";
+
+    static constexpr std::string_view P3_RMAP_DISK_BUFFER_FILE_NAME        = META_DISK_BUFFER_FILE_NAME;
+    static constexpr std::string_view P3_INDEX_DISK_BUFFER_FILE_NAME       = Y_DISK_BUFFER_FILE_NAME;
+    static constexpr std::string_view P3_LP_AND_LMAP_DISK_BUFFER_FILE_NAME = LPAIRS_DISK_BUFFER_FILE_NAME;
+
+    DiskQueue*  temp1Queue;  // Tables Queue
+    DiskQueue*  temp2Queue;  // Metadata Queue (could be the same as temp1Queue)
+
+    DiskBucketBuffer* metaBuffer;   // Enabled in < 128G mode
+    DiskBucketBuffer* yBuffer;      // Enabled in < 128G mode
+    DiskBucketBuffer* unsortedL;    // Unsorted Xs (or L pairs in < 128G) are written to disk (uint64 entries)
+    DiskBucketBuffer* unsortedR;    // Unsorted R pairs in < 128G mode
+
+    DiskBuffer*       tablesL[7];
+    DiskBuffer*       tablesR[7];
+
+    GpuDownloadBuffer _tablesL[7];
+    GpuDownloadBuffer _tablesR[7];
+
+    struct
+    {
+        // #NOTE: These buffers shared the same file-backed storage as
+        //        with other buffers in phase 1.
+        DiskBucketBuffer* rMapBuffer;           // Step 1
+        DiskBucketBuffer* indexBuffer;          // X-step/Step 2
+        DiskBucketBuffer* lpAndLMapBuffer;      // X-step/Step 2 (LP) | Step 3 (LMap)
+
+    } phase3;
+};
 
 struct CudaK32Phase2
 {
@@ -64,11 +113,12 @@ struct CudaK32Phase3
     };
 
     uint64  pairsLoadOffset;
-    
+
+    // Device buffers
     uint32* devBucketCounts;
     uint32* devPrunedEntryCount;
 
-
+    // Host buffers
     union {
         RMap*   hostRMap;
         uint32* hostIndices;
@@ -78,12 +128,6 @@ struct CudaK32Phase3
         LMap*   hostLMap;
         uint64* hostLinePoints;
     };
-
-    // #TODO: Remove this when we sort-out all of the buffer usage 
-    // uint64* hostMarkingTables[6]; // Set by Phase 2
-
-
-    // uint32* hostBucketCounts;
 
     uint32 prunedBucketCounts[7][BBCU_BUCKET_COUNT];
     uint64 prunedTableEntryCounts[7];
@@ -111,9 +155,10 @@ struct CudaK32Phase3
     // Step 2
     struct {
         GpuUploadBuffer   rMapIn;       // RMap from step 1
-        GpuUploadBuffer   lMapIn;       // Output map (uint64) from the previous table run. Or during L table 1, it is inlined x values
+        GpuUploadBuffer   lMapIn;       // Output map (uint64) from the previous table run. Or, when L table is the first stored table, it is inlined x values
         GpuDownloadBuffer lpOut;        // Output line points (uint64)
         GpuDownloadBuffer indexOut;     // Output source line point index (uint32) (taken from the rMap source value)
+        GpuDownloadBuffer parksOut;     // Output P7 parks on the last table
         uint32*           devLTable[2]; // Unpacked L table bucket
 
         uint32 prunedBucketSlices[BBCU_BUCKET_COUNT][BBCU_BUCKET_COUNT];
@@ -123,7 +168,7 @@ struct CudaK32Phase3
     struct {
         GpuUploadBuffer   lpIn;         // Line points from step 2
         GpuUploadBuffer   indexIn;      // Indices from step 2
-        GpuDownloadBuffer mapOut;       // lTable for next step 1
+        GpuDownloadBuffer mapOut;       // lTable for next step 2
         GpuDownloadBuffer parksOut;     // Downloads park buffers to host
 
         uint32*           hostParkOverrunCount;
@@ -137,7 +182,6 @@ struct CudaK32Phase3
         FSE_CTable*       devCTable;
         uint32*           devParkOverrunCount;
 
-        Fence*              parkFence;
         std::atomic<uint32> parkBucket;
 
         uint32 prunedBucketSlices[BBCU_BUCKET_COUNT][BBCU_BUCKET_COUNT];
@@ -178,8 +222,9 @@ struct CudaK32PlotContext
     int32           cudaDevice        = -1;
     cudaDeviceProp* cudaDevProps      = nullptr;
     bool            downloadDirect    = false;
+    TableId         firstStoredTable  = TableId::Table2;    // First non-dropped table that has back pointers
     ThreadPool*     threadPool        = nullptr;
-    
+
     TableId      table                = TableId::Table1;    // Current table being generated
     uint32       bucket               = 0;                  // Current bucket being processed
 
@@ -192,6 +237,7 @@ struct CudaK32PlotContext
     PlotRequest  plotRequest;
     PlotWriter*  plotWriter           = nullptr;
     Fence*       plotFence            = nullptr;
+    Fence*       parkFence            = nullptr;
 
     // Root allocations
     size_t allocAlignment             = 0;
@@ -263,8 +309,6 @@ struct CudaK32PlotContext
     uint32*      hostBucketSlices     = nullptr;
     uint32*      hostTableL           = nullptr;
     uint16*      hostTableR           = nullptr;
-    uint32*      hostTableSortedL     = nullptr;
-    uint16*      hostTableSortedR     = nullptr;
 
     union {
         uint32*  hostMatchCount       = nullptr;
@@ -278,6 +322,14 @@ struct CudaK32PlotContext
 
     CudaK32Phase2* phase2 = nullptr;
     CudaK32Phase3* phase3 = nullptr;
+
+    CudaK32HybridMode*  diskContext    = nullptr;
+    CudaK32ParkContext* parkContext    = nullptr;
+    bool                useParkContext = false;
+
+    // Used when '--check' is enabled
+    struct GreenReaperContext* grCheckContext = nullptr;
+    class  PlotChecker*        plotChecker    = nullptr;
 
     struct
     {
@@ -359,7 +411,7 @@ inline uint32 CudaK32PlotGetOutputIndex( CudaK32PlotContext& cx )
 }
 
 //-----------------------------------------------------------
-inline bool CudaK32PlotIsOutputInterleaved( CudaK32PlotContext& cx )
+inline bool CudaK32PlotIsOutputVertical( CudaK32PlotContext& cx )
 {
     return CudaK32PlotGetOutputIndex( cx ) == 0;
 }

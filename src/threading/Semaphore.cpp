@@ -133,7 +133,7 @@ int Semaphore::GetCount()
 
         return value;
     #elif PLATFORM_IS_WINDOWS || PLATFORM_IS_APPLE
-        return _count.load( std::memory_order::memory_order_release );
+        return _count.load( std::memory_order_release );
     #else
         #error Unimplemented
     #endif

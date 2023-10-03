@@ -1,5 +1,5 @@
 if(NOT ${BB_HARVESTER_STATIC})
-    add_library(bladebit_harvester SHARED)
+    add_library(bladebit_harvester SHARED src/harvesting/HarvesterDummy.cpp)
 else()
     add_library(bladebit_harvester STATIC)
 endif()
@@ -82,9 +82,15 @@ target_sources(bladebit_harvester PRIVATE
         cuda/CudaF1.cu
         cuda/CudaMatch.cu
         cuda/CudaPlotUtil.cu
+        cuda/GpuQueue.cu
 
-        # TODO: Remove this, ought not be needed in harvester
+        # TODO: Does this have to be here?
         cuda/GpuStreams.cu
+        cuda/GpuDownloadStream.cu
+        src/plotting/DiskBuffer.cpp
+        src/plotting/DiskBucketBuffer.cpp
+        src/plotting/DiskBufferBase.cpp
+        src/plotting/DiskQueue.cpp
     >
 
     $<$<NOT:${have_cuda}>:
@@ -159,7 +165,7 @@ if(CUDAToolkit_FOUND)
         CUDA_RUNTIME_LIBRARY Static
         CUDA_SEPARABLE_COMPILATION ON
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
-        # CUDA_ARCHITECTURES OFF
+        CUDA_ARCHITECTURES OFF
     )
 endif()
 

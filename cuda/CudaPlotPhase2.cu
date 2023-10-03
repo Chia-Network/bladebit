@@ -20,8 +20,7 @@
 static void CudaK32PlotAllocateBuffersTest( CudaK32PlotContext& cx );
 
 #define MARK_TABLE_BLOCK_THREADS 128
-#define P2_BUCKET_COUNT          BBCU_BUCKET_COUNT
-#define P2_ENTRIES_PER_BUCKET    BBCU_BUCKET_ALLOC_ENTRY_COUNT //((1ull<<BBCU_K)/P2_BUCKET_COUNT)
+#define P2_ENTRIES_PER_BUCKET    BBCU_BUCKET_ALLOC_ENTRY_COUNT //((1ull<<BBCU_K)/BBCU_BUCKET_COUNT)
 
 
 inline size_t GetMarkingTableByteSize()
@@ -30,7 +29,8 @@ inline size_t GetMarkingTableByteSize()
 }
 
 template<bool useRMarks>
-__global__ void CudaMarkTables( const uint32 entryCount, const uint32* lPairs, const uint16* rPairs, byte* marks, const uint64* rTableMarks, const uint32 rOffset )
+__global__ void CudaMarkTables( const uint32 entryCount, const uint32* lPairs, const uint16* rPairs,
+                                byte* marks, const uint64* rTableMarks, const uint32 rOffset )
 {
     const uint32 gid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -39,11 +39,11 @@ __global__ void CudaMarkTables( const uint32 entryCount, const uint32* lPairs, c
         return;
 
     if constexpr ( useRMarks )
-    {   
+    {
         if( !CuBitFieldGet( rTableMarks, rOffset + gid ) )
             return;
     }
-    
+
     const uint32 l = lPairs[gid];
     const uint32 r = l + rPairs[gid];
 
@@ -117,12 +117,12 @@ static void BytefieldToBitfield( CudaK32PlotContext& cx, const byte* bytefield, 
 
     ASSERT( (uint64)blockCount * blockThreadCount * 64 == tableEntryCount );
 
-#if DBG_BBCU_P2_COUNT_PRUNED_ENTRIES
+    #if DBG_BBCU_P2_COUNT_PRUNED_ENTRIES
         #define G_PRUNED_COUNTS ,cx.phase2->devPrunedCount
         CudaErrCheck( cudaMemsetAsync( cx.phase2->devPrunedCount, 0, sizeof( uint32 ), stream ) );
-#else
+    #else
         #define G_PRUNED_COUNTS 
-#endif
+    #endif
     
     ASSERT_DOES_NOT_OVERLAP2( bitfield, bytefield, GetMarkingTableBitFieldSize(), GetMarkingTableByteSize() );
 
@@ -131,8 +131,11 @@ static void BytefieldToBitfield( CudaK32PlotContext& cx, const byte* bytefield, 
 
 void LoadPairs( CudaK32PlotContext& cx, CudaK32Phase2& p2, const TableId rTable, const uint32 bucket )
 {
+    if( bucket >= BBCU_BUCKET_COUNT )
+        return;
+
     const uint64 tableEntryCount = cx.tableEntryCounts[(int)rTable];
-    const uint32 entryCount      = BBCU_BUCKET_ENTRY_COUNT;//(uint32)std::min( (uint64)BBCU_BUCKET_ENTRY_COUNT, tableEntryCount - p2.pairsLoadOffset );// cx.bucketCounts[(int)rTable][bucket];
+    const uint32 entryCount      = cx.bucketCounts[(int)rTable][bucket];
 
         //   uint32* hostPairsL     = cx.hostTableSortedL + p2.pairsLoadOffset;
         //   uint16* hostPairsR     = cx.hostTableSortedR + p2.pairsLoadOffset;
@@ -163,29 +166,35 @@ void MarkTable( CudaK32PlotContext& cx, CudaK32Phase2& p2 )
 
     byte* devLMarks = p2.devMarkingTable;
 
+    if( cx.cfg.hybrid128Mode )
+    {
+        cx.diskContext->tablesL[(int)rTable]->Swap();
+        cx.diskContext->tablesR[(int)rTable]->Swap();
+
+        p2.pairsLIn.AssignDiskBuffer( cx.diskContext->tablesL[(int)rTable] );
+        p2.pairsRIn.AssignDiskBuffer( cx.diskContext->tablesR[(int)rTable] );
+    }
+
     // Zero-out marks
     CudaErrCheck( cudaMemsetAsync( devLMarks, 0, GetMarkingTableByteSize(), cx.computeStream ) );
 
     // Load first bucket's worth of pairs
     LoadPairs( cx, p2, rTable, 0 );
 
-    uint32 rOffset = 0;
-    for( uint32 bucket = 0; bucket < P2_BUCKET_COUNT; bucket++ )
-    {
-        const bool isLastBucket = bucket + 1 == P2_BUCKET_COUNT;
+    // Mark the table, buckey by bucket
+    uint32 rTableGlobalIndexOffset = 0;
 
-        // Load next set of pairs in the background
-        if( !isLastBucket )
-            LoadPairs( cx, p2, rTable, bucket + 1 );
+    for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
+    {
+        // Load next set of pairs in the background (if there is another bucket)
+        LoadPairs( cx, p2, rTable, bucket + 1 );
 
         const uint64 tableEntryCount = cx.tableEntryCounts[(int)rTable];
-        const uint32 entryCount      = isLastBucket ? tableEntryCount - (BBCU_BUCKET_ENTRY_COUNT * (BBCU_BUCKET_COUNT-1)): BBCU_BUCKET_ENTRY_COUNT;
-        // const uint32 entryCount       = cx.bucketCounts[(int)rTable][bucket];
+        const uint32 entryCount      = cx.bucketCounts[(int)rTable][bucket];
 
         // Wait for pairs to be ready
         const uint32* devLPairs = p2.pairsLIn.GetUploadedDeviceBufferT<uint32>( cx.computeStream );
         const uint16* devRPairs = p2.pairsRIn.GetUploadedDeviceBufferT<uint16>( cx.computeStream );
-
 
         // Mark
         const uint32 blockCount = (uint32)CDiv( entryCount, MARK_TABLE_BLOCK_THREADS );
@@ -193,12 +202,12 @@ void MarkTable( CudaK32PlotContext& cx, CudaK32Phase2& p2 )
         if( rTable == TableId::Table7 )
             CudaMarkTables<false><<<blockCount, MARK_TABLE_BLOCK_THREADS, 0, cx.computeStream>>>( entryCount, devLPairs, devRPairs, devLMarks, nullptr, 0 );
         else
-            CudaMarkTables<true ><<<blockCount, MARK_TABLE_BLOCK_THREADS, 0, cx.computeStream>>>( entryCount, devLPairs, devRPairs, devLMarks, p2.devRMarks[(int)rTable], rOffset );
-        
+            CudaMarkTables<true ><<<blockCount, MARK_TABLE_BLOCK_THREADS, 0, cx.computeStream>>>( entryCount, devLPairs, devRPairs, devLMarks, p2.devRMarks[(int)rTable], rTableGlobalIndexOffset );
+
         p2.pairsLIn.ReleaseDeviceBuffer( cx.computeStream );
         p2.pairsRIn.ReleaseDeviceBuffer( cx.computeStream );
 
-        rOffset += entryCount;
+        rTableGlobalIndexOffset += entryCount;
     }
 
     // Convert the bytefield marking table to a bitfield
@@ -209,14 +218,14 @@ void MarkTable( CudaK32PlotContext& cx, CudaK32Phase2& p2 )
     // Download bitfield marks
     // uint64* hostBitField = p2.hostBitFieldAllocator->AllocT<uint64>( GetMarkingTableBitFieldSize() );
     uint64* hostBitField = cx.hostMarkingTables[(int)lTable];
-    
+
     // #TODO: Do download and copy again, for now just store all of them in this pinned buffer
     // cx.phase3->hostMarkingTables[(int)lTable] = hostBitField;
     p2.outMarks.Download( hostBitField, GetMarkingTableBitFieldSize(), cx.computeStream );
-    
+
     // p2.outMarks.DownloadAndCopy( hostBitField, cx.hostMarkingTables[(int)lTable], GetMarkingTableBitFieldSize(), cx.computeStream );
     // p2.outMarks.Download( cx.hostMarkingTables[(int)lTable], GetMarkingTableBitFieldSize() );
-    
+
 
 #if DBG_BBCU_P2_COUNT_PRUNED_ENTRIES
     {
@@ -370,6 +379,9 @@ void CudaK32PlotPhase2( CudaK32PlotContext& cx )
         MarkTable( cx, p2 );
         p2.outMarks.WaitForCompletion();
         p2.outMarks.Reset();
+        p2.pairsLIn.Reset();
+        p2.pairsRIn.Reset();
+
         const auto elapsed = TimerEnd( timer );
         Log::Line( "Marked Table %u in %.2lf seconds.", rTable, elapsed );
 
@@ -380,7 +392,7 @@ void CudaK32PlotPhase2( CudaK32PlotContext& cx )
     }
 
     // Wait for everything to complete
-    
+
     // p2.outMarks.WaitForCopyCompletion(); // #TODO: Re-activate this when re-enabling copy
     p2.outMarks.WaitForCompletion();
     p2.outMarks.Reset();
@@ -392,30 +404,39 @@ void CudaK32PlotPhase2( CudaK32PlotContext& cx )
 ///
 void CudaK32PlotPhase2AllocateBuffers( CudaK32PlotContext& cx, CudaK32AllocContext& acx )
 {
-    const size_t alignment = cx.allocAlignment;
+    GpuStreamDescriptor desc{};
 
-    IAllocator& devAllocator    = *acx.devAllocator;
-    IAllocator& pinnedAllocator = *acx.pinnedAllocator; 
+    desc.entriesPerSlice = P2_ENTRIES_PER_BUCKET;
+    desc.sliceCount      = 1;
+    desc.sliceAlignment  = cx.allocAlignment;
+    desc.bufferCount     = BBCU_DEFAULT_GPU_BUFFER_COUNT;
+    desc.deviceAllocator = acx.devAllocator;
+    desc.pinnedAllocator = nullptr;             // Start in direct mode (no intermediate pinined buffers)
+
+    if( cx.cfg.hybrid128Mode )
+    {
+        desc.pinnedAllocator = acx.pinnedAllocator;
+        desc.sliceAlignment  = cx.diskContext->temp1Queue->BlockSize();
+    }
+
+    if( !cx.downloadDirect )
+        desc.pinnedAllocator = acx.pinnedAllocator;
 
     CudaK32Phase2& p2 = *cx.phase2;
 
     const size_t markingTableByteSize     = GetMarkingTableByteSize();
     const size_t markingTableBitFieldSize = GetMarkingTableBitFieldSize();
 
-    p2.devPrunedCount  = devAllocator.CAlloc<uint32>( 1, alignment );
-    p2.devMarkingTable = devAllocator.AllocT<byte>( markingTableByteSize, alignment );
+    // Device buffers
+    p2.devPrunedCount  = acx.devAllocator->CAlloc<uint32>( 1, acx.alignment );
+    p2.devMarkingTable = acx.devAllocator->AllocT<byte>( markingTableByteSize, acx.alignment );
 
-    p2.pairsLIn = cx.gpuUploadStream[0]->CreateUploadBuffer(
-                    sizeof( uint32 ) * P2_ENTRIES_PER_BUCKET, devAllocator, pinnedAllocator, alignment, acx.dryRun );
+    // Upload/Download streams
+    p2.pairsLIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint32>( desc, acx.dryRun );
+    p2.pairsRIn = cx.gpuUploadStream[0]->CreateUploadBufferT<uint16>( desc, acx.dryRun );
 
-    p2.pairsRIn = cx.gpuUploadStream[0]->CreateUploadBuffer(
-                    sizeof( uint16 ) * P2_ENTRIES_PER_BUCKET, devAllocator, pinnedAllocator, alignment, acx.dryRun );
-
-    p2.outMarks = cx.gpuDownloadStream[0]->CreateDirectDownloadBuffer( 
-                    markingTableBitFieldSize, devAllocator, alignment, acx.dryRun );
-
-    // These buffers are safe to use at this point
-    // p2.hostBitFieldAllocator = new StackAllocator( cx.hostTableR, sizeof( uint32 ) * BBCU_TABLE_ALLOC_ENTRY_COUNT );
+    desc.entriesPerSlice = markingTableBitFieldSize;
+    p2.outMarks          = cx.gpuDownloadStream[0]->CreateDownloadBufferT<byte>( desc, acx.dryRun );
 }
 
 
@@ -550,7 +571,7 @@ void DbgValidateTable( CudaK32PlotContext& cx )
     {
         {
             uint64 totalCount = 0;
-            for( uint32 bucket = 0; bucket < P2_BUCKET_COUNT; bucket++ )
+            for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
                 totalCount += cx.bucketCounts[(int)rt][bucket];
 
             ASSERT( totalCount == cx.tableEntryCounts[(int)rt] );
@@ -562,7 +583,7 @@ void DbgValidateTable( CudaK32PlotContext& cx )
 
         Pairs hostRTablePairs = cx.hostBackPointers[(int)rt];
 
-        for( uint32 bucket = 0; bucket < P2_BUCKET_COUNT; bucket++ )
+        for( uint32 bucket = 0; bucket < BBCU_BUCKET_COUNT; bucket++ )
         {
             const uint32 rTableBucketEntryCount = cx.bucketCounts[(int)rt][bucket];
 
@@ -638,9 +659,13 @@ void DbgWriteMarks( CudaK32PlotContext& cx, const TableId table )
 {
     char path[512];
 
+    std::string baseUrl = DBG_BBCU_DBG_DIR;
+    if( cx.cfg.hybrid128Mode )
+        baseUrl += "disk/";
+
     Log::Line( "[DEBUG] Writing marking table %u to disk...", table+1 );
     {
-        sprintf( path, "%smarks%d.tmp", DBG_BBCU_DBG_DIR, (int)table+1 );
+        sprintf( path, "%smarks%d.tmp", baseUrl.c_str(), (int)table+1 );
 
         const uint64* marks = cx.hostMarkingTables[(int)table];
 

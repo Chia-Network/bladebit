@@ -3,10 +3,14 @@
 #include "util/SPCQueue.h"
 #include "plotting/PlotTypes.h"
 #include "plotting/PlotHeader.h"
+#include "tools/PlotChecker.h"
 #include "io/FileStream.h"
 #include "threading/Thread.h"
 #include "threading/AutoResetSignal.h"
 #include "threading/Fence.h"
+#include <functional>
+#include <mutex>
+#include <queue>
 
 /**
  * Handles writing the final plot data to disk asynchronously.
@@ -83,6 +87,7 @@ public:
     PlotWriter( DiskBufferQueue& ownerQueue );
     virtual ~PlotWriter();
     
+    void EnablePlotChecking( PlotChecker& checker );
 
     // Begins writing a new plot. Any previous plot must have finished before calling this
     bool BeginPlot( PlotVersion version, 
@@ -118,6 +123,9 @@ public:
 
     void SignalFence( Fence& fence );
     void SignalFence( Fence& fence, uint32 sequence );
+
+    // Dispatch a callback from the writer thread
+    void CallBack( std::function<void()> func );
     
     void CompleteTable();
 
@@ -154,8 +162,11 @@ private:
         const byte* plotMemo, const uint16 plotMemoSize,
         int32 compressionLevel );
 
+    bool CheckPlot();
+
     Command& GetCommand( CommandType type );
     void SubmitCommands();
+    void SubmitCommand( const Command cmd );
     
     void SeekToLocation( size_t location );
 
@@ -168,6 +179,7 @@ private:
 
     void WriteData( const byte* data, size_t size );
 
+
 private:
     void CmdBeginTable( const Command& cmd );
     void CmdEndTable( const Command& cmd );
@@ -176,6 +188,7 @@ private:
     void CmdWriteReservedTable( const Command& cmd );
     void CmdSignalFence( const Command& cmd );
     void CmdEndPlot( const Command& cmd );
+    void CmdCallBack( const Command& cmd );
 
 private:
     enum class CommandType : uint32
@@ -188,7 +201,8 @@ private:
         ReserveTable,
         WriteReservedTable,
         SignalFence,
-        EndPlot
+        EndPlot,
+        CallBack,
     };
 
     struct Command
@@ -237,6 +251,11 @@ private:
                 Fence* fence;
                 bool   rename;
             } endPlot;
+
+            struct
+            {
+                std::function<void()>* func;
+            } callback;
         };
     };
 
@@ -244,7 +263,7 @@ private:
 private:
     class DiskBufferQueue* _owner               = nullptr;  // This instance might be own by an IOQueue, which will 
                                                             // dispatch our ocmmands in its own threads.
-                                                            
+
     FileStream             _stream;
     bool                   _directIO;
     bool                   _dummyMode           = false;    // In this mode we don't actually write anything
@@ -255,6 +274,7 @@ private:
     Fence                  _completedFence;             // Signal plot completed
     AutoResetSignal        _cmdReadySignal;
     AutoResetSignal        _cmdConsumedSignal;
+    AutoResetSignal        _readyToPlotSignal;          // Set when the writer is ready to start the next plot.
     Span<byte>             _writeBuffer         = {};
     size_t                 _bufferBytes         = 0;    // Current number of bytes in the buffer
     size_t                 _headerSize          = 0;
@@ -271,6 +291,12 @@ private:
     size_t                 _tableStart          = 0;    // Current table start location
     uint64                 _tablePointers[10]   = {};
     uint64                 _tableSizes   [10]   = {};
-    SPCQueue<Command, 512> _queue;
+    // SPCQueue<Command, 512> _queue;
+
+    std::queue<Command>     _queue;
+    std::mutex              _queueLock;
+    // std::mutex              _pushLock;
+
+    PlotChecker* _plotChecker              = nullptr;    // User responsible for ownership of checker. Must live until this PlotWriter's lifetime neds.
 };
 

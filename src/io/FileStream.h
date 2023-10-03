@@ -31,7 +31,28 @@ class FileStream : public IStream
 {
 public:
     inline FileStream() {}
-    inline ~FileStream()
+
+    inline FileStream( FileStream&& other ) noexcept
+        :  _position ( other._position )
+        , _access    ( other._access )
+        , _flags     ( other._flags )
+        , _error     ( other._error )
+        , _blockSize ( other._blockSize )
+        , _fd        ( other._fd )
+    {
+        other._position  = 0;
+        other._access    = FileAccess::None;
+        other._flags     = FileFlags::None;
+        other._error     = 0;
+        other._blockSize = 0;
+        #if PLATFORM_IS_UNIX
+            other._fd = -1;
+        #else
+            other._fd = INVALID_WIN32_HANDLE;
+        #endif
+    }
+
+    virtual inline ~FileStream()
     {
         Close();
     }

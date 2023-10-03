@@ -22,6 +22,9 @@ add_executable(bladebit_cuda
     cuda/CudaPlotUtil.cu
     cuda/GpuStreams.h
     cuda/GpuStreams.cu
+    cuda/GpuDownloadStream.cu
+    cuda/GpuQueue.h
+    cuda/GpuQueue.cu
 
     # Harvester
     cuda/harvesting/CudaThresher.cu
@@ -42,7 +45,7 @@ target_compile_options(bladebit_cuda PRIVATE
     >
 
     $<${is_cuda_debug}:
-        -G
+    #    -G
     >
  )
 

@@ -14,7 +14,7 @@ public:
         const size_t allocSize = PageAlign( size );
         _size += allocSize;
         
-        return bbvirtalloc<byte>( allocSize );
+        return bbvirtallocbounded<byte>( allocSize );
     }
 
     inline void* TryAlloc( const size_t size )
