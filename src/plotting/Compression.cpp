@@ -74,16 +74,45 @@ CompressionInfo GetCompressionInfoForLevel( const uint32 compressionLevel )
 
     switch ( compressionLevel )
     {
-        case 1: GetCompressionInfoForLevel<1>( info ); break;
-        case 2: GetCompressionInfoForLevel<2>( info ); break;
-        case 3: GetCompressionInfoForLevel<3>( info ); break;
-        case 4: GetCompressionInfoForLevel<4>( info ); break;
-        case 5: GetCompressionInfoForLevel<5>( info ); break;
-        case 6: GetCompressionInfoForLevel<6>( info ); break;
-        case 7: GetCompressionInfoForLevel<7>( info ); break;
-        case 8: GetCompressionInfoForLevel<8>( info ); break;
-        case 9: GetCompressionInfoForLevel<9>( info ); break;
-    
+        case 1: return CreateCompressionCTable<1>( outTableSize, compress );
+        case 2: return CreateCompressionCTable<2>( outTableSize, compress );
+        case 3: return CreateCompressionCTable<3>( outTableSize, compress );
+        case 4: return CreateCompressionCTable<4>( outTableSize, compress );
+        case 5: return CreateCompressionCTable<5>( outTableSize, compress );
+        case 6: return CreateCompressionCTable<6>( outTableSize, compress );
+        case 7: return CreateCompressionCTable<7>( outTableSize, compress );
+        case 8: return CreateCompressionCTable<8>( outTableSize, compress );
+        case 9: return CreateCompressionCTable<9>( outTableSize, compress );
+        case 10: return CreateCompressionCTable<10>( outTableSize, compress );
+        case 11: return CreateCompressionCTable<11>( outTableSize, compress );
+        case 12: return CreateCompressionCTable<12>( outTableSize, compress );
+        case 13: return CreateCompressionCTable<13>( outTableSize, compress );
+        case 14: return CreateCompressionCTable<14>( outTableSize, compress );
+        case 15: return CreateCompressionCTable<15>( outTableSize, compress );
+        case 16: return CreateCompressionCTable<16>( outTableSize, compress );
+        case 17: return CreateCompressionCTable<17>( outTableSize, compress );
+        case 18: return CreateCompressionCTable<18>( outTableSize, compress );
+        case 19: return CreateCompressionCTable<19>( outTableSize, compress );
+        case 20: return CreateCompressionCTable<20>( outTableSize, compress );
+        case 21: return CreateCompressionCTable<21>( outTableSize, compress );
+        case 22: return CreateCompressionCTable<22>( outTableSize, compress );
+        case 23: return CreateCompressionCTable<23>( outTableSize, compress );
+        case 24: return CreateCompressionCTable<24>( outTableSize, compress );
+        case 25: return CreateCompressionCTable<25>( outTableSize, compress );
+        case 26: return CreateCompressionCTable<26>( outTableSize, compress );
+        case 27: return CreateCompressionCTable<27>( outTableSize, compress );
+        case 28: return CreateCompressionCTable<28>( outTableSize, compress );
+        case 29: return CreateCompressionCTable<29>( outTableSize, compress );
+        case 30: return CreateCompressionCTable<30>( outTableSize, compress );
+        case 31: return CreateCompressionCTable<31>( outTableSize, compress );
+        case 32: return CreateCompressionCTable<32>( outTableSize, compress );
+        case 33: return CreateCompressionCTable<33>( outTableSize, compress );
+        case 34: return CreateCompressionCTable<34>( outTableSize, compress );
+        case 35: return CreateCompressionCTable<35>( outTableSize, compress );
+        case 36: return CreateCompressionCTable<36>( outTableSize, compress );
+        case 37: return CreateCompressionCTable<37>( outTableSize, compress );
+        case 38: return CreateCompressionCTable<38>( outTableSize, compress );
+        case 39: return CreateCompressionCTable<39>( outTableSize, compress );       
     default:
         Fatal( "Invalid compression level %u.", compressionLevel );
         break;
@@ -96,6 +125,7 @@ void* CreateCompressionTable( const uint32 compressionLevel, size_t* outTableSiz
 {
     switch ( compressionLevel )
     {
+
         case 1: return CreateCompressionCTable<1>( outTableSize, compress );
         case 2: return CreateCompressionCTable<2>( outTableSize, compress );
         case 3: return CreateCompressionCTable<3>( outTableSize, compress );
@@ -105,6 +135,36 @@ void* CreateCompressionTable( const uint32 compressionLevel, size_t* outTableSiz
         case 7: return CreateCompressionCTable<7>( outTableSize, compress );
         case 8: return CreateCompressionCTable<8>( outTableSize, compress );
         case 9: return CreateCompressionCTable<9>( outTableSize, compress );
+        case 10: return CreateCompressionCTable<10>( outTableSize, compress );
+        case 11: return CreateCompressionCTable<11>( outTableSize, compress );
+        case 12: return CreateCompressionCTable<12>( outTableSize, compress );
+        case 13: return CreateCompressionCTable<13>( outTableSize, compress );
+        case 14: return CreateCompressionCTable<14>( outTableSize, compress );
+        case 15: return CreateCompressionCTable<15>( outTableSize, compress );
+        case 16: return CreateCompressionCTable<16>( outTableSize, compress );
+        case 17: return CreateCompressionCTable<17>( outTableSize, compress );
+        case 18: return CreateCompressionCTable<18>( outTableSize, compress );
+        case 19: return CreateCompressionCTable<19>( outTableSize, compress );
+        case 20: return CreateCompressionCTable<20>( outTableSize, compress );
+        case 21: return CreateCompressionCTable<21>( outTableSize, compress );
+        case 22: return CreateCompressionCTable<22>( outTableSize, compress );
+        case 23: return CreateCompressionCTable<23>( outTableSize, compress );
+        case 24: return CreateCompressionCTable<24>( outTableSize, compress );
+        case 25: return CreateCompressionCTable<25>( outTableSize, compress );
+        case 26: return CreateCompressionCTable<26>( outTableSize, compress );
+        case 27: return CreateCompressionCTable<27>( outTableSize, compress );
+        case 28: return CreateCompressionCTable<28>( outTableSize, compress );
+        case 29: return CreateCompressionCTable<29>( outTableSize, compress );
+        case 30: return CreateCompressionCTable<30>( outTableSize, compress );
+        case 31: return CreateCompressionCTable<31>( outTableSize, compress );
+        case 32: return CreateCompressionCTable<32>( outTableSize, compress );
+        case 33: return CreateCompressionCTable<33>( outTableSize, compress );
+        case 34: return CreateCompressionCTable<34>( outTableSize, compress );
+        case 35: return CreateCompressionCTable<35>( outTableSize, compress );
+        case 36: return CreateCompressionCTable<36>( outTableSize, compress );
+        case 37: return CreateCompressionCTable<37>( outTableSize, compress );
+        case 38: return CreateCompressionCTable<38>( outTableSize, compress );
+        case 39: return CreateCompressionCTable<39>( outTableSize, compress );
     
         default:
         break;
