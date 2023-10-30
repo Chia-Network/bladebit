@@ -273,7 +273,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
         }
         else if( cli.ArgConsume( "ramplot" ) )
         {
-            FatalIf( cfg.compressionLevel > 7, "ramplot currently does not support compression levels greater than 7" );
+            FatalIf( cfg.compressionLevel > 16, "ramplot currently does not support compression levels greater than 7" );
 
             plotter = new MemPlotter();
             break;
