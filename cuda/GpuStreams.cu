@@ -99,7 +99,6 @@ void GpuUploadBuffer::UploadAndPreLoad( void* hostBuffer, const size_t size, con
     // cpy.copy.size       = copySize;
 
     // // Launch copy command
-    // CudaErrCheck( cudaLaunchHostFunc( self->queue->GetStream(), []( void* userData ){
 
     //     const CopyInfo& c = *reinterpret_cast<CopyInfo*>( userData );
     //     IGpuBuffer* self = c.self;

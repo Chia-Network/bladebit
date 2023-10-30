@@ -171,7 +171,6 @@ struct IGpuBuffer* GpuQueue::CreateGpuBuffer( const GpuStreamDescriptor& desc, b
             CudaErrCheck( cudaEventCreateWithFlags( &buf->events[i]         , cudaEventDisableTiming ) );
             CudaErrCheck( cudaEventCreateWithFlags( &buf->completedEvents[i], cudaEventDisableTiming ) );
             CudaErrCheck( cudaEventCreateWithFlags( &buf->readyEvents[i]    , cudaEventDisableTiming ) );
-            // CudaErrCheck( cudaEventCreateWithFlags( &buf->preloadEvents[i]  , cudaEventDisableTiming ) );
             CudaErrCheck( cudaEventCreateWithFlags( &buf->pinnedEvent[i]  , cudaEventDisableTiming ) );
 
             CudaErrCheck( cudaEventCreateWithFlags( &buf->callbackLockEvent     , cudaEventDisableTiming ) );

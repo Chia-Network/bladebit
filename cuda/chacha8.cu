@@ -293,7 +293,6 @@ static void DbgValidateBucket( CudaK32PlotContext& cx, const uint32 bucket )
     if( _dbgPool == nullptr )
         _dbgPool = new ThreadPool( SysHost::GetLogicalCPUCount() );
 
-    //CudaErrCheck( cudaStreamSynchronize( cx.downloadStream ) );
 
     Log::Line( "Validating bucket %u", bucket );
     AnonMTJob::Run( *_dbgPool, [&cx, bucket]( AnonMTJob* self ) {

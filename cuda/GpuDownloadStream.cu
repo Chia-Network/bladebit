@@ -64,17 +64,14 @@ void GpuDownloadBuffer::DownloadAndCopy( void* hostBuffer, void* finalBuffer, co
     // const void* devBuffer    = self->deviceBuffer[index];
 
     // // Signal from the work stream when it has finished doing kernel work with the device buffer
-    // CudaErrCheck( cudaEventRecord( self->readyEvents[index], workStream ) );
 
 
     // // Ensure the work stream has completed writing data to the device buffer
     // cudaStream_t stream = self->queue->_stream;
 
-    // CudaErrCheck( cudaStreamWaitEvent( stream, self->readyEvents[index] ) );
 
     // // Copy
-    // CudaErrCheck( cudaMemcpyAsync( hostBuffer, devBuffer, size, cudaMemcpyDeviceToHost, stream ) );
-    
+
     // // Signal that the device buffer is free to be re-used
     // CudaErrCheck( cudaEventRecord( self->events[index], stream ) );
 
