@@ -11,7 +11,8 @@ void* GpuDownloadBuffer::GetDeviceBuffer()
 {
     const uint32 index = self->outgoingSequence % self->bufferCount;
 
-    CudaErrCheck( cudaEventSynchronize( self->events[index] ) );
+    Log::Line( "Marker Set to %d", 56)
+CudaErrCheck( cudaEventSynchronize( self->events[index] ) );
 
     return self->deviceBuffer[index];
 }
@@ -25,7 +26,8 @@ void* GpuDownloadBuffer::LockDeviceBuffer( cudaStream_t stream )
     self->lockSequence++;
 
     // Wait for the device buffer to be free to be used by kernels
-    CudaErrCheck( cudaStreamWaitEvent( stream, self->events[index] ) );
+    Log::Line( "Marker Set to %d", 57)
+CudaErrCheck( cudaStreamWaitEvent( stream, self->events[index] ) );
     return self->deviceBuffer[index];
 }
 
@@ -73,10 +75,12 @@ void GpuDownloadBuffer::DownloadAndCopy( void* hostBuffer, void* finalBuffer, co
     // // Copy
 
     // // Signal that the device buffer is free to be re-used
-    // CudaErrCheck( cudaEventRecord( self->events[index], stream ) );
+    // Log::Line( "Marker Set to %d", 58)
+CudaErrCheck( cudaEventRecord( self->events[index], stream ) );
 
     // // Launch copy command
-    // CudaErrCheck( cudaLaunchHostFunc( stream, []( void* userData ){
+    // Log::Line( "Marker Set to %d", 59)
+CudaErrCheck( cudaLaunchHostFunc( stream, []( void* userData ){
 
     //     const CopyInfo& c = *reinterpret_cast<CopyInfo*>( userData );
     //     IGpuBuffer* self = c.self;
@@ -131,11 +135,13 @@ void GpuDownloadBuffer::PerformDownload2D( void* hostBuffer, size_t width, size_
 
 
     // Signal from the work stream when it has finished doing kernel work with the device buffer
-    CudaErrCheck( cudaEventRecord( self->workEvent[index], workStream ) );
+    Log::Line( "Marker Set to %d", 60)
+CudaErrCheck( cudaEventRecord( self->workEvent[index], workStream ) );
 
     // From the download stream, wait for the work stream to finish
     cudaStream_t downloadStream = self->queue->_stream;
-    CudaErrCheck( cudaStreamWaitEvent( downloadStream, self->workEvent[index] ) );
+    Log::Line( "Marker Set to %d", 61)
+CudaErrCheck( cudaStreamWaitEvent( downloadStream, self->workEvent[index] ) );
 
 
     if( self->diskBuffer )

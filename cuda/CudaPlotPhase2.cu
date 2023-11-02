@@ -119,7 +119,8 @@ static void BytefieldToBitfield( CudaK32PlotContext& cx, const byte* bytefield, 
 
     #if DBG_BBCU_P2_COUNT_PRUNED_ENTRIES
         #define G_PRUNED_COUNTS ,cx.phase2->devPrunedCount
-        CudaErrCheck( cudaMemsetAsync( cx.phase2->devPrunedCount, 0, sizeof( uint32 ), stream ) );
+        Log::Line( "Marker Set to %d", 7)
+CudaErrCheck( cudaMemsetAsync( cx.phase2->devPrunedCount, 0, sizeof( uint32 ), stream ) );
     #else
         #define G_PRUNED_COUNTS 
     #endif
@@ -176,7 +177,8 @@ void MarkTable( CudaK32PlotContext& cx, CudaK32Phase2& p2 )
     }
 
     // Zero-out marks
-    CudaErrCheck( cudaMemsetAsync( devLMarks, 0, GetMarkingTableByteSize(), cx.computeStream ) );
+    Log::Line( "Marker Set to %d", 8)
+CudaErrCheck( cudaMemsetAsync( devLMarks, 0, GetMarkingTableByteSize(), cx.computeStream ) );
 
     // Load first bucket's worth of pairs
     LoadPairs( cx, p2, rTable, 0 );
@@ -230,9 +232,12 @@ void MarkTable( CudaK32PlotContext& cx, CudaK32Phase2& p2 )
 #if DBG_BBCU_P2_COUNT_PRUNED_ENTRIES
     {
         uint32 prunedEntryCount = 0;
-        CudaErrCheck( cudaStreamSynchronize( cx.computeStream ) );
-        CudaErrCheck( cudaMemcpyAsync( &prunedEntryCount, p2.devPrunedCount, sizeof( uint32 ), cudaMemcpyDeviceToHost, cx.computeStream ) );
-        CudaErrCheck( cudaStreamSynchronize( cx.computeStream ) );
+        Log::Line( "Marker Set to %d", 9)
+CudaErrCheck( cudaStreamSynchronize( cx.computeStream ) );
+        Log::Line( "Marker Set to %d", 10)
+CudaErrCheck( cudaMemcpyAsync( &prunedEntryCount, p2.devPrunedCount, sizeof( uint32 ), cudaMemcpyDeviceToHost, cx.computeStream ) );
+        Log::Line( "Marker Set to %d", 11)
+CudaErrCheck( cudaStreamSynchronize( cx.computeStream ) );
 
         const uint64 lEntryCount = cx.tableEntryCounts[(int)lTable];
         Log::Line( "Table %u now has %u / %llu  ( %.2lf%% ) entries.", (uint)lTable+1, 

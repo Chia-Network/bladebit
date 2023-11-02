@@ -592,8 +592,10 @@ void CudaMatchBucketizedK32(
         CudaSetFirstAndLastGroup<<<1,2,0,stream>>>( tmpGroupCounts, entryCount );
     }
 
-    CudaErrCheck( cudaMemsetAsync( cx.devGroupCount, 0, sizeof( uint32 ), stream ) );
-    CudaErrCheck( cudaMemsetAsync( cx.devMatchCount, 0, sizeof( uint32 ), stream ) );
+    Log::Line( "Marker Set to %d", 1)
+CudaErrCheck( cudaMemsetAsync( cx.devGroupCount, 0, sizeof( uint32 ), stream ) );
+    Log::Line( "Marker Set to %d", 2)
+CudaErrCheck( cudaMemsetAsync( cx.devMatchCount, 0, sizeof( uint32 ), stream ) );
     ScanGroupsCudaK32Bucket<<<kscanblocks, BBCU_SCAN_GROUP_THREADS, 0, stream>>>( devY, tmpGroupCounts+2, cx.devGroupCount, entryCount, bucketMask );
 
     byte*  sortTmpAlloc = (byte*)( tmpGroupCounts + BBCU_MAX_GROUP_COUNT );
