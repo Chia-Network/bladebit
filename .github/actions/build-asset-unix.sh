@@ -45,7 +45,6 @@ fi
 set -x
 mkdir build-${target} && cd build-${target}
 cmake .. -DCMAKE_BUILD_TYPE=Release
-bash -eo pipefail ../embed-version.sh
 cmake --build . --config Release --target $target -j $thread_count
 chmod +x ./${exe_name}
 
