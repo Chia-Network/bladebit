@@ -47,69 +47,25 @@ void MemPlotter::Init()
 
         Log::Line( "System Memory: %llu/%llu GiB.", availMemory BtoGB , totalMemory BtoGB );
 
-        // YBuffers need to round up to chacha block size, so we just add an extra block always
-        const size_t chachaBlockSize  = kF1BlockSizeBits / 8;
-
-        const size_t t1XBuffer   = 16ull GB;
-        const size_t t2LRBuffer  = 32ull GB;
-        const size_t t3LRBuffer  = 32ull GB;
-        const size_t t4LRBuffer  = 32ull GB;
-        const size_t t5LRBuffer  = 32ull GB;
-        const size_t t6LRBuffer  = 32ull GB;
-        const size_t t7LRBuffer  = 32ull GB;
-        const size_t t7YBuffer   = 16ull GB;
-
-        const size_t yBuffer0    = 32ull GB + chachaBlockSize;
-        const size_t yBuffer1    = 32ull GB + chachaBlockSize;
-        const size_t metaBuffer0 = 64ull GB;
-        const size_t metaBuffer1 = 64ull GB;
-
-        const size_t reqMem = 
-            t1XBuffer   +
-            t2LRBuffer  +
-            t3LRBuffer  +
-            t4LRBuffer  +
-            t5LRBuffer  +
-            t6LRBuffer  +
-            t7LRBuffer  +
-            t7YBuffer   +
-            yBuffer0    +
-            yBuffer1    +
-            metaBuffer0 +
-            metaBuffer1;
+        const size_t reqMem = _context.RequiredMemory();
 
         Log::Line( "Memory required: %llu GiB.", reqMem BtoGB );
         if( availMemory < reqMem  )
             Log::Line( "Warning: Not enough memory available. Buffer allocation may fail." );
 
         Log::Line( "Allocating buffers." );
-        _context.t1XBuffer   = SafeAlloc<uint32>( t1XBuffer  , warmStart, numa );
-
-        _context.t2LRBuffer  = SafeAlloc<Pair>  ( t2LRBuffer , warmStart, numa );
-        _context.t3LRBuffer  = SafeAlloc<Pair>  ( t3LRBuffer , warmStart, numa );
-        _context.t4LRBuffer  = SafeAlloc<Pair>  ( t4LRBuffer , warmStart, numa );
-        _context.t5LRBuffer  = SafeAlloc<Pair>  ( t5LRBuffer , warmStart, numa );
-        _context.t6LRBuffer  = SafeAlloc<Pair>  ( t6LRBuffer , warmStart, numa );
-
-        _context.t7YBuffer   = SafeAlloc<uint32>( t7YBuffer  , warmStart, numa );
-        _context.t7LRBuffer  = SafeAlloc<Pair>  ( t7LRBuffer , warmStart, numa );
-
-        _context.yBuffer0    = SafeAlloc<uint64>( yBuffer0   , warmStart, numa );
-        _context.yBuffer1    = SafeAlloc<uint64>( yBuffer1   , warmStart, numa );
-        _context.metaBuffer0 = SafeAlloc<uint64>( metaBuffer0, warmStart, numa );
-        _context.metaBuffer1 = SafeAlloc<uint64>( metaBuffer1, warmStart, numa );
-
+        _context.AllocateBuffers(warmStart, numa);
 
         // Some table's kBC group pairings yield more values than 2^k. 
         // Therefore, we need to have some overflow space for kBC pairs.
         // We get an average of 236 entries per group.
         // We use a yBuffer for to mark group boundaries, 
         // so we fit as many as we can in it.
-        const size_t maxKbcGroups  = yBuffer0 / sizeof( uint32 );
+        const size_t maxKbcGroups  = _context.yBuffer0Size / sizeof( uint32 );
 
         // Since we use a meta buffer (64GiB) for pairing,
         // we can just use all its space to fit pairs.
-        const size_t maxPairs      = metaBuffer0 / sizeof( Pair );
+        const size_t maxPairs      = _context.metaBuffer0Size / sizeof( Pair );
 
         _context.maxPairs     = maxPairs;
         _context.maxKBCGroups = maxKbcGroups;
@@ -231,103 +187,4 @@ void MemPlotter::WaitPlotWriter()
     _context.plotWriter->DumpTables();
 }
 
-///
-/// Internal methods
-///
-//-----------------------------------------------------------
-template<typename T>
-T* MemPlotter::SafeAlloc( size_t size, bool warmStart, const NumaInfo* numa )
-{
-    #if DEBUG || BOUNDS_PROTECTION
-    
-        const size_t originalSize = size;
-        const size_t pageSize     = SysHost::GetPageSize();
-        size = pageSize * 2 + RoundUpToNextBoundary( size, (int)pageSize );
-
-    #endif
-
-    T* ptr = (T*)SysHost::VirtualAlloc( size, false );
-
-    if( !ptr )
-    {
-        Fatal( "Error: Failed to allocate required buffers." );
-    }
-
-    if( numa )
-    {
-        if( !SysHost::NumaSetMemoryInterleavedMode( ptr, size ) )
-            Log::Error( "Warning: Failed to bind NUMA memory." );
-    }
-
-    // Protect memory boundaries
-    #if DEBUG || BOUNDS_PROTECTION
-    {
-        byte* p = (byte*)ptr;
-        ptr = (T*)(p + pageSize);
-
-        SysHost::VirtualProtect( p, pageSize, VProtect::NoAccess );
-        SysHost::VirtualProtect( p + size - pageSize, pageSize, VProtect::NoAccess );
-    }
-    #endif
-
-    // Touch pages to initialize them, if specified
-    if( warmStart )
-    {
-        struct InitJob
-        {
-            byte*  pages;
-            size_t pageSize;
-            uint64 pageCount;
-
-            inline static void Run( InitJob* job )
-            {
-                const size_t pageSize = job->pageSize;
-
-                byte*       page = job->pages;
-                const byte* end  = page + job->pageCount * pageSize;
-
-                do {
-                    *page = 0;
-                    page += pageSize;
-                    
-                } while ( page < end );
-            }
-        };
-
-        #if DEBUG || BOUNDS_PROTECTION
-            size = originalSize;
-        #endif
-
-        InitJob jobs[MAX_THREADS];
-
-        const uint   threadCount    = _context.threadPool->ThreadCount();
-        const size_t pageSize       = SysHost::GetPageSize();
-        const uint64 pageCount      = CDiv( size, (int)pageSize );
-        const uint64 pagesPerThread = pageCount / threadCount;
-
-        uint64 numRemainderPages = pageCount - ( pagesPerThread * threadCount );
-
-        byte* pages = (byte*)ptr;
-        for( uint i = 0; i < threadCount; i++ )
-        {
-            InitJob& job = jobs[i];
-
-            job.pages     = pages;
-            job.pageSize  = pageSize;
-            job.pageCount = pagesPerThread;
-
-            if( numRemainderPages )
-            {
-                job.pageCount ++;
-                numRemainderPages --;
-            }
-
-            pages += pageSize * job.pageCount;
-        }
-
-        _context.threadPool->RunJob( InitJob::Run, jobs, threadCount );
-    }
-
-    return ptr;
-}
 

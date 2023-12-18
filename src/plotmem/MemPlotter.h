@@ -19,9 +19,6 @@ public:
 
 private:
 
-    template<typename T>
-    T* SafeAlloc( size_t size, bool warmStart, const NumaInfo* numa );
-
     void BeginPlotFile( const PlotRequest& request );
 
     // Check if the background plot writer finished

@@ -198,8 +198,7 @@ void ParseCommandLine( GlobalPlotConfig& cfg, IPlotter*& outPlotter, int argc, c
         else if( cli.ArgConsume( "--memory" ) )
         {
             // #TODO: We should move the required part to the memplot command
-            // #TODO: Get this value from Memplotter
-            const size_t requiredMem  = 416ull GB;
+            const size_t requiredMem  = MemPlotContext::RequiredMemory() BtoGB;
             const size_t availableMem = SysHost::GetAvailableSystemMemory();
             const size_t totalMem     = SysHost::GetTotalSystemMemory();
 

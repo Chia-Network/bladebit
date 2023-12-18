@@ -64,6 +64,29 @@ struct MemPlotContext
     uint64* metaBuffer0;      // 64GiB each
     uint64* metaBuffer1;
 
+    // Buffers sizes
+    static constexpr size_t t1XBufferSize   = 16ull GB;
+    static constexpr size_t t2LRBufferSize  = 32ull GB;
+    static constexpr size_t t3LRBufferSize  = 32ull GB;
+    static constexpr size_t t4LRBufferSize  = 32ull GB;
+    static constexpr size_t t5LRBufferSize  = 32ull GB;
+    static constexpr size_t t6LRBufferSize  = 32ull GB;
+    static constexpr size_t t7LRBufferSize  = 32ull GB;
+    static constexpr size_t t7YBufferSize   = 16ull GB;
+
+    // YBuffers need to round up to chacha block size, so we just add an extra block always
+    static constexpr size_t yBuffer0Size    = 32ull GB + kF1BlockSize;
+    static constexpr size_t yBuffer1Size    = 32ull GB + kF1BlockSize;
+    static constexpr size_t metaBuffer0Size = 64ull GB;
+    static constexpr size_t metaBuffer1Size = 64ull GB;
+
+    static const size_t RequiredMemory();
+
+    template<typename T>
+    T* SafeAlloc( size_t size, bool warmStart, const NumaInfo* numa );
+
+    void AllocateBuffers(bool warmStart, const NumaInfo* numa);
+
     uint64  maxKBCGroups;
     uint64  maxPairs;         // Max total pairs our buffer can hold
     
