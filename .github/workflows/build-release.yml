@@ -49,7 +49,7 @@ jobs:
           if-no-files-found: error
 
   build-harvester-windows-x86-64:
-    runs-on: windows-2022
+    runs-on: cuda-windows
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
