@@ -8,45 +8,45 @@ env:
   CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
 
 jobs:
-#  build-harvester-linux-x86-64:
-#    runs-on: ubuntu-20.04
-#    container:
-#      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
-#    steps:
-#      - name: Checkout Repo
-#        uses: actions/checkout@v3
-#
-#      - name: Set Env
-#        uses: Chia-Network/actions/setjobenv@main
-#        env:
-#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#
-#      - name: Get Version Number
-#        id: version_number
-#        shell: bash
-#        run: ./.github/actions/get-version.sh ubuntu x86-64
-#
-#      - name: Install Prerequisites
-#        shell: bash
-#        run: |
-#          set -eo pipefail
-#          yum group install -y "Development Tools"
-#          yum install -y sudo make git wget subscription-manager
-#
-#      - name: Build Harvester
-#        shell: bash
-#        run: |
-#          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
-#          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-#          # emits env.harvester_artifact_path
-#          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-#
-#      - name: Upload Harvester Artifact
-#        uses: actions/upload-artifact@v3
-#        with:
-#          name: ${{ env.harvester_artifact_name }}
-#          path: ${{ env.harvester_artifact_path }}
-#          if-no-files-found: error
+  build-harvester-linux-x86-64:
+    runs-on: cuda-ubuntu
+    container:
+      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Version Number
+        id: version_number
+        shell: bash
+        run: ./.github/actions/get-version.sh ubuntu x86-64
+
+      - name: Install Prerequisites
+        shell: bash
+        run: |
+          set -eo pipefail
+          yum group install -y "Development Tools"
+          yum install -y sudo make git wget subscription-manager
+
+      - name: Build Harvester
+        shell: bash
+        run: |
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
+          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+          # emits env.harvester_artifact_path
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+
+      - name: Upload Harvester Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.harvester_artifact_name }}
+          path: ${{ env.harvester_artifact_path }}
+          if-no-files-found: error
 
   build-harvester-windows-x86-64:
     runs-on: cuda-windows
@@ -226,56 +226,56 @@ jobs:
 #          name: ${{ env.harvester_artifact_name }}
 #          path: ${{ env.harvester_artifact_path }}
 #          if-no-files-found: error
-#
-#
-#  build-bladebit-ubuntu-x86-64:
-#    runs-on: ubuntu-20.04
-#    steps:
-#      - name: Checkout Repo
-#        uses: actions/checkout@v3
-#
-#      - name: Set Env
-#        uses: Chia-Network/actions/setjobenv@main
-#        env:
-#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#
-#      - name: Get Version Number
-#        id: version_number
-#        run: .github/actions/get-version.sh ubuntu x86-64
-#
-#      - name: Install Prerequisites
-#        run: |
-#            sudo apt install -y libgmp-dev libnuma-dev
-#            sudo bash .github/actions/install-cmake-linux.sh
-#
-#      - name: Build Bladebit
-#        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
-#
-#      - name: Setup CUDA
-#        uses: Jimver/cuda-toolkit@v0.2.11
-#        id: cuda-toolkit
-#        with:
-#          cuda: '12.1.0'
-#          method: network
-#          linux-local-args: '["--toolkit"]'
-#
-#      - name: Build Bladebit CUDA
-#        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
-#
-#      - name: Upload Bladebit Artifact
-#        uses: actions/upload-artifact@v3
-#        with:
-#          name: ${{ env.BB_ARTIFACT_NAME }}
-#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-#          if-no-files-found: error
-#
-#      - name: Upload Bladebit CUDA Artifact
-#        uses: actions/upload-artifact@v3
-#        with:
-#          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-#          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-#          if-no-files-found: error
-#
+
+
+  build-bladebit-ubuntu-x86-64:
+    runs-on: cuda-ubuntu
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Version Number
+        id: version_number
+        run: .github/actions/get-version.sh ubuntu x86-64
+
+      - name: Install Prerequisites
+        run: |
+            sudo apt install -y libgmp-dev libnuma-dev
+            sudo bash .github/actions/install-cmake-linux.sh
+
+      - name: Build Bladebit
+        run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
+
+      - name: Setup CUDA
+        uses: Jimver/cuda-toolkit@v0.2.11
+        id: cuda-toolkit
+        with:
+          cuda: '12.1.0'
+          method: network
+          linux-local-args: '["--toolkit"]'
+
+      - name: Build Bladebit CUDA
+        run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
+
+      - name: Upload Bladebit Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+          if-no-files-found: error
+
+      - name: Upload Bladebit CUDA Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+          if-no-files-found: error
+
 #  build-bladebit-centos-x86-64:
 #    runs-on: ubuntu-20.04
 #    container:
