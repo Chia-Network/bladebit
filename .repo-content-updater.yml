@@ -1,0 +1,3 @@
+# So that the LICENSE can be kept up to date while retaining both names
+var_overrides:
+  COMPANY_NAME: "Harold Brenes, Chia Network Inc."
