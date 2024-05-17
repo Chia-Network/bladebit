@@ -14,7 +14,7 @@ jobs:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -52,7 +52,7 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -108,7 +108,7 @@ jobs:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_aarch64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -168,7 +168,7 @@ jobs:
         uses: Chia-Network/actions/clean-workspace@main
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -201,7 +201,7 @@ jobs:
         uses: Chia-Network/actions/clean-workspace@main
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -282,7 +282,7 @@ jobs:
       image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -342,7 +342,7 @@ jobs:
       image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -379,7 +379,7 @@ jobs:
         shell: bash
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -429,7 +429,7 @@ jobs:
     runs-on: windows-2019
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -478,7 +478,7 @@ jobs:
     runs-on: windows-2019
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
