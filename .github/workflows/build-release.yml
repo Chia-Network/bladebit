@@ -42,7 +42,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -96,7 +96,7 @@ jobs:
           CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -155,7 +155,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -188,7 +188,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -221,7 +221,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -263,14 +263,14 @@ jobs:
         run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
       - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
       - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
@@ -323,14 +323,14 @@ jobs:
           .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
 
       - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
       - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
@@ -364,7 +364,7 @@ jobs:
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
 
       - name: Upload Artifact CentOS ARM64
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
@@ -409,7 +409,7 @@ jobs:
         run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
       - name: Upload Artifact Ubuntu ARM64
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
@@ -419,7 +419,7 @@ jobs:
         run: |
           .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
       - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
@@ -468,7 +468,7 @@ jobs:
           ls -la ../../bin
 
       - name: Upload Bladebit Artifact Windows x86-64
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
@@ -538,7 +538,7 @@ jobs:
           ls -la ../../bin
 
       - name: Upload Bladebit CUDA Artifact Windows x86-64
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
