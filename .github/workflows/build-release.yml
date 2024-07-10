@@ -14,7 +14,7 @@ jobs:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -42,7 +42,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -52,7 +52,7 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -72,7 +72,7 @@ jobs:
           choco install -y sed
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.11
+        uses: Jimver/cuda-toolkit@v0.2.15
         id: cuda-toolkit
         with:
           cuda: '12.1.0'
@@ -96,7 +96,7 @@ jobs:
           CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -108,7 +108,7 @@ jobs:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_aarch64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -116,7 +116,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache DNF packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: /var/cache/dnf
           key: ${{ runner.os }}-dnf-${{ hashFiles('**/your-build-file') }}
@@ -155,7 +155,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -168,7 +168,7 @@ jobs:
         uses: Chia-Network/actions/clean-workspace@main
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -188,7 +188,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -201,7 +201,7 @@ jobs:
         uses: Chia-Network/actions/clean-workspace@main
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -221,7 +221,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -252,7 +252,7 @@ jobs:
         run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.11
+        uses: Jimver/cuda-toolkit@v0.2.15
         id: cuda-toolkit
         with:
           cuda: '12.1.0'
@@ -263,14 +263,14 @@ jobs:
         run: .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{env.BB_VERSION}}
 
       - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
       - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
@@ -282,7 +282,7 @@ jobs:
       image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -323,14 +323,14 @@ jobs:
           .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
 
       - name: Upload Bladebit Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
           if-no-files-found: error
 
       - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
@@ -342,7 +342,7 @@ jobs:
       image: quay.io/centos/centos:stream8
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -364,7 +364,7 @@ jobs:
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
 
       - name: Upload Artifact CentOS ARM64
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
@@ -379,7 +379,7 @@ jobs:
         shell: bash
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -409,7 +409,7 @@ jobs:
         run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
       - name: Upload Artifact Ubuntu ARM64
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
@@ -419,7 +419,7 @@ jobs:
         run: |
           .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
       - name: Upload Bladebit CUDA Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
@@ -429,7 +429,7 @@ jobs:
     runs-on: windows-2019
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -468,7 +468,7 @@ jobs:
           ls -la ../../bin
 
       - name: Upload Bladebit Artifact Windows x86-64
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
@@ -478,7 +478,7 @@ jobs:
     runs-on: windows-2019
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -498,7 +498,7 @@ jobs:
           choco install -y sed
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.11
+        uses: Jimver/cuda-toolkit@v0.2.15
         id: cuda-toolkit
         with:
           cuda: '12.1.0'
@@ -538,7 +538,7 @@ jobs:
           ls -la ../../bin
 
       - name: Upload Bladebit CUDA Artifact Windows x86-64
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
