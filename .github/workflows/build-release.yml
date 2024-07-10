@@ -279,7 +279,7 @@ jobs:
   build-bladebit-centos-x86-64:
     runs-on: ubuntu-20.04
     container:
-      image: quay.io/centos/centos:stream8
+      image: chianetwork/rocky8-builder:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -339,7 +339,7 @@ jobs:
   build-bladebit-centos-arm64:
     runs-on: [ARM64, Linux]
     container:
-      image: quay.io/centos/centos:stream8
+      image: chianetwork/rocky8-builder:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
