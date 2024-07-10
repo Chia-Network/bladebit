@@ -11,7 +11,7 @@ jobs:
   build-harvester-linux-x86-64:
     runs-on: ubuntu-20.04
     container:
-      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:main
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -105,7 +105,7 @@ jobs:
   build-harvester-linux-arm64:
     runs-on: [ARM64, Linux]
     container:
-      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_aarch64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_aarch64:main
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
