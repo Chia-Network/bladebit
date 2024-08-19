@@ -1,6 +1,16 @@
 add_library(bladebit_core)
 target_link_libraries(bladebit_core PUBLIC bladebit_config)
 
+string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} SYSTEM_PROCESSOR_LC)
+if(SYSTEM_PROCESSOR_LC MATCHES "arm" OR SYSTEM_PROCESSOR_LC MATCHES "aarch64" OR SYSTEM_PROCESSOR_LC MATCHES "arm64")
+    set(is_arm ON)
+else()
+    set(is_arm OFF)
+endif()
+if(${is_arm})
+    add_compile_options(-mfpu=neon)
+endif()
+
 target_include_directories(bladebit_core PUBLIC
     ${INCLUDE_DIRECTORIES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -13,7 +23,7 @@ target_compile_definitions(bladebit_core PUBLIC
 
 target_compile_options(bladebit_core PUBLIC ${preinclude_pch})
 
-target_link_libraries(bladebit_core PUBLIC 
+target_link_libraries(bladebit_core PUBLIC
     Threads::Threads
     bls
 
@@ -64,19 +74,27 @@ set(src_blake3
     src/b3/blake3.h
     src/b3/blake3_impl.h
     src/b3/blake3_portable.c
-    
-    $<${is_x86}:
-
+    $<$<BOOL:${is_x86}>:
         $<$<PLATFORM_ID:Windows>:
-            src/b3/blake3_sse41.c
-            src/b3/blake3_avx2.c
-            src/b3/blake3_avx512.c
+            $<$<CXX_COMPILER_ID:MSVC>:
+                src/b3/blake3_avx2_x86-64_windows_msvc.asm
+                src/b3/blake3_avx512_x86-64_windows_msvc.asm
+                src/b3/blake3_sse41_x86-64_windows_msvc.asm
+            >
+            $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:
+                src/b3/blake3_avx2_x86-64_windows_gnu.S
+                src/b3/blake3_avx512_x86-64_windows_gnu.S
+                src/b3/blake3_sse41_x86-64_windows_gnu.S
+            >
         >
         $<$<NOT:$<PLATFORM_ID:Windows>>:
             src/b3/blake3_avx2_x86-64_unix.S
             src/b3/blake3_avx512_x86-64_unix.S
             src/b3/blake3_sse41_x86-64_unix.S
         >
+    >
+    $<$<BOOL:${is_arm}>:
+        src/b3/blake3_neon.c
     >
 )
 
