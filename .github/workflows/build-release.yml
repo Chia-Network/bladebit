@@ -126,7 +126,7 @@ jobs:
       - name: Get Version Number
         id: version_number
         shell: bash
-        run: ./.github/actions/get-version.sh centos arm64
+        run: ./.github/actions/get-version.sh almalinux arm64
 
       - name: Install Prerequisites
         shell: bash
@@ -276,10 +276,10 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
-  build-bladebit-centos-x86-64:
+  build-bladebit-almalinux-x86-64:
     runs-on: ubuntu-20.04
     container:
-      image: quay.io/centos/centos:stream8
+      image: quay.io/almalinux/almalinux:8
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -291,7 +291,7 @@ jobs:
 
       - name: Get Version Number
         id: version_number
-        run: .github/actions/get-version.sh centos x86-64
+        run: .github/actions/get-version.sh almalinux x86-64
 
       - name: Install Prerequisites
         run: |
@@ -336,10 +336,10 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
-  build-bladebit-centos-arm64:
+  build-bladebit-almalinux-arm64:
     runs-on: [ARM64, Linux]
     container:
-      image: quay.io/centos/centos:stream8
+      image: quay.io/almalinux/almalinux:8
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -351,7 +351,7 @@ jobs:
 
       - name: Get Version Number
         id: version_number
-        run: .github/actions/get-version.sh centos arm64
+        run: .github/actions/get-version.sh almalinux arm64
 
       - name: Install Prerequisites
         run: |
@@ -363,7 +363,7 @@ jobs:
           source /opt/rh/gcc-toolset-9/enable
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
 
-      - name: Upload Artifact CentOS ARM64
+      - name: Upload Artifact AlmaLinux ARM64
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
