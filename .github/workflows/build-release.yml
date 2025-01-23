@@ -279,7 +279,7 @@ jobs:
   build-bladebit-almalinux-x86-64:
     runs-on: ubuntu-latest
     container:
-      image: quay.io/almalinux/almalinux:8
+      image: almalinux:8
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -339,7 +339,7 @@ jobs:
   build-bladebit-almalinux-arm64:
     runs-on: ubuntu-24.04-arm
     container:
-      image: quay.io/almalinux/almalinux:8
+      image: almalinux:8
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
