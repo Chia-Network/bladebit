@@ -9,7 +9,7 @@ env:
 
 jobs:
   build-harvester-linux-x86-64:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     container:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:latest
     steps:
@@ -103,7 +103,7 @@ jobs:
           if-no-files-found: error
 
   build-harvester-linux-arm64:
-    runs-on: [ARM64, Linux]
+    runs-on: ubuntu-24.04-arm
     container:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_aarch64:latest
     steps:
@@ -229,7 +229,7 @@ jobs:
 
 
   build-bladebit-ubuntu-x86-64:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -277,7 +277,7 @@ jobs:
           if-no-files-found: error
 
   build-bladebit-almalinux-x86-64:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     container:
       image: quay.io/almalinux/almalinux:8
     steps:
@@ -337,7 +337,7 @@ jobs:
           if-no-files-found: error
 
   build-bladebit-almalinux-arm64:
-    runs-on: [ARM64, Linux]
+    runs-on: ubuntu-24.04-arm
     container:
       image: quay.io/almalinux/almalinux:8
     steps:
@@ -371,7 +371,7 @@ jobs:
           if-no-files-found: error
 
   build-bladebit-cuda-linux-arm64:
-    runs-on: [ARM64, Linux]
+    runs-on: ubuntu-24.04-arm
     container:
       image: chianetwork/ubuntu-20.04-builder:latest
     defaults:

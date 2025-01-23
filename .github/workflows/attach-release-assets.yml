@@ -7,7 +7,7 @@ on:
 
 jobs:
   upload-release-assets:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -16,7 +16,7 @@ jobs:
 
       # Setup Node
       - uses: actions/setup-node@v4
-        with: { node-version: '16' }
+        with: { node-version: '20' }
       - run: cd .github/actions && npm install @octokit/action
 
       # Upload Artifacts as Release Assets

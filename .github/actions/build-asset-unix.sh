@@ -46,7 +46,7 @@ set -x
 mkdir build-${target} && cd build-${target}
 cmake .. -DCMAKE_BUILD_TYPE=Release
 bash -eo pipefail ../embed-version.sh
-cmake --build . --config Release --target $target -j $thread_count
+cmake --build . --config Release --target $target -j "$thread_count"
 chmod +x ./${exe_name}
 
 if [[ $OSTYPE == 'msys'* ]] || [[ $OSTYPE == 'cygwin'* ]]; then
@@ -64,8 +64,8 @@ if [[ "$bb_version" != "$version" ]]; then
 fi
 
 tar --version
-tar -czvf $artifact_name $exe_name
+tar -czvf "$artifact_name" "$exe_name"
 mkdir -p ../bin
-mv $artifact_name ../bin/
+mv "$artifact_name" ../bin/
 ls -la ../bin
 
