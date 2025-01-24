@@ -92,6 +92,7 @@ void CmdSimulateMain( GlobalPlotConfig& gCfg, CliParser& cli )
         else if( cli.ReadSize( cfg.farmSize, "-s", "--size" ) ) continue;
         else if( cli.ReadHexStrAsBytes( cfg.randomSeed, sizeof( cfg.randomSeed ), "--seed" ) ) continue;
         else if( cli.ReadSwitch( cfg.noCuda, "--no-cuda" ) ) continue;
+        else if( cli.ReadI32( cfg.cudaDevice, "-d", "--device" ) ) continue;
         else
             break;
     }

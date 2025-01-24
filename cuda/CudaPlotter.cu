@@ -47,6 +47,7 @@ static void UploadBucketToGpu( CudaK32PlotContext& context, TableId table, const
 static void LoadAndSortBucket( CudaK32PlotContext& cx, const uint32 bucket );
 
 void CudaMatchBucketizedK32( CudaK32PlotContext& cx, const uint32* devY, cudaStream_t stream, cudaEvent_t event );
+[[noreturn]] static void ListCudaDevices( bool json );
 
 // Defined in FxCuda.cu
 void GenFx( CudaK32PlotContext& cx, const uint32* devYIn, const uint32* devMetaIn, cudaStream_t stream );
@@ -58,6 +59,11 @@ GPU-based (CUDA) plotter
 [OPTIONS]:
  -h, --help           : Shows this help message and exits.
  -d, --device         : Select the CUDA device index. (default=0)
+
+ -l, --list           : List availabe CUDA devices, showing their indices.
+
+ --json               : Show output in json format. This is only valid for certain parameters:
+                          --list
 
  --disk-128           : Enable hybrid disk plotting for 128G system RAM. 
                          Requires a --temp1 and --temp2 to be set.
@@ -95,6 +101,9 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
     CudaK32PlotConfig& cfg = _cfg;
     cfg.gCfg = &gCfg;
 
+    bool listDevices = false;
+    bool json        = false;
+
     while( cli.HasArgs() )
     {
         if( cli.ReadU32( cfg.deviceIndex, "-d", "--device" ) )
@@ -127,6 +136,10 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
             continue;
         if( cli.ReadF64( cfg.plotCheckThreshhold, "--check-threshold" ) )
             continue;
+        if( cli.ReadSwitch( json, "--json" ) )
+            continue;
+        if( cli.ReadSwitch( listDevices, "-l", "--list" ) )
+            continue;
         // if( cli.ReadSwitch( cfg.disableDirectDownloads, "--no-direct-buffers" ) )
         //     continue;
         if( cli.ArgMatch( "--help", "-h" ) )
@@ -139,6 +152,8 @@ void CudaK32Plotter::ParseCLI( const GlobalPlotConfig& gCfg, CliParser& cli )
     }
     // The rest should be output directies, parsed by the global config parser.
 
+    if( listDevices )
+        ListCudaDevices( json );
 
     if( cfg.hybrid128Mode && gCfg.compressionLevel <= 0 )
     {
@@ -345,6 +360,64 @@ void CudaInit( CudaK32PlotContext& cx )
     //int supportsCoopLaunch = 0;
     //cudaDeviceGetAttribute( &supportsCoopLaunch, cudaDevAttrCooperativeLaunch, cx.cudaDevice );
     //FatalIf( supportsCoopLaunch != 1, "This CUDA device does not support cooperative kernel launches." );
+}
+
+//-----------------------------------------------------------
+void ListCudaDevices( const bool json )
+{
+    cudaError_t err         = cudaSuccess;
+    int         deviceCount = 0;
+
+    #define CheckCudaSuccess( x ) if( (err = x) != cudaSuccess ) goto CUDA_ERROR_EXIT;
+
+    {
+        CheckCudaSuccess( cudaGetDeviceCount( &deviceCount ) );
+
+        if( deviceCount < 1 )
+        {
+            const char* e = "No CUDA devices available.";
+            if( json )
+                Log::Line( R"({"error": "%s"})", e );
+            else
+                Log::Line( e );
+            exit(0);
+        }
+
+        if( json )
+            Log::Line("[");
+
+        for( int i = 0; i < deviceCount; i++ )
+        {
+            cudaDeviceProp cudaDevProps{};
+            CheckCudaSuccess( cudaGetDeviceProperties( &cudaDevProps, i ) );
+
+            if( json )
+            {
+                Log::Write( R"(  {"id": %d, "name": "%s"})", i, cudaDevProps.name );
+                if( i+1 < deviceCount )
+                    Log::Write( "," );
+
+                Log::NewLine();
+            }
+            else
+                Log::Line( "%-2d: %s", i, cudaDevProps.name );
+        }
+
+        if( json )
+            Log::Line("]");
+
+        exit(0);
+    }
+
+    #undef CheckCudaSuccess
+    CUDA_ERROR_EXIT:
+
+    if( json )
+        Log::Error( R"({ "error": "Failed to list CUDA devices with error 0x%llx: '%s'"})", (llu)err, cudaGetErrorString( err ) );
+    else
+        Log::Error( "Failed to list CUDA devices with error 0x%llx: '%s'.", (llu)err, cudaGetErrorString( err ) );
+
+    exit(1);
 }
 
 
