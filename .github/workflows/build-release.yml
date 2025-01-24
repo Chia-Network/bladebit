@@ -245,8 +245,8 @@ jobs:
 
       - name: Install Prerequisites
         run: |
-            sudo apt install -y libgmp-dev libnuma-dev
-            sudo bash .github/actions/install-cmake-linux.sh
+            sudo apt install -y libgmp-dev libnuma-dev cmake
+            # sudo bash .github/actions/install-cmake-linux.sh
 
       - name: Build Bladebit
         run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
@@ -297,7 +297,7 @@ jobs:
         run: |
           set -eo pipefail
           dnf install -y gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
-              gmp-devel numactl-devel make git wget subscription-manager
+              gmp-devel numactl-devel make cmake git wget subscription-manager
           # bash .github/actions/install-cmake-linux.sh
 
       - name: Build Bladebit
@@ -355,12 +355,12 @@ jobs:
 
       - name: Install Prerequisites
         run: |
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+          dnf install -y gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
             cmake gmp-devel numactl-devel make git
 
       - name: Build
         run: |
-          source /opt/rh/gcc-toolset-9/enable
+          source /opt/rh/gcc-toolset-14/enable
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
 
       - name: Upload Artifact AlmaLinux ARM64
