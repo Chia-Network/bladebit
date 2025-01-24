@@ -1,50 +1,41 @@
+# Read the version from the file
+file(READ "${CMAKE_SOURCE_DIR}/VERSION" version_file_content)
+string(STRIP "${version_file_content}" version_file_content)
+string(REPLACE "\n" ";" version_file_lines "${version_file_content}")
 
-if((NOT DEFINED ENV{CI}) AND (NOT DEFINED CACHE{bb_version_embedded}))
-    message("Embedding local build version")
+# Parse major, minor, and revision numbers
+list(GET version_file_lines 0 version_str)
+string(REPLACE "." ";" version_numbers "${version_str}")
+list(GET version_numbers 0 bb_ver_maj)
+list(GET version_numbers 1 bb_ver_min)
+list(GET version_numbers 2 bb_ver_rev)
 
-    set(cmd_shell bash)
-    set(cmd_ext sh)
-    if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-
-        find_program(bash_path NAMES bash.exe NO_CACHE)
-
-        if(${bash_path} MATCHES "-NOTFOUND")
-            set(cmd_shell powershell)
-            set(cmd_ext ps1)
-        else()
-            set(cmd_shell "${bash_path}")
-        endif()
-    endif()
-
-    execute_process(COMMAND ${cmd_shell} ${CMAKE_SOURCE_DIR}/extract-version.${cmd_ext} major    OUTPUT_VARIABLE bb_ver_maj    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_shell} ${CMAKE_SOURCE_DIR}/extract-version.${cmd_ext} minor    OUTPUT_VARIABLE bb_ver_min    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_shell} ${CMAKE_SOURCE_DIR}/extract-version.${cmd_ext} revision OUTPUT_VARIABLE bb_ver_rev    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_shell} ${CMAKE_SOURCE_DIR}/extract-version.${cmd_ext} suffix   OUTPUT_VARIABLE bb_ver_suffix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND ${cmd_shell} ${CMAKE_SOURCE_DIR}/extract-version.${cmd_ext} commit   OUTPUT_VARIABLE bb_ver_commit WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ERROR_IS_FATAL ANY)
-
-    # Remove trailing whitespace incurred in windows gitbash
-    string(STRIP "${bb_ver_maj}"    bb_ver_maj)
-    string(STRIP "${bb_ver_min}"    bb_ver_min)
-    string(STRIP "${bb_ver_rev}"    bb_ver_rev)
-    string(STRIP "${bb_ver_suffix}" bb_ver_suffix)
-    string(STRIP "${bb_ver_commit}" bb_ver_commit)
-
-    set(bb_ver_suffix ${bb_ver_suffix}-dev)
-
-    # This is slow on windows, so let's cache them
-    set(bb_ver_maj    ${bb_ver_maj}    CACHE STRING "")
-    set(bb_ver_min    ${bb_ver_min}    CACHE STRING "")
-    set(bb_ver_rev    ${bb_ver_rev}    CACHE STRING "")
-    set(bb_ver_suffix ${bb_ver_suffix} CACHE STRING "")
-    set(bb_ver_commit ${bb_ver_commit} CACHE STRING "")
+# Parse the optional suffix
+list(LENGTH version_file_lines version_file_lines_length)
+if(${version_file_lines_length} GREATER 1)
+    list(GET version_file_lines 1 bb_ver_suffix)
+else()
+    set(bb_ver_suffix "")
 endif()
 
-if(NOT DEFINED ENV{CI})
-    add_compile_definitions(BLADEBIT_VERSION_MAJ=${bb_ver_maj})
-    add_compile_definitions(BLADEBIT_VERSION_MIN=${bb_ver_min})
-    add_compile_definitions(BLADEBIT_VERSION_REV=${bb_ver_rev})
-    add_compile_definitions(BLADEBIT_VERSION_SUFFIX="${bb_ver_suffix}")
-    add_compile_definitions(BLADEBIT_GIT_COMMIT="${bb_ver_commit}")
+# Determine if we are in a CI environment
+if(DEFINED ENV{CI})
+    # CI build; use the suffix from the VERSION file
+    set(bb_ver_suffix_final "-${bb_ver_suffix}")
+else()
+    # Local build; use "-dev" as the suffix
+    set(bb_ver_suffix_final "-dev")
 endif()
 
-set(bb_version_embedded on CACHE BOOL "Version embedding has already happened.")
+# Get the Git commit hash
+execute_process(COMMAND git rev-parse HEAD
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE bb_ver_commit
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+# Set compile definitions
+add_compile_definitions(BLADEBIT_VERSION_MAJ=${bb_ver_maj})
+add_compile_definitions(BLADEBIT_VERSION_MIN=${bb_ver_min})
+add_compile_definitions(BLADEBIT_VERSION_REV=${bb_ver_rev})
+add_compile_definitions(BLADEBIT_VERSION_SUFFIX="${bb_ver_suffix_final}")
+add_compile_definitions(BLADEBIT_GIT_COMMIT="${bb_ver_commit}")
