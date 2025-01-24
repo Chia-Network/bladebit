@@ -312,7 +312,7 @@ jobs:
           dnf install -y epel-release
           dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
           dnf clean expire-cache
-          dnf module install -y nvidia
+          dnf module enable -y nvidia-driver:560-open
           dnf install -y cuda
           ls -la /usr/local/
           ls -la /usr/local/cuda/
