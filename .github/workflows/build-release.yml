@@ -11,7 +11,7 @@ jobs:
   build-harvester-linux-x86-64:
     runs-on: ubuntu-latest
     container:
-      image: sameli/manylinux_2_34_x86_64_cuda_12.6:latest
+      image: ghcr.io/wallentx/build-images/manylinux_cuda_x86_64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -105,7 +105,7 @@ jobs:
   build-harvester-linux-arm64:
     runs-on: ubuntu-24.04-arm
     container:
-      image: sameli/manylinux_2_28_aarch64_cuda_12.3:latest
+      image: ghcr.io/wallentx/build-images/manylinux_cuda_aarch64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
