@@ -11,7 +11,7 @@ jobs:
   build-harvester-linux-x86-64:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/wallentx/build-images/manylinux_cuda_x86_64:sha-9c6940c99f0e3ac50f0cf36a5d2afd2b1411f47f
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -105,7 +105,7 @@ jobs:
   build-harvester-linux-arm64:
     runs-on: ubuntu-24.04-arm
     container:
-      image: ghcr.io/wallentx/build-images/manylinux_cuda_aarch64:sha-fe5c8a380202ec459d3d4274cdfd37730a2a67e3
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_aarch64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -278,7 +278,7 @@ jobs:
   build-bladebit-almalinux-x86-64:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/wallentx/build-images/manylinux_cuda_x86_64:sha-9c6940c99f0e3ac50f0cf36a5d2afd2b1411f47f
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -326,7 +326,7 @@ jobs:
   build-bladebit-almalinux-arm64:
     runs-on: ubuntu-24.04-arm
     container:
-      image: ghcr.io/wallentx/build-images/manylinux_cuda_aarch64:sha-fe5c8a380202ec459d3d4274cdfd37730a2a67e3
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_aarch64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
