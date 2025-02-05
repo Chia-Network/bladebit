@@ -1,3 +1,7 @@
+#if defined(__ELF__) && defined(__linux__)
+.section .note.GNU-stack,"",%progbits
+#endif
+
 #ifdef __x86_64__
 .intel_syntax noprefix
 

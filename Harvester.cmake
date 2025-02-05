@@ -158,11 +158,6 @@ target_link_libraries(bladebit_harvester
         $<${have_cuda}:CUDA::cudart_static>
 )
 
-target_link_options(bladebit_harvester
-    PRIVATE
-    -z noexecstack
-)
-
 if(CUDAToolkit_FOUND)
     set_target_properties(bladebit_harvester PROPERTIES 
         EXCLUDE_FROM_ALL ON
