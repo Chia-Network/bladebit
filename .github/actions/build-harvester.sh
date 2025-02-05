@@ -54,8 +54,8 @@ elif [[ "$host_os" == "linux" ]]; then
   OBJDUMP=$(/usr/local/cuda/bin/cuobjdump libbladebit_harvester.so)
 
   # Check for the right GNU_STACK flags
-  # script_path=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
-  # ${script_path}/check-elf-gnu-stack-flags.sh libbladebit_harvester.so
+  script_path=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
+  ${script_path}/check-elf-gnu-stack-flags.sh libbladebit_harvester.so
 fi
 
 cmake --install . --prefix harvester_dist
