@@ -1,0 +1,228 @@
+name: Build Harvester Release Assets
+on:
+  push:
+    branches: ['*']
+  workflow_dispatch:
+
+env:
+  CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
+
+jobs:
+  build-harvester-linux-x86-64:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Version Number
+        id: version_number
+        shell: bash
+        run: ./.github/actions/get-version.sh ubuntu x86-64
+
+      - name: Install Prerequisites
+        shell: bash
+        run: |
+          set -eo pipefail
+          yum group install -y "Development Tools"
+          yum install -y sudo make git wget subscription-manager
+
+      - name: Build Harvester
+        shell: bash
+        run: |
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-x86-64.tar.gz"
+          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+          # emits env.harvester_artifact_path
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+
+      - name: Upload Harvester Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.harvester_artifact_name }}
+          path: ${{ env.harvester_artifact_path }}
+          if-no-files-found: error
+
+  # build-harvester-linux-arm64:
+  #   runs-on: ubuntu-24.04-arm
+  #   container:
+  #     image: ghcr.io/chia-network/build-images/manylinux_cuda_aarch64:latest
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v4
+
+  #     - name: Set Env
+  #       uses: Chia-Network/actions/setjobenv@main
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  #     - name: Cache DNF packages
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: /var/cache/dnf
+  #         key: ${{ runner.os }}-dnf-${{ hashFiles('**/your-build-file') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-dnf-
+
+  #     - name: Get Version Number
+  #       id: version_number
+  #       shell: bash
+  #       run: ./.github/actions/get-version.sh rhl arm64
+
+  #     - name: Install Prerequisites
+  #       shell: bash
+  #       run: |
+  #         set -eo pipefail
+  #         export module_platform_id=platform:el10
+  #         export MODULE_PLATFORM_ID=platform:el10
+  #         export PLATFORM_ID=platform:el10
+  #         uname -a
+  #         cat /etc/os-release
+  #         yum install -y dnf
+  #         dnf install -y epel-release
+  #         dnf install -y dnf-plugins-core
+  #         dnf makecache
+  #         dnf install -y kernel-headers.aarch64 kernel-devel.aarch64 tar bzip2 make automake gcc gcc-c++ pciutils elfutils-libelf-devel libglvnd-opengl libglvnd-glx libglvnd-devel acpid pkgconfig dkms
+  #         dnf install -y cmake
+  #         dnf group install -y "Development Tools"
+  #         dnf install -y gmp-devel numactl-devel make git wget sed
+
+  #     - name: Build Harvester
+  #       shell: bash
+  #       run: |
+  #         export artifact_name="green_reaper-v${{ env.BB_VERSION }}-linux-ARM64.tar.gz"
+  #         echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+  #         # emits env.harvester_artifact_path
+  #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+
+  #     - name: Upload Harvester Artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ env.harvester_artifact_name }}
+  #         path: ${{ env.harvester_artifact_path }}
+  #         if-no-files-found: error
+
+  # build-harvester-macos-arm64:
+  #   runs-on: macos-latest
+  #   steps:
+  #     - name: Cleanup Environment
+  #       uses: Chia-Network/actions/clean-workspace@main
+
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v4
+
+  #     - name: Set Env
+  #       uses: Chia-Network/actions/setjobenv@main
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: bash -e .github/actions/get-version.sh macos arm64
+
+  #     - name: Build Harvester
+  #       shell: bash
+  #       run: |
+  #         export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-arm64.tar.gz"
+  #         echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+  #         # emits env.harvester_artifact_path
+  #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+
+  #     - name: Upload Harvester Artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ env.harvester_artifact_name }}
+  #         path: ${{ env.harvester_artifact_path }}
+  #         if-no-files-found: error
+
+  # build-harvester-macos-x86-64:
+  #   runs-on: macOS-13
+  #   steps:
+  #     - name: Cleanup Environment
+  #       uses: Chia-Network/actions/clean-workspace@main
+
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v4
+
+  #     - name: Set Env
+  #       uses: Chia-Network/actions/setjobenv@main
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  #     - name: Get Version Number
+  #       id: version_number
+  #       run: bash -e .github/actions/get-version.sh macos x86-64
+
+  #     - name: Build Harvester
+  #       shell: bash
+  #       run: |
+  #         export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-x86-64.tar.gz"
+  #         echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+  #         # emits env.harvester_artifact_path
+  #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+
+  #     - name: Upload Harvester Artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ env.harvester_artifact_name }}
+  #         path: ${{ env.harvester_artifact_path }}
+  #         if-no-files-found: error
+
+  # build-harvester-windows-x86-64:
+  #   runs-on: windows-2022
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v4
+
+  #     - name: Set Env
+  #       uses: Chia-Network/actions/setjobenv@main
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  #     - name: Get Version Number
+  #       id: version_number
+  #       shell: bash
+  #       run: ./.github/actions/get-version.sh windows x86-64
+
+  #     - name: Install Prerequisites
+  #       shell: powershell
+  #       run: |
+  #         choco install -y make
+  #         choco install -y wget
+  #         choco install -y sed
+
+  #     - name: Setup CUDA
+  #       uses: Jimver/cuda-toolkit@v0.2.19
+  #       id: cuda-toolkit
+  #       with:
+  #         cuda: '12.6.2'
+  #         method: network
+
+  #     - name: Verify CUDA
+  #       shell: bash
+  #       run: |
+  #         echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+  #         echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+  #         nvcc -V
+
+  #     - name: Build Harvester
+  #       shell: bash
+  #       run: |
+  #         export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.zip"
+  #         echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+  #         # emits env.harvester_artifact_path
+  #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+  #       env:
+  #         CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
+
+  #     - name: Upload Harvester Artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ env.harvester_artifact_name }}
+  #         path: ${{ env.harvester_artifact_path }}
+  #         if-no-files-found: error
