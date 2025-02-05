@@ -19,8 +19,9 @@ jobs:
       - name: Install another node...
         shell: bash
         run: |
-          curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-          yum install nsolid -y
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
+          nvm install node 18
+          nvm use 18
           node -v
 
       - name: Checkout Repo
