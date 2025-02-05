@@ -192,119 +192,119 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
-  build-bladebit-windows-x86-64:
-    runs-on: windows-2019
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
+  # build-bladebit-windows-x86-64:
+  #   runs-on: windows-2019
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v4
 
-      - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Set Env
+  #       uses: Chia-Network/actions/setjobenv@main
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get Version Number
-        shell: bash
-        id: version_number
-        run: .github/actions/get-version.sh windows x86-64
+  #     - name: Get Version Number
+  #       shell: bash
+  #       id: version_number
+  #       run: .github/actions/get-version.sh windows x86-64
 
-      - name: Build Bladebit
-        shell: bash
-        env:
-          BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
-          BB_VERSION: ${{env.BB_VERSION}}
-        run: |
-          mkdir build && cd build
-          cmake ..
-          cat ../src/Version.h
-          cmake --build . --target bladebit --config Release
+  #     - name: Build Bladebit
+  #       shell: bash
+  #       env:
+  #         BB_ARTIFACT_NAME: ${{ env.BB_ARTIFACT_NAME }}
+  #         BB_VERSION: ${{env.BB_VERSION}}
+  #       run: |
+  #         mkdir build && cd build
+  #         cmake ..
+  #         cat ../src/Version.h
+  #         cmake --build . --target bladebit --config Release
 
-          # Ensure bladebit version matches expected version
-          bb_version="$(./Release/bladebit.exe --version | xargs)"
+  #         # Ensure bladebit version matches expected version
+  #         bb_version="$(./Release/bladebit.exe --version | xargs)"
 
-          if [[ "$bb_version" != "$BB_VERSION" ]]; then
-              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
-              exit 1
-          fi
+  #         if [[ "$bb_version" != "$BB_VERSION" ]]; then
+  #             >&2 echo "Incorrect bladebit version. Got'$bb_version' but expected '$BB_VERSION'."
+  #             exit 1
+  #         fi
 
-          mkdir ../bin
-          cd Release
-          ls -la
-          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
-          ls -la ../../bin
+  #         mkdir ../bin
+  #         cd Release
+  #         ls -la
+  #         7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME} bladebit.exe
+  #         ls -la ../../bin
 
-      - name: Upload Bladebit Artifact Windows x86-64
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
-          if-no-files-found: error
+  #     - name: Upload Bladebit Artifact Windows x86-64
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ env.BB_ARTIFACT_NAME }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME }}
+  #         if-no-files-found: error
 
-  build-bladebit-cuda-windows-x86-64:
-    runs-on: windows-2019
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
+  # build-bladebit-cuda-windows-x86-64:
+  #   runs-on: windows-2019
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v4
 
-      - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Set Env
+  #       uses: Chia-Network/actions/setjobenv@main
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get Version Number
-        shell: bash
-        id: version_number
-        run: .github/actions/get-version.sh windows x86-64
+  #     - name: Get Version Number
+  #       shell: bash
+  #       id: version_number
+  #       run: .github/actions/get-version.sh windows x86-64
 
-      - name: Install Prerequisites
-        shell: powershell
-        run: |
-          choco install -y make
-          choco install -y wget
-          choco install -y sed
+  #     - name: Install Prerequisites
+  #       shell: powershell
+  #       run: |
+  #         choco install -y make
+  #         choco install -y wget
+  #         choco install -y sed
 
-      - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.19
-        id: cuda-toolkit
-        with:
-          cuda: '12.6.2'
-          method: network
+  #     - name: Setup CUDA
+  #       uses: Jimver/cuda-toolkit@v0.2.19
+  #       id: cuda-toolkit
+  #       with:
+  #         cuda: '12.6.2'
+  #         method: network
 
-      - name: Verify CUDA
-        shell: bash
-        run: |
-          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
-          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
-          nvcc -V
+  #     - name: Verify CUDA
+  #       shell: bash
+  #       run: |
+  #         echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+  #         echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+  #         nvcc -V
 
-      - name: Build Bladebit CUDA
-        shell: bash
-        env:
-          BB_ARTIFACT_NAME_CUDA: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-          BB_VERSION: ${{env.BB_VERSION}}
-        run: |
-          mkdir build_cuda && cd build_cuda
-          cmake ..
-          cat ../src/Version.h
-          cmake --build . --target bladebit_cuda --config Release
+  #     - name: Build Bladebit CUDA
+  #       shell: bash
+  #       env:
+  #         BB_ARTIFACT_NAME_CUDA: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+  #         BB_VERSION: ${{env.BB_VERSION}}
+  #       run: |
+  #         mkdir build_cuda && cd build_cuda
+  #         cmake ..
+  #         cat ../src/Version.h
+  #         cmake --build . --target bladebit_cuda --config Release
 
-          # Ensure bladebit version matches expected version
-          bb_version="$(./Release/bladebit_cuda.exe --version | xargs)"
+  #         # Ensure bladebit version matches expected version
+  #         bb_version="$(./Release/bladebit_cuda.exe --version | xargs)"
 
-          if [[ "$bb_version" != "$BB_VERSION" ]]; then
-              >&2 echo "Incorrect bladebit version. Got but '$bb_version' expected '$BB_VERSION'."
-              exit 1
-          fi
+  #         if [[ "$bb_version" != "$BB_VERSION" ]]; then
+  #             >&2 echo "Incorrect bladebit version. Got bb_version' but expected '$BB_VERSION'."
+  #             exit 1
+  #         fi
 
-          mkdir ../bin
-          cd Release
-          ls -la
-          7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME_CUDA} bladebit_cuda.exe
-          ls -la ../../bin
+  #         mkdir ../bin
+  #         cd Release
+  #         ls -la
+  #         7z.exe a -tzip ../../bin/${BB_ARTIFACT_NAME_CUDA} bladebit_cuda.exe
+  #         ls -la ../../bin
 
-      - name: Upload Bladebit CUDA Artifact Windows x86-64
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
-          path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
-          if-no-files-found: error
+  #     - name: Upload Bladebit CUDA Artifact Windows x86-64
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ env.BB_ARTIFACT_NAME_CUDA }}
+  #         path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
+  #         if-no-files-found: error

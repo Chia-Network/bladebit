@@ -107,60 +107,6 @@ jobs:
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
-  build-harvester-windows-x86-64:
-    runs-on: windows-2022
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-
-      - name: Set Env
-        uses: Chia-Network/actions/setjobenv@main
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get Version Number
-        id: version_number
-        shell: bash
-        run: ./.github/actions/get-version.sh windows x86-64
-
-      - name: Install Prerequisites
-        shell: powershell
-        run: |
-          choco install -y make
-          choco install -y wget
-          choco install -y sed
-
-      - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.19
-        id: cuda-toolkit
-        with:
-          cuda: '12.6.2'
-          method: network
-
-      - name: Verify CUDA
-        shell: bash
-        run: |
-          echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
-          echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
-          nvcc -V
-
-      - name: Build Harvester
-        shell: bash
-        run: |
-          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.zip"
-          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-          # emits env.harvester_artifact_path
-          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
-        env:
-          CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
-
-      - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.harvester_artifact_name }}
-          path: ${{ env.harvester_artifact_path }}
-          if-no-files-found: error
-
   build-harvester-macos-arm64:
     runs-on: macos-latest
     steps:
@@ -227,3 +173,56 @@ jobs:
           path: ${{ env.harvester_artifact_path }}
           if-no-files-found: error
 
+  # build-harvester-windows-x86-64:
+  #   runs-on: windows-2022
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v4
+
+  #     - name: Set Env
+  #       uses: Chia-Network/actions/setjobenv@main
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  #     - name: Get Version Number
+  #       id: version_number
+  #       shell: bash
+  #       run: ./.github/actions/get-version.sh windows x86-64
+
+  #     - name: Install Prerequisites
+  #       shell: powershell
+  #       run: |
+  #         choco install -y make
+  #         choco install -y wget
+  #         choco install -y sed
+
+  #     - name: Setup CUDA
+  #       uses: Jimver/cuda-toolkit@v0.2.19
+  #       id: cuda-toolkit
+  #       with:
+  #         cuda: '12.6.2'
+  #         method: network
+
+  #     - name: Verify CUDA
+  #       shell: bash
+  #       run: |
+  #         echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+  #         echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+  #         nvcc -V
+
+  #     - name: Build Harvester
+  #       shell: bash
+  #       run: |
+  #         export artifact_name="green_reaper-v${{ env.BB_VERSION }}-windows-x86-64.zip"
+  #         echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+  #         # emits env.harvester_artifact_path
+  #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+  #       env:
+  #         CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
+
+  #     - name: Upload Harvester Artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ env.harvester_artifact_name }}
+  #         path: ${{ env.harvester_artifact_path }}
+  #         if-no-files-found: error
