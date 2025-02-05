@@ -19,6 +19,7 @@ jobs:
       - name: Install another node...
         shell: bash
         run: |
+          echo "" >> ~/.bashrc
           curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
           nvm install node 18
           nvm use 18
