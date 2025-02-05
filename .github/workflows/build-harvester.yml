@@ -1,4 +1,4 @@
-name: Build Release Assets
+name: Build Harvester Release Assets
 on:
   push:
     branches: ['*']
@@ -195,35 +195,35 @@ jobs:
           if-no-files-found: error
 
   build-harvester-macos-x86-64:
-  #   runs-on: macOS-13
-  #   steps:
-  #     - name: Cleanup Environment
-  #       uses: Chia-Network/actions/clean-workspace@main
+    runs-on: macOS-13
+    steps:
+      - name: Cleanup Environment
+        uses: Chia-Network/actions/clean-workspace@main
 
-  #     - name: Checkout Repo
-  #       uses: actions/checkout@v4
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
-  #     - name: Set Env
-  #       uses: Chia-Network/actions/setjobenv@main
-  #       env:
-  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set Env
+        uses: Chia-Network/actions/setjobenv@main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  #     - name: Get Version Number
-  #       id: version_number
-  #       run: bash -e .github/actions/get-version.sh macos x86-64
+      - name: Get Version Number
+        id: version_number
+        run: bash -e .github/actions/get-version.sh macos x86-64
 
-  #     - name: Build Harvester
-  #       shell: bash
-  #       run: |
-  #         export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-x86-64.tar.gz"
-  #         echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
-  #         # emits env.harvester_artifact_path
-  #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
+      - name: Build Harvester
+        shell: bash
+        run: |
+          export artifact_name="green_reaper-v${{ env.BB_VERSION }}-macos-x86-64.tar.gz"
+          echo "harvester_artifact_name=${artifact_name}" >> "$GITHUB_ENV"
+          # emits env.harvester_artifact_path
+          bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
-  #     - name: Upload Harvester Artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: ${{ env.harvester_artifact_name }}
-  #         path: ${{ env.harvester_artifact_path }}
-  #         if-no-files-found: error
+      - name: Upload Harvester Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.harvester_artifact_name }}
+          path: ${{ env.harvester_artifact_path }}
+          if-no-files-found: error
 

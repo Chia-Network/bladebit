@@ -1,4 +1,4 @@
-name: Build Release Assets
+name: Build Bladebit Release Assets
 on:
   push:
     branches: ['*']
