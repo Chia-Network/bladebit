@@ -13,16 +13,15 @@ jobs:
     container:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:main
     steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      # - name: Install another node...
-      #   shell: bash
-      #   run: |
-      #     curl -sL https://deb.nodesource.com/setup_18.x -o setup_node.sh
-      #     chmod +x setup_node.sh
-      #     ./setup_node.sh
-      #     node -v
+      # - uses: actions/setup-node@v4
+      #   with:
+      #     node-version: 18
+      - name: Install another node...
+        shell: bash
+        run: |
+          curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+          yum install nsolid -y
+          node -v
 
       - name: Checkout Repo
         uses: actions/checkout@v4
