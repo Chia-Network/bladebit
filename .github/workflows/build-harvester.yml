@@ -18,7 +18,7 @@ jobs:
         run: |
           curl -sL https://deb.nodesource.com/setup_18.x -o setup_node.sh
           chmod +x setup_node.sh
-          sudo ./setup_node.sh
+          ./setup_node.sh
           node -v
 
       - name: Checkout Repo
