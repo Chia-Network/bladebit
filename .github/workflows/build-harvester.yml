@@ -11,21 +11,21 @@ jobs:
   build-harvester-linux-x86-64:
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:main
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:main
     steps:
       # - uses: actions/setup-node@v4
       #   with:
       #     node-version: 18
-      - name: Install another node...
-        shell: bash
-        run: |
-          ldd --version
-          echo "" >> ~/.bashrc
-          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
-          source ~/.bashrc
-          nvm install v22
-          nvm use 22
-          node -v
+      # - name: Install another node...
+      #   shell: bash
+      #   run: |
+      #     ldd --version
+      #     echo "" >> ~/.bashrc
+      #     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
+      #     source ~/.bashrc
+      #     nvm install v22
+      #     nvm use 22
+      #     node -v
 
       - name: Checkout Repo
         uses: actions/checkout@v4
