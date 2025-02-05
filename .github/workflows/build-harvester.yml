@@ -7,11 +7,11 @@ on:
 env:
   CI_BLADEBIT: 1  # Our own CI, that is, not being built as a dependency
 
-jobs:
+
   build-harvester-linux-x86-64:
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:sha-7450e26b6d0bbd602b7b012e7c802a2f7a8173ba
+      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:main
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
