@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-set +e
-set -x
-which readelf
-set -eo pipefail
-
-
 file_path=$1
 flag=$(readelf -e $file_path | grep GNU_STACK -A 1 | tail -n 1 | tr -s ' ' | cut -f4 -d' ')
 
@@ -16,4 +10,3 @@ if [[ $flag != "RW" ]]; then
     >&2 echo "GNU_STACK flag is expected to be set to 'RW', but got '$flag'"
     exit 1
 fi
-set +x
