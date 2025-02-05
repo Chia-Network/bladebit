@@ -42,10 +42,7 @@ echo "Harvester artifact: ${artifact_name}"
 echo 'cmake --version'
 cmake --version
 
-ls -la
 ./build-harvester.sh
-ls -la
-set -x
 
 if [[ "$host_os" == "windows" ]]; then
   OBJDUMP=$("${CUDA_PATH}"\\bin\\cuobjdump Release\\bladebit_harvester.dll)
@@ -54,7 +51,7 @@ elif [[ "$host_os" == "linux" ]]; then
 
   # Check for the right GNU_STACK flags
   script_path=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
-  echo $script_path
+  # echo $script_path
   ${script_path}/check-elf-gnu-stack-flags.sh "build-harvester/libbladebit_harvester.so"
 fi
 
@@ -113,5 +110,4 @@ if [[ "$CI" == "true" ]]; then
   echo "harvester_artifact_path=$harvester_artifact_path" >> "$GITHUB_ENV"
 fi
 
-popd
 ls -la
