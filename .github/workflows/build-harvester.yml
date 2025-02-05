@@ -13,8 +13,16 @@ jobs:
     container:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:main
     steps:
+      - name: Install another node...
+        shell: bash
+        run: |
+          curl -sL https://deb.nodesource.com/setup_18.x -o setup_node.sh
+          chmod +x setup_node.sh
+          sudo ./setup_node.sh
+          node -v
+
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
