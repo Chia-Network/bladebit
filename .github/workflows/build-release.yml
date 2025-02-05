@@ -9,9 +9,9 @@ env:
 
 jobs:
   build-harvester-linux-x86-64:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     container:
-      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -72,10 +72,10 @@ jobs:
           choco install -y sed
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.15
+        uses: Jimver/cuda-toolkit@v0.2.19
         id: cuda-toolkit
         with:
-          cuda: '12.1.0'
+          cuda: '12.6.2'
           method: network
 
       - name: Verify CUDA
@@ -103,9 +103,9 @@ jobs:
           if-no-files-found: error
 
   build-harvester-linux-arm64:
-    runs-on: [ARM64, Linux]
+    runs-on: ubuntu-24.04-arm
     container:
-      image: ghcr.io/chia-network/build-images/manylinux2014_cuda_aarch64:sha-1caf046d5ff19b7c743de2a106dd86928794032b
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_aarch64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -126,19 +126,19 @@ jobs:
       - name: Get Version Number
         id: version_number
         shell: bash
-        run: ./.github/actions/get-version.sh centos arm64
+        run: ./.github/actions/get-version.sh almalinux arm64
 
       - name: Install Prerequisites
         shell: bash
         run: |
           set -eo pipefail
-          export module_platform_id=platform:el9
-          export MODULE_PLATFORM_ID=platform:el9
-          export PLATFORM_ID=platform:el9
+          export module_platform_id=platform:el10
+          export MODULE_PLATFORM_ID=platform:el10
+          export PLATFORM_ID=platform:el10
           uname -a
           cat /etc/os-release
           yum install -y dnf
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+          dnf install -y epel-release
           dnf install -y dnf-plugins-core
           dnf makecache
           dnf install -y kernel-headers.aarch64 kernel-devel.aarch64 tar bzip2 make automake gcc gcc-c++ pciutils elfutils-libelf-devel libglvnd-opengl libglvnd-glx libglvnd-devel acpid pkgconfig dkms
@@ -162,7 +162,7 @@ jobs:
           if-no-files-found: error
 
   build-harvester-macos-arm64:
-    runs-on: [macos, arm64]
+    runs-on: macos-latest
     steps:
       - name: Cleanup Environment
         uses: Chia-Network/actions/clean-workspace@main
@@ -195,7 +195,7 @@ jobs:
           if-no-files-found: error
 
   build-harvester-macos-x86-64:
-    runs-on: macOS-11
+    runs-on: macOS-13
     steps:
       - name: Cleanup Environment
         uses: Chia-Network/actions/clean-workspace@main
@@ -229,7 +229,7 @@ jobs:
 
 
   build-bladebit-ubuntu-x86-64:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -245,17 +245,16 @@ jobs:
 
       - name: Install Prerequisites
         run: |
-            sudo apt install -y libgmp-dev libnuma-dev
-            sudo bash .github/actions/install-cmake-linux.sh
+            sudo apt install -y libgmp-dev libnuma-dev cmake
 
       - name: Build Bladebit
         run: .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{env.BB_VERSION}}
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.15
+        uses: Jimver/cuda-toolkit@v0.2.19
         id: cuda-toolkit
         with:
-          cuda: '12.1.0'
+          cuda: '12.6.2'
           method: network
           linux-local-args: '["--toolkit"]'
 
@@ -276,10 +275,10 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
-  build-bladebit-centos-x86-64:
-    runs-on: ubuntu-20.04
+  build-bladebit-almalinux-x86-64:
+    runs-on: ubuntu-latest
     container:
-      image: quay.io/centos/centos:stream8
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -291,35 +290,23 @@ jobs:
 
       - name: Get Version Number
         id: version_number
-        run: .github/actions/get-version.sh centos x86-64
+        run: .github/actions/get-version.sh almalinux x86-64
 
       - name: Install Prerequisites
         run: |
           set -eo pipefail
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
-              gmp-devel numactl-devel make git wget subscription-manager
-          bash .github/actions/install-cmake-linux.sh
+          dnf install -y gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
+          gmp-devel numactl-devel make cmake git wget subscription-manager
+
 
       - name: Build Bladebit
         run: |
-          source /opt/rh/gcc-toolset-9/enable
+          source /opt/rh/gcc-toolset-14/enable
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
-
-      - name: Install CUDA Prerequisites
-        run: |
-          distro=rhel8
-          arch=x86_64
-          dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo
-          dnf clean expire-cache
-          dnf module install -y nvidia-driver:latest-dkms
-          dnf install -y cuda
-          ls -la /usr/local/
-          ls -la /usr/local/cuda/
 
       - name: Build Bladebit CUDA
         run: |
-          source /opt/rh/gcc-toolset-9/enable
+          source /opt/rh/gcc-toolset-14/enable
           .github/actions/build-asset-unix.sh --cuda --artifact ${{ env.BB_ARTIFACT_NAME_CUDA }} --version ${{ env.BB_VERSION }}
 
       - name: Upload Bladebit Artifact
@@ -336,10 +323,10 @@ jobs:
           path: ${{ github.workspace }}/bin/${{ env.BB_ARTIFACT_NAME_CUDA }}
           if-no-files-found: error
 
-  build-bladebit-centos-arm64:
-    runs-on: [ARM64, Linux]
+  build-bladebit-almalinux-arm64:
+    runs-on: ubuntu-24.04-arm
     container:
-      image: quay.io/centos/centos:stream8
+      image: ghcr.io/chia-network/build-images/manylinux_cuda_aarch64:latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -351,19 +338,19 @@ jobs:
 
       - name: Get Version Number
         id: version_number
-        run: .github/actions/get-version.sh centos arm64
+        run: .github/actions/get-version.sh almalinux arm64
 
       - name: Install Prerequisites
         run: |
-          dnf install -y gcc-toolset-9-gcc gcc-toolset-9-gcc-c++ \
+          dnf install -y gcc-toolset-14-gcc gcc-toolset-14-gcc-c++ \
             cmake gmp-devel numactl-devel make git
 
       - name: Build
         run: |
-          source /opt/rh/gcc-toolset-9/enable
+          source /opt/rh/gcc-toolset-14/enable
           .github/actions/build-asset-unix.sh --artifact ${{ env.BB_ARTIFACT_NAME }} --version ${{ env.BB_VERSION }}
 
-      - name: Upload Artifact CentOS ARM64
+      - name: Upload Artifact AlmaLinux ARM64
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BB_ARTIFACT_NAME }}
@@ -371,7 +358,7 @@ jobs:
           if-no-files-found: error
 
   build-bladebit-cuda-linux-arm64:
-    runs-on: [ARM64, Linux]
+    runs-on: ubuntu-24.04-arm
     container:
       image: chianetwork/ubuntu-20.04-builder:latest
     defaults:
@@ -399,9 +386,9 @@ jobs:
         run: |
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/cuda-ubuntu2004.pin
           mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600
-          wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
-          dpkg -i cuda-repo-ubuntu2004-12-1-local_12.1.1-530.30.02-1_arm64.deb
-          cp /var/cuda-repo-ubuntu2004-12-1-local/cuda-*-keyring.gpg /usr/share/keyrings/
+          wget https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda-repo-ubuntu2004-12-8-local_12.8.0-570.86.10-1_arm64.deb
+          dpkg -i cuda-repo-ubuntu2004-12-8-local_12.8.0-570.86.10-1_arm64.deb
+          cp /var/cuda-repo-ubuntu2004-12-8-local/cuda-*-keyring.gpg /usr/share/keyrings/
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get -y install cuda
 
@@ -449,7 +436,6 @@ jobs:
         run: |
           mkdir build && cd build
           cmake ..
-          bash -eo pipefail ../embed-version.sh
           cat ../src/Version.h
           cmake --build . --target bladebit --config Release
 
@@ -498,10 +484,10 @@ jobs:
           choco install -y sed
 
       - name: Setup CUDA
-        uses: Jimver/cuda-toolkit@v0.2.15
+        uses: Jimver/cuda-toolkit@v0.2.19
         id: cuda-toolkit
         with:
-          cuda: '12.1.0'
+          cuda: '12.6.2'
           method: network
 
       - name: Verify CUDA
@@ -519,7 +505,6 @@ jobs:
         run: |
           mkdir build_cuda && cd build_cuda
           cmake ..
-          bash -eo pipefail ../embed-version.sh
           cat ../src/Version.h
           cmake --build . --target bladebit_cuda --config Release
 
