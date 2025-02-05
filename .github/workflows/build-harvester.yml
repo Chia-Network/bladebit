@@ -14,7 +14,7 @@ jobs:
       image: ghcr.io/chia-network/build-images/manylinux2014_cuda_x86_64:main
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
