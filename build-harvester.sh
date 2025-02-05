@@ -5,7 +5,6 @@ cd $_dir
 
 build_dir=build-harvester
 mkdir -p ${build_dir}
-cd ${build_dir}
 
 cmake -B ${build_dir} -DCMAKE_BUILD_TYPE=Release -DBB_HARVESTER_ONLY=ON
 cmake --build ${build_dir} --target clean --config Release

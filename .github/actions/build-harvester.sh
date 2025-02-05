@@ -50,15 +50,15 @@ set -x
 if [[ "$host_os" == "windows" ]]; then
   OBJDUMP=$("${CUDA_PATH}"\\bin\\cuobjdump Release\\bladebit_harvester.dll)
 elif [[ "$host_os" == "linux" ]]; then
-  OBJDUMP=$(/usr/local/cuda/bin/cuobjdump libbladebit_harvester.so)
+  OBJDUMP=$(/usr/local/cuda/bin/cuobjdump "build-harvester/libbladebit_harvester.so")
 
   # Check for the right GNU_STACK flags
   script_path=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
   echo $script_path
-  ${script_path}/check-elf-gnu-stack-flags.sh libbladebit_harvester.so
+  ${script_path}/check-elf-gnu-stack-flags.sh "build-harvester/libbladebit_harvester.so"
 fi
 
-cmake --install . --prefix harvester_dist
+cmake --install "build-harvester" --prefix harvester_dist
 pushd harvester_dist/green_reaper
 
 if [[ "$host_os" == "windows" ]]; then
