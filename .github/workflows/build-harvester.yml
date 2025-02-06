@@ -11,7 +11,7 @@ jobs:
   build-harvester-linux-x86-64:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:latest
+      image: quay.io/pypa/manylinux_2_28_x86_64
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -30,8 +30,16 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
+
+          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
+          dnf install -y epel-release
+          dnf clean expire-cache
+          dnf module enable -y nvidia-driver:560-open
+          dnf install -y cuda
+
           yum group install -y "Development Tools"
           yum install -y sudo make git wget subscription-manager
+
 
       - name: Build Harvester
         shell: bash
