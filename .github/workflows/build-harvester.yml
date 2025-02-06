@@ -36,13 +36,13 @@ jobs:
           cuda_ver="12-6"
           cuda_arch="x86_64"
 
-          RUN dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
-          RUN dnf -y install cuda-compiler-${cuda_ver}.${cuda_arch} \
+          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
+          dnf -y install cuda-compiler-${cuda_ver}.${cuda_arch} \
                             cuda-libraries-${cuda_ver}.${cuda_arch} \
                             cuda-libraries-devel-${cuda_ver}.${cuda_arch}
-          RUN dnf clean all
-          RUN rm -rf /var/cache/dnf/*
-          RUN echo "/usr/local/cuda/lib64" >> /etc/ld.so.conf.d/999_nvidia_cuda.conf
+          dnf clean all
+          rm -rf /var/cache/dnf/*
+          echo "/usr/local/cuda/lib64" >> /etc/ld.so.conf.d/999_nvidia_cuda.conf
 
           yum group install -y "Development Tools"
           yum install -y sudo make git wget subscription-manager
