@@ -14,7 +14,7 @@ jobs:
       image: ghcr.io/chia-network/build-images/manylinux_cuda_x86_64:latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set Env
         uses: Chia-Network/actions/setjobenv@main
@@ -54,7 +54,7 @@ jobs:
   #     image: ghcr.io/chia-network/build-images/manylinux_cuda_aarch64:latest
   #   steps:
   #     - name: Checkout Repo
-  #       uses: actions/checkout@v4
+  #       uses: actions/checkout@v6
 
   #     - name: Set Env
   #       uses: Chia-Network/actions/setjobenv@main
@@ -114,7 +114,7 @@ jobs:
   #       uses: Chia-Network/actions/clean-workspace@main
 
   #     - name: Checkout Repo
-  #       uses: actions/checkout@v4
+  #       uses: actions/checkout@v6
 
   #     - name: Set Env
   #       uses: Chia-Network/actions/setjobenv@main
@@ -147,7 +147,7 @@ jobs:
   #       uses: Chia-Network/actions/clean-workspace@main
 
   #     - name: Checkout Repo
-  #       uses: actions/checkout@v4
+  #       uses: actions/checkout@v6
 
   #     - name: Set Env
   #       uses: Chia-Network/actions/setjobenv@main
@@ -177,7 +177,7 @@ jobs:
   #   runs-on: windows-2022
   #   steps:
   #     - name: Checkout Repo
-  #       uses: actions/checkout@v4
+  #       uses: actions/checkout@v6
 
   #     - name: Set Env
   #       uses: Chia-Network/actions/setjobenv@main
