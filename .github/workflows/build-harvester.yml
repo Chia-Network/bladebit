@@ -42,7 +42,7 @@ jobs:
           bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
       - name: Upload Harvester Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.harvester_artifact_name }}
           path: ${{ env.harvester_artifact_path }}
@@ -101,7 +101,7 @@ jobs:
   #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
   #     - name: Upload Harvester Artifact
-  #       uses: actions/upload-artifact@v4
+  #       uses: actions/upload-artifact@v6
   #       with:
   #         name: ${{ env.harvester_artifact_name }}
   #         path: ${{ env.harvester_artifact_path }}
@@ -134,7 +134,7 @@ jobs:
   #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
   #     - name: Upload Harvester Artifact
-  #       uses: actions/upload-artifact@v4
+  #       uses: actions/upload-artifact@v6
   #       with:
   #         name: ${{ env.harvester_artifact_name }}
   #         path: ${{ env.harvester_artifact_path }}
@@ -167,7 +167,7 @@ jobs:
   #         bash .github/actions/build-harvester.sh --artifact "${artifact_name}"
 
   #     - name: Upload Harvester Artifact
-  #       uses: actions/upload-artifact@v4
+  #       uses: actions/upload-artifact@v6
   #       with:
   #         name: ${{ env.harvester_artifact_name }}
   #         path: ${{ env.harvester_artifact_path }}
@@ -221,7 +221,7 @@ jobs:
   #         CUDA_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
 
   #     - name: Upload Harvester Artifact
-  #       uses: actions/upload-artifact@v4
+  #       uses: actions/upload-artifact@v6
   #       with:
   #         name: ${{ env.harvester_artifact_name }}
   #         path: ${{ env.harvester_artifact_path }}
