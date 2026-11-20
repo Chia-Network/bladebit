@@ -1,44 +1,10 @@
 # This file is managed by the repo-content-updater project. Manual changes here will result in a PR to bring back
-# inline with the upstream template, unless you remove the dependabot managed file property from the repo
+# inline with the upstream template, unless you add !dependabot to the repo's managed-files property
 
 version: 2
 updates:
-  - package-ecosystem: "gomod"
-    directory: /
-    schedule:
-      interval: "weekly"
-      day: "tuesday"
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 10
-    rebase-strategy: auto
-    labels:
-      - dependencies
-      - go
-      - "Changed"
-    reviewers: ["cameroncooper", "emlowe"]
-    groups:
-      global:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
-    directory: /
-    schedule:
-      interval: "weekly"
-      day: "tuesday"
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 10
-    rebase-strategy: auto
-    labels:
-      - dependencies
-      - python
-      - "Changed"
-    reviewers: ["emlowe"]
-
   - package-ecosystem: "github-actions"
-    directories: ["/", ".github/actions/*"]
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: "weekly"
       day: "tuesday"
@@ -50,43 +16,6 @@ updates:
       - dependencies
       - github_actions
       - "Changed"
-    reviewers: ["cameroncooper", "emlowe"]
-
-  - package-ecosystem: "npm"
-    directory: /
-    schedule:
-      interval: "weekly"
-      day: "tuesday"
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 10
-    rebase-strategy: auto
-    labels:
-      - dependencies
-      - javascript
-      - "Changed"
-    reviewers: ["emlowe", "seeden"]
-
-  - package-ecosystem: cargo
-    directory: /
-    schedule:
-      interval: "weekly"
-      day: "tuesday"
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 10
-    rebase-strategy: auto
-    labels:
-      - dependencies
-      - rust
-      - "Changed"
-
-  - package-ecosystem: swift
-    directory: /
-    schedule:
-      interval: "weekly"
-      day: "tuesday"
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 10
-    rebase-strategy: auto
+    exclude-paths:
+      - ".github/workflows/dependency-artifact-review.yml"
+      - ".github/workflows/dependency-review.yml"
